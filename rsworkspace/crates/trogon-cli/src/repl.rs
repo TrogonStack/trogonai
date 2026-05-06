@@ -142,7 +142,8 @@ fn join_continuation(s: &str) -> String {
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
 pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()> {
-    let session = TrogonSession::new(nats, prefix, cwd.clone()).await?;
+    let prefix = prefix.to_string();
+    let mut session = TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await?;
 
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
@@ -168,8 +169,23 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
                     continue;
                 }
 
-                if let Some(output) = handle_slash_command(&line) {
-                    println!("{output}");
+                if line.starts_with('/') {
+                    let mut parts = line.splitn(2, ' ');
+                    let cmd = parts.next().unwrap_or("");
+                    let arg = parts.next().unwrap_or("");
+                    if cmd == "/clear" {
+                        match TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await {
+                            Ok(s) => {
+                                session = s;
+                                session_used_tokens = 0;
+                                session_context_size = 0;
+                                eprintln!("session cleared — new session {}", session.session_id);
+                            }
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else {
+                        println!("{}", handle_slash_command(cmd, arg, session_used_tokens, session_context_size));
+                    }
                     continue;
                 }
 
@@ -253,23 +269,156 @@ pub async fn run(nats: Client, prefix: &str, cwd: PathBuf) -> anyhow::Result<()>
     Ok(())
 }
 
-fn handle_slash_command(line: &str) -> Option<String> {
-    if !line.starts_with('/') {
-        return None;
-    }
-    let parts: Vec<&str> = line.splitn(2, ' ').collect();
-    match parts[0] {
-        "/help" => Some(
-            "Commands: /help /clear /cost /model <id>\n\
-             Multiline: end a line with \\ to continue on the next line\n\
-             Ctrl+C  cancel active response    Ctrl+D  quit"
-                .to_string(),
-        ),
-        "/clear" => Some("[/clear not yet implemented — PR 9]".to_string()),
-        "/cost" => Some("[/cost not yet implemented — PR 9]".to_string()),
-        _ => Some(format!("unknown command: {}", parts[0])),
+fn handle_slash_command(cmd: &str, arg: &str, used_tokens: u64, context_size: u64) -> String {
+    match cmd {
+        "/help" => "\
+Commands:
+  /help               show this help
+  /cost               show token usage for this session
+  /clear              start a new session (clears conversation history)
+  /compact            force context compaction
+  /config             show config  |  /config set <key> <value>
+  /model <id>         change model for this session (not yet implemented)
+  /init               generate TROGON.md for this project (not yet implemented)
+
+Multiline: end a line with \\ to continue on the next line
+Ctrl+C    cancel active response
+Ctrl+D    quit"
+            .to_string(),
+
+        "/cost" => {
+            if context_size == 0 {
+                "no usage data yet — send a message first".to_string()
+            } else {
+                let pct = used_tokens * 100 / context_size;
+                let cost = estimate_cost(used_tokens);
+                format!(
+                    "context: {}/{} tokens ({}%)  |  ~${cost}",
+                    fmt_tokens(used_tokens),
+                    fmt_tokens(context_size),
+                    pct,
+                )
+            }
+        }
+
+        "/compact" => {
+            "compaction is triggered automatically at 85% context usage.\n\
+             Force compact is not yet implemented."
+                .to_string()
+        }
+
+        "/config" => handle_config_cmd(arg),
+
+        "/model" => {
+            if arg.is_empty() {
+                "usage: /model <model-id>  (not yet implemented — requires runner support)".to_string()
+            } else {
+                format!("/model not yet implemented — requires runner support")
+            }
+        }
+
+        "/init" => "not yet implemented".to_string(),
+
+        other => format!("unknown command: {other}  (type /help for a list)"),
     }
 }
+
+// ── /config ───────────────────────────────────────────────────────────────────
+
+fn config_path() -> PathBuf {
+    expand_tilde("~/.config/trogon/config.json")
+}
+
+fn read_config() -> serde_json::Value {
+    let path = config_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!({}))
+}
+
+fn write_config(config: &serde_json::Value) -> Result<(), String> {
+    let path = config_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create config dir: {e}"))?;
+    }
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| format!("cannot write config: {e}"))
+}
+
+fn handle_config_cmd(arg: &str) -> String {
+    let mut parts = arg.splitn(3, ' ');
+    match parts.next().unwrap_or("") {
+        "" => {
+            let cfg = read_config();
+            let path = config_path();
+            format!(
+                "config: {}\n{}",
+                path.display(),
+                serde_json::to_string_pretty(&cfg).unwrap_or_default()
+            )
+        }
+        "get" => {
+            let key = parts.next().unwrap_or("");
+            if key.is_empty() {
+                return "usage: /config get <key>".to_string();
+            }
+            let cfg = read_config();
+            match cfg.get(key) {
+                Some(v) => format!("{key} = {v}"),
+                None => format!("{key} is not set"),
+            }
+        }
+        "set" => {
+            let key = parts.next().unwrap_or("");
+            let value = parts.next().unwrap_or("");
+            if key.is_empty() {
+                return "usage: /config set <key> <value>".to_string();
+            }
+            let mut cfg = read_config();
+            cfg[key] = serde_json::Value::String(value.to_string());
+            match write_config(&cfg) {
+                Ok(()) => format!("{key} = {value}"),
+                Err(e) => format!("error: {e}"),
+            }
+        }
+        other => format!("unknown config subcommand: {other}  (use get, set, or no args)"),
+    }
+}
+
+// ── cost estimation ───────────────────────────────────────────────────────────
+
+/// Blended $/MTok rates (input:output assumed 3:1).
+/// Usage from the runner is input+cache+output combined, so we can't split
+/// them precisely — the blended rate gives a reasonable estimate.
+fn blended_rate_per_mtoken(model: &str) -> f64 {
+    if model.contains("opus") {
+        28.5 // ($15*3 + $75) / 4
+    } else if model.contains("haiku") {
+        1.6 // ($0.80*3 + $4) / 4
+    } else {
+        6.0 // sonnet default: ($3*3 + $15) / 4
+    }
+}
+
+/// Return a formatted cost string like "0.0123" for the given token count,
+/// using the model stored in config (defaults to sonnet if unset).
+fn estimate_cost(tokens: u64) -> String {
+    let model = read_config()
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-sonnet-4-6")
+        .to_string();
+    let rate = blended_rate_per_mtoken(&model);
+    let cost = tokens as f64 * rate / 1_000_000.0;
+    if cost < 0.01 {
+        format!("{cost:.4}")
+    } else {
+        format!("{cost:.2}")
+    }
+}
+
+// ── token formatting ──────────────────────────────────────────────────────────
 
 /// Format a token count with thousands separator (e.g. 12345 → "12,345").
 fn fmt_tokens(n: u64) -> String {
@@ -298,6 +447,9 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Single lock for all tests that mutate the HOME env var.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // ── expand_mentions ───────────────────────────────────────────────────────
 
@@ -502,5 +654,341 @@ mod tests {
     #[test]
     fn fmt_tokens_millions() {
         assert_eq!(fmt_tokens(1_234_567), "1,234,567");
+    }
+
+    // ── handle_slash_command ──────────────────────────────────────────────────
+
+    #[test]
+    fn slash_help_lists_all_commands() {
+        let out = handle_slash_command("/help", "", 0, 0);
+        assert!(out.contains("/help"));
+        assert!(out.contains("/cost"));
+        assert!(out.contains("/clear"));
+        assert!(out.contains("/compact"));
+        assert!(out.contains("/config"));
+        assert!(out.contains("/model"));
+        assert!(out.contains("/init"));
+    }
+
+    #[test]
+    fn slash_cost_no_data_yet() {
+        let out = handle_slash_command("/cost", "", 0, 0);
+        assert!(out.contains("no usage data"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_cost_shows_percentage_and_estimated_cost() {
+        let out = handle_slash_command("/cost", "", 50_000, 200_000);
+        assert!(out.contains("25%"), "got: {out}");
+        assert!(out.contains("50,000"), "got: {out}");
+        assert!(out.contains("200,000"), "got: {out}");
+        assert!(out.contains("~$"), "expected cost estimate, got: {out}");
+    }
+
+    // ── estimate_cost / blended_rate ──────────────────────────────────────────
+
+    #[test]
+    fn blended_rate_sonnet_default() {
+        assert_eq!(blended_rate_per_mtoken("claude-sonnet-4-6"), 6.0);
+    }
+
+    #[test]
+    fn blended_rate_opus() {
+        assert_eq!(blended_rate_per_mtoken("claude-opus-4-7"), 28.5);
+    }
+
+    #[test]
+    fn blended_rate_haiku() {
+        assert_eq!(blended_rate_per_mtoken("claude-haiku-4-5"), 1.6);
+    }
+
+    #[test]
+    fn blended_rate_unknown_model_falls_back_to_sonnet() {
+        assert_eq!(blended_rate_per_mtoken("unknown-model"), 6.0);
+    }
+
+    #[test]
+    fn estimate_cost_zero_tokens_is_zero() {
+        let cost = estimate_cost(0);
+        assert_eq!(cost, "0.0000", "got: {cost}");
+    }
+
+    #[test]
+    fn estimate_cost_1m_tokens_sonnet_is_6_dollars() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_sonnet");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // No config set → defaults to sonnet at $6/MTok blended
+        let cost = estimate_cost(1_000_000);
+        assert_eq!(cost, "6.00", "got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn estimate_cost_uses_model_from_config() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_opus");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set model claude-opus-4-7");
+        let cost = estimate_cost(1_000_000);
+        assert_eq!(cost, "28.50", "got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn estimate_cost_small_amount_shows_four_decimals() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("trogon_cost_small");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // 1000 tokens at $6/MTok = $0.006 → four decimals
+        let cost = estimate_cost(1_000);
+        assert!(cost.starts_with("0.00"), "expected 4-decimal format, got: {cost}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn slash_compact_explains_auto() {
+        let out = handle_slash_command("/compact", "", 0, 0);
+        assert!(out.contains("automatic") || out.contains("85%"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_unknown_suggests_help() {
+        let out = handle_slash_command("/nope", "", 0, 0);
+        assert!(out.contains("unknown command"), "got: {out}");
+        assert!(out.contains("/help"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_model_without_arg_shows_usage() {
+        let out = handle_slash_command("/model", "", 0, 0);
+        assert!(out.contains("usage") || out.contains("not yet"), "got: {out}");
+    }
+
+    // ── handle_config_cmd ─────────────────────────────────────────────────────
+
+    #[test]
+    fn config_set_and_get_roundtrip() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_test");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let set_out = handle_config_cmd("set mykey myvalue");
+        assert!(set_out.contains("mykey"), "got: {set_out}");
+        assert!(set_out.contains("myvalue"), "got: {set_out}");
+
+        let get_out = handle_config_cmd("get mykey");
+        assert!(get_out.contains("myvalue"), "got: {get_out}");
+
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_get_missing_key_says_not_set() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_missing");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let out = handle_config_cmd("get nonexistent");
+        assert!(out.contains("not set"), "got: {out}");
+
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_no_args_shows_path() {
+        let out = handle_config_cmd("");
+        assert!(out.contains("config"), "got: {out}");
+    }
+
+    #[test]
+    fn config_set_missing_key_shows_usage() {
+        let out = handle_config_cmd("set");
+        assert!(out.contains("usage"), "got: {out}");
+    }
+
+    #[test]
+    fn config_get_missing_key_arg_shows_usage() {
+        let out = handle_config_cmd("get");
+        assert!(out.contains("usage"), "got: {out}");
+    }
+
+    #[test]
+    fn config_unknown_subcommand_returns_error() {
+        let out = handle_config_cmd("delete mykey");
+        assert!(out.contains("unknown config subcommand"), "got: {out}");
+    }
+
+    #[test]
+    fn config_set_overwrites_existing_value() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_overwrite");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set model claude-sonnet-4-6");
+        let out = handle_config_cmd("set model claude-opus-4-7");
+        assert!(out.contains("claude-opus-4-7"), "got: {out}");
+
+        let get = handle_config_cmd("get model");
+        assert!(get.contains("claude-opus-4-7"), "got: {get}");
+        assert!(!get.contains("claude-sonnet-4-6"), "old value should be gone: {get}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_set_value_with_spaces_preserved() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_spaces");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        // splitn(3, ' ') means value gets everything after the second space
+        handle_config_cmd("set description hello world foo");
+        let out = handle_config_cmd("get description");
+        assert!(out.contains("hello world foo"), "got: {out}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_show_reflects_set_values() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_show");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        handle_config_cmd("set theme dark");
+        let show = handle_config_cmd("");
+        assert!(show.contains("dark"), "got: {show}");
+        assert!(show.contains("theme"), "got: {show}");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_config_returns_empty_object_when_file_missing() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_missing_file");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let cfg = read_config();
+        assert!(cfg.is_object(), "expected object, got: {cfg}");
+        assert_eq!(cfg.as_object().unwrap().len(), 0);
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_config_creates_parent_directories() {
+        let _guard = HOME_LOCK.lock().unwrap();
+
+        let dir = std::env::temp_dir().join("trogon_cfg_mkdir");
+        std::fs::remove_dir_all(&dir).ok();
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &dir);
+
+        let cfg = serde_json::json!({"x": "y"});
+        write_config(&cfg).unwrap();
+        assert!(config_path().exists(), "config file should exist after write");
+
+        if let Some(h) = old_home { std::env::set_var("HOME", h); }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── expand_tilde ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_tilde_replaces_home() {
+        let _guard = HOME_LOCK.lock().unwrap();
+        let old = std::env::var("HOME").ok();
+        std::env::set_var("HOME", "/tmp/fakehome");
+        let result = expand_tilde("~/.config/trogon/config.json");
+        assert_eq!(result, PathBuf::from("/tmp/fakehome/.config/trogon/config.json"));
+        if let Some(h) = old { std::env::set_var("HOME", h); }
+    }
+
+    #[test]
+    fn expand_tilde_without_tilde_is_unchanged() {
+        let result = expand_tilde("/absolute/path");
+        assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn expand_tilde_bare_tilde_without_slash_is_unchanged() {
+        let result = expand_tilde("~nodot");
+        assert_eq!(result, PathBuf::from("~nodot"));
+    }
+
+    // ── /cost edge cases ──────────────────────────────────────────────────────
+
+    #[test]
+    fn slash_cost_at_full_context_shows_100_percent() {
+        let out = handle_slash_command("/cost", "", 200_000, 200_000);
+        assert!(out.contains("100%"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_cost_rounds_down() {
+        // 1 / 3 = 33% (integer division)
+        let out = handle_slash_command("/cost", "", 1, 3);
+        assert!(out.contains("33%"), "got: {out}");
+    }
+
+    // ── remaining stub commands ───────────────────────────────────────────────
+
+    #[test]
+    fn slash_init_returns_not_implemented() {
+        let out = handle_slash_command("/init", "", 0, 0);
+        assert!(out.contains("not yet implemented"), "got: {out}");
+    }
+
+    #[test]
+    fn slash_model_with_arg_returns_not_implemented() {
+        let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0);
+        assert!(out.contains("not yet implemented"), "got: {out}");
     }
 }
