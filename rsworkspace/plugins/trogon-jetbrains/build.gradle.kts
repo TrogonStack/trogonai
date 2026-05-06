@@ -13,6 +13,10 @@ repositories {
     mavenCentral()
 }
 
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+}
+
 intellij {
     version.set("2024.1")
     type.set("IC")
@@ -26,6 +30,10 @@ tasks {
     }
     withType<KotlinCompile> {
         kotlinOptions.jvmTarget = "17"
+    }
+    test {
+        useJUnit()
+        jvmArgs("-Djava.awt.headless=true")
     }
     patchPluginXml {
         sinceBuild.set("241")
