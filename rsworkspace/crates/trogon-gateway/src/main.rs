@@ -47,12 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("no sources configured — provide a config file or set source env vars".into());
     }
 
-    acp_telemetry::init_logger(
-        acp_telemetry::ServiceName::TrogonGateway,
-        "gateway",
-        &SystemEnv,
-        &SystemFs,
-    );
+    trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
 
@@ -154,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("all tasks stopped, shutting down");
-    if let Err(e) = acp_telemetry::shutdown_otel() {
+    if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 

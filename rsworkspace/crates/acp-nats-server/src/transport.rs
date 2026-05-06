@@ -1026,7 +1026,7 @@ pub async fn run_http_connection<N, J>(
     let incoming = async_compat::Compat::new(agent_read);
     let outgoing = async_compat::Compat::new(agent_write);
 
-    let meter = acp_telemetry::meter("acp-nats-server");
+    let meter = trogon_telemetry::meter("acp-nats-server");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
