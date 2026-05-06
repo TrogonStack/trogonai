@@ -11,12 +11,10 @@ opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = ["http-json", "logs", "metrics", "reqwest-rustls"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "logs", "metrics"] }
-tokio = { workspace = true, features = ["signal"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros", "signal", "time"] }
 trogon-std = { workspace = true, features = ["test-support"] }
