@@ -1,7 +1,6 @@
 mod allowed_host;
 mod config;
 mod constants;
-mod http_route_path;
 
 #[cfg(not(coverage))]
 mod runtime {
@@ -28,6 +27,7 @@ mod runtime {
 
     use crate::allowed_host::AllowedHost;
     use crate::config;
+    use crate::constants::MCP_ENDPOINT;
 
     type BoxError = Box<dyn Error + Send + Sync>;
     type ProxyResponse = oneshot::Sender<Result<ServerResult, ErrorData>>;
@@ -41,7 +41,6 @@ mod runtime {
             client_id_prefix,
             server_id,
             bind_addr,
-            path,
             allowed_hosts,
         } = config;
         let mcp = mcp_nats::apply_timeout_overrides(mcp, &SystemEnv);
@@ -57,10 +56,10 @@ mod runtime {
         let client_ids = ClientIdFactory::new(client_id_prefix);
         let http_config = streamable_http_config(allowed_hosts);
         let service = streamable_http_service(nats_client, mcp, client_ids, server_id, http_config);
-        let app = Router::new().route_service(path.as_str(), service);
+        let app = Router::new().route_service(MCP_ENDPOINT, service);
         let listener = TcpListener::bind(bind_addr).await?;
 
-        info!(endpoint = %format!("http://{bind_addr}{}", path.as_str()), "MCP HTTP bridge starting");
+        info!(endpoint = %format!("http://{bind_addr}{MCP_ENDPOINT}"), "MCP HTTP bridge starting");
 
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())

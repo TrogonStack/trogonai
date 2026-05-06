@@ -8,11 +8,9 @@ use trogon_std::env::ReadEnv;
 
 use crate::allowed_host::{AllowedHost, AllowedHostError};
 use crate::constants::{
-    DEFAULT_MCP_CLIENT_ID_PREFIX, DEFAULT_MCP_HTTP_HOST, DEFAULT_MCP_HTTP_PATH, DEFAULT_MCP_HTTP_PORT,
-    DEFAULT_MCP_SERVER_ID, ENV_MCP_CLIENT_ID_PREFIX, ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PATH, ENV_MCP_HTTP_PORT,
-    ENV_MCP_SERVER_ID,
+    DEFAULT_MCP_CLIENT_ID_PREFIX, DEFAULT_MCP_HTTP_HOST, DEFAULT_MCP_HTTP_PORT, DEFAULT_MCP_SERVER_ID,
+    ENV_MCP_CLIENT_ID_PREFIX, ENV_MCP_HTTP_HOST, ENV_MCP_HTTP_PORT, ENV_MCP_SERVER_ID,
 };
-use crate::http_route_path::{HttpRoutePath, HttpRoutePathError};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "mcp-nats-server")]
@@ -28,8 +26,6 @@ pub struct Args {
     pub host: Option<IpAddr>,
     #[arg(long = "port")]
     pub port: Option<u16>,
-    #[arg(long = "path")]
-    pub path: Option<String>,
     #[arg(long = "allowed-host")]
     pub allowed_hosts: Vec<String>,
 }
@@ -40,7 +36,6 @@ pub struct HttpBridgeConfig {
     pub client_id_prefix: McpPeerId,
     pub server_id: McpPeerId,
     pub bind_addr: SocketAddr,
-    pub path: HttpRoutePath,
     pub allowed_hosts: Vec<AllowedHost>,
 }
 
@@ -69,10 +64,6 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Htt
         .port
         .or(read_env_port(env_provider)?)
         .unwrap_or(DEFAULT_MCP_HTTP_PORT);
-    let raw_path = args
-        .path
-        .or_else(|| env_provider.var(ENV_MCP_HTTP_PATH).ok())
-        .unwrap_or_else(|| DEFAULT_MCP_HTTP_PATH.to_string());
 
     let host = args
         .host
@@ -93,7 +84,6 @@ fn base_config_from_args<E: ReadEnv>(args: Args, env_provider: &E) -> Result<Htt
         client_id_prefix: McpPeerId::new(raw_client_id_prefix).map_err(ConfigError::ClientIdPrefix)?,
         server_id: McpPeerId::new(raw_server_id).map_err(ConfigError::ServerId)?,
         bind_addr: SocketAddr::new(host, port),
-        path: HttpRoutePath::new(raw_path).map_err(ConfigError::Path)?,
         allowed_hosts,
     })
 }
@@ -103,7 +93,6 @@ pub enum ConfigError {
     Prefix(McpPrefixError),
     ClientIdPrefix(McpPeerIdError),
     ServerId(McpPeerIdError),
-    Path(HttpRoutePathError),
     AllowedHost(AllowedHostError),
     InvalidHost { value: String, source: AddrParseError },
     InvalidPort { value: String, source: ParseIntError },
@@ -115,7 +104,6 @@ impl std::fmt::Display for ConfigError {
             Self::Prefix(_) => write!(f, "invalid MCP prefix"),
             Self::ClientIdPrefix(_) => write!(f, "invalid MCP client id prefix"),
             Self::ServerId(_) => write!(f, "invalid MCP server id"),
-            Self::Path(_) => write!(f, "invalid MCP HTTP path"),
             Self::AllowedHost(_) => write!(f, "invalid MCP HTTP allowed host"),
             Self::InvalidHost { value, source } => {
                 write!(f, "invalid value for {ENV_MCP_HTTP_HOST}: {value:?} ({source})")
@@ -132,7 +120,6 @@ impl std::error::Error for ConfigError {
         match self {
             Self::Prefix(source) => Some(source),
             Self::ClientIdPrefix(source) | Self::ServerId(source) => Some(source),
-            Self::Path(source) => Some(source),
             Self::AllowedHost(source) => Some(source),
             Self::InvalidHost { source, .. } => Some(source),
             Self::InvalidPort { source, .. } => Some(source),
@@ -173,7 +160,6 @@ mod tests {
             server_id: None,
             host: None,
             port: None,
-            path: None,
             allowed_hosts: Vec::new(),
         })
     }
@@ -185,7 +171,6 @@ mod tests {
             client_id_prefix: config.client_id_prefix,
             server_id: config.server_id,
             bind_addr: config.bind_addr,
-            path: config.path,
             allowed_hosts: config.allowed_hosts,
         }
     }
@@ -205,7 +190,6 @@ mod tests {
         assert_eq!(config.client_id_prefix.as_str(), "http");
         assert_eq!(config.server_id.as_str(), "default");
         assert_eq!(config.bind_addr, "127.0.0.1:8081".parse().unwrap());
-        assert_eq!(config.path.as_str(), "/mcp");
         assert!(config.allowed_hosts.is_empty());
     }
 
@@ -217,7 +201,6 @@ mod tests {
         env.set("MCP_SERVER_ID", "filesystem");
         env.set("MCP_HTTP_HOST", "0.0.0.0");
         env.set("MCP_HTTP_PORT", "9090");
-        env.set("MCP_HTTP_PATH", "/tenant/mcp");
 
         let config = config_from_env(&env);
 
@@ -225,7 +208,6 @@ mod tests {
         assert_eq!(config.client_id_prefix.as_str(), "browser");
         assert_eq!(config.server_id.as_str(), "filesystem");
         assert_eq!(config.bind_addr, "0.0.0.0:9090".parse().unwrap());
-        assert_eq!(config.path.as_str(), "/tenant/mcp");
     }
 
     #[test]
@@ -236,14 +218,12 @@ mod tests {
         env.set("MCP_SERVER_ID", "env-server");
         env.set("MCP_HTTP_HOST", "127.0.0.1");
         env.set("MCP_HTTP_PORT", "9090");
-        env.set("MCP_HTTP_PATH", "/env");
         let parser = FixedArgs(Args {
             mcp_prefix: Some("cli-mcp".to_string()),
             client_id_prefix: Some("cli-client".to_string()),
             server_id: Some("cli-server".to_string()),
             host: Some("0.0.0.0".parse().unwrap()),
             port: Some(7070),
-            path: Some("/cli".to_string()),
             allowed_hosts: vec!["example.com".to_string()],
         });
 
@@ -253,7 +233,6 @@ mod tests {
         assert_eq!(config.client_id_prefix.as_str(), "cli-client");
         assert_eq!(config.server_id.as_str(), "cli-server");
         assert_eq!(config.bind_addr, "0.0.0.0:7070".parse().unwrap());
-        assert_eq!(config.path.as_str(), "/cli");
         assert_eq!(
             config.allowed_hosts.iter().map(AllowedHost::as_str).collect::<Vec<_>>(),
             vec!["example.com"]
@@ -284,7 +263,6 @@ mod tests {
                     server_id: None,
                     host: None,
                     port: None,
-                    path: None,
                     allowed_hosts: Vec::new(),
                 }),
                 &env,
@@ -299,7 +277,6 @@ mod tests {
                     server_id: None,
                     host: None,
                     port: None,
-                    path: None,
                     allowed_hosts: Vec::new(),
                 }),
                 &env,
@@ -314,7 +291,6 @@ mod tests {
                     server_id: Some("bad.server".to_string()),
                     host: None,
                     port: None,
-                    path: None,
                     allowed_hosts: Vec::new(),
                 }),
                 &env,
@@ -341,22 +317,6 @@ mod tests {
                     server_id: None,
                     host: None,
                     port: None,
-                    path: Some("mcp".to_string()),
-                    allowed_hosts: Vec::new(),
-                }),
-                &env,
-            ),
-            Err(ConfigError::Path(_))
-        ));
-        assert!(matches!(
-            base_config(
-                &FixedArgs(Args {
-                    mcp_prefix: None,
-                    client_id_prefix: None,
-                    server_id: None,
-                    host: None,
-                    port: None,
-                    path: None,
                     allowed_hosts: vec!["bad host".to_string()],
                 }),
                 &env,
@@ -367,11 +327,6 @@ mod tests {
 
     #[test]
     fn config_error_display_and_source_are_specific() {
-        assert_eq!(
-            HttpRoutePathError.to_string(),
-            "HTTP route path must start with '/', include a route segment, and contain only valid path characters"
-        );
-
         let prefix = err(base_config(
             &FixedArgs(Args {
                 mcp_prefix: Some("bad.*".to_string()),
@@ -379,7 +334,6 @@ mod tests {
                 server_id: None,
                 host: None,
                 port: None,
-                path: None,
                 allowed_hosts: Vec::new(),
             }),
             &InMemoryEnv::new(),
@@ -394,7 +348,6 @@ mod tests {
                 server_id: None,
                 host: None,
                 port: None,
-                path: None,
                 allowed_hosts: Vec::new(),
             }),
             &InMemoryEnv::new(),
@@ -409,29 +362,12 @@ mod tests {
                 server_id: Some("bad.server".to_string()),
                 host: None,
                 port: None,
-                path: None,
                 allowed_hosts: Vec::new(),
             }),
             &InMemoryEnv::new(),
         ));
         assert_eq!(server_id.to_string(), "invalid MCP server id");
         assert!(std::error::Error::source(&server_id).is_some());
-
-        let path = err(base_config(
-            &FixedArgs(Args {
-                mcp_prefix: None,
-                client_id_prefix: None,
-                server_id: None,
-                host: None,
-                port: None,
-                path: Some("/".to_string()),
-                allowed_hosts: Vec::new(),
-            }),
-            &InMemoryEnv::new(),
-        ));
-
-        assert_eq!(path.to_string(), "invalid MCP HTTP path");
-        assert!(std::error::Error::source(&path).is_some());
 
         let allowed_host = err(base_config(
             &FixedArgs(Args {
@@ -440,7 +376,6 @@ mod tests {
                 server_id: None,
                 host: None,
                 port: None,
-                path: None,
                 allowed_hosts: vec!["bad host".to_string()],
             }),
             &InMemoryEnv::new(),

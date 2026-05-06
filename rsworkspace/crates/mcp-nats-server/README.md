@@ -54,7 +54,6 @@ header returned by `initialize`.
 |----------|----------|-------------|---------|
 | `MCP_HTTP_HOST` | `--host` | Listen address | `127.0.0.1` |
 | `MCP_HTTP_PORT` | `--port` | Listen port | `8081` |
-| `MCP_HTTP_PATH` | `--path` | Streamable HTTP route | `/mcp` |
 | | `--allowed-host` | Allowed host for Streamable HTTP validation | RMCP default |
 
 ### MCP
