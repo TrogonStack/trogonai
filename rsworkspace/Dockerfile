@@ -12,8 +12,9 @@
 #   acp-nats-server    — ACP HTTP transport bridge (port 8086)
 #   trogon-acp-runner  — ACP agent runner / Claude (NATS only)
 #   trogon-compactor   — Context compaction service (NATS only)
-#   trogon-xai-runner  — ACP agent runner / xAI Grok (NATS only)
-#   trogon-codex-runner — ACP agent runner / Codex (NATS only)
+#   trogon-xai-runner       — ACP agent runner / xAI Grok (NATS only)
+#   trogon-codex-runner     — ACP agent runner / Codex (NATS only)
+#   trogon-openrouter-runner — ACP agent runner / OpenRouter (NATS only)
 #   trogon-wasm-runtime — WASM tool execution runtime (NATS only)
 #   trogon-console     — Console management API (port 8091)
 #   trogon-router      — Event router / LLM dispatch (NATS only)
@@ -54,6 +55,7 @@ RUN cargo build --release \
     -p trogon-compactor \
     -p trogon-xai-runner \
     -p trogon-codex-runner \
+    -p trogon-openrouter-runner \
     -p trogon-wasm-runtime \
     -p trogon-console \
     -p trogon-router \
@@ -162,21 +164,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=builder /workspace/target/release/trogon-xai-runner /usr/local/bin/trogon-xai-runner
 ENTRYPOINT ["trogon-xai-runner"]
 
-# ── Stage 16: trogon-codex-runner runtime ────────────────────────────────────
+# ── Stage 16: trogon-openrouter-runner runtime ───────────────────────────────
+FROM debian:bookworm-slim AS trogon-openrouter-runner
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/trogon-openrouter-runner /usr/local/bin/trogon-openrouter-runner
+ENTRYPOINT ["trogon-openrouter-runner"]
+
+# ── Stage 17: trogon-codex-runner runtime ────────────────────────────────────
 FROM ubuntu:24.04 AS trogon-codex-runner
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-codex-runner /usr/local/bin/trogon-codex-runner
 ENTRYPOINT ["trogon-codex-runner"]
 
-# ── Stage 17: trogon-wasm-runtime runtime ────────────────────────────────────
+# ── Stage 18: trogon-wasm-runtime runtime ────────────────────────────────────
 FROM ubuntu:24.04 AS trogon-wasm-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-wasm-runtime /usr/local/bin/trogon-wasm-runtime
 ENTRYPOINT ["trogon-wasm-runtime"]
 
-# ── Stage 18: trogon-console runtime ─────────────────────────────────────────
+# ── Stage 19: trogon-console runtime ─────────────────────────────────────────
 FROM debian:bookworm-slim AS trogon-console
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -184,21 +193,21 @@ COPY --from=builder /workspace/target/release/trogon-console /usr/local/bin/trog
 EXPOSE 8091
 ENTRYPOINT ["trogon-console"]
 
-# ── Stage 19: trogon-router runtime ──────────────────────────────────────────
+# ── Stage 20: trogon-router runtime ──────────────────────────────────────────
 FROM debian:bookworm-slim AS trogon-router
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-router /usr/local/bin/trogon-router
 ENTRYPOINT ["trogon-router"]
 
-# ── Stage 20: trogon-pr-actor runtime ────────────────────────────────────────
+# ── Stage 21: trogon-pr-actor runtime ────────────────────────────────────────
 FROM debian:bookworm-slim AS trogon-pr-actor
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-pr-actor /usr/local/bin/trogon-pr-actor
 ENTRYPOINT ["trogon-pr-actor"]
 
-# ── Stage 21: trogon-gateway runtime ─────────────────────────────────────────
+# ── Stage 22: trogon-gateway runtime ─────────────────────────────────────────
 FROM debian:bookworm-slim AS trogon-gateway
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*

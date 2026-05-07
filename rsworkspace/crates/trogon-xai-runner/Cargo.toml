@@ -49,5 +49,5 @@ uuid            = { workspace = true }
 [dev-dependencies]
 axum                    = { workspace = true }
 futures                 = { workspace = true }
-testcontainers-modules  = { version = "0.8", features = ["nats"] }
+testcontainers-modules  = { version = "0.15", features = ["nats"] }
 trogon-nats             = { workspace = true, features = ["test-support"] }

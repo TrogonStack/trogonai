@@ -36,7 +36,7 @@ httpmock = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1"
 sha2 = "0.10"
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = "0.5"
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }

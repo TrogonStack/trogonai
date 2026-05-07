@@ -26,7 +26,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 httpmock = "0.7"
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 trogon-agent-core = { path = "../trogon-agent-core" }

@@ -28,7 +28,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-testcontainers-modules = { version = "0.8.0", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = { workspace = true }
