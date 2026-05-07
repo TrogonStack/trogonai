@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod agent_runner;
+pub mod nats_todo_tool;
 pub mod spawn_agent_tool;
 pub mod trogon_md;
 pub mod wasm_bash_tool;
