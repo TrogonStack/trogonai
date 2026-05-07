@@ -793,4 +793,23 @@ mod tests {
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "bye"));
         assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
     }
+
+    #[test]
+    fn parse_finish_reason_empty_string_in_line_is_skipped() {
+        // finish_reason: "" → !reason.is_empty() guard → no Finished event emitted.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":""}]}"#,
+        ]);
+        assert_eq!(events.len(), 1, "empty string finish_reason must not emit Finished event");
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "text"));
+    }
+
+    #[test]
+    fn parse_usage_null_is_skipped() {
+        // "usage": null → .as_object() returns None → no Usage event emitted.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[],"usage":null}"#,
+        ]);
+        assert!(events.is_empty(), "null usage must not emit Usage event");
+    }
 }
