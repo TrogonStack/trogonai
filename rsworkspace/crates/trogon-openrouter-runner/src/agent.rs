@@ -2803,6 +2803,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn new_session_falls_back_to_with_system_prompt_when_agent_loader_has_no_prompt() {
+        // agent_sp = None, self.system_prompt = Some("fallback") → base = "fallback"
+        // Skills are also present → combined = "fallback\n\nskills"
+        use std::pin::Pin;
+        use crate::agent_loader::{AgentConfig, AgentLoading};
+        use crate::skill_loader::SkillLoading;
+
+        struct NoPromptLoader;
+        impl AgentLoading for NoPromptLoader {
+            fn load_config<'a>(&'a self, _: &'a str) -> Pin<Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>> {
+                Box::pin(async move { AgentConfig { skill_ids: vec![], system_prompt: None, model_id: None } })
+            }
+        }
+        struct FixedSkillLoader;
+        impl SkillLoading for FixedSkillLoader {
+            fn load<'a>(&'a self, _: &'a [String]) -> Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+                Box::pin(async move { Some("# Skills\n\nDo Z.".to_string()) })
+            }
+        }
+
+        let agent = make_agent()
+            .with_system_prompt("Base prompt.")
+            .with_loaders("agent-x", Arc::new(NoPromptLoader), Arc::new(FixedSkillLoader));
+
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref().unwrap();
+            assert!(sp.starts_with("Base prompt."), "with_system_prompt must be used when agent loader has no prompt");
+            assert!(sp.contains("# Skills\n\nDo Z."), "skills must be appended");
+        }).await;
+    }
+
+    #[tokio::test]
     async fn new_session_uses_model_id_from_agent_loader() {
         let agent = make_agent_with_loaders(None, None, Some("test-model"));
         local().run_until(async move {

@@ -761,4 +761,29 @@ mod tests {
         assert_eq!(m2.prompt_tokens, Some(10));
         assert_eq!(m2.completion_tokens, Some(5));
     }
+
+    #[test]
+    fn data_line_with_only_whitespace_after_prefix_is_skipped() {
+        // "data:    " → stripped to "" → not DONE, invalid JSON → silently skipped.
+        let events = events_from_lines(&["data:    "]);
+        assert!(events.is_empty(), "whitespace-only data line must produce no events");
+    }
+
+    #[test]
+    fn data_line_with_empty_choices_array_and_no_usage_is_skipped() {
+        // An empty choices array with no usage field must produce no events.
+        let events = events_from_lines(&[r#"data: {"choices":[]}"#]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn finish_reason_stop_and_content_in_same_delta_emits_both() {
+        // OpenRouter sometimes sends content AND finish_reason in the same chunk.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"bye"},"finish_reason":"stop"}]}"#,
+        ]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "bye"));
+        assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
+    }
 }
