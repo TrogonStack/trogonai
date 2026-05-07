@@ -41,6 +41,9 @@ struct ServerResponse {
     /// If true, send `body` as a streaming chunk then block forever (simulates
     /// a long-running generation that the client might cancel mid-stream).
     slow: bool,
+    /// If true, send headers then immediately yield an IO error in the body stream
+    /// (simulates a connection drop / TCP reset after headers are received).
+    error_body: bool,
 }
 
 #[derive(Clone, Default)]
@@ -94,6 +97,19 @@ impl ServerState {
             body: Bytes::from(body),
             extra_headers,
             slow,
+            error_body: false,
+        });
+    }
+
+    /// Push a response that sends HTTP 200 headers then immediately drops the body
+    /// with an IO error, simulating a TCP connection reset after headers are received.
+    fn push_connection_reset(&self) {
+        self.responses.lock().unwrap().push_back(ServerResponse {
+            status: StatusCode::OK,
+            body: Bytes::new(),
+            extra_headers: vec![],
+            slow: false,
+            error_body: true,
         });
     }
 
@@ -129,6 +145,7 @@ async fn chat_handler(
         body: Bytes::from("queue empty"),
         extra_headers: vec![],
         slow: false,
+        error_body: false,
     });
 
     let mut builder = axum::http::Response::builder().status(resp.status);
@@ -138,7 +155,17 @@ async fn chat_handler(
     for (k, v) in resp.extra_headers {
         builder = builder.header(k, v);
     }
-    if resp.slow {
+    if resp.error_body {
+        // Send headers then immediately error — simulates a TCP reset after headers.
+        use futures_util::stream;
+        let body_stream = stream::once(async move {
+            Err::<Bytes, std::io::Error>(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "simulated connection reset",
+            ))
+        });
+        builder.body(axum::body::Body::from_stream(body_stream)).unwrap()
+    } else if resp.slow {
         // Send the initial chunk then block forever — lets tests verify cancel.
         use futures_util::stream;
         let body_stream = stream::once(async move { Ok::<Bytes, std::io::Error>(resp.body) })
@@ -822,6 +849,243 @@ async fn response_size_limit_stops_stream_early() {
             assert!(
                 received <= 80,
                 "guard should have fired well before 200 bytes, got {received}"
+            );
+        })
+        .await;
+}
+
+/// SSE body that ends without a trailing `\n` — the parser must flush the
+/// remaining buffer when the connection closes and still produce a TextDelta.
+#[tokio::test(flavor = "current_thread")]
+async fn sse_truncated_without_trailing_newline_is_flushed() {
+    let srv = TestServer::new().await;
+    // No \n at the end — raw body, not via push_sse which appends \n.
+    srv.state.push_raw(
+        StatusCode::OK,
+        r#"data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}"#.to_string(),
+        vec![],
+        false,
+    );
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert!(
+        events.iter().any(|e| matches!(e, OpenRouterEvent::TextDelta { text } if text == "hello")),
+        "SSE parser must flush remaining buffer on stream close: {events:?}"
+    );
+}
+
+/// A single SSE chunk whose content exceeds `max_response_bytes` in one shot —
+/// the guard must fire even without multiple chunks accumulating.
+#[tokio::test(flavor = "current_thread")]
+async fn single_chunk_exceeding_size_limit_fires_guard() {
+    let srv = TestServer::new().await;
+    // 100 bytes of content, limit is 50.
+    let big_text = "x".repeat(100);
+    let chunk = format!(
+        r#"data: {{"choices":[{{"delta":{{"content":"{big_text}"}},"finish_reason":null}}]}}"#
+    );
+    // Push chunk followed by [DONE] — guard should fire before [DONE] is seen.
+    srv.state.push_raw(
+        StatusCode::OK,
+        format!("{chunk}\ndata: [DONE]\n"),
+        vec![],
+        false,
+    );
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(
+        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client)
+            .with_max_response_bytes(50),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let result = agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("q".to_string())],
+                ))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, StopReason::EndTurn),
+                "guard must stop the stream cleanly: {result:?}"
+            );
+            // The oversized chunk was delivered then the guard fired.
+            assert_eq!(
+                notifier.text_bytes_received(),
+                100,
+                "the chunk bytes reach the notifier before the guard fires"
+            );
+        })
+        .await;
+}
+
+/// Server sends 200 headers then drops the connection with an IO error.
+/// The agent must complete (not hang) and return `EndTurn`.
+#[tokio::test(flavor = "current_thread")]
+async fn stream_io_error_mid_body_returns_end_turn() {
+    let srv = TestServer::new().await;
+    srv.state.push_connection_reset();
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let result = agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("q".to_string())],
+                ))
+                .await
+                .unwrap();
+            // Agent must not hang; it logs the stream error and returns EndTurn.
+            assert!(
+                matches!(result.stop_reason, StopReason::EndTurn),
+                "IO error during body must produce EndTurn, not hang: {result:?}"
+            );
+        })
+        .await;
+}
+
+/// Second prompt must send the full prior conversation in the request body —
+/// user turn 1, assistant turn 1, then user turn 2.
+#[tokio::test(flavor = "current_thread")]
+async fn history_carries_over_between_turns() {
+    let srv = TestServer::new().await;
+
+    // Turn 1: server returns "world".
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"world"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Turn 2: server returns something (content doesn't matter for this test).
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let sid = resp.session_id.clone();
+
+            // Turn 1.
+            agent
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Turn 2.
+            agent
+                .prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("next question".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The second request must include the full prior turn in the body.
+            let body = srv.state.last_body().expect("server must have captured a request");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            let roles: Vec<&str> = messages
+                .iter()
+                .filter_map(|m| m["role"].as_str())
+                .collect();
+            assert_eq!(
+                roles,
+                ["user", "assistant", "user"],
+                "second turn must send full history: {body}"
+            );
+            assert_eq!(messages[0]["content"].as_str(), Some("hello"));
+            assert_eq!(messages[1]["content"].as_str(), Some("world"));
+            assert_eq!(messages[2]["content"].as_str(), Some("next question"));
+        })
+        .await;
+}
+
+/// When a system prompt is configured, it must appear as the first message in
+/// the request body sent to the model, before any user messages.
+#[tokio::test(flavor = "current_thread")]
+async fn system_prompt_is_first_wire_message() {
+    let srv = TestServer::new().await;
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(
+        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client)
+            .with_system_prompt("You are a helpful assistant."),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let body = srv.state.last_body().expect("server must have captured request");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            assert!(
+                !messages.is_empty(),
+                "request must have at least one message"
+            );
+            assert_eq!(
+                messages[0]["role"].as_str(),
+                Some("system"),
+                "system prompt must be the first message: {body}"
+            );
+            assert_eq!(
+                messages[0]["content"].as_str(),
+                Some("You are a helpful assistant.")
+            );
+            assert_eq!(
+                messages[1]["role"].as_str(),
+                Some("user"),
+                "user message must follow the system prompt"
             );
         })
         .await;

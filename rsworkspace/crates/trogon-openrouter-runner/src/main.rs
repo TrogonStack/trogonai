@@ -1,3 +1,5 @@
+mod config;
+
 use std::sync::Arc;
 
 use acp_nats::acp_prefix::AcpPrefix;
@@ -13,52 +15,26 @@ use trogon_openrouter_runner::{
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
-    let nats_url =
-        std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
-    let default_model = std::env::var("OPENROUTER_DEFAULT_MODEL")
-        .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string());
-    let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| {
-        info!(
-            "OPENROUTER_API_KEY not set; users must authenticate with their own key via 'openrouter-api-key'"
-        );
-        String::new()
-    });
+    let cfg = config::RunnerConfig::from_env();
 
-    let system_prompt_set = std::env::var("OPENROUTER_SYSTEM_PROMPT").is_ok();
-    let max_history_messages = std::env::var("OPENROUTER_MAX_HISTORY_MESSAGES")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(20);
-    let session_ttl_secs = std::env::var("OPENROUTER_SESSION_TTL_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(7 * 24 * 3600);
-    let prompt_timeout_secs = std::env::var("OPENROUTER_PROMPT_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(300);
-    let models = std::env::var("OPENROUTER_MODELS").unwrap_or_else(|_| {
-        "anthropic/claude-sonnet-4-6:Claude Sonnet 4.6,openai/gpt-4o:GPT-4o,google/gemini-pro-1.5:Gemini Pro 1.5".to_string()
-    });
+    if cfg.api_key.is_none() {
+        info!("OPENROUTER_API_KEY not set; users must authenticate with their own key via 'openrouter-api-key'");
+    }
 
     info!(
-        nats_url,
-        prefix,
-        default_model,
-        models,
-        system_prompt_set,
-        max_history_messages,
-        prompt_timeout_secs,
-        session_ttl_secs,
+        nats_url = cfg.nats_url,
+        prefix = cfg.prefix,
+        default_model = cfg.default_model,
+        models = cfg.models_str,
+        system_prompt_set = cfg.system_prompt_set,
+        max_history_messages = cfg.max_history_messages,
+        prompt_timeout_secs = cfg.prompt_timeout_secs,
+        session_ttl_secs = cfg.session_ttl_secs,
         "openrouter-runner starting"
     );
 
-    let nats = async_nats::connect(&nats_url).await?;
-    let acp_prefix = AcpPrefix::new(&prefix)?;
+    let nats = async_nats::connect(&cfg.nats_url).await?;
+    let acp_prefix = AcpPrefix::new(&cfg.prefix)?;
     let js_ctx = async_nats::jetstream::new(nats.clone());
     let js = NatsJetStreamClient::new(js_ctx.clone());
 
@@ -68,23 +44,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // ── Registry self-registration ────────────────────────────────────────────
 
-    let agent_type = std::env::var("AGENT_TYPE").unwrap_or_else(|_| "openrouter".to_string());
     let reg_store = trogon_registry::provision(&js_ctx)
         .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
-        agent_type: agent_type.clone(),
+        agent_type: cfg.agent_type.clone(),
         capabilities: vec!["chat".to_string()],
-        nats_subject: format!("{}.agent.>", prefix),
+        nats_subject: format!("{}.agent.>", cfg.prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &prefix }),
+        metadata: serde_json::json!({ "acp_prefix": &cfg.prefix }),
     };
     registry
         .register(&cap)
         .await
         .map_err(|e| format!("initial registry registration failed: {e}"))?;
-    info!(agent_type, prefix, "registered in agent registry");
+    info!(agent_type = cfg.agent_type, prefix = cfg.prefix, "registered in agent registry");
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -99,7 +74,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let mut agent = OpenRouterAgent::new(notifier, default_model, api_key);
+    let mut agent = OpenRouterAgent::new(
+        notifier,
+        cfg.default_model,
+        cfg.api_key.unwrap_or_default(),
+    );
 
     {
         let js = js_ctx;
@@ -116,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
 
-        match NatsSessionStore::open(&js, session_ttl_secs).await {
+        match NatsSessionStore::open(&js, cfg.session_ttl_secs).await {
             Ok(store) => {
                 info!("openrouter: session persistence enabled");
                 agent = agent.with_session_store(Arc::new(store));

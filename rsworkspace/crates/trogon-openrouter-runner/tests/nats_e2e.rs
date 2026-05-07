@@ -13,12 +13,14 @@
 use std::time::Duration;
 
 use acp_nats::AcpPrefix;
+use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use async_trait::async_trait;
 use futures_util::stream::{self, LocalBoxStream};
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_openrouter_runner::{
     Message, NatsSessionNotifier, OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient,
 };
@@ -161,4 +163,28 @@ async fn openrouter_runner_registers_with_correct_acp_prefix_metadata() {
         format!("{}.agent.>", prefix),
         "nats_subject must be derived from ACP_PREFIX"
     );
+}
+
+/// Calling `provision_streams` twice on the same NATS server must succeed —
+/// it creates-or-updates, not create-or-fail.
+#[tokio::test]
+async fn provision_streams_is_idempotent() {
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = async_nats::jetstream::new(nats);
+    let js = NatsJetStreamClient::new(js_ctx);
+    let prefix = AcpPrefix::new("acp").unwrap();
+
+    let first = provision_streams(&js, &prefix).await;
+    assert!(first.is_ok(), "first provision_streams call must succeed: {first:?}");
+
+    let second = provision_streams(&js, &prefix).await;
+    assert!(second.is_ok(), "second provision_streams call must succeed (idempotent): {second:?}");
 }

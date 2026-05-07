@@ -210,6 +210,11 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         self
     }
 
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
     fn build_snapshot(&self, session_id: &str, session: &OpenRouterSession) -> SessionSnapshot {
         let name = session
             .history
@@ -1794,6 +1799,107 @@ mod tests {
             // Exactly at the limit (not strictly greater) should not trigger the guard.
             assert_eq!(s.history.last().unwrap().content, "hello");
         }).await;
+    }
+
+    // ── with_deps env var parsing ─────────────────────────────────────────────
+
+    #[test]
+    fn available_models_empty_env_falls_back_to_defaults() {
+        unsafe { std::env::set_var("OPENROUTER_MODELS", ""); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+        assert!(agent.available_models.len() >= 3, "should use default list");
+        assert!(
+            agent.available_models.iter().any(|m| m.model_id.0.as_ref().contains("claude")),
+            "default list must include a Claude model"
+        );
+    }
+
+    #[test]
+    fn available_models_malformed_entry_is_skipped_valid_ones_kept() {
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,no-colon-entry,also/good:Also Good"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+        let ids: Vec<&str> = agent.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
+        assert!(ids.contains(&"good/model"), "valid entry must be included");
+        assert!(ids.contains(&"also/good"), "valid entry must be included");
+        assert!(!ids.contains(&"no-colon-entry"), "malformed entry must be skipped");
+    }
+
+    #[test]
+    fn available_models_all_malformed_falls_back_to_hardcoded_defaults() {
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "no-colon,also-no-colon"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+        assert!(
+            agent.available_models.iter().any(|m| m.model_id.0.as_ref().contains("claude")),
+            "all-malformed list must fall back to hardcoded defaults"
+        );
+    }
+
+    #[test]
+    fn max_history_messages_zero_defaults_to_20() {
+        unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "0"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
+        assert_eq!(agent.max_history, 20);
+    }
+
+    #[test]
+    fn max_history_messages_non_numeric_defaults_to_20() {
+        unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "not-a-number"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
+        assert_eq!(agent.max_history, 20);
+    }
+
+    // ── builder methods ───────────────────────────────────────────────────────
+
+    #[test]
+    fn with_max_response_bytes_last_call_wins() {
+        let agent = make_agent()
+            .with_max_response_bytes(100)
+            .with_max_response_bytes(200);
+        assert_eq!(agent.max_response_bytes, 200);
+    }
+
+    #[test]
+    fn with_system_prompt_overrides_env_value() {
+        let agent = make_agent().with_system_prompt("Be concise.");
+        assert_eq!(agent.system_prompt.as_deref(), Some("Be concise."));
+    }
+
+    #[test]
+    fn with_system_prompt_called_twice_last_wins() {
+        let agent = make_agent()
+            .with_system_prompt("First.")
+            .with_system_prompt("Second.");
+        assert_eq!(agent.system_prompt.as_deref(), Some("Second."));
+    }
+
+    #[test]
+    fn with_loaders_sets_agent_id() {
+        use std::pin::Pin;
+        use crate::agent_loader::{AgentConfig, AgentLoading};
+        use crate::skill_loader::SkillLoading;
+
+        struct NoOpAgentLoader;
+        impl AgentLoading for NoOpAgentLoader {
+            fn load_config<'a>(&'a self, _: &'a str) -> Pin<Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>> {
+                Box::pin(async move { AgentConfig { skill_ids: vec![], system_prompt: None, model_id: None } })
+            }
+        }
+
+        struct NoOpSkillLoader;
+        impl SkillLoading for NoOpSkillLoader {
+            fn load<'a>(&'a self, _: &'a [String]) -> Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+                Box::pin(async move { None })
+            }
+        }
+
+        let agent = make_agent()
+            .with_loaders("my-agent-42", Arc::new(NoOpAgentLoader), Arc::new(NoOpSkillLoader));
+        assert_eq!(agent.agent_id.as_deref(), Some("my-agent-42"));
     }
 
     #[tokio::test]
