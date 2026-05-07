@@ -1654,6 +1654,134 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         );
     }
 
+    // ── PermissionChecker deny ────────────────────────────────────────────────
+
+    struct DenyAllChecker;
+
+    impl PermissionChecker for DenyAllChecker {
+        fn check<'a>(
+            &'a self,
+            _id: &'a str,
+            _name: &'a str,
+            _input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(std::future::ready(false))
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tools_permission_denied_returns_denied_message() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker));
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({"path": "foo.txt"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_tools_streaming_permission_denied_returns_denied_message() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker));
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t2".to_string(),
+            name: "write_file".to_string(),
+            input: serde_json::json!({"path": "out.txt", "content": "x"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    // ── execute_tools (non-streaming) ask_user ────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_with_provider_returning_answer() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(Some("my answer".to_string()))) as Arc<dyn ElicitationProvider>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u1".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "What is X?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, "my answer");
+    }
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_with_provider_returning_none() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u2".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "Continue?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("declined") || results[0].content.contains("cancelled"),
+            "expected declined/cancelled, got: {}",
+            results[0].content
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_without_provider_returns_not_available() {
+        let agent = make_test_agent();
+        let content = vec![ContentBlock::ToolUse {
+            id: "u3".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "What now?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("not available"),
+            "expected 'not available', got: {}",
+            results[0].content
+        );
+    }
+
+    // ── messages_url ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn messages_url_uses_proxy_when_no_base_url() {
+        let agent = make_test_agent(); // anthropic_base_url: None
+        let url = agent.messages_url();
+        assert!(url.contains("http://unused:9999"), "got: {url}");
+        assert!(url.ends_with("/anthropic/v1/messages"), "got: {url}");
+    }
+
+    #[test]
+    fn messages_url_uses_base_url_when_set() {
+        let mut agent = make_test_agent();
+        agent.anthropic_base_url = Some("https://gateway.example.com/v1".to_string());
+        let url = agent.messages_url();
+        assert_eq!(url, "https://gateway.example.com/v1/messages");
+    }
+
     /// Proves TextDelta events are emitted as SSE bytes arrive, not buffered
     /// until the full stream closes. A DelayedStreamingClient delivers the
     /// text-delta chunk immediately and holds back the closing chunk for 100ms.
