@@ -71,6 +71,10 @@ required-features = ["test-helpers"]
 name = "nats_todo_integration"
 required-features = ["test-helpers"]
 
+[[test]]
+name = "spawn_agent_integration"
+required-features = ["test-helpers"]
+
 [dev-dependencies]
 futures                = "0.3"
 httpmock               = "0.7"
