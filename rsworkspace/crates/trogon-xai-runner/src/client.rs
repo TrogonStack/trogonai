@@ -106,35 +106,118 @@ impl Message {
     }
 }
 
+/// A tool specification sent in the `tools` array of a Responses API request.
+///
+/// - `ServerSide`: a built-in xAI tool (e.g. `"web_search"`). Serialized as
+///   `{ "type": "<name>" }`.
+/// - `Function`: a client-side function the runner will execute. Serialized
+///   as `{ "type": "function", "function": { "name": ..., "description": ...,
+///   "parameters": ... } }`.
+#[derive(Clone, Debug)]
+pub enum ToolSpec {
+    ServerSide(String),
+    Function {
+        name: String,
+        description: String,
+        parameters: serde_json::Value,
+    },
+}
+
+impl ToolSpec {
+    /// Returns the tool name regardless of variant — useful in assertions.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::ServerSide(n) => n,
+            Self::Function { name, .. } => name,
+        }
+    }
+}
+
+impl Serialize for ToolSpec {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::ServerSide(name) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("type", name)?;
+                map.end()
+            }
+            Self::Function { name, description, parameters } => {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": description,
+                        "parameters": parameters,
+                    }
+                })
+                .serialize(s)
+            }
+        }
+    }
+}
+
 /// An item in the `input` array sent to the Responses API.
 ///
-/// Only text roles are needed: tool execution is server-side and never recorded
-/// as history entries that need to be replayed in the input array.
-#[derive(Serialize, Clone, Debug)]
-pub struct InputItem {
-    pub role: String,
-    pub content: String,
+/// Covers both text messages (`role` + `content`) and client-side function
+/// call outputs (`type: "function_call_output"`).
+#[derive(Clone, Debug)]
+pub enum InputItem {
+    Message { role: String, content: String },
+    FunctionCallOutput { call_id: String, output: String },
+}
+
+impl Serialize for InputItem {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::Message { role, content } => {
+                let mut map = s.serialize_map(Some(2))?;
+                map.serialize_entry("role", role)?;
+                map.serialize_entry("content", content)?;
+                map.end()
+            }
+            Self::FunctionCallOutput { call_id, output } => {
+                let mut map = s.serialize_map(Some(3))?;
+                map.serialize_entry("type", "function_call_output")?;
+                map.serialize_entry("call_id", call_id)?;
+                map.serialize_entry("output", output)?;
+                map.end()
+            }
+        }
+    }
 }
 
 impl InputItem {
     pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: content.into(),
-        }
+        Self::Message { role: "user".to_string(), content: content.into() }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: "system".to_string(),
-            content: content.into(),
-        }
+        Self::Message { role: "system".to_string(), content: content.into() }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content: content.into(),
+        Self::Message { role: "assistant".to_string(), content: content.into() }
+    }
+
+    pub fn function_call_output(call_id: impl Into<String>, output: impl Into<String>) -> Self {
+        Self::FunctionCallOutput { call_id: call_id.into(), output: output.into() }
+    }
+
+    /// Returns the `role` field for `Message` items, `None` for `FunctionCallOutput`.
+    pub fn role(&self) -> Option<&str> {
+        match self {
+            Self::Message { role, .. } => Some(role),
+            Self::FunctionCallOutput { .. } => None,
+        }
+    }
+
+    /// Returns the `content` field for `Message` items, `None` for `FunctionCallOutput`.
+    pub fn content(&self) -> Option<&str> {
+        match self {
+            Self::Message { content, .. } => Some(content),
+            Self::FunctionCallOutput { .. } => None,
         }
     }
 }
@@ -152,6 +235,8 @@ pub enum FinishReason {
     Failed,
     /// Generation was cancelled.
     Cancelled,
+    /// The model stopped to wait for client-side function call results.
+    ToolCalls,
     /// Unknown / other status.
     Other(String),
 }
@@ -163,6 +248,7 @@ impl FinishReason {
             "incomplete" => Self::Incomplete,
             "failed" => Self::Failed,
             "cancelled" => Self::Cancelled,
+            "tool_calls" | "requires_action" => Self::ToolCalls,
             other => Self::Other(other.to_string()),
         }
     }
@@ -267,14 +353,14 @@ impl XaiClient {
         model: &str,
         input: &[InputItem],
         api_key: &str,
-        tools: &[String],
+        tools: &[ToolSpec],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
         debug!(
             model,
             input_len = input.len(),
-            tools = ?tools,
+            tool_count = tools.len(),
             has_prev_response = previous_response_id.is_some(),
             "xai: starting responses stream"
         );
@@ -304,7 +390,7 @@ impl XaiClient {
         model: &str,
         input: &[InputItem],
         api_key: &str,
-        tools: &[String],
+        tools: &[ToolSpec],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> Result<reqwest::Response, String> {
@@ -317,7 +403,7 @@ impl XaiClient {
         if !tools.is_empty() {
             let tools_json: Vec<serde_json::Value> = tools
                 .iter()
-                .map(|t| serde_json::json!({ "type": t }))
+                .map(|t| serde_json::to_value(t).unwrap_or_default())
                 .collect();
             body["tools"] = serde_json::Value::Array(tools_json);
         }
@@ -370,7 +456,7 @@ impl XaiHttpClient for XaiClient {
         model: &str,
         input: &[InputItem],
         api_key: &str,
-        tools: &[String],
+        tools: &[ToolSpec],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {

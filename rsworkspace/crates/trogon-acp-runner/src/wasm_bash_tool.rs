@@ -20,7 +20,7 @@ pub struct WasmRuntimeBashTool {
     nats: async_nats::Client,
     wasm_prefix: String,
     session_id: String,
-    _timeout: Duration,
+    timeout: Duration,
 }
 
 impl WasmRuntimeBashTool {
@@ -34,7 +34,7 @@ impl WasmRuntimeBashTool {
             nats,
             wasm_prefix: wasm_prefix.into(),
             session_id: session_id.into(),
-            _timeout: timeout,
+            timeout,
         }
     }
 
@@ -78,6 +78,7 @@ impl McpCallTool for WasmRuntimeBashTool {
         let nats = self.nats.clone();
         let wasm_prefix = self.wasm_prefix.clone();
         let session_id = self.session_id.clone();
+        let timeout = self.timeout;
 
         Box::pin(async move {
             let command = arguments["command"]
@@ -87,42 +88,46 @@ impl McpCallTool for WasmRuntimeBashTool {
 
             let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
 
-            // 1. create terminal — bash -c <command>
-            let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
-                .args(vec!["-c".to_string(), command]);
-            let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
-            let msg = nats
-                .request(format!("{base}.create"), payload.into())
-                .await
-                .map_err(|e| e.to_string())?;
-            let create_resp: CreateTerminalResponse =
-                serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-            let tid = create_resp.terminal_id.clone();
+            tokio::time::timeout(timeout, async move {
+                // 1. create terminal — bash -c <command>
+                let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
+                    .args(vec!["-c".to_string(), command]);
+                let payload = serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
+                let msg = nats
+                    .request(format!("{base}.create"), payload.into())
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let create_resp: CreateTerminalResponse =
+                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+                let tid = create_resp.terminal_id.clone();
 
-            // 2. wait for exit
-            let wait_req = WaitForTerminalExitRequest::new(session_id.clone(), tid.clone());
-            let payload = serde_json::to_vec(&wait_req).map_err(|e| e.to_string())?;
-            nats.request(format!("{base}.wait_for_exit"), payload.into())
-                .await
-                .map_err(|e| e.to_string())?;
+                // 2. wait for exit
+                let wait_req = WaitForTerminalExitRequest::new(session_id.clone(), tid.clone());
+                let payload = serde_json::to_vec(&wait_req).map_err(|e| e.to_string())?;
+                nats.request(format!("{base}.wait_for_exit"), payload.into())
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-            // 3. collect output
-            let out_req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
-            let payload = serde_json::to_vec(&out_req).map_err(|e| e.to_string())?;
-            let msg = nats
-                .request(format!("{base}.output"), payload.into())
-                .await
-                .map_err(|e| e.to_string())?;
-            let out: TerminalOutputResponse =
-                serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+                // 3. collect output
+                let out_req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+                let payload = serde_json::to_vec(&out_req).map_err(|e| e.to_string())?;
+                let msg = nats
+                    .request(format!("{base}.output"), payload.into())
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let out: TerminalOutputResponse =
+                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
 
-            // 4. release (best-effort)
-            let rel_req = ReleaseTerminalRequest::new(session_id, tid);
-            if let Ok(payload) = serde_json::to_vec(&rel_req) {
-                let _ = nats.request(format!("{base}.release"), payload.into()).await;
-            }
+                // 4. release (best-effort)
+                let rel_req = ReleaseTerminalRequest::new(session_id, tid);
+                if let Ok(payload) = serde_json::to_vec(&rel_req) {
+                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                }
 
-            Ok(out.output)
+                Ok(out.output)
+            })
+            .await
+            .unwrap_or_else(|_| Err("bash execution timed out".to_string()))
         })
     }
 }

@@ -797,7 +797,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
 
     // The mock must have been called with exactly one user message (no duplicate).
     let calls = mock.calls.lock().unwrap();
-    let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role == "user").collect();
+    let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role() == Some("user")).collect();
     assert_eq!(
         user_msgs.len(),
         1,
@@ -1110,8 +1110,8 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
         1,
         "turn 1 should have exactly one input item"
     );
-    assert_eq!(calls[0].input[0].role, "user");
-    assert_eq!(calls[0].input[0].content, "first question");
+    assert_eq!(calls[0].input[0].role().unwrap(), "user");
+    assert_eq!(calls[0].input[0].content().unwrap(), "first question");
     assert!(
         calls[0].previous_response_id.is_none(),
         "turn 1 must not send previous_response_id"
@@ -1123,8 +1123,8 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
         1,
         "turn 2 should send only the new user message"
     );
-    assert_eq!(calls[1].input[0].role, "user");
-    assert_eq!(calls[1].input[0].content, "second question");
+    assert_eq!(calls[1].input[0].role().unwrap(), "user");
+    assert_eq!(calls[1].input[0].content().unwrap(), "second question");
     assert_eq!(
         calls[1].previous_response_id.as_deref(),
         Some("resp_0"),
@@ -1626,8 +1626,8 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
 
     let calls = mock.calls.lock().unwrap();
     let user_msg = calls[0].input.last().expect("at least one input item");
-    assert_eq!(user_msg.role, "user");
-    assert_eq!(user_msg.content, "line one\nline two");
+    assert_eq!(user_msg.role().unwrap(), "user");
+    assert_eq!(user_msg.content().unwrap(), "line one\nline two");
 }
 
 // ── set_session_model affects HTTP request ────────────────────────────────────
@@ -1926,10 +1926,10 @@ async fn system_prompt_injected_as_first_message_in_request() {
     let input = &calls[0].input;
 
     assert_eq!(input.len(), 2, "system + user");
-    assert_eq!(input[0].role, "system");
-    assert_eq!(input[0].content, "You are a helpful assistant.");
-    assert_eq!(input[1].role, "user");
-    assert_eq!(input[1].content, "hello");
+    assert_eq!(input[0].role().unwrap(), "system");
+    assert_eq!(input[0].content().unwrap(), "You are a helpful assistant.");
+    assert_eq!(input[1].role().unwrap(), "user");
+    assert_eq!(input[1].content().unwrap(), "hello");
 }
 
 #[tokio::test]
@@ -1955,7 +1955,7 @@ async fn system_prompt_absent_when_env_var_not_set() {
     let input = &calls[0].input;
 
     assert_eq!(input.len(), 1, "only user message — no system message");
-    assert_eq!(input[0].role, "user");
+    assert_eq!(input[0].role().unwrap(), "user");
 }
 
 #[tokio::test]
@@ -1991,14 +1991,14 @@ async fn system_prompt_present_in_subsequent_turns() {
     // Turn 1: system + user
     let input1 = &calls[0].input;
     assert_eq!(input1.len(), 2, "system + user");
-    assert_eq!(input1[0].role, "system");
-    assert_eq!(input1[0].content, "Be concise.");
+    assert_eq!(input1[0].role().unwrap(), "system");
+    assert_eq!(input1[0].content().unwrap(), "Be concise.");
 
     // Turn 2: stateful — only the new user message (system already in xAI context).
     let input2 = &calls[1].input;
     assert_eq!(input2.len(), 1, "only new user message on turn 2");
-    assert_eq!(input2[0].role, "user");
-    assert_eq!(input2[0].content, "turn 2");
+    assert_eq!(input2[0].role().unwrap(), "user");
+    assert_eq!(input2[0].content().unwrap(), "turn 2");
     assert!(
         calls[1].previous_response_id.is_some(),
         "turn 2 must have previous_response_id"
@@ -2205,9 +2205,9 @@ async fn enabled_tools_are_sent_in_request_tools_array() {
 
     let calls = mock.calls.lock().unwrap();
     assert!(
-        calls[0].tools.iter().any(|t| t == "web_search"),
+        calls[0].tools.iter().any(|t| t.name() == "web_search"),
         "web_search must be in tools: {:?}",
-        calls[0].tools
+        calls[0].tools.iter().map(|t| t.name()).collect::<Vec<_>>()
     );
 }
 
@@ -2462,9 +2462,9 @@ async fn x_search_tool_enabled_is_included_in_tools_array() {
 
     let calls = mock.calls.lock().unwrap();
     assert!(
-        calls[0].tools.iter().any(|t| t == "x_search"),
+        calls[0].tools.iter().any(|t| t.name() == "x_search"),
         "x_search must be in tools: {:?}",
-        calls[0].tools
+        calls[0].tools.iter().map(|t| t.name()).collect::<Vec<_>>()
     );
 }
 
@@ -2847,10 +2847,10 @@ async fn fork_session_inherits_system_prompt() {
     let calls = mock.calls.lock().unwrap();
     let fork_input = &calls[1].input;
     assert_eq!(
-        fork_input[0].role, "system",
+        fork_input[0].role().unwrap(), "system",
         "first input item of fork must be system: {fork_input:?}"
     );
-    assert_eq!(fork_input[0].content, "Be concise.");
+    assert_eq!(fork_input[0].content().unwrap(), "Be concise.");
 }
 
 // ── ContentBlock::ResourceLink and ContentBlock::Resource ─────────────────────
@@ -2878,7 +2878,7 @@ async fn resource_link_is_included_as_text_in_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert!(
         content.contains("README") && content.contains("file:///project/README.md"),
         "ResourceLink must be forwarded as text: {content:?}"
@@ -2910,7 +2910,7 @@ async fn embedded_text_resource_is_included_as_text_in_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert_eq!(content, "fn main() {}");
 }
 
@@ -2937,7 +2937,7 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert!(
         content.starts_with("Please review:"),
         "text block must come first: {content:?}"
@@ -3082,7 +3082,7 @@ async fn incomplete_max_output_tokens_continues_and_assembles_text() {
 
     // First request: user message, no previous_response_id.
     assert!(
-        calls[0].input.iter().any(|i| i.role == "user"),
+        calls[0].input.iter().any(|i| i.role() == Some("user")),
         "first request must carry the user message"
     );
     assert!(
@@ -3362,7 +3362,7 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
     assert!(
         calls[2].input.len() >= 2,
         "retry must include full history, got {:?}",
-        calls[2].input.iter().map(|i| &i.role).collect::<Vec<_>>()
+        calls[2].input.iter().map(|i| i.role().unwrap_or("")).collect::<Vec<_>>()
     );
 
     drop(calls);
@@ -3463,10 +3463,148 @@ async fn incomplete_max_turns_continuation_resends_user_input() {
         Some("resp_mt"),
         "continuation must reference the incomplete response's ID"
     );
-    let user_msg = calls[1].input.iter().find(|i| i.role == "user");
+    let user_msg = calls[1].input.iter().find(|i| i.role() == Some("user"));
     assert!(
         user_msg.is_some(),
         "max_turns continuation must include the user question"
     );
-    assert_eq!(user_msg.unwrap().content, "ask with tools");
+    assert_eq!(user_msg.unwrap().content().unwrap(), "ask with tools");
+}
+
+// ── Bash tool round-trip via wasm-runtime ─────────────────────────────────────
+
+/// Verifies the full bash tool execution path:
+/// 1. Mock HTTP returns a `FunctionCall { name: "bash" }` in round 1.
+/// 2. Agent routes the call through NATS to a fake wasm-runtime terminal responder.
+/// 3. Agent sends a second HTTP request with the `function_call_output` and the
+///    correct `previous_response_id`.
+#[tokio::test]
+async fn bash_tool_call_round_trips_through_wasm_runtime() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    // ── Start NATS JetStream ──────────────────────────────────────────────
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+
+    // ── Register fake wasm-runtime in the registry ────────────────────────
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    // ── Spawn terminal responder ──────────────────────────────────────────
+    // Handles the four sequential NATS requests the agent issues per bash call.
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                let resp = CreateTerminalResponse::new(TerminalId::new("tid-1"));
+                serde_json::to_vec(&resp).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                let resp = WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                );
+                serde_json::to_vec(&resp).unwrap()
+            } else if subject.ends_with(".output") {
+                let resp = TerminalOutputResponse::new("hello\n".to_string(), false);
+                serde_json::to_vec(&resp).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ── Build agent with execution backend ───────────────────────────────
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _env_guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Round 1: model requests a bash call
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hello"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Round 2: model produces the final answer after seeing the tool output
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "All done!".to_string() },
+        XaiEvent::ResponseId { id: "resp_2".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    // ── Run prompt ────────────────────────────────────────────────────────
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run a command"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected 2 HTTP calls: bash round + final answer");
+
+    // Second call must carry the first response's id as context
+    assert_eq!(
+        calls[1].previous_response_id.as_deref(),
+        Some("resp_bash"),
+        "round 2 must reference resp_bash as previous_response_id"
+    );
+
+    // Second call's input must contain the bash function_call_output
+    let fo = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"));
+    assert!(fo.is_some(), "round 2 input must contain function_call_output for cid1");
+    if let Some(InputItem::FunctionCallOutput { output, .. }) = fo {
+        assert!(
+            output.contains("hello"),
+            "bash output must be forwarded to model; got {output:?}"
+        );
+    }
 }

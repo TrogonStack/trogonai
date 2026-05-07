@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures_util::stream::LocalBoxStream;
 
-use crate::client::{InputItem, XaiEvent};
+use crate::client::{InputItem, ToolSpec, XaiEvent};
 
 /// Abstraction over the xAI HTTP call so agent tests can inject a mock
 /// without spinning up a TCP server.
@@ -12,7 +12,7 @@ pub trait XaiHttpClient {
         model: &str,
         input: &[InputItem],
         api_key: &str,
-        tools: &[String],
+        tools: &[ToolSpec],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent>;
@@ -29,14 +29,14 @@ pub mod mock {
     use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 
     use super::XaiHttpClient;
-    use crate::client::{InputItem, XaiEvent};
+    use crate::client::{InputItem, ToolSpec, XaiEvent};
 
     /// A recorded call to `chat_stream`.
     pub struct MockCall {
         pub model: String,
         pub input: Vec<InputItem>,
         pub api_key: String,
-        pub tools: Vec<String>,
+        pub tools: Vec<ToolSpec>,
         pub previous_response_id: Option<String>,
         pub max_turns: Option<u32>,
     }
@@ -98,7 +98,7 @@ pub mod mock {
             model: &str,
             input: &[InputItem],
             api_key: &str,
-            tools: &[String],
+            tools: &[ToolSpec],
             previous_response_id: Option<&str>,
             max_turns: Option<u32>,
         ) -> LocalBoxStream<'static, XaiEvent> {
@@ -141,7 +141,7 @@ pub mod mock {
             model: &str,
             input: &[InputItem],
             api_key: &str,
-            tools: &[String],
+            tools: &[ToolSpec],
             previous_response_id: Option<&str>,
             max_turns: Option<u32>,
         ) -> LocalBoxStream<'static, XaiEvent> {
