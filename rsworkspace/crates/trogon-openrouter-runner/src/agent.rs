@@ -2587,6 +2587,71 @@ mod tests {
         }).await;
     }
 
+    // ── stream event edge cases ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_error_event_breaks_stream_and_saves_partial_text() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "partial".to_string() },
+            OpenRouterEvent::Error { message: "something went wrong".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            // Error event breaks the loop; still returns EndTurn.
+            assert!(matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn));
+            // Partial text collected before the error must be saved.
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history[1].role, "assistant");
+            assert_eq!(s.history[1].content, "partial");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_finished_event_is_silently_ignored() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "text".to_string() },
+            OpenRouterEvent::Finished { reason: crate::client::FinishReason::Stop },
+            OpenRouterEvent::Done,
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            // Finished event is ignored; only TextDelta content is stored.
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history[1].content, "text");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_empty_assistant_text_is_not_stored_in_history() {
+        // If the stream returns no text (e.g., only Done), the user message is stored
+        // but no assistant message is pushed (because assistant_text is empty).
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history.len(), 1, "no assistant turn must be stored when response text is empty");
+            assert_eq!(s.history[0].role, "user");
+        }).await;
+    }
+
     // ── list_sessions after close ─────────────────────────────────────────────
 
     #[tokio::test]

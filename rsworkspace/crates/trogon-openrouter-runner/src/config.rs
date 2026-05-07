@@ -207,4 +207,30 @@ mod tests {
         clear_runner_env();
         assert_eq!(cfg.models_str, "x/y:Label");
     }
+
+    #[test]
+    fn negative_numeric_values_fall_back_to_defaults() {
+        // "-1" cannot parse as usize, so falls back to default.
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "-1");
+            std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "-1");
+            std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "-1");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.max_history_messages, 20);
+        assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
+        assert_eq!(cfg.prompt_timeout_secs, 300);
+    }
+
+    #[test]
+    fn api_key_whitespace_only_is_some() {
+        // Only strictly empty string is filtered; whitespace is preserved.
+        clear_runner_env();
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", "   "); }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.api_key.as_deref(), Some("   "));
+    }
 }
