@@ -665,6 +665,65 @@ async fn list_sessions_via_nats_returns_sorted() {
         .await;
 }
 
+#[tokio::test]
+async fn close_session_then_list_sessions_removes_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Close the session.
+            let close_subj = format!("acp.session.{sid}.agent.close");
+            h.session_req(
+                &close_subj,
+                CloseSessionRequest::new(sid.clone()),
+                "r.close",
+            );
+            h.expect_n_publishes(2).await;
+
+            // List sessions — closed one must not appear.
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                resp.sessions.is_empty(),
+                "closed session must not appear in list: {:?}",
+                resp.sessions
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_with_branch_at_index_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Fork with branchAtIndex.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 0}),
+            )
+            .unwrap();
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork").meta(meta),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            let fork_id = val["sessionId"].as_str().unwrap_or_default();
+            assert!(!fork_id.is_empty(), "fork must return non-empty sessionId");
+            assert_ne!(fork_id, sid.as_str(), "fork sessionId must differ from source");
+            // The fork response includes modes and models.
+            assert!(val.get("modes").is_some(), "fork response must include modes");
+            assert!(val.get("models").is_some(), "fork response must include models");
+        })
+        .await;
+}
+
 // ── set_session_model ─────────────────────────────────────────────────────────
 
 #[tokio::test]
