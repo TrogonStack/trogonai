@@ -763,6 +763,13 @@ mod tests {
     }
 
     #[test]
+    fn data_line_without_space_after_colon_is_skipped() {
+        // "data:" without a following space does not match "data: " prefix.
+        let events = events_from_lines(&["data:{\"choices\":[]}"]);
+        assert!(events.is_empty(), "data line without space separator must be skipped");
+    }
+
+    #[test]
     fn data_line_with_only_whitespace_after_prefix_is_skipped() {
         // "data:    " → stripped to "" → not DONE, invalid JSON → silently skipped.
         let events = events_from_lines(&["data:    "]);
