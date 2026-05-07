@@ -22,6 +22,11 @@ pub trait Session: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_;
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_;
+
+    fn set_model(
+        &self,
+        model_id: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 }
 
 // ── TrogonSession ─────────────────────────────────────────────────────────────
@@ -183,6 +188,31 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let _ = self.nats.publish_bytes(subject, Bytes::new()).await;
         }
     }
+
+    fn set_model(
+        &self,
+        model_id: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+    {
+        let model_id = model_id.to_string();
+        let subject = format!("{}.session.{}.agent.set_model", self.prefix, self.session_id);
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        async move {
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "sessionId": session_id,
+                "modelId": model_id,
+            }))?;
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                nats.request_bytes(subject, payload.into()),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?
+            .map_err(|e| anyhow::anyhow!("NATS error setting model: {e}"))?;
+            Ok(())
+        }
+    }
 }
 
 // ── StreamEvent ───────────────────────────────────────────────────────────────
@@ -271,6 +301,8 @@ pub mod mock {
         session_id: String,
         turns: Mutex<VecDeque<Vec<StreamEvent>>>,
         cancelled: Mutex<Vec<String>>,
+        model: Mutex<Option<String>>,
+        set_model_error: Mutex<Option<String>>,
     }
 
     impl MockSession {
@@ -279,6 +311,8 @@ pub mod mock {
                 session_id: session_id.into(),
                 turns: Mutex::new(VecDeque::new()),
                 cancelled: Mutex::new(Vec::new()),
+                model: Mutex::new(None),
+                set_model_error: Mutex::new(None),
             }
         }
 
@@ -289,6 +323,14 @@ pub mod mock {
 
         pub fn cancel_count(&self) -> usize {
             self.cancelled.lock().unwrap().len()
+        }
+
+        pub fn last_model(&self) -> Option<String> {
+            self.model.lock().unwrap().clone()
+        }
+
+        pub fn fail_set_model(&self, error: impl Into<String>) {
+            *self.set_model_error.lock().unwrap() = Some(error.into());
         }
     }
 
@@ -321,6 +363,21 @@ pub mod mock {
             let id = self.session_id.clone();
             async move {
                 self.cancelled.lock().unwrap().push(id);
+            }
+        }
+
+        fn set_model(
+            &self,
+            model_id: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+        {
+            let model_id = model_id.to_string();
+            async move {
+                if let Some(err) = self.set_model_error.lock().unwrap().clone() {
+                    return Err(anyhow::anyhow!("{err}"));
+                }
+                *self.model.lock().unwrap() = Some(model_id);
+                Ok(())
             }
         }
     }
@@ -437,6 +494,55 @@ mod tests {
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
+    }
+
+    // ── TrogonSession::new via MockNatsClient ─────────────────────────────────
+
+    // ── TrogonSession::set_model ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_model_sends_nats_request_and_returns_ok() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "s1"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+
+        nats.queue_request_ok(Bytes::from(b"{}".as_slice()));
+        let result = session.set_model("claude-opus-4-7").await;
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn set_model_returns_error_on_nats_failure() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "s1"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+
+        nats.queue_request_err("connection refused");
+        let err = session.set_model("claude-opus-4-7").await.unwrap_err();
+        assert!(err.to_string().contains("NATS error"), "got: {err}");
+    }
+
+    // ── MockSession::set_model ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_session_set_model_stores_model() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        session.set_model("claude-opus-4-7").await.unwrap();
+        assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
+    }
+
+    #[tokio::test]
+    async fn mock_session_set_model_returns_error_when_configured() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        session.fail_set_model("runner unavailable");
+        let err = session.set_model("claude-opus-4-7").await.unwrap_err();
+        assert!(err.to_string().contains("runner unavailable"), "got: {err}");
     }
 
     // ── TrogonSession::new via MockNatsClient ─────────────────────────────────

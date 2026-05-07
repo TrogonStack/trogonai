@@ -178,6 +178,20 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                             }
                             Err(e) => eprintln!("error: {e}"),
                         }
+                    } else if cmd == "/model" && !arg.is_empty() {
+                        let model = arg.trim().to_string();
+                        let mut cfg = read_config(&fs);
+                        cfg["model"] = serde_json::Value::String(model.clone());
+                        if let Err(e) = write_config(&cfg, &fs) {
+                            eprintln!("error saving config: {e}");
+                        }
+                        match session.set_model(&model).await {
+                            Ok(()) => println!("model updated: {model}"),
+                            Err(e) => {
+                                eprintln!("error updating model on runner: {e}");
+                                println!("model saved to config — takes effect on next session");
+                            }
+                        }
                     } else {
                         println!(
                             "{}",
@@ -346,10 +360,7 @@ Ctrl+D    quit"
                 let mut cfg = read_config(fs);
                 cfg["model"] = serde_json::Value::String(model.to_string());
                 match write_config(&cfg, fs) {
-                    Ok(()) => format!(
-                        "model set to: {model}\n\
-                         cost estimates updated  |  restart runner with AGENT_MODEL={model} to apply"
-                    ),
+                    Ok(()) => format!("model set to: {model}\ncost estimates updated"),
                     Err(e) => format!("error saving model: {e}"),
                 }
             }
@@ -983,7 +994,7 @@ mod tests {
         let fs = MockFs::new();
         let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0, Path::new("/tmp"), &fs);
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
-        assert!(!out.contains("not yet implemented"), "should be implemented: {out}");
+        assert!(out.contains("cost estimates updated"), "got: {out}");
         // Verify it was actually persisted.
         let check = handle_slash_command("/model", "", 0, 0, Path::new("/tmp"), &fs);
         assert!(check.contains("claude-opus-4-7"), "model not persisted: {check}");
