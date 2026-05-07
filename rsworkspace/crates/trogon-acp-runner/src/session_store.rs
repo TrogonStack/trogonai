@@ -79,6 +79,10 @@ pub struct SessionState {
     /// Todo list for this session, persisted in NATS KV.
     #[serde(default)]
     pub todos: Vec<TodoItem>,
+    /// Permission rules text set via `/config` (same format as TROGON.md `## Permissions` section).
+    /// Merged with rules loaded from TROGON.md — session rules take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_rules_text: Option<String>,
     /// Token budget used to decide when to compact the message history.
     /// Compaction triggers at 85 % of this value. Default: 200 000.
     #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
@@ -112,6 +116,7 @@ impl Default for SessionState {
             branched_at_index: None,
             terminal_id: None,
             todos: Vec::new(),
+            permission_rules_text: None,
             token_budget: default_token_budget(),
         }
     }

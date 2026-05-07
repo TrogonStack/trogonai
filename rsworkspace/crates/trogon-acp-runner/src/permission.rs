@@ -5,9 +5,13 @@
 //! `LocalSet` task (the only context that can call `conn.request_permission`).
 //! The caller awaits a oneshot reply with the user's allow/deny decision.
 
+use std::sync::Arc;
+
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use trogon_agent_core::agent_loop::PermissionChecker;
+
+use crate::permission_rules::{PermissionRules, RuleDecision};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
 pub struct PermissionReq {
@@ -69,6 +73,32 @@ impl PermissionChecker for ChannelPermissionChecker {
                 _ => false,
             }
         })
+    }
+}
+
+/// `PermissionChecker` that first evaluates static [`PermissionRules`] before
+/// forwarding to the interactive [`ChannelPermissionChecker`].
+///
+/// - `Deny` → rejects immediately (no UI prompt).
+/// - `Allow` → approves immediately (no UI prompt).
+/// - `Ask` → falls through to the channel checker for interactive approval.
+pub struct RulesPermissionChecker {
+    pub rules: Arc<PermissionRules>,
+    pub inner: ChannelPermissionChecker,
+}
+
+impl PermissionChecker for RulesPermissionChecker {
+    fn check<'a>(
+        &'a self,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_input: &'a Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        match self.rules.check(tool_name, tool_input) {
+            RuleDecision::Deny => Box::pin(async move { false }),
+            RuleDecision::Allow => Box::pin(async move { true }),
+            RuleDecision::Ask => self.inner.check(tool_call_id, tool_name, tool_input),
+        }
     }
 }
 

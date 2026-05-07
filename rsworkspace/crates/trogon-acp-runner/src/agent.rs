@@ -27,7 +27,8 @@ use trogon_agent_core::tools::ToolDef;
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
-use crate::permission::{ChannelPermissionChecker, PermissionTx};
+use crate::permission::{ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
+use crate::permission_rules::PermissionRules;
 use crate::wasm_bash_tool::WasmRuntimeBashTool;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
@@ -480,10 +481,25 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                 if needs_perm
                     && let Some(ref perm_tx) = self.permission_tx
                 {
-                    a.set_permission_checker(Arc::new(ChannelPermissionChecker {
+                    let inner = ChannelPermissionChecker {
                         session_id: session_id.clone(),
                         tx: perm_tx.clone(),
                         allowed_tools: state.allowed_tools.clone(),
+                    };
+                    // Build static rules: TROGON.md base + session override merged.
+                    let mut rules = if let Some(trogon_md) =
+                        crate::trogon_md::load_trogon_md(&state.cwd).await
+                    {
+                        PermissionRules::parse(&trogon_md)
+                    } else {
+                        PermissionRules::default()
+                    };
+                    if let Some(ref extra) = state.permission_rules_text {
+                        rules.merge(PermissionRules::parse(extra));
+                    }
+                    a.set_permission_checker(Arc::new(RulesPermissionChecker {
+                        rules: Arc::new(rules),
+                        inner,
                     }));
                 }
                 if let Some(ref elic_tx) = self.elicitation_tx {
@@ -880,6 +896,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist config model update");
+                }
+            }
+            "permissions" => {
+                state.permission_rules_text = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.clone())
+                };
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id, error = %e, "agent: failed to persist permission rules");
                 }
             }
             other => {
