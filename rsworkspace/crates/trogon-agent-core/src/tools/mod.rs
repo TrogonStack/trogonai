@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod editor;
 pub mod fs;
 pub mod git;
+pub mod todo;
 pub mod web;
 
 /// Anthropic tool definition sent in every request.
@@ -159,6 +160,28 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
                 "required": ["path", "cell_index", "content"]
             }),
         ),
+        tool_def(
+            "todo_write",
+            "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id":      { "type": "string", "description": "Unique identifier for the todo" },
+                    "content": { "type": "string", "description": "Description of the task" },
+                    "status":  { "type": "string", "description": "One of: pending, in_progress, completed" }
+                },
+                "required": ["id", "content", "status"]
+            }),
+        ),
+        tool_def(
+            "todo_read",
+            "List all active (non-completed) todos for the current session.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        ),
     ];
 
     // Mark the last tool with cache_control so Anthropic caches the entire block.
@@ -182,6 +205,8 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_log"       => git::log(ctx, input).await,
         "fetch_url"     => web::fetch_url(ctx, input).await,
         "notebook_edit" => fs::notebook_edit(ctx, input).await,
+        "todo_write"    => todo::todo_write(ctx, input).await,
+        "todo_read"     => todo::todo_read(ctx, input).await,
         _               => format!("Unknown tool: {name}"),
     }
 }
