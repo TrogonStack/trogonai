@@ -16,7 +16,7 @@ use agent_client_protocol::{
     SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
-    ExtRequest, ExtResponse, ToolKind, UsageUpdate,
+    ToolCallUpdate, ToolCallUpdateFields, ExtRequest, ExtResponse, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -25,7 +25,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::agent_loader::{AgentConfig, AgentLoading};
-use crate::client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
+use crate::client::{FinishReason, InputItem, Message, ToolSpec, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
@@ -151,6 +151,10 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     /// Tenant identifier written to each session snapshot (from `TENANT_ID` env
     /// var; defaults to `"default"`).
     tenant_id: String,
+    /// Registry used to discover execution backends (wasm-runtime). `None` disables bash tool.
+    registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
+    /// NATS client forwarded to the bash execution helper when a wasm-runtime is available.
+    execution_nats: Option<async_nats::Client>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -273,6 +277,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             skill_loader: None,
             session_store: None,
             tenant_id,
+            registry: None,
+            execution_nats: None,
         }
     }
 
@@ -293,6 +299,21 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
     /// Attach a session store so sessions are visible in trogon-console.
     pub fn with_session_store(mut self, store: Arc<dyn SessionStoring>) -> Self {
         self.session_store = Some(store);
+        self
+    }
+
+    /// Enable the `bash` tool by connecting to a `trogon-wasm-runtime` execution backend.
+    ///
+    /// On each prompt the runner discovers the execution backend from the registry.
+    /// If no backend with capability `"execution"` is registered the `bash` tool is
+    /// not injected and the agent runs without it — graceful degradation.
+    pub fn with_execution_backend(
+        mut self,
+        nats: async_nats::Client,
+        registry: trogon_registry::Registry<async_nats::jetstream::kv::Store>,
+    ) -> Self {
+        self.execution_nats = Some(nats);
+        self.registry = Some(Arc::new(registry));
         self
     }
 
@@ -936,11 +957,57 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             .await
             .insert(session_id.clone(), cancel_tx);
 
+        // Discover execution backend once per prompt (not per tool-call round).
+        // None means bash tool is not available this turn.
+        let wasm_prefix: Option<String> = if let (Some(reg), Some(_)) =
+            (&self.registry, &self.execution_nats)
+        {
+            reg.discover("execution")
+                .await
+                .ok()
+                .and_then(|mut entries| entries.drain(..).next())
+                .and_then(|e| {
+                    e.metadata["acp_prefix"]
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| Some("acp.wasm".to_string()))
+                })
+        } else {
+            None
+        };
+
+        // Build the tools list: server-side enabled tools + optional bash function.
+        let mut call_tools: Vec<ToolSpec> = enabled_tools
+            .iter()
+            .map(|t| ToolSpec::ServerSide(t.clone()))
+            .collect();
+        if wasm_prefix.is_some() {
+            call_tools.push(ToolSpec::Function {
+                name: "bash".to_string(),
+                description: "Run a shell command in the session sandbox and return its output."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute."
+                        }
+                    },
+                    "required": ["command"]
+                }),
+            });
+        }
+
         let client = Arc::clone(&self.client);
         let mut assistant_text = String::new();
         let mut current_turn_usage: Option<(u64, u64)> = None;
         let mut canceled = false;
-        let mut pending_tool_calls: Vec<(String, String)> = Vec::new();
+        // (call_id, name, arguments)
+        let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new();
+        // Counts client-driven bash execution rounds to prevent infinite loops.
+        let mut tool_rounds: u32 = 0;
+        const MAX_TOOL_ROUNDS: u32 = 10;
         // ID returned by xAI for this response; saved as `last_response_id` so
         // subsequent turns can use stateful multi-turn via `previous_response_id`.
         let mut current_response_id: Option<String> = None;
@@ -965,7 +1032,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     &model,
                     &current_input,
                     &api_key,
-                    &enabled_tools,
+                    &call_tools,
                     current_prev_response_id.as_deref(),
                     self.max_turns,
                 )
@@ -1024,21 +1091,22 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         // stream (e.g. custom function calling). The ToolCall(Pending)
                         // notification will therefore not fire in the typical xAI deployment.
                         info!(session_id, call_id = %call_id, tool_name = %name, "xai: tool call");
+                        let kind = if name == "bash" { ToolKind::Execute } else { ToolKind::Other };
                         let tool_call = ToolCall::new(call_id.clone(), name.clone())
                             .status(ToolCallStatus::Pending)
-                            .kind(ToolKind::Other)
+                            .kind(kind)
                             .raw_input(parse_tool_arguments(&arguments));
                         let notif = SessionNotification::new(
                             session_id.clone(),
                             SessionUpdate::ToolCall(tool_call),
                         );
                         self.notifier.notify(notif).await;
-                        pending_tool_calls.push((call_id, name));
+                        pending_tool_calls.push((call_id, name, arguments));
                     }
                     XaiEvent::ServerToolCompleted { name } => {
                         // NOTE: grok-4 does not emit this event — see FunctionCall note above.
-                        if let Some(pos) = pending_tool_calls.iter().position(|(_, n)| *n == name) {
-                            let (call_id, tc_name) = pending_tool_calls.remove(pos);
+                        if let Some(pos) = pending_tool_calls.iter().position(|(_, n, _)| *n == name) {
+                            let (call_id, tc_name, _) = pending_tool_calls.remove(pos);
                             info!(session_id, call_id = %call_id, tool_name = %tc_name,
                                   "xai: server tool completed");
                             let notif = SessionNotification::new(
@@ -1074,6 +1142,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                                 ));
                             }
                             FinishReason::Completed => {}
+                            // ToolCalls: model stopped to wait for client-side function results.
+                            // The pending_tool_calls vec will carry them to the execution block
+                            // after the inner loop — no action needed here.
+                            FinishReason::ToolCalls => {}
                             FinishReason::Other(ref s) => {
                                 warn!(session_id, status = %s,
                                       "xai: unknown finish status — treating as end of turn");
@@ -1163,6 +1235,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     };
                     continuations += 1;
                     continuation_in_progress = true;
+                    // Tool calls from an Incomplete stream are stale — they belong
+                    // to a response the model never finished. Clear them so the
+                    // continuation round does not re-execute them.
+                    pending_tool_calls.clear();
                     continue 'outer;
                 } else {
                     warn!(
@@ -1170,6 +1246,73 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                         incomplete_reason = ?last_incomplete_reason,
                         "xai: response incomplete but no response_id received — returning truncated response"
                     );
+                }
+            }
+
+            // Execute any pending client-side bash tool calls, then continue the
+            // outer loop with the results so the model can incorporate the output.
+            let (bash_calls, other_calls): (Vec<_>, Vec<_>) = pending_tool_calls
+                .drain(..)
+                .partition(|(_, name, _)| name == "bash");
+            for (cid, name, _) in other_calls {
+                warn!(session_id, call_id = %cid, tool = %name, "xai: unhandled custom tool call — only bash is supported");
+                let notif = SessionNotification::new(
+                    session_id.clone(),
+                    SessionUpdate::ToolCallUpdate(
+                        ToolCallUpdate::new(
+                            cid,
+                            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+                        ),
+                    ),
+                );
+                self.notifier.notify(notif).await;
+            }
+            if !bash_calls.is_empty() {
+                if tool_rounds >= MAX_TOOL_ROUNDS {
+                    warn!(session_id, MAX_TOOL_ROUNDS, "xai: max tool rounds reached");
+                    break 'outer StopReason::Cancelled;
+                }
+                if let (Some(nats), Some(resp_id)) = (&self.execution_nats, current_response_id.clone()) {
+                    let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
+                    let mut outputs: Vec<InputItem> = Vec::with_capacity(bash_calls.len());
+                    for (call_id, _, arguments) in bash_calls {
+                        let in_progress = SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::ToolCall(
+                                ToolCall::new(call_id.clone(), "bash")
+                                    .status(ToolCallStatus::InProgress)
+                                    .kind(ToolKind::Execute),
+                            ),
+                        );
+                        self.notifier.notify(in_progress).await;
+                        let result = execute_bash_via_nats(nats, wasm, &session_id, &arguments).await;
+                        info!(session_id, call_id = %call_id, "xai: bash tool executed");
+                        let completed = SessionNotification::new(
+                            session_id.clone(),
+                            SessionUpdate::ToolCallUpdate(
+                                ToolCallUpdate::new(
+                                    call_id.clone(),
+                                    ToolCallUpdateFields::new()
+                                        .status(ToolCallStatus::Completed)
+                                        .raw_output(serde_json::Value::String(result.clone())),
+                                ),
+                            ),
+                        );
+                        self.notifier.notify(completed).await;
+                        outputs.push(InputItem::function_call_output(call_id, result));
+                    }
+                    current_prev_response_id = Some(resp_id);
+                    current_input = outputs;
+                    current_response_id = None;
+                    tool_rounds += 1;
+                    // Disables the stale-ID retry for this iteration: the ID we
+                    // just set is milliseconds old so it cannot be stale, and even
+                    // if it were, a retry would replay history without the
+                    // function_call_output items — producing a wrong response.
+                    continuation_in_progress = true;
+                    continue 'outer;
+                } else {
+                    warn!(session_id, pending = bash_calls.len(), "xai: bash calls pending but no execution backend — skipping");
                 }
             }
 
@@ -1198,10 +1341,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     s.history.push(assistant_msg);
                 }
                 trim_history(&mut s.history, self.max_history);
-                // Only update the response ID if we received one; keep the old
-                // ID when the stream ended without producing a new one.
+                // Update the stored response ID from this turn.
+                // If bash rounds ran but the final round returned no ID, clear the
+                // stored ID — a stale ID from a previous prompt would cause the next
+                // turn to send a wrong previous_response_id.
                 if let Some(resp_id) = current_response_id {
                     s.last_response_id = Some(resp_id);
+                } else if tool_rounds > 0 {
+                    s.last_response_id = None;
                 }
             }
             // If session was closed during streaming, silently discard history update.
@@ -1317,6 +1464,94 @@ fn trim_history(history: &mut Vec<Message>, max: usize) {
 fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
     serde_json::from_str(arguments)
         .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
+}
+
+/// Execute a bash command by delegating to the wasm-runtime over NATS.
+///
+/// Sends four NATS requests against `{wasm_prefix}.session.{session_id}.client.terminal.*`:
+/// create → wait_for_exit → output → release. Returns the captured stdout/stderr,
+/// or an error message string on failure (never propagates errors — the model
+/// receives the error text as the tool result and can decide how to proceed).
+async fn execute_bash_via_nats(
+    nats: &async_nats::Client,
+    wasm_prefix: &str,
+    session_id: &str,
+    arguments: &str,
+) -> String {
+    use agent_client_protocol::{
+        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
+        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    };
+
+    let command = match serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|v| v["command"].as_str().map(str::to_string))
+    {
+        Some(c) => c,
+        None => return "error: missing 'command' in bash arguments".to_string(),
+    };
+
+    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let session_id_owned = session_id.to_string();
+    let nats = nats.clone();
+
+    let result = tokio::time::timeout(Duration::from_secs(30), async move {
+        // 1. create terminal
+        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
+            .args(vec!["-c".to_string(), command]);
+        let payload = match serde_json::to_vec(&create_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+            Ok(m) => m,
+            Err(e) => return format!("error: {e}"),
+        };
+        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => return format!("error: {e}"),
+        };
+        let tid = create_resp.terminal_id.clone();
+
+        // 2. wait for exit
+        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&wait_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
+            return format!("error: {e}");
+        }
+
+        // 3. collect output
+        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&out_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
+            Ok(m) => m,
+            Err(e) => return format!("error: {e}"),
+        };
+        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => return format!("error: {e}"),
+        };
+
+        // 4. release (best-effort)
+        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
+        if let Ok(payload) = serde_json::to_vec(&rel_req) {
+            let _ = nats.request(format!("{base}.release"), payload.into()).await;
+        }
+
+        out.output
+    })
+    .await;
+
+    match result {
+        Ok(output) => output,
+        Err(_elapsed) => "error: bash execution timed out".to_string(),
+    }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -2868,10 +3103,10 @@ mod tests {
         let calls = mock_http.calls.lock().unwrap();
         let input = &calls.last().unwrap().input;
         assert_eq!(
-            input[0].role, "system",
+            input[0].role().unwrap(), "system",
             "first input item must be the system prompt"
         );
-        assert_eq!(input[0].content, "You are a helpful assistant.");
+        assert_eq!(input[0].content().unwrap(), "You are a helpful assistant.");
     }
 
     // ── prompt: stream error returns Ok ──────────────────────────────────────────
@@ -3013,7 +3248,7 @@ mod tests {
 
         let calls = agent.client.calls.lock().unwrap();
         let user_item = calls.last().unwrap().input.last().unwrap();
-        assert_eq!(user_item.content, "block one\nblock two");
+        assert_eq!(user_item.content().unwrap(), "block one\nblock two");
     }
 
     // ── XAI_MAX_HISTORY_MESSAGES env var ──────────────────────────────────────
@@ -3202,7 +3437,7 @@ mod tests {
         assert_eq!(calls.len(), 1);
         let input = &calls[0].input;
         assert!(
-            input[0].role != "system",
+            input[0].role() != Some("system"),
             "empty XAI_SYSTEM_PROMPT must not prepend a system input item"
         );
     }
@@ -3443,21 +3678,21 @@ mod tests {
             4,
             "system + user + assistant + new_user = 4 items"
         );
-        assert_eq!(input[0].role, "system", "item[0] must be the system prompt");
-        assert_eq!(input[0].content, "You are concise.");
+        assert_eq!(input[0].role().unwrap(), "system", "item[0] must be the system prompt");
+        assert_eq!(input[0].content().unwrap(), "You are concise.");
         assert_eq!(
-            input[1].role, "user",
+            input[1].role().unwrap(), "user",
             "item[1] must be history user message"
         );
         assert_eq!(
-            input[2].role, "assistant",
+            input[2].role().unwrap(), "assistant",
             "item[2] must be history assistant message"
         );
         assert_eq!(
-            input[3].role, "user",
+            input[3].role().unwrap(), "user",
             "item[3] must be the new user message"
         );
-        assert_eq!(input[3].content, "follow-up");
+        assert_eq!(input[3].content().unwrap(), "follow-up");
     }
 
     // ── prompt: ResourceLink content block ────────────────────────────────────
@@ -3538,10 +3773,10 @@ mod tests {
         let calls = agent.client.calls.lock().unwrap();
         // input: [history-item (role=user), new user item] — no system prompt set
         assert_eq!(
-            calls[0].input[0].role, "user",
+            calls[0].input[0].role().unwrap(), "user",
             "non-assistant role must be mapped to 'user'"
         );
-        assert_eq!(calls[0].input[0].content, "injected");
+        assert_eq!(calls[0].input[0].content().unwrap(), "injected");
     }
 
     // ── with_deps: empty api_key sets global_api_key to None ─────────────────
@@ -3587,9 +3822,9 @@ mod tests {
             2,
             "system prompt + user item only (no history)"
         );
-        assert_eq!(input[0].role, "system");
-        assert_eq!(input[0].content, "Be concise.");
-        assert_eq!(input[1].role, "user");
+        assert_eq!(input[0].role().unwrap(), "system");
+        assert_eq!(input[0].content().unwrap(), "Be concise.");
+        assert_eq!(input[1].role().unwrap(), "user");
     }
 
     // ── new_session stores cwd ────────────────────────────────────────────────
@@ -3809,9 +4044,8 @@ mod tests {
             .unwrap();
 
         let calls = agent.client.calls.lock().unwrap();
-        assert_eq!(
-            calls.last().unwrap().tools,
-            vec!["web_search".to_string()],
+        assert!(
+            calls.last().unwrap().tools.iter().any(|t| t.name() == "web_search"),
             "enabled web_search must be forwarded to chat_stream"
         );
     }
@@ -3949,9 +4183,9 @@ mod tests {
         let calls = agent.client.calls.lock().unwrap();
         let user_item = calls.last().unwrap().input.last().unwrap();
         assert!(
-            user_item.content.contains("embedded text content"),
-            "EmbeddedResource text must appear in the chat_stream input: {}",
-            user_item.content
+            user_item.content().unwrap_or("").contains("embedded text content"),
+            "EmbeddedResource text must appear in the chat_stream input: {:?}",
+            user_item.content()
         );
     }
 
@@ -3980,14 +4214,14 @@ mod tests {
         let calls = agent.client.calls.lock().unwrap();
         let user_item = calls.last().unwrap().input.last().unwrap();
         assert!(
-            user_item.content.contains("[Binary resource:"),
-            "EmbeddedResource binary must produce a '[Binary resource: ...]' note: {}",
-            user_item.content
+            user_item.content().unwrap_or("").contains("[Binary resource:"),
+            "EmbeddedResource binary must produce a '[Binary resource: ...]' note: {:?}",
+            user_item.content()
         );
         assert!(
-            user_item.content.contains("image/png"),
-            "binary resource note must include MIME type: {}",
-            user_item.content
+            user_item.content().unwrap_or("").contains("image/png"),
+            "binary resource note must include MIME type: {:?}",
+            user_item.content()
         );
     }
 
@@ -4130,7 +4364,7 @@ mod tests {
             1,
             "non-max_output_tokens continuation must re-send the user message"
         );
-        assert_eq!(calls[1].input[0].content, "my query");
+        assert_eq!(calls[1].input[0].content().unwrap(), "my query");
     }
 
     #[tokio::test]
