@@ -1919,4 +1919,243 @@ mod tests {
             assert_eq!(s.history[1].content, "abcd");
         }).await;
     }
+
+    // ── initialize ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn initialize_without_global_key_offers_only_env_var_auth() {
+        let agent = make_agent(); // global_api_key = None
+        local().run_until(async move {
+            let resp = agent.initialize(agent_client_protocol::InitializeRequest::new(
+                agent_client_protocol::ProtocolVersion::LATEST,
+            )).await.unwrap();
+            // Must offer exactly one method: the user-key env-var method.
+            assert_eq!(resp.auth_methods.len(), 1);
+            let id = match &resp.auth_methods[0] {
+                agent_client_protocol::AuthMethod::EnvVar(m) => m.id.0.as_ref().to_string(),
+                other => panic!("expected EnvVar method, got {other:?}"),
+            };
+            assert_eq!(id, "openrouter-api-key");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn initialize_with_global_key_offers_both_auth_methods() {
+        let agent = make_agent_with_key("server-key");
+        local().run_until(async move {
+            let resp = agent.initialize(agent_client_protocol::InitializeRequest::new(
+                agent_client_protocol::ProtocolVersion::LATEST,
+            )).await.unwrap();
+            // Must offer two methods: user-key and agent key.
+            assert_eq!(resp.auth_methods.len(), 2, "should offer env-var + agent methods");
+            let ids: Vec<String> = resp.auth_methods.iter().map(|m| match m {
+                agent_client_protocol::AuthMethod::EnvVar(e) => e.id.0.as_ref().to_string(),
+                agent_client_protocol::AuthMethod::Agent(a) => a.id.0.as_ref().to_string(),
+                _ => "other".to_string(),
+            }).collect();
+            assert!(ids.contains(&"openrouter-api-key".to_string()));
+            assert!(ids.contains(&"agent".to_string()));
+        }).await;
+    }
+
+    // ── ContentBlock variants in prompt ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_resource_link_block_is_formatted_correctly() {
+        use agent_client_protocol::ResourceLink;
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::ResourceLink(
+                    ResourceLink::new("my-file.txt", "file:///workspace/my-file.txt"),
+                )],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert_eq!(
+                user_msg.content,
+                "[Resource: my-file.txt | file:///workspace/my-file.txt]",
+                "ResourceLink must be formatted with name and URI"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_embedded_text_resource_is_included_as_text() {
+        use agent_client_protocol::{EmbeddedResource, EmbeddedResourceResource, TextResourceContents};
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::TextResourceContents(
+                        TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
+                    ),
+                ))],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert_eq!(
+                user_msg.content, "fn main() {}",
+                "TextResourceContents must be included verbatim"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_embedded_blob_resource_is_formatted_as_binary_placeholder() {
+        use agent_client_protocol::{EmbeddedResource, EmbeddedResourceResource, BlobResourceContents};
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let mut blob = BlobResourceContents::new("base64data==", "file:///img.png");
+            blob.mime_type = Some("image/png".to_string());
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::BlobResourceContents(blob),
+                ))],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert!(
+                user_msg.content.contains("img.png") && user_msg.content.contains("image/png"),
+                "BlobResourceContents must produce placeholder with uri and mime type: {:?}",
+                user_msg.content
+            );
+        }).await;
+    }
+
+    // ── set_session_model affects wire model ──────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_model_changes_model_in_wire_request() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            // Switch from the default "test-model" to "test-model" (it's the only one in list);
+            // to test a different model we explicitly add it via env var — use a known available model.
+            // Since "test-model" is auto-added as default, switching to it is a no-op in this test.
+            // Instead, verify the default model is used when no override is set.
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(
+                calls[0].model, "test-model",
+                "default model must appear in wire request"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_model_override_appears_in_wire_request() {
+        // Use env var to add a second model, then switch to it and verify the wire model changes.
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "test-model:Test Model,other-model:Other Model"); }
+        let agent = make_agent_with_key("k");
+        unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.set_session_model(SetSessionModelRequest::new(sid.clone(), "other-model")).await.unwrap();
+            agent.prompt(PromptRequest::new(
+                sid,
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(
+                calls[0].model, "other-model",
+                "switched model must appear in wire request, not default"
+            );
+        }).await;
+    }
+
+    // ── close_session during active prompt ────────────────────────────────────
+
+    #[tokio::test]
+    async fn close_session_during_active_prompt_cancels_it() {
+        let agent = Arc::new(make_agent_with_key("k"));
+        let agent2 = Arc::clone(&agent);
+        agent.client.push_slow_response(OpenRouterEvent::TextDelta { text: "streaming".to_string() });
+
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sid2 = sid.clone();
+
+            let agent_prompt = Arc::clone(&agent);
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt.prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("q".to_string())],
+                )).await.unwrap()
+            });
+
+            // Give the prompt time to start streaming.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            // Close the session — this should trigger the cancel sender.
+            agent2.close_session(CloseSessionRequest::new(sid2)).await.unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::Cancelled),
+                "close_session during active prompt must cancel it: {:?}",
+                result.stop_reason
+            );
+        }).await;
+    }
+
+    // ── empty prompt content ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_with_empty_content_list_returns_end_turn() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![]); // no assistant response either
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            // Empty content block list — the agent warns but must not error.
+            let result = agent.prompt(PromptRequest::new(sid, vec![])).await;
+            assert!(result.is_ok(), "empty content list must not error: {result:?}");
+            assert!(matches!(result.unwrap().stop_reason, agent_client_protocol::StopReason::EndTurn));
+        }).await;
+    }
+
+    // ── TENANT_ID env var ─────────────────────────────────────────────────────
+
+    #[test]
+    fn tenant_id_env_var_appears_in_snapshot() {
+        unsafe { std::env::set_var("TENANT_ID", "acme-corp"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("TENANT_ID"); }
+        let session = make_session();
+        let snap = agent.build_snapshot("sid", &session);
+        assert_eq!(snap.tenant_id, "acme-corp");
+    }
+
+    #[test]
+    fn tenant_id_defaults_to_default_when_absent() {
+        unsafe { std::env::remove_var("TENANT_ID"); }
+        let agent = make_agent();
+        let session = make_session();
+        let snap = agent.build_snapshot("sid", &session);
+        assert_eq!(snap.tenant_id, "default");
+    }
+
+    #[test]
+    fn tenant_id_empty_env_var_defaults_to_default() {
+        unsafe { std::env::set_var("TENANT_ID", ""); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("TENANT_ID"); }
+        let session = make_session();
+        let snap = agent.build_snapshot("sid", &session);
+        assert_eq!(snap.tenant_id, "default", "empty TENANT_ID must fall back to 'default'");
+    }
 }
