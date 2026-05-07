@@ -732,6 +732,14 @@ mod tests {
         assert!(!result.contains("Unknown tool"));
     }
 
+    #[tokio::test]
+    async fn dispatch_spawn_agent_returns_nats_required_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "must be routed, got: {result}");
+    }
+
     // ── idempotency_marker ────────────────────────────────────────────────────
 
     /// Keys without `--` must be embedded verbatim — no substitution.
