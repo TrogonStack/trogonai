@@ -301,8 +301,27 @@ fn process_sse_line(line: &str, pending: &mut VecDeque<OpenRouterEvent>) {
         return;
     };
 
-    // Usage chunk — OpenRouter sends this as a trailing chunk when
-    // `stream_options.include_usage` is true.
+    if let Some(choice) = val["choices"].get(0) {
+        let delta = &choice["delta"];
+
+        if let Some(text) = delta["content"].as_str() {
+            if !text.is_empty() {
+                pending.push_back(OpenRouterEvent::TextDelta {
+                    text: text.to_string(),
+                });
+            }
+        }
+
+        if let Some(reason) = choice["finish_reason"].as_str() {
+            if !reason.is_empty() {
+                pending.push_back(OpenRouterEvent::Finished {
+                    reason: FinishReason::from_str(reason),
+                });
+            }
+        }
+    }
+
+    // Usage — emitted after Finished; may arrive in a separate chunk with empty choices.
     if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
         if !usage.is_empty() {
             let prompt_tokens = usage
@@ -316,28 +335,6 @@ fn process_sse_line(line: &str, pending: &mut VecDeque<OpenRouterEvent>) {
             pending.push_back(OpenRouterEvent::Usage {
                 prompt_tokens,
                 completion_tokens,
-            });
-        }
-    }
-
-    let Some(choice) = val["choices"].get(0) else {
-        return;
-    };
-
-    let delta = &choice["delta"];
-
-    if let Some(text) = delta["content"].as_str() {
-        if !text.is_empty() {
-            pending.push_back(OpenRouterEvent::TextDelta {
-                text: text.to_string(),
-            });
-        }
-    }
-
-    if let Some(reason) = choice["finish_reason"].as_str() {
-        if !reason.is_empty() {
-            pending.push_back(OpenRouterEvent::Finished {
-                reason: FinishReason::from_str(reason),
             });
         }
     }

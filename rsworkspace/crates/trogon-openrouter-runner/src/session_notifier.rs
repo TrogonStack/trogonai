@@ -55,11 +55,13 @@ impl SessionNotifier for NatsSessionNotifier {
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
+#[allow(dead_code)]
 pub struct MockSessionNotifier {
     pub notifications: std::sync::Mutex<Vec<SessionNotification>>,
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
+#[allow(dead_code)]
 impl MockSessionNotifier {
     pub fn new() -> Self {
         Self {
