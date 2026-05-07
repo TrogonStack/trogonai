@@ -35,7 +35,8 @@ mod client_subjects {
     }
 }
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, ImageContent, PromptRequest, TextContent};
+use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ImageContent, PromptRequest, TextContent, TerminalId};
+use trogon_acp_runner::wasm_bash_tool::WasmRuntimeBashTool;
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -193,6 +194,154 @@ async fn send_text(
         vec![ContentBlock::Text(TextContent::new(text))],
     )
     .await
+}
+
+/// Spawn mock NATS responders for the four interactions used by the
+/// demarcation-marker protocol: create → output(baseline) → write_stdin → output(poll).
+fn spawn_terminal_responders(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output: &'static str,
+) {
+    tokio::spawn(async move {
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
+            let payload = serde_json::to_vec(&resp).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = write_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output}__EXIT_0__\n");
+            let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+    });
+}
+
+/// Start a `TrogonAgent` wired with a `WasmRuntimeBashTool` backed by the same
+/// `NatsSessionStore` used for session persistence.  Returns the store so tests
+/// can inspect persisted state after the run.
+async fn start_agent_with_bash_tool(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+
+    let bash_tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        Duration::from_secs(10),
+        store.clone(),
+    );
+    let (dispatch_name, orig_name, client) = bash_tool.into_dispatch();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![WasmRuntimeBashTool::<NatsSessionStore>::tool_def()];
+    agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+// ── SSE helpers ───────────────────────────────────────────────────────────────
+
+fn sse_event(event_type: &str, data: serde_json::Value) -> String {
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
+}
+
+fn sse_end_turn_stream(text: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 8}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": serde_json::to_string(&input).unwrap()
+            }
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 5}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
 }
 
 fn tool_use_body() -> String {
@@ -1852,6 +2001,168 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
                 resp["stopReason"].as_str(),
                 Some("end_turn"),
                 "expected end_turn after elicitation cancel; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Real tool dispatch through the full NATS pipeline ────────────────────────
+
+/// Full pipeline: NATS prompt → TrogonAgent → AgentLoop dispatches a real
+/// `read_file` tool → file content lands in the tool_result → second Anthropic
+/// call → Done(end_turn) published via NATS.
+///
+/// Unlike `runner_publishes_tool_call_events`, this test uses an existing tool
+/// (not `unknown_tool`), verifying that the real tool implementation is wired
+/// through the entire runner stack.
+#[tokio::test]
+async fn runner_dispatches_real_read_file_tool_through_nats() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("readme.txt"), "runner-e2e-marker")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: tool_result sent back to Anthropic → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("file content received"));
+    });
+
+    // First call: read_file tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_rf_e2e_001",
+                "read_file",
+                serde_json::json!({"path": "readme.txt"}),
+            ));
+    });
+
+    let prefix = "test-readfile-e2e";
+    let session_id = "sess-readfile-e2e-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(trogon_agent_core::tools::ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "read the file").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after real tool dispatch; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Full pipeline: NATS prompt → TrogonAgent (with `WasmRuntimeBashTool` backed
+/// by `NatsKvSessionStore`) → AgentLoop dispatches `bash` → NATS terminal
+/// responders reply → tool_result sent back → Done(end_turn) via NATS.
+///
+/// After the run, the `terminal_id` must be persisted in the real
+/// `NatsKvSessionStore` (not an in-memory mock), proving that the bash tool's
+/// session state survives beyond a single in-process call.
+#[tokio::test]
+async fn runner_bash_tool_persists_terminal_id_in_nats_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-bash-nats-kv";
+    let session_id = "sess-bash-kv-1";
+    let terminal_id = "term-kv-e2e-001";
+    let cmd_output = "hello-from-bash\n";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    spawn_terminal_responders(nats.clone(), base, ext_base, terminal_id, cmd_output);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let server = MockServer::start();
+
+    // Second call: tool_result containing bash output → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("bash completed"));
+    });
+
+    // First call: bash tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_kv_001",
+                "bash",
+                serde_json::json!({"command": "echo hello-from-bash"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_tool(
+                nats.clone(),
+                &js,
+                prefix,
+                session_id,
+                &server.base_url(),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "run bash").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after bash dispatch; got: {resp}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must be persisted in NatsKvSessionStore after bash tool runs"
             );
         })
         .await;

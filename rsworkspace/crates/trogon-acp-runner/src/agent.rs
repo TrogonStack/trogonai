@@ -675,6 +675,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         }
 
         if let Some(updated) = final_messages {
+            // Reload terminal_id in case the bash tool set it during this turn —
+            // state was loaded before execution and would otherwise overwrite it.
+            if state.terminal_id.is_none() {
+                if let Ok(live) = self.store.load(&session_id).await {
+                    state.terminal_id = live.terminal_id;
+                }
+            }
             state.messages = updated;
             state.updated_at = now_iso8601();
             if let Err(e) = self.store.save(&session_id, &state).await {
