@@ -773,6 +773,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             }
         }
 
+        // Drop the stream before any awaits so the HTTP connection to OpenRouter
+        // is closed immediately on cancellation, stopping token generation.
+        drop(stream);
+
         self.cancel_senders.lock().await.remove(&session_id);
 
         // Persist assistant turn and trim history.

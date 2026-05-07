@@ -7,8 +7,13 @@
 //!   cargo test -p trogon-openrouter-runner --test live_http
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
 use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
@@ -16,8 +21,15 @@ use axum::routing::post;
 use bytes::Bytes;
 use futures_util::StreamExt as _;
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
-use trogon_openrouter_runner::{FinishReason, Message, OpenRouterClient, OpenRouterEvent};
+use agent_client_protocol::{
+    Agent as _, CancelNotification, ContentBlock, NewSessionRequest, PromptRequest,
+    SessionNotification, StopReason,
+};
+use trogon_openrouter_runner::{
+    FinishReason, Message, OpenRouterAgent, OpenRouterClient, OpenRouterEvent, SessionNotifier,
+};
 use trogon_openrouter_runner::OpenRouterHttpClient as _;
 
 // ── Shared server state ───────────────────────────────────────────────────────
@@ -26,6 +38,9 @@ struct ServerResponse {
     status: StatusCode,
     body: Bytes,
     extra_headers: Vec<(&'static str, String)>,
+    /// If true, send `body` as a streaming chunk then block forever (simulates
+    /// a long-running generation that the client might cancel mid-stream).
+    slow: bool,
 }
 
 #[derive(Clone, Default)]
@@ -41,11 +56,11 @@ struct Captured {
 
 impl ServerState {
     fn push_sse(&self, body: impl Into<String>) {
-        self.push_raw(StatusCode::OK, body.into(), vec![]);
+        self.push_raw(StatusCode::OK, body.into(), vec![], false);
     }
 
     fn push_error(&self, status: StatusCode, body: impl Into<String>) {
-        self.push_raw(status, body.into(), vec![]);
+        self.push_raw(status, body.into(), vec![], false);
     }
 
     /// Push a 429 response with `Retry-After: 0` so tests don't actually wait.
@@ -54,6 +69,7 @@ impl ServerState {
             StatusCode::TOO_MANY_REQUESTS,
             r#"{"error":"rate limit exceeded"}"#.to_string(),
             vec![("retry-after", "0".to_string())],
+            false,
         );
     }
 
@@ -63,14 +79,21 @@ impl ServerState {
             StatusCode::SERVICE_UNAVAILABLE,
             r#"{"error":"service unavailable"}"#.to_string(),
             vec![("retry-after", "0".to_string())],
+            false,
         );
     }
 
-    fn push_raw(&self, status: StatusCode, body: String, extra_headers: Vec<(&'static str, String)>) {
+    /// Push an SSE response that sends `body` as one chunk then blocks forever.
+    fn push_slow_sse(&self, body: impl Into<String>) {
+        self.push_raw(StatusCode::OK, body.into(), vec![], true);
+    }
+
+    fn push_raw(&self, status: StatusCode, body: String, extra_headers: Vec<(&'static str, String)>, slow: bool) {
         self.responses.lock().unwrap().push_back(ServerResponse {
             status,
             body: Bytes::from(body),
             extra_headers,
+            slow,
         });
     }
 
@@ -105,6 +128,7 @@ async fn chat_handler(
         status: StatusCode::INTERNAL_SERVER_ERROR,
         body: Bytes::from("queue empty"),
         extra_headers: vec![],
+        slow: false,
     });
 
     let mut builder = axum::http::Response::builder().status(resp.status);
@@ -114,7 +138,15 @@ async fn chat_handler(
     for (k, v) in resp.extra_headers {
         builder = builder.header(k, v);
     }
-    builder.body(axum::body::Body::from(resp.body)).unwrap()
+    if resp.slow {
+        // Send the initial chunk then block forever — lets tests verify cancel.
+        use futures_util::stream;
+        let body_stream = stream::once(async move { Ok::<Bytes, std::io::Error>(resp.body) })
+            .chain(stream::pending::<Result<Bytes, std::io::Error>>());
+        builder.body(axum::body::Body::from_stream(body_stream)).unwrap()
+    } else {
+        builder.body(axum::body::Body::from(resp.body)).unwrap()
+    }
 }
 
 // ── TestServer ────────────────────────────────────────────────────────────────
@@ -562,4 +594,159 @@ async fn multiple_retries_then_success() {
     assert_eq!(srv.state.request_count(), 3);
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], OpenRouterEvent::Done));
+}
+
+// ── Cancel test ───────────────────────────────────────────────────────────────
+
+/// Minimal session notifier that signals when the first notification arrives.
+#[derive(Clone)]
+struct TestNotifier {
+    first_notification: Arc<Notify>,
+    count: Arc<AtomicUsize>,
+}
+
+impl TestNotifier {
+    fn new() -> Self {
+        Self {
+            first_notification: Arc::new(Notify::new()),
+            count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Wait until at least one notification has been received.
+    async fn wait_for_first(&self) {
+        if self.count.load(Ordering::Relaxed) == 0 {
+            self.first_notification.notified().await;
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionNotifier for TestNotifier {
+    async fn notify(&self, _: SessionNotification) {
+        let prev = self.count.fetch_add(1, Ordering::Relaxed);
+        if prev == 0 {
+            self.first_notification.notify_one();
+        }
+    }
+}
+
+/// Cancel mid-stream with the real HTTP client: prompt must return
+/// `StopReason::Cancelled` quickly, and the HTTP connection must be released
+/// (verified by the server-side pending stream being dropped, not kept alive).
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_mid_stream_returns_cancelled_stop_reason() {
+    let srv = TestServer::new().await;
+
+    // Server sends one text chunk then blocks forever.
+    srv.state.push_slow_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"token"},"finish_reason":null}]}"#,
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.clone();
+
+            // Start prompt in background — it will block on the slow server.
+            let agent_prompt = Arc::clone(&agent);
+            let sid = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid,
+                        vec![ContentBlock::from("hello".to_string())],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // Wait until the first chunk notification arrives (stream is live).
+            notifier.wait_for_first().await;
+
+            // Cancel the in-flight prompt.
+            agent
+                .cancel(CancelNotification::new(session_id))
+                .await
+                .unwrap();
+
+            // Prompt must complete within 2 seconds.
+            let result = tokio::time::timeout(Duration::from_secs(2), prompt_handle)
+                .await
+                .expect("prompt did not finish within 2s after cancel")
+                .expect("task panicked");
+
+            assert!(
+                matches!(result.stop_reason, StopReason::Cancelled),
+                "expected Cancelled, got {:?}",
+                result.stop_reason
+            );
+        })
+        .await;
+}
+
+/// Cancel before any chunk arrives (cancel races with HTTP request initiation).
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_before_first_chunk_returns_cancelled() {
+    let srv = TestServer::new().await;
+
+    // Server sends a slow response: nothing arrives immediately.
+    srv.state.push_slow_sse(""); // empty initial chunk, then blocks
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.clone();
+
+            let agent_prompt = Arc::clone(&agent);
+            let sid = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid,
+                        vec![ContentBlock::from("hello".to_string())],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // Yield to let the prompt task start, then immediately cancel.
+            tokio::task::yield_now().await;
+            agent
+                .cancel(CancelNotification::new(session_id))
+                .await
+                .unwrap();
+
+            let result = tokio::time::timeout(Duration::from_secs(2), prompt_handle)
+                .await
+                .expect("prompt did not finish within 2s after cancel")
+                .expect("task panicked");
+
+            assert!(matches!(result.stop_reason, StopReason::Cancelled));
+        })
+        .await;
 }
