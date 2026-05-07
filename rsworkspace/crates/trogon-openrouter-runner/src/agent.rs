@@ -868,6 +868,13 @@ mod tests {
     use crate::http_client::mock::MockOpenRouterHttpClient;
     use crate::session_notifier::MockSessionNotifier;
 
+    // Serialise all tests that mutate environment variables so they don't race
+    // each other in the default multi-threaded cargo test harness.
+    static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    }
+
     // ── Test helpers ──────────────────────────────────────────────────────────
 
     fn make_agent() -> OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier> {
@@ -1675,6 +1682,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_system_prompt_not_stored_in_history() {
+        let _guard = env_lock();
         // Set a system prompt via env var.
         unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", "You are helpful."); }
         let agent = OpenRouterAgent::with_deps(
@@ -1805,6 +1813,7 @@ mod tests {
 
     #[test]
     fn available_models_empty_env_falls_back_to_defaults() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("OPENROUTER_MODELS", ""); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
@@ -1817,6 +1826,7 @@ mod tests {
 
     #[test]
     fn available_models_malformed_entry_is_skipped_valid_ones_kept() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,no-colon-entry,also/good:Also Good"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
@@ -1828,6 +1838,7 @@ mod tests {
 
     #[test]
     fn available_models_all_malformed_falls_back_to_hardcoded_defaults() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("OPENROUTER_MODELS", "no-colon,also-no-colon"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
@@ -1839,6 +1850,7 @@ mod tests {
 
     #[test]
     fn max_history_messages_zero_defaults_to_20() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "0"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
@@ -1847,6 +1859,7 @@ mod tests {
 
     #[test]
     fn max_history_messages_non_numeric_defaults_to_20() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "not-a-number"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
@@ -2058,6 +2071,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_session_model_override_appears_in_wire_request() {
+        let _guard = env_lock();
         // Use env var to add a second model, then switch to it and verify the wire model changes.
         unsafe { std::env::set_var("OPENROUTER_MODELS", "test-model:Test Model,other-model:Other Model"); }
         let agent = make_agent_with_key("k");
@@ -2132,6 +2146,7 @@ mod tests {
 
     #[test]
     fn tenant_id_env_var_appears_in_snapshot() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("TENANT_ID", "acme-corp"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("TENANT_ID"); }
@@ -2142,6 +2157,7 @@ mod tests {
 
     #[test]
     fn tenant_id_defaults_to_default_when_absent() {
+        let _guard = env_lock();
         unsafe { std::env::remove_var("TENANT_ID"); }
         let agent = make_agent();
         let session = make_session();
@@ -2151,11 +2167,447 @@ mod tests {
 
     #[test]
     fn tenant_id_empty_env_var_defaults_to_default() {
+        let _guard = env_lock();
         unsafe { std::env::set_var("TENANT_ID", ""); }
         let agent = make_agent();
         unsafe { std::env::remove_var("TENANT_ID"); }
         let session = make_session();
         let snap = agent.build_snapshot("sid", &session);
         assert_eq!(snap.tenant_id, "default", "empty TENANT_ID must fall back to 'default'");
+    }
+
+    // ── build_snapshot: model and agent_id ───────────────────────────────────
+
+    #[test]
+    fn build_snapshot_uses_session_model_when_set() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.model = Some("override-model".to_string());
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.model.as_deref(), Some("override-model"));
+    }
+
+    #[test]
+    fn build_snapshot_falls_back_to_default_model_when_none() {
+        let agent = make_agent(); // default_model = "test-model"
+        let session = make_session(); // model = None
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.model.as_deref(), Some("test-model"));
+    }
+
+    #[test]
+    fn build_snapshot_includes_agent_id_when_set() {
+        let mut agent = make_agent();
+        agent.agent_id = Some("my-agent-99".to_string());
+        let session = make_session();
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.agent_id.as_deref(), Some("my-agent-99"));
+    }
+
+    #[test]
+    fn build_snapshot_agent_id_is_none_when_not_set() {
+        let agent = make_agent();
+        let session = make_session();
+        let snap = agent.build_snapshot("s", &session);
+        assert!(snap.agent_id.is_none());
+    }
+
+    // ── fork_session: inherited fields ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_inherits_system_prompt_from_source() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+
+            // Manually plant a system prompt on the source session.
+            agent.sessions.lock().await.get_mut(&src_id.to_string()).unwrap()
+                .system_prompt = Some("Be helpful.".to_string());
+
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, std::path::PathBuf::from("/f"))
+            ).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let fork_session = sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(
+                fork_session.system_prompt.as_deref(), Some("Be helpful."),
+                "fork must inherit source session's system_prompt"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_inherits_api_key_from_source() {
+        let agent = make_agent(); // no global key
+        local().run_until(async move {
+            // Authenticate to set a per-user pending key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("per-user-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta)).await.unwrap();
+
+            let src = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, std::path::PathBuf::from("/f"))
+            ).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let fork_session = sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(
+                fork_session.api_key.as_deref(), Some("per-user-key"),
+                "fork must inherit source session's api_key"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_stores_branched_at_index_in_session() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 5})
+            ).unwrap();
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, std::path::PathBuf::from("/f")).meta(meta)
+            ).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let fork_session = sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(fork_session.branched_at_index, Some(5));
+        }).await;
+    }
+
+    // ── prompt: multi-block joining and skipped types ─────────────────────────
+
+    #[tokio::test]
+    async fn prompt_two_text_blocks_are_joined_with_newline() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![
+                    ContentBlock::from("first".to_string()),
+                    ContentBlock::from("second".to_string()),
+                ],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert_eq!(user_msg.content, "first\nsecond");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_image_block_is_silently_skipped() {
+        use agent_client_protocol::ImageContent;
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            // Image blocks produce no text — user_input will be empty (warns, doesn't error).
+            let result = agent.prompt(PromptRequest::new(
+                sid,
+                vec![ContentBlock::Image(ImageContent::new("base64data==", "image/png"))],
+            )).await;
+            assert!(result.is_ok(), "image-only prompt must not error: {result:?}");
+        }).await;
+    }
+
+    // ── env var: prompt_timeout and max_response_bytes ────────────────────────
+
+    #[test]
+    fn prompt_timeout_env_var_is_read() {
+        let _guard = env_lock();
+        unsafe { std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "60"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_PROMPT_TIMEOUT_SECS"); }
+        assert_eq!(agent.prompt_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn prompt_timeout_zero_falls_back_to_300s() {
+        let _guard = env_lock();
+        unsafe { std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "0"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_PROMPT_TIMEOUT_SECS"); }
+        assert_eq!(agent.prompt_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn max_response_bytes_env_var_is_read() {
+        let _guard = env_lock();
+        unsafe { std::env::set_var("OPENROUTER_MAX_RESPONSE_BYTES", "1024"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MAX_RESPONSE_BYTES"); }
+        assert_eq!(agent.max_response_bytes, 1024);
+    }
+
+    #[test]
+    fn max_response_bytes_zero_falls_back_to_4mb() {
+        let _guard = env_lock();
+        unsafe { std::env::set_var("OPENROUTER_MAX_RESPONSE_BYTES", "0"); }
+        let agent = make_agent();
+        unsafe { std::env::remove_var("OPENROUTER_MAX_RESPONSE_BYTES"); }
+        assert_eq!(agent.max_response_bytes, 4 * 1024 * 1024);
+    }
+
+    // ── initialize: capabilities ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn initialize_response_has_agent_info_with_correct_name() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let resp = agent.initialize(agent_client_protocol::InitializeRequest::new(
+                agent_client_protocol::ProtocolVersion::LATEST,
+            )).await.unwrap();
+            let info = resp.agent_info.expect("agent_info must be set");
+            assert_eq!(
+                info.name, "trogon-openrouter-runner",
+                "agent name must match crate name"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn initialize_response_has_embedded_context_true() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let resp = agent.initialize(agent_client_protocol::InitializeRequest::new(
+                agent_client_protocol::ProtocolVersion::LATEST,
+            )).await.unwrap();
+            assert!(
+                resp.agent_capabilities.prompt_capabilities.embedded_context,
+                "embedded_context must be true to support Resource blocks in prompts"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn initialize_response_has_full_session_capabilities() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let resp = agent.initialize(agent_client_protocol::InitializeRequest::new(
+                agent_client_protocol::ProtocolVersion::LATEST,
+            )).await.unwrap();
+            let caps = &resp.agent_capabilities.session_capabilities;
+            assert!(caps.fork.is_some(), "fork capability must be declared");
+            assert!(caps.list.is_some(), "list capability must be declared");
+            assert!(caps.resume.is_some(), "resume capability must be declared");
+            assert!(caps.close.is_some(), "close capability must be declared");
+        }).await;
+    }
+
+    // ── authenticate / api_key precedence ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_uses_pending_key_over_global_key() {
+        let agent = make_agent_with_key("global-key");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            // Authenticate with a user-specific key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("user-specific-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta)).await.unwrap();
+
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid,
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(
+                calls[0].api_key, "user-specific-key",
+                "user-provided key must take precedence over global server key"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn pending_key_consumed_not_available_to_second_session() {
+        let agent = make_agent_with_key("global-key");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "r1".to_string() }]);
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "r2".to_string() }]);
+        local().run_until(async move {
+            // First authenticate + new_session consumes the pending key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("user-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta)).await.unwrap();
+            let sid1 = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+
+            // Second session — no pending key; should fall back to global.
+            let sid2 = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+
+            agent.prompt(PromptRequest::new(sid1, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            agent.prompt(PromptRequest::new(sid2, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(calls[0].api_key, "user-key",   "first session must use user key");
+            assert_eq!(calls[1].api_key, "global-key", "second session must fall back to global key");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_called_twice_replaces_pending_key() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let mut meta1 = serde_json::Map::new();
+            meta1.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("first-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta1)).await.unwrap();
+
+            let mut meta2 = serde_json::Map::new();
+            meta2.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("second-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta2)).await.unwrap();
+
+            // Second call must overwrite the first.
+            assert_eq!(
+                *agent.pending_api_key.lock().await,
+                Some("second-key".to_string()),
+                "second authenticate call must replace the previous pending key"
+            );
+        }).await;
+    }
+
+    // ── session store integration ─────────────────────────────────────────────
+
+    struct RecordingSessionStore {
+        saves: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl RecordingSessionStore {
+        fn new() -> (Self, Arc<std::sync::Mutex<Vec<String>>>) {
+            let saves = Arc::new(std::sync::Mutex::new(Vec::new()));
+            (Self { saves: Arc::clone(&saves) }, saves)
+        }
+    }
+
+    impl crate::session_store::SessionStoring for RecordingSessionStore {
+        fn save<'a>(
+            &'a self,
+            snapshot: &'a crate::session_store::SessionSnapshot,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            let id = snapshot.id.clone();
+            let saves = Arc::clone(&self.saves);
+            Box::pin(async move {
+                saves.lock().unwrap().push(id);
+            })
+        }
+
+        fn remove<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
+    }
+
+    fn make_agent_with_store() -> (
+        OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier>,
+        Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        let (store, saves) = RecordingSessionStore::new();
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_session_store(Arc::new(store));
+        (agent, saves)
+    }
+
+    #[tokio::test]
+    async fn session_store_save_called_on_new_session() {
+        let (agent, saves) = make_agent_with_store();
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.to_string();
+            let recorded = saves.lock().unwrap().clone();
+            assert!(
+                recorded.contains(&sid),
+                "session store must be called with the new session id: {recorded:?}"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn session_store_save_called_after_prompt() {
+        let (agent, saves) = make_agent_with_store();
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "hi".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            let count_before = saves.lock().unwrap().len();
+            agent.prompt(PromptRequest::new(
+                sid,
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            let count_after = saves.lock().unwrap().len();
+            assert!(
+                count_after > count_before,
+                "session store must be called again after prompt"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn session_store_save_called_on_close_session() {
+        let (agent, saves) = make_agent_with_store();
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            let count_before = saves.lock().unwrap().len();
+            agent.close_session(CloseSessionRequest::new(sid)).await.unwrap();
+            let count_after = saves.lock().unwrap().len();
+            assert!(
+                count_after > count_before,
+                "session store must be called when closing a session"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn session_store_save_called_on_fork_session() {
+        let (agent, saves) = make_agent_with_store();
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            let count_before = saves.lock().unwrap().len();
+            agent.fork_session(ForkSessionRequest::new(src_id, std::path::PathBuf::from("/f"))).await.unwrap();
+            let count_after = saves.lock().unwrap().len();
+            assert!(
+                count_after > count_before,
+                "session store must be called for the forked session"
+            );
+        }).await;
+    }
+
+    // ── usage notification ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_usage_event_fires_usage_notification() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "reply".to_string() },
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8 },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid,
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+
+            let notes = agent.notifier.notifications.lock().unwrap();
+            let has_usage = notes.iter().any(|n| {
+                matches!(&n.update, agent_client_protocol::SessionUpdate::UsageUpdate(_))
+            });
+            assert!(has_usage, "a UsageUpdate notification must be fired for Usage events");
+        }).await;
     }
 }
