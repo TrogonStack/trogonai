@@ -1436,3 +1436,161 @@ async fn wire_model_field_reflects_default_and_overridden_model() {
         })
         .await;
 }
+
+/// Fork with `branchAtIndex` sends only the truncated history slice on the wire.
+#[tokio::test(flavor = "current_thread")]
+async fn fork_with_branch_at_index_sends_truncated_history_on_wire() {
+    let srv = TestServer::new().await;
+
+    // Source: first prompt response.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"reply1"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Source: second prompt response.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"reply2"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Fork prompt response.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"fork-reply"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let src_id = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+
+            // Two prompt turns → 4 messages in source history.
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("q1".to_string())],
+                ))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("q2".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Fork at index 2 — keeps only the first user+assistant pair.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 2}),
+            )
+            .unwrap();
+            let fork_id = agent
+                .fork_session(
+                    ForkSessionRequest::new(src_id, std::path::PathBuf::from("/")).meta(meta),
+                )
+                .await
+                .unwrap()
+                .session_id;
+
+            // Prompt from the fork.
+            agent
+                .prompt(PromptRequest::new(
+                    fork_id,
+                    vec![ContentBlock::from("fork-q".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let body = srv.state.last_body().expect("must have fork request body");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            // Expected: user q1, assistant reply1, user fork-q (q2+reply2 truncated).
+            assert_eq!(
+                messages.len(),
+                3,
+                "fork with branchAtIndex:2 must send only 3 messages on wire: {body}"
+            );
+            assert_eq!(messages[0]["content"].as_str(), Some("q1"));
+            assert_eq!(messages[1]["content"].as_str(), Some("reply1"));
+            assert_eq!(messages[2]["content"].as_str(), Some("fork-q"));
+        })
+        .await;
+}
+
+/// After a fork, closing the source session must not affect the fork's ability
+/// to continue prompting.
+#[tokio::test(flavor = "current_thread")]
+async fn fork_is_independent_after_source_is_closed() {
+    let srv = TestServer::new().await;
+
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"src-reply"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"fork-reply"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use agent_client_protocol::CloseSessionRequest;
+
+            let src_id = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("src-q".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let fork_id = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), std::path::PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+
+            // Close the source — fork must survive.
+            agent.close_session(CloseSessionRequest::new(src_id)).await.unwrap();
+
+            let result = agent
+                .prompt(PromptRequest::new(
+                    fork_id,
+                    vec![ContentBlock::from("fork-q".to_string())],
+                ))
+                .await;
+
+            assert!(
+                result.is_ok(),
+                "fork must continue to work after source is closed: {result:?}"
+            );
+            assert!(matches!(result.unwrap().stop_reason, StopReason::EndTurn));
+        })
+        .await;
+}
