@@ -143,6 +143,11 @@ impl OpenRouterClient {
         }
     }
 
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
+
     async fn do_chat_stream(
         &self,
         model: &str,

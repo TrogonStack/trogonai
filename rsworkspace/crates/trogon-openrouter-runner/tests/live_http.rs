@@ -632,6 +632,42 @@ async fn does_not_retry_on_404() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn request_timeout_fires_when_server_never_sends_headers() {
+    use tokio::io::AsyncReadExt as _;
+
+    // Bind a raw TCP listener that accepts connections but never writes back,
+    // simulating a server that stalls before sending response headers.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let _server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else { break };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                // Never respond — hold the connection open until dropped.
+                futures_util::future::pending::<()>().await;
+            });
+        }
+    });
+
+    let client = OpenRouterClient::with_base_url(format!("http://127.0.0.1:{port}"))
+        .with_request_timeout(Duration::from_millis(100));
+
+    let events: Vec<OpenRouterEvent> = client
+        .chat_stream("test-model", &[Message::user("hello")], "sk-test")
+        .await
+        .collect()
+        .await;
+
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("timed out")),
+        "expected timeout error, got: {events:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn exhausts_retries_and_returns_error() {
     let srv = TestServer::new().await;
     // Queue four 429s — MAX_RETRIES=3 means 4 total attempts, all failing.
