@@ -415,4 +415,180 @@ mod tests {
         assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 5, completion_tokens: 2 }));
         assert!(matches!(&events[3], OpenRouterEvent::Done));
     }
+
+    // ── Message builders ──────────────────────────────────────────────────────
+
+    #[test]
+    fn message_user_sets_role_and_content() {
+        let m = Message::user("hello");
+        assert_eq!(m.role, "user");
+        assert_eq!(m.content, "hello");
+        assert!(m.prompt_tokens.is_none());
+        assert!(m.completion_tokens.is_none());
+    }
+
+    #[test]
+    fn message_assistant_sets_role_and_content() {
+        let m = Message::assistant("reply");
+        assert_eq!(m.role, "assistant");
+        assert_eq!(m.content, "reply");
+        assert!(m.prompt_tokens.is_none());
+        assert!(m.completion_tokens.is_none());
+    }
+
+    #[test]
+    fn message_system_sets_role_and_content() {
+        let m = Message::system("be concise");
+        assert_eq!(m.role, "system");
+        assert_eq!(m.content, "be concise");
+        assert!(m.prompt_tokens.is_none());
+        assert!(m.completion_tokens.is_none());
+    }
+
+    #[test]
+    fn message_assistant_with_usage_stores_token_counts() {
+        let m = Message::assistant_with_usage("reply", 100, 50);
+        assert_eq!(m.role, "assistant");
+        assert_eq!(m.content, "reply");
+        assert_eq!(m.prompt_tokens, Some(100));
+        assert_eq!(m.completion_tokens, Some(50));
+    }
+
+    #[test]
+    fn message_serialization_omits_none_token_fields() {
+        let m = Message::user("hi");
+        let v = serde_json::to_value(&m).unwrap();
+        assert!(v.get("prompt_tokens").is_none());
+        assert!(v.get("completion_tokens").is_none());
+    }
+
+    #[test]
+    fn message_with_usage_serializes_token_fields() {
+        let m = Message::assistant_with_usage("ok", 10, 5);
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["prompt_tokens"], 10);
+        assert_eq!(v["completion_tokens"], 5);
+    }
+
+    // ── FinishReason ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn finish_reason_stop() {
+        assert_eq!(FinishReason::from_str("stop"), FinishReason::Stop);
+    }
+
+    #[test]
+    fn finish_reason_length() {
+        assert_eq!(FinishReason::from_str("length"), FinishReason::Length);
+    }
+
+    #[test]
+    fn finish_reason_unknown_becomes_other() {
+        assert_eq!(
+            FinishReason::from_str("content_filter"),
+            FinishReason::Other("content_filter".to_string())
+        );
+    }
+
+    #[test]
+    fn finish_reason_empty_string_becomes_other() {
+        assert_eq!(
+            FinishReason::from_str(""),
+            FinishReason::Other("".to_string())
+        );
+    }
+
+    // ── SSE parser edge cases ─────────────────────────────────────────────────
+
+    #[test]
+    fn skips_empty_content_delta() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":""},"finish_reason":null}]}"#,
+        ]);
+        assert!(events.is_empty(), "empty content string must not emit TextDelta");
+    }
+
+    #[test]
+    fn skips_malformed_json() {
+        let events = events_from_lines(&["data: {not valid json"]);
+        assert!(events.is_empty(), "malformed JSON must be silently skipped");
+    }
+
+    #[test]
+    fn skips_data_line_with_no_choices_and_no_usage() {
+        let events = events_from_lines(&[r#"data: {"id":"chatcmpl-xyz","object":"chat.completion.chunk"}"#]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_finish_reason_length() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Length)
+        );
+    }
+
+    #[test]
+    fn parse_finish_reason_unknown() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::Finished { reason } if *reason == FinishReason::Other("content_filter".to_string()))
+        );
+    }
+
+    #[test]
+    fn usage_and_finish_in_same_chunk_emits_finished_then_usage() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#,
+        ]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
+        assert!(matches!(&events[1], OpenRouterEvent::Usage { prompt_tokens: 3, completion_tokens: 1 }));
+    }
+
+    #[test]
+    fn usage_zero_completion_tokens_is_allowed() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 0 })
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_split_across_chunks_reassembles_line() {
+        use futures_util::stream;
+
+        // SSE line split in the middle of the JSON across two chunks.
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from("data: {\"choices\":[{\"delta\":{\"con")),
+            Ok(Bytes::from("tent\":\"A\"},\"finish_reason\":null}]}\n")),
+            Ok(Bytes::from("data: [DONE]\n")),
+        ];
+
+        let events: Vec<_> = parse_sse(stream::iter(chunks)).collect().await;
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "A"));
+        assert!(matches!(&events[1], OpenRouterEvent::Done));
+    }
+
+    #[tokio::test]
+    async fn stream_crlf_line_endings_are_handled() {
+        use futures_util::stream;
+
+        let chunks: Vec<Result<Bytes, reqwest::Error>> = vec![
+            Ok(Bytes::from(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"B\"},\"finish_reason\":null}]}\r\n",
+            )),
+            Ok(Bytes::from("data: [DONE]\r\n")),
+        ];
+
+        let events: Vec<_> = parse_sse(stream::iter(chunks)).collect().await;
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "B"));
+        assert!(matches!(&events[1], OpenRouterEvent::Done));
+    }
 }

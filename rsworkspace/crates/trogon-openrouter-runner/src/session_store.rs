@@ -146,7 +146,7 @@ pub fn now_iso() -> String {
     format!("{y:04}-{mo:02}-{day:02}T{h:02}:{min:02}:{s:02}.{millis:03}Z")
 }
 
-fn days_to_ymd(days: u64) -> (i64, u32, u32) {
+pub(crate) fn days_to_ymd(days: u64) -> (i64, u32, u32) {
     let z = days as i64 + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
@@ -158,4 +158,173 @@ fn days_to_ymd(days: u64) -> (i64, u32, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = if month <= 2 { y + 1 } else { y };
     (year, month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── days_to_ymd ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn days_to_ymd_unix_epoch() {
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_known_dates() {
+        assert_eq!(days_to_ymd(1), (1970, 1, 2));
+        assert_eq!(days_to_ymd(365), (1971, 1, 1));
+        // 2021-01-01: 51 years × 365 + 13 leap days = 18628
+        assert_eq!(days_to_ymd(18628), (2021, 1, 1));
+        // 2024-01-01: confirmed by algorithm
+        assert_eq!(days_to_ymd(19723), (2024, 1, 1));
+        // 2023-12-31: one day before 2024-01-01
+        assert_eq!(days_to_ymd(19722), (2023, 12, 31));
+    }
+
+    #[test]
+    fn days_to_ymd_leap_year_feb29() {
+        // 2024-01-01 = day 19723; +31 (Jan) +28 (Feb 1-28) = 19782 = Feb 29
+        assert_eq!(days_to_ymd(19782), (2024, 2, 29));
+        // Following day must be Mar 1
+        assert_eq!(days_to_ymd(19783), (2024, 3, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_end_of_year() {
+        assert_eq!(days_to_ymd(19722), (2023, 12, 31));
+        assert_eq!(days_to_ymd(19723), (2024, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_century_non_leap() {
+        // 1900 is NOT a leap year (div by 100 but not 400).
+        // 1900-03-01: days before epoch are negative; test via a positive known date.
+        // 2100-03-01 is not a leap year either, but we can test known post-epoch dates.
+        // 2000-02-29 IS valid (2000 is div by 400 → leap).
+        // Days to 2000-01-01: 30 years + 8 leap days = 10950 + 8 - 1 = actually
+        // 2000-01-01 is day 10957 since epoch.
+        assert_eq!(days_to_ymd(10957), (2000, 1, 1));
+        // 2000-02-29 = 10957 + 59 = 11016
+        assert_eq!(days_to_ymd(11016), (2000, 2, 29));
+    }
+
+    // ── now_iso ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn now_iso_has_correct_format() {
+        let s = now_iso();
+        // YYYY-MM-DDTHH:MM:SS.MMMZ
+        assert_eq!(s.len(), 24, "expected 24 chars, got {s:?}");
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[7..8], "-");
+        assert_eq!(&s[10..11], "T");
+        assert_eq!(&s[13..14], ":");
+        assert_eq!(&s[16..17], ":");
+        assert_eq!(&s[19..20], ".");
+        assert_eq!(&s[23..24], "Z");
+    }
+
+    #[test]
+    fn now_iso_is_monotonically_non_decreasing() {
+        let a = now_iso();
+        let b = now_iso();
+        assert!(b >= a, "now_iso should not go backward: a={a} b={b}");
+    }
+
+    // ── TextBlock ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn text_block_type_is_always_text() {
+        let b = TextBlock::new("hello");
+        assert_eq!(b.kind, "text");
+        assert_eq!(b.text, "hello");
+    }
+
+    #[test]
+    fn text_block_serializes_type_field() {
+        let b = TextBlock::new("world");
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["type"], "text");
+        assert_eq!(v["text"], "world");
+    }
+
+    // ── SessionSnapshot serialization ─────────────────────────────────────────
+
+    #[test]
+    fn message_usage_zero_cache_fields_are_omitted() {
+        let usage = MessageUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let v = serde_json::to_value(&usage).unwrap();
+        assert!(v.get("cache_creation_input_tokens").is_none());
+        assert!(v.get("cache_read_input_tokens").is_none());
+        assert_eq!(v["input_tokens"], 10);
+        assert_eq!(v["output_tokens"], 5);
+    }
+
+    #[test]
+    fn message_usage_nonzero_cache_fields_are_included() {
+        let usage = MessageUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 2,
+            cache_read_input_tokens: 3,
+        };
+        let v = serde_json::to_value(&usage).unwrap();
+        assert_eq!(v["cache_creation_input_tokens"], 2);
+        assert_eq!(v["cache_read_input_tokens"], 3);
+    }
+
+    #[test]
+    fn snapshot_optional_fields_are_omitted_when_none() {
+        let snap = SessionSnapshot {
+            id: "s1".to_string(),
+            tenant_id: "t1".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        };
+        let v = serde_json::to_value(&snap).unwrap();
+        assert!(v.get("model").is_none());
+        assert!(v.get("memory_path").is_none());
+        assert!(v.get("agent_id").is_none());
+        assert!(v.get("parent_session_id").is_none());
+        assert!(v.get("branched_at_index").is_none());
+    }
+
+    #[test]
+    fn snapshot_optional_fields_are_present_when_set() {
+        let snap = SessionSnapshot {
+            id: "s1".to_string(),
+            tenant_id: "t1".to_string(),
+            name: "Test".to_string(),
+            model: Some("gpt-4".to_string()),
+            tools: vec![],
+            memory_path: Some("/tmp".to_string()),
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: Some("agent-1".to_string()),
+            parent_session_id: Some("parent-id".to_string()),
+            branched_at_index: Some(3),
+        };
+        let v = serde_json::to_value(&snap).unwrap();
+        assert_eq!(v["model"], "gpt-4");
+        assert_eq!(v["memory_path"], "/tmp");
+        assert_eq!(v["agent_id"], "agent-1");
+        assert_eq!(v["parent_session_id"], "parent-id");
+        assert_eq!(v["branched_at_index"], 3);
+    }
 }

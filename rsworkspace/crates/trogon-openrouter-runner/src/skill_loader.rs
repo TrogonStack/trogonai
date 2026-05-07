@@ -112,3 +112,64 @@ impl SkillLoading for SkillLoader {
         Box::pin(self.load_impl(skill_ids))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sec(name: &str, content: &str) -> (String, String) {
+        (name.to_string(), content.to_string())
+    }
+
+    #[test]
+    fn empty_sections_returns_none() {
+        assert!(format_skill_sections(vec![]).is_none());
+    }
+
+    #[test]
+    fn single_skill_has_correct_structure() {
+        let out = format_skill_sections(vec![sec("Coding", "Write tests.")]).unwrap();
+        assert!(out.starts_with("# Available Skills\n\n"));
+        assert!(out.contains("## Skill: Coding\n\nWrite tests."));
+    }
+
+    #[test]
+    fn multiple_skills_joined_with_separator() {
+        let out = format_skill_sections(vec![
+            sec("Alpha", "Do alpha."),
+            sec("Beta", "Do beta."),
+        ])
+        .unwrap();
+        assert!(out.contains("## Skill: Alpha\n\nDo alpha."));
+        assert!(out.contains("## Skill: Beta\n\nDo beta."));
+        assert!(out.contains("\n\n---\n\n"), "sections must be separated by ---");
+    }
+
+    #[test]
+    fn order_is_preserved() {
+        let out = format_skill_sections(vec![
+            sec("First", "1"),
+            sec("Second", "2"),
+            sec("Third", "3"),
+        ])
+        .unwrap();
+        let pos_first = out.find("## Skill: First").unwrap();
+        let pos_second = out.find("## Skill: Second").unwrap();
+        let pos_third = out.find("## Skill: Third").unwrap();
+        assert!(pos_first < pos_second);
+        assert!(pos_second < pos_third);
+    }
+
+    #[test]
+    fn skill_name_with_special_chars() {
+        let out = format_skill_sections(vec![sec("C++ & Rust", "```rust\nfn f() {}\n```")]).unwrap();
+        assert!(out.contains("## Skill: C++ & Rust"));
+        assert!(out.contains("```rust"));
+    }
+
+    #[test]
+    fn single_skill_has_no_separator() {
+        let out = format_skill_sections(vec![sec("Solo", "content")]).unwrap();
+        assert!(!out.contains("---"), "single skill must not contain separator");
+    }
+}

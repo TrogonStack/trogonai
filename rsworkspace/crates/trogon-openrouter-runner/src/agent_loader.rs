@@ -100,3 +100,94 @@ impl AgentLoading for AgentLoader {
         Box::pin(self.load_config_impl(agent_id))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> AgentConfig {
+        let val: serde_json::Value = serde_json::from_str(json).unwrap();
+        parse_agent_config(&val)
+    }
+
+    #[test]
+    fn full_config_parsed_correctly() {
+        let cfg = parse(r#"{"skill_ids":["s1","s2"],"system_prompt":"Be brief.","model":{"id":"gpt-4o"}}"#);
+        assert_eq!(cfg.skill_ids, vec!["s1", "s2"]);
+        assert_eq!(cfg.system_prompt.as_deref(), Some("Be brief."));
+        assert_eq!(cfg.model_id.as_deref(), Some("gpt-4o"));
+    }
+
+    #[test]
+    fn missing_skill_ids_defaults_to_empty() {
+        let cfg = parse(r#"{"system_prompt":"hi","model":{"id":"x"}}"#);
+        assert!(cfg.skill_ids.is_empty());
+    }
+
+    #[test]
+    fn empty_skill_ids_array() {
+        let cfg = parse(r#"{"skill_ids":[]}"#);
+        assert!(cfg.skill_ids.is_empty());
+    }
+
+    #[test]
+    fn skill_ids_with_non_string_entries_are_skipped() {
+        let cfg = parse(r#"{"skill_ids":["ok",42,null,true,"also-ok"]}"#);
+        assert_eq!(cfg.skill_ids, vec!["ok", "also-ok"]);
+    }
+
+    #[test]
+    fn empty_system_prompt_becomes_none() {
+        let cfg = parse(r#"{"system_prompt":""}"#);
+        assert!(cfg.system_prompt.is_none());
+    }
+
+    #[test]
+    fn missing_system_prompt_is_none() {
+        let cfg = parse(r#"{}"#);
+        assert!(cfg.system_prompt.is_none());
+    }
+
+    #[test]
+    fn empty_model_id_becomes_none() {
+        let cfg = parse(r#"{"model":{"id":""}}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn missing_model_key_is_none() {
+        let cfg = parse(r#"{"skill_ids":[]}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn model_not_an_object_is_none() {
+        let cfg = parse(r#"{"model":"gpt-4o"}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn model_without_id_field_is_none() {
+        let cfg = parse(r#"{"model":{"name":"gpt-4o"}}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn model_id_null_is_none() {
+        let cfg = parse(r#"{"model":{"id":null}}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn model_id_non_string_is_none() {
+        let cfg = parse(r#"{"model":{"id":42}}"#);
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn extra_fields_are_ignored() {
+        let cfg = parse(r#"{"skill_ids":["x"],"unknown_key":"value","model":{"id":"m1","extra":true}}"#);
+        assert_eq!(cfg.skill_ids, vec!["x"]);
+        assert_eq!(cfg.model_id.as_deref(), Some("m1"));
+    }
+}

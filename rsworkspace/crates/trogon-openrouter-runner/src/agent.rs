@@ -821,3 +821,884 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
     }
 
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use agent_client_protocol::{
+        Agent as _, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
+        ForkSessionRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
+        PromptRequest, ResumeSessionRequest, SessionId, SetSessionModeRequest,
+        SetSessionModelRequest,
+    };
+    use super::*;
+    use crate::http_client::mock::MockOpenRouterHttpClient;
+    use crate::session_notifier::MockSessionNotifier;
+
+    // ── Test helpers ──────────────────────────────────────────────────────────
+
+    fn make_agent() -> OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier> {
+        OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "",
+            MockOpenRouterHttpClient::new(),
+        )
+    }
+
+    fn make_agent_with_key(key: &str) -> OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier> {
+        OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            key,
+            MockOpenRouterHttpClient::new(),
+        )
+    }
+
+    fn local() -> tokio::task::LocalSet {
+        tokio::task::LocalSet::new()
+    }
+
+    // ── trim_history ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn trim_history_removes_from_front_when_over_limit() {
+        let mut history = vec![
+            Message::user("a"),
+            Message::assistant("b"),
+            Message::user("c"),
+        ];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 2);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].content, "b");
+        assert_eq!(history[1].content, "c");
+    }
+
+    #[test]
+    fn trim_history_no_op_when_under_limit() {
+        let mut history = vec![Message::user("a"), Message::assistant("b")];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 5);
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn trim_history_no_op_when_at_limit() {
+        let mut history = vec![Message::user("a"), Message::assistant("b")];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 2);
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn trim_history_clears_all_when_max_is_zero() {
+        let mut history = vec![Message::user("a"), Message::assistant("b")];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 0);
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn trim_history_empty_is_noop() {
+        let mut history: Vec<Message> = vec![];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 5);
+        assert!(history.is_empty());
+    }
+
+    // ── maybe_evict_oldest ────────────────────────────────────────────────────
+
+    #[test]
+    fn maybe_evict_oldest_no_eviction_below_limit() {
+        let mut sessions: HashMap<String, OpenRouterSession> = HashMap::new();
+        for i in 0..MAX_SESSIONS - 1 {
+            sessions.insert(format!("s{i}"), make_session());
+        }
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        assert_eq!(sessions.len(), MAX_SESSIONS - 1);
+    }
+
+    #[test]
+    fn maybe_evict_oldest_evicts_at_exactly_limit() {
+        let mut sessions: HashMap<String, OpenRouterSession> = HashMap::new();
+        for i in 0..MAX_SESSIONS {
+            sessions.insert(format!("s{i}"), make_session());
+        }
+        // At exactly MAX_SESSIONS, eviction fires (guard is `< MAX_SESSIONS`).
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        assert_eq!(sessions.len(), MAX_SESSIONS - 1);
+    }
+
+    #[test]
+    fn maybe_evict_oldest_removes_one_when_over_limit() {
+        let mut sessions: HashMap<String, OpenRouterSession> = HashMap::new();
+        for i in 0..=MAX_SESSIONS {
+            sessions.insert(format!("s{i}"), make_session());
+        }
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        assert_eq!(sessions.len(), MAX_SESSIONS);
+    }
+
+    #[test]
+    fn maybe_evict_oldest_empty_map_does_not_panic() {
+        let mut sessions: HashMap<String, OpenRouterSession> = HashMap::new();
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        assert!(sessions.is_empty());
+    }
+
+    fn make_session() -> OpenRouterSession {
+        OpenRouterSession {
+            cwd: "/tmp".to_string(),
+            model: None,
+            api_key: None,
+            history: vec![],
+            system_prompt: None,
+            created_at: Instant::now(),
+            created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        }
+    }
+
+    // ── session_mode_state / session_model_state ──────────────────────────────
+
+    #[test]
+    fn session_mode_state_has_single_default_mode() {
+        let agent = make_agent();
+        let state = agent.session_mode_state();
+        assert_eq!(state.current_mode_id.0.as_ref(), "default");
+        assert_eq!(state.available_modes.len(), 1);
+        assert_eq!(state.available_modes[0].id.0.as_ref(), "default");
+    }
+
+    #[test]
+    fn session_model_state_includes_default_model() {
+        let agent = make_agent();
+        let state = agent.session_model_state(None);
+        assert_eq!(state.current_model_id.0.as_ref(), "test-model");
+        assert!(
+            state.available_models.iter().any(|m| m.model_id.0.as_ref() == "test-model"),
+            "test-model must be in available_models"
+        );
+    }
+
+    #[test]
+    fn session_model_state_uses_provided_current() {
+        let agent = make_agent();
+        let state = agent.session_model_state(Some("openai/gpt-4o"));
+        assert_eq!(state.current_model_id.0.as_ref(), "openai/gpt-4o");
+    }
+
+    // ── build_snapshot ────────────────────────────────────────────────────────
+
+    #[test]
+    fn build_snapshot_name_defaults_to_new_conversation_when_empty_history() {
+        let agent = make_agent();
+        let session = make_session();
+        let snap = agent.build_snapshot("sid-1", &session);
+        assert_eq!(snap.name, "New Conversation");
+    }
+
+    #[test]
+    fn build_snapshot_name_uses_first_message_content() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::user("Short question"));
+        let snap = agent.build_snapshot("sid-1", &session);
+        assert_eq!(snap.name, "Short question");
+    }
+
+    #[test]
+    fn build_snapshot_name_truncated_at_60_chars() {
+        let agent = make_agent();
+        let mut session = make_session();
+        let long = "a".repeat(80);
+        session.history.push(Message::user(&long));
+        let snap = agent.build_snapshot("sid-1", &session);
+        assert!(snap.name.ends_with('…'), "long name must end with ellipsis");
+        // The visible chars before ellipsis should be 60.
+        let chars: Vec<char> = snap.name.chars().collect();
+        assert_eq!(chars.len(), 61, "60 chars + ellipsis = 61 chars");
+    }
+
+    #[test]
+    fn build_snapshot_preserves_session_id_and_tenant() {
+        let agent = make_agent();
+        let session = make_session();
+        let snap = agent.build_snapshot("my-session-id", &session);
+        assert_eq!(snap.id, "my-session-id");
+        assert_eq!(snap.tenant_id, "default");
+    }
+
+    #[test]
+    fn build_snapshot_messages_mapped_correctly() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::user("hi"));
+        session.history.push(Message::assistant("hello"));
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.messages.len(), 2);
+        assert_eq!(snap.messages[0].role, "user");
+        assert_eq!(snap.messages[0].content[0].text, "hi");
+        assert_eq!(snap.messages[1].role, "assistant");
+    }
+
+    #[test]
+    fn build_snapshot_empty_message_content_yields_empty_blocks() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::user(""));
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.messages[0].content.len(), 0);
+    }
+
+    #[test]
+    fn build_snapshot_includes_usage_when_present() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::assistant_with_usage("reply", 10, 5));
+        let snap = agent.build_snapshot("s", &session);
+        let usage = snap.messages[0].usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 5);
+    }
+
+    #[test]
+    fn build_snapshot_no_usage_when_absent() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::user("q"));
+        let snap = agent.build_snapshot("s", &session);
+        assert!(snap.messages[0].usage.is_none());
+    }
+
+    #[test]
+    fn build_snapshot_includes_parent_and_branch_when_set() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.parent_session_id = Some("parent-id".to_string());
+        session.branched_at_index = Some(3);
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.parent_session_id.as_deref(), Some("parent-id"));
+        assert_eq!(snap.branched_at_index, Some(3));
+    }
+
+    // ── authenticate ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn authenticate_with_valid_user_key_succeeds() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("sk-test-key"));
+            let req = AuthenticateRequest::new("openrouter-api-key").meta(meta);
+            assert!(agent.authenticate(req).await.is_ok());
+            // Key should now be pending.
+            assert_eq!(
+                *agent.pending_api_key.lock().await,
+                Some("sk-test-key".to_string())
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_empty_key() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!(""));
+            let req = AuthenticateRequest::new("openrouter-api-key").meta(meta);
+            assert!(agent.authenticate(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_missing_meta_key() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let req = AuthenticateRequest::new("openrouter-api-key").meta(serde_json::Map::new());
+            assert!(agent.authenticate(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_rejects_non_string_key() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!(42));
+            let req = AuthenticateRequest::new("openrouter-api-key").meta(meta);
+            assert!(agent.authenticate(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_agent_method_fails_without_global_key() {
+        let agent = make_agent(); // global_api_key is None
+        local().run_until(async move {
+            let req = AuthenticateRequest::new("agent");
+            assert!(agent.authenticate(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_agent_method_succeeds_with_global_key() {
+        let agent = make_agent_with_key("global-key");
+        local().run_until(async move {
+            let req = AuthenticateRequest::new("agent");
+            assert!(agent.authenticate(req).await.is_ok());
+            // No pending key should be set for the "agent" method.
+            assert!(agent.pending_api_key.lock().await.is_none());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn authenticate_unknown_method_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let req = AuthenticateRequest::new("unknown-method");
+            assert!(agent.authenticate(req).await.is_err());
+        }).await;
+    }
+
+    // ── new_session ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_creates_session_with_unique_id() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let r1 = agent.new_session(NewSessionRequest::new(PathBuf::from("/a"))).await.unwrap();
+            let r2 = agent.new_session(NewSessionRequest::new(PathBuf::from("/b"))).await.unwrap();
+            assert_ne!(r1.session_id, r2.session_id);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_consumes_pending_api_key_once() {
+        let agent = make_agent();
+        local().run_until(async move {
+            // Set a pending key via authenticate.
+            let mut meta = serde_json::Map::new();
+            meta.insert("OPENROUTER_API_KEY".to_string(), serde_json::json!("per-user-key"));
+            agent.authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta)).await.unwrap();
+
+            // After new_session, pending key is consumed.
+            agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            assert!(agent.pending_api_key.lock().await.is_none(), "pending key must be consumed");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_returns_modes_and_models() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            assert!(resp.modes.is_some());
+            assert!(resp.models.is_some());
+        }).await;
+    }
+
+    // ── resume_session / load_session ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resume_session_existing_succeeds() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            assert!(agent.resume_session(ResumeSessionRequest::new(resp.session_id, "/")).await.is_ok());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn resume_session_nonexistent_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let req = ResumeSessionRequest::new(SessionId::from("no-such-session"), "/");
+            assert!(agent.resume_session(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_existing_returns_modes_and_models() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let new_resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let load_resp = agent.load_session(LoadSessionRequest::new(new_resp.session_id, "/")).await.unwrap();
+            assert!(load_resp.modes.is_some());
+            assert!(load_resp.models.is_some());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_nonexistent_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            assert!(agent.load_session(LoadSessionRequest::new(SessionId::from("ghost"), "/")).await.is_err());
+        }).await;
+    }
+
+    // ── list_sessions ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_empty() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            assert!(resp.sessions.is_empty());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn list_sessions_returns_all_sessions_sorted() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            agent.new_session(NewSessionRequest::new(PathBuf::from("/a"))).await.unwrap();
+            agent.new_session(NewSessionRequest::new(PathBuf::from("/b"))).await.unwrap();
+            agent.new_session(NewSessionRequest::new(PathBuf::from("/c"))).await.unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            assert_eq!(resp.sessions.len(), 3);
+            // Must be sorted by session_id.
+            let ids: Vec<&str> = resp.sessions.iter().map(|s| s.session_id.0.as_ref()).collect();
+            let mut sorted = ids.clone();
+            sorted.sort();
+            assert_eq!(ids, sorted);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn list_sessions_fork_includes_metadata() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let new_resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/src"))).await.unwrap();
+            let src_id = new_resp.session_id.clone();
+            agent.fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork"))).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let fork = resp.sessions.iter().find(|s| s.session_id != src_id).unwrap();
+            let meta = fork.meta.as_ref().expect("fork must have meta");
+            assert!(meta.contains_key("parentSessionId"));
+        }).await;
+    }
+
+    // ── set_session_mode / set_session_model ──────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_mode_valid_mode_succeeds() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id;
+            assert!(agent.set_session_mode(SetSessionModeRequest::new(sid, "default")).await.is_ok());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_invalid_mode_fails() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id;
+            assert!(agent.set_session_mode(SetSessionModeRequest::new(sid, "turbo")).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_nonexistent_session_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            assert!(agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("ghost"), "default")).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_model_valid_model_updates_session() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            // "test-model" is added automatically as the default model.
+            assert!(agent.set_session_model(SetSessionModelRequest::new(sid.clone(), "test-model")).await.is_ok());
+            // Verify via load_session that the model is reflected.
+            let load = agent.load_session(LoadSessionRequest::new(sid, "/")).await.unwrap();
+            let models = load.models.unwrap();
+            assert_eq!(models.current_model_id.0.as_ref(), "test-model");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_model_unknown_model_fails() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            assert!(agent.set_session_model(SetSessionModelRequest::new(resp.session_id, "unknown/model")).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_model_nonexistent_session_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            assert!(agent.set_session_model(SetSessionModelRequest::new(SessionId::from("ghost"), "test-model")).await.is_err());
+        }).await;
+    }
+
+    // ── close_session ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn close_session_removes_session() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            agent.close_session(CloseSessionRequest::new(sid.clone())).await.unwrap();
+            assert!(agent.resume_session(ResumeSessionRequest::new(sid, "/")).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn close_session_nonexistent_does_not_panic() {
+        let agent = make_agent();
+        local().run_until(async move {
+            assert!(agent.close_session(CloseSessionRequest::new(SessionId::from("ghost"))).await.is_ok());
+        }).await;
+    }
+
+    // ── cancel ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn cancel_nonexistent_session_is_noop() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let result = agent.cancel(CancelNotification::new("ghost")).await;
+            assert!(result.is_ok());
+        }).await;
+    }
+
+    // ── fork_session ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_session_creates_new_id() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let fork = agent.fork_session(ForkSessionRequest::new(src.session_id.clone(), PathBuf::from("/f"))).await.unwrap();
+            assert_ne!(fork.session_id, src.session_id);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_nonexistent_source_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            assert!(agent.fork_session(ForkSessionRequest::new(
+                SessionId::from("ghost"), PathBuf::from("/f")
+            )).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_inherits_model_from_source() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+            // Set a specific model on the source.
+            agent.set_session_model(SetSessionModelRequest::new(src_id.clone(), "test-model")).await.unwrap();
+            let fork = agent.fork_session(ForkSessionRequest::new(src_id, PathBuf::from("/f"))).await.unwrap();
+            let fork_load = agent.load_session(LoadSessionRequest::new(fork.session_id, "/")).await.unwrap();
+            assert_eq!(fork_load.models.unwrap().current_model_id.0.as_ref(), "test-model");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_with_branch_at_index_truncates_history() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+
+            // Add 4 messages to source history via prompt.
+            for text in ["msg1", "msg2"] {
+                agent.sessions.lock().await.get_mut(&src_id.to_string()).unwrap()
+                    .history.push(Message::user(text));
+                agent.sessions.lock().await.get_mut(&src_id.to_string()).unwrap()
+                    .history.push(Message::assistant("ok"));
+            }
+
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 2})
+            ).unwrap();
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, PathBuf::from("/f")).meta(meta)
+            ).await.unwrap();
+
+            // Fork should have only 2 messages (truncated at index 2).
+            let fork_sessions = agent.sessions.lock().await;
+            let fork_session = fork_sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(fork_session.history.len(), 2);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_without_branch_at_index_copies_full_history() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let src_id = src.session_id.clone();
+
+            agent.sessions.lock().await.get_mut(&src_id.to_string()).unwrap()
+                .history.push(Message::user("q"));
+            agent.sessions.lock().await.get_mut(&src_id.to_string()).unwrap()
+                .history.push(Message::assistant("a"));
+
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, PathBuf::from("/f"))
+            ).await.unwrap();
+
+            let fork_sessions = agent.sessions.lock().await;
+            let fork_session = fork_sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(fork_session.history.len(), 2);
+        }).await;
+    }
+
+    // ── prompt ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_fails_without_api_key() {
+        let agent = make_agent(); // no global key, no pending key
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let result = agent.prompt(PromptRequest::new(
+                resp.session_id,
+                vec![ContentBlock::from("hello".to_string())],
+            )).await;
+            assert!(result.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_on_nonexistent_session_fails() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let result = agent.prompt(PromptRequest::new(
+                SessionId::from("ghost"),
+                vec![ContentBlock::from("hello".to_string())],
+            )).await;
+            assert!(result.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_stores_user_and_assistant_messages() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "pong".to_string() },
+        ]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping".to_string())],
+            )).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history.len(), 2);
+            assert_eq!(s.history[0].role, "user");
+            assert_eq!(s.history[0].content, "ping");
+            assert_eq!(s.history[1].role, "assistant");
+            assert_eq!(s.history[1].content, "pong");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_with_no_response_stores_only_user_message() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping".to_string())],
+            )).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history.len(), 1, "only user message when no assistant response");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_skips_duplicate_user_message_on_resume() {
+        let agent = make_agent_with_key("k");
+        // First call stores "ping" in history with no reply.
+        agent.client.push_response(vec![]);
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "pong".to_string() }]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            // First prompt — stores user message.
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping".to_string())],
+            )).await.unwrap();
+            // Second prompt with same message — should resume, not duplicate.
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping".to_string())],
+            )).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            // user "ping" should appear only once, followed by assistant "pong".
+            let user_msgs: Vec<_> = s.history.iter().filter(|m| m.role == "user").collect();
+            assert_eq!(user_msgs.len(), 1, "duplicate user message must be skipped on resume");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_sends_notifications_for_text_delta() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "Hello".to_string() },
+            OpenRouterEvent::TextDelta { text: " World".to_string() },
+        ]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            agent.prompt(PromptRequest::new(
+                resp.session_id,
+                vec![ContentBlock::from("hi".to_string())],
+            )).await.unwrap();
+            let notes = agent.notifier.notifications.lock().unwrap();
+            assert_eq!(notes.len(), 2, "one notification per TextDelta");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_returns_end_turn_stop_reason() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let prompt_resp = agent.prompt(PromptRequest::new(
+                resp.session_id,
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            assert!(matches!(prompt_resp.stop_reason, agent_client_protocol::StopReason::EndTurn));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_cancel_returns_cancelled_stop_reason() {
+        let agent = Arc::new(make_agent_with_key("k"));
+        let agent2 = Arc::clone(&agent);
+        agent.client.push_slow_response(OpenRouterEvent::TextDelta { text: "slow".to_string() });
+
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            let sid2 = sid.clone();
+
+            let agent_prompt = Arc::clone(&agent);
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt.prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("q".to_string())],
+                )).await.unwrap()
+            });
+
+            // Give the prompt time to start.
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            agent2.cancel(CancelNotification::new(sid2)).await.unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert!(matches!(result.stop_reason, agent_client_protocol::StopReason::Cancelled));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_trims_history_to_max() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            // Pre-fill with max_history messages (default = 20).
+            {
+                let mut sessions = agent.sessions.lock().await;
+                let s = sessions.get_mut(&sid.to_string()).unwrap();
+                for i in 0..20 {
+                    s.history.push(Message::user(format!("q{i}")));
+                }
+            }
+            // One more prompt with a reply adds 2 more → trim to 20.
+            agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "r".to_string() }]);
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("extra".to_string())],
+            )).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert!(s.history.len() <= 20, "history must be trimmed to max_history");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_system_prompt_not_stored_in_history() {
+        // Set a system prompt via env var.
+        unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", "You are helpful."); }
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        );
+        unsafe { std::env::remove_var("OPENROUTER_SYSTEM_PROMPT"); }
+
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("hi".to_string())],
+            )).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            // History must not contain the system message.
+            assert!(
+                s.history.iter().all(|m| m.role != "system"),
+                "system prompt must not be stored in history"
+            );
+            // But it should have been sent to the HTTP client.
+            let calls = agent.client.calls.lock().unwrap();
+            assert!(
+                calls[0].messages.iter().any(|m| m.role == "system"),
+                "system prompt must appear in wire messages"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_uses_usage_from_stream_for_history() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "reply".to_string() },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+        ]);
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let sid = resp.session_id.clone();
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            let assistant_msg = s.history.iter().find(|m| m.role == "assistant").unwrap();
+            assert_eq!(assistant_msg.prompt_tokens, Some(10));
+            assert_eq!(assistant_msg.completion_tokens, Some(5));
+        }).await;
+    }
+}
