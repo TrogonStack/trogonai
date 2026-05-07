@@ -16,6 +16,15 @@ pub struct StoredMcpServer {
     pub headers: Vec<(String, String)>,
 }
 
+/// A single todo item stored in the session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoItem {
+    pub id: String,
+    pub content: String,
+    /// One of: `pending`, `in_progress`, `completed`.
+    pub status: String,
+}
+
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.
@@ -67,6 +76,9 @@ pub struct SessionState {
     /// Set on the first bash call; subsequent calls reuse the same terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// Todo list for this session, persisted in NATS KV.
+    #[serde(default)]
+    pub todos: Vec<TodoItem>,
     /// Token budget used to decide when to compact the message history.
     /// Compaction triggers at 85 % of this value. Default: 200 000.
     #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
@@ -99,6 +111,7 @@ impl Default for SessionState {
             parent_session_id: None,
             branched_at_index: None,
             terminal_id: None,
+            todos: Vec::new(),
             token_budget: default_token_budget(),
         }
     }
