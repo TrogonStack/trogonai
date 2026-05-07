@@ -2587,6 +2587,167 @@ mod tests {
         }).await;
     }
 
+    // ── list_sessions after close ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_after_close_session_is_removed() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.close_session(CloseSessionRequest::new(sid.clone())).await.unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            assert!(
+                resp.sessions.iter().all(|s| s.session_id != sid),
+                "closed session must not appear in list_sessions"
+            );
+        }).await;
+    }
+
+    // ── fork branchAtIndex edge cases ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fork_with_branch_at_index_zero_removes_all_history() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            {
+                let mut sessions = agent.sessions.lock().await;
+                let s = sessions.get_mut(&src_id.to_string()).unwrap();
+                s.history.push(Message::user("a"));
+                s.history.push(Message::assistant("b"));
+            }
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 0})
+            ).unwrap();
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, PathBuf::from("/f")).meta(meta)
+            ).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let fork_session = sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(fork_session.history.len(), 0, "branchAtIndex:0 must produce an empty history");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_with_branch_at_index_beyond_length_copies_full_history() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            {
+                let mut sessions = agent.sessions.lock().await;
+                let s = sessions.get_mut(&src_id.to_string()).unwrap();
+                s.history.push(Message::user("a"));
+                s.history.push(Message::assistant("b"));
+            }
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 9999})
+            ).unwrap();
+            let fork = agent.fork_session(
+                ForkSessionRequest::new(src_id, PathBuf::from("/f")).meta(meta)
+            ).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let fork_session = sessions.get(&fork.session_id.to_string()).unwrap();
+            assert_eq!(fork_session.history.len(), 2, "branchAtIndex beyond length must copy full history");
+        }).await;
+    }
+
+    // ── agent loader system-prompt composition ────────────────────────────────
+
+    fn make_agent_with_loaders(
+        agent_sp: Option<&'static str>,
+        skills_text: Option<&'static str>,
+        model_id: Option<&'static str>,
+    ) -> OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier> {
+        use std::pin::Pin;
+        use crate::agent_loader::{AgentConfig, AgentLoading};
+        use crate::skill_loader::SkillLoading;
+
+        struct FixedAgentLoader {
+            sp: Option<&'static str>,
+            model_id: Option<&'static str>,
+        }
+        impl AgentLoading for FixedAgentLoader {
+            fn load_config<'a>(&'a self, _: &'a str) -> Pin<Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>> {
+                let sp = self.sp.map(|s| s.to_string());
+                let mid = self.model_id.map(|s| s.to_string());
+                Box::pin(async move {
+                    AgentConfig { skill_ids: vec![], system_prompt: sp, model_id: mid }
+                })
+            }
+        }
+
+        struct FixedSkillLoader { text: Option<&'static str> }
+        impl SkillLoading for FixedSkillLoader {
+            fn load<'a>(&'a self, _: &'a [String]) -> Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>> {
+                let t = self.text.map(|s| s.to_string());
+                Box::pin(async move { t })
+            }
+        }
+
+        make_agent().with_loaders(
+            "agent-1",
+            Arc::new(FixedAgentLoader { sp: agent_sp, model_id }),
+            Arc::new(FixedSkillLoader { text: skills_text }),
+        )
+    }
+
+    #[tokio::test]
+    async fn new_session_combines_agent_and_skills_system_prompt() {
+        let agent = make_agent_with_loaders(Some("Be concise."), Some("# Skills\n\nDo X."), None);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref().unwrap();
+            assert!(sp.contains("Be concise."), "agent system_prompt must be in combined prompt");
+            assert!(sp.contains("# Skills\n\nDo X."), "skills text must be in combined prompt");
+            assert!(sp.contains("\n\n"), "parts must be joined with double newline");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_uses_skills_only_when_no_agent_system_prompt() {
+        let agent = make_agent_with_loaders(None, Some("# Skills\n\nDo Y."), None);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref().unwrap();
+            assert_eq!(sp, "# Skills\n\nDo Y.", "skills-only path must produce exactly the skills text");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_uses_agent_prompt_only_when_no_skills() {
+        let agent = make_agent_with_loaders(Some("Agent only."), None, None);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref().unwrap();
+            assert_eq!(sp, "Agent only.", "agent-only path must produce exactly the agent system prompt");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_no_prompt_when_neither_agent_nor_skills() {
+        let agent = make_agent_with_loaders(None, None, None);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = &sessions.get(&sid.to_string()).unwrap().system_prompt;
+            assert!(sp.is_none(), "both-none path must produce no system prompt");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_uses_model_id_from_agent_loader() {
+        let agent = make_agent_with_loaders(None, None, Some("test-model"));
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sessions = agent.sessions.lock().await;
+            let model = sessions.get(&sid.to_string()).unwrap().model.as_deref();
+            assert_eq!(model, Some("test-model"), "agent loader model_id must be stored on the session");
+        }).await;
+    }
+
     // ── usage notification ────────────────────────────────────────────────────
 
     #[tokio::test]
