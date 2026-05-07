@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures_util::stream::{LocalBoxStream, StreamExt as _};
 use futures_util::{Stream, stream};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::http_client::OpenRouterHttpClient;
 
@@ -183,38 +183,65 @@ impl OpenRouterClient {
             .unwrap_or_else(|_| "https://trogonai.com".to_string());
         let site_name = std::env::var("OPENROUTER_SITE_NAME")
             .unwrap_or_else(|_| "TrogonAI".to_string());
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
-        let response = tokio::time::timeout(
-            self.request_timeout,
-            self.http
-                .post(format!(
-                    "{}/chat/completions",
-                    self.base_url.trim_end_matches('/')
-                ))
-                .bearer_auth(api_key)
-                .header("HTTP-Referer", &site_url)
-                .header("X-Title", &site_name)
-                .json(&body)
-                .send(),
-        )
-        .await
-        .map_err(|_| {
-            format!(
-                "OpenRouter request timed out after {}s (no response headers received)",
-                self.request_timeout.as_secs()
+        let mut attempt = 0u32;
+        loop {
+            let response = tokio::time::timeout(
+                self.request_timeout,
+                self.http
+                    .post(&url)
+                    .bearer_auth(api_key)
+                    .header("HTTP-Referer", &site_url)
+                    .header("X-Title", &site_name)
+                    .json(&body)
+                    .send(),
             )
-        })?
-        .map_err(|e| e.to_string())?;
+            .await
+            .map_err(|_| {
+                format!(
+                    "OpenRouter request timed out after {}s (no response headers received)",
+                    self.request_timeout.as_secs()
+                )
+            })?
+            .map_err(|e| e.to_string())?;
 
-        if !response.status().is_success() {
+            if response.status().is_success() {
+                return Ok(response);
+            }
+
             let status = response.status();
+            let retryable = matches!(status.as_u16(), 429 | 503) && attempt < MAX_RETRIES;
+            let delay = retry_delay(response.headers(), attempt);
             let text = response.text().await.unwrap_or_default();
-            warn!(status = %status, body = %text, "openrouter: API error response");
-            return Err(format!("OpenRouter API error {status}: {text}"));
-        }
+            warn!(status = %status, body = %text, attempt, "openrouter: API error response");
 
-        Ok(response)
+            if retryable {
+                attempt += 1;
+                info!(
+                    status = %status,
+                    delay_ms = delay.as_millis(),
+                    attempt,
+                    "openrouter: retrying after transient error"
+                );
+                tokio::time::sleep(delay).await;
+            } else {
+                return Err(format!("OpenRouter API error {status}: {text}"));
+            }
+        }
     }
+}
+
+const MAX_RETRIES: u32 = 3;
+
+fn retry_delay(headers: &reqwest::header::HeaderMap, attempt: u32) -> Duration {
+    headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(1u64 << attempt.min(5)))
+        .min(Duration::from_secs(30))
 }
 
 #[async_trait(?Send)]
@@ -590,5 +617,44 @@ mod tests {
         let events: Vec<_> = parse_sse(stream::iter(chunks)).collect().await;
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "B"));
         assert!(matches!(&events[1], OpenRouterEvent::Done));
+    }
+
+    // ── retry_delay ───────────────────────────────────────────────────────────
+
+    fn empty_headers() -> reqwest::header::HeaderMap {
+        reqwest::header::HeaderMap::new()
+    }
+
+    fn headers_with_retry_after(secs: &str) -> reqwest::header::HeaderMap {
+        let mut m = reqwest::header::HeaderMap::new();
+        m.insert("retry-after", secs.parse().unwrap());
+        m
+    }
+
+    #[test]
+    fn retry_delay_no_header_uses_exponential_backoff() {
+        assert_eq!(retry_delay(&empty_headers(), 0), Duration::from_secs(1));
+        assert_eq!(retry_delay(&empty_headers(), 1), Duration::from_secs(2));
+        assert_eq!(retry_delay(&empty_headers(), 2), Duration::from_secs(4));
+        assert_eq!(retry_delay(&empty_headers(), 3), Duration::from_secs(8));
+    }
+
+    #[test]
+    fn retry_delay_header_overrides_backoff() {
+        assert_eq!(retry_delay(&headers_with_retry_after("5"), 0), Duration::from_secs(5));
+        assert_eq!(retry_delay(&headers_with_retry_after("0"), 2), Duration::from_secs(0));
+    }
+
+    #[test]
+    fn retry_delay_is_capped_at_30s() {
+        assert_eq!(retry_delay(&empty_headers(), 5), Duration::from_secs(30));
+        assert_eq!(retry_delay(&headers_with_retry_after("60"), 0), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn retry_delay_ignores_non_numeric_retry_after() {
+        // HTTP-date format in Retry-After is not supported; falls back to backoff.
+        let h = headers_with_retry_after("Wed, 21 Oct 2025 07:28:00 GMT");
+        assert_eq!(retry_delay(&h, 0), Duration::from_secs(1));
     }
 }

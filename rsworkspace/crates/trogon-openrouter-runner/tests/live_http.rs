@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use bytes::Bytes;
 use futures_util::StreamExt as _;
@@ -23,9 +22,15 @@ use trogon_openrouter_runner::OpenRouterHttpClient as _;
 
 // ── Shared server state ───────────────────────────────────────────────────────
 
+struct ServerResponse {
+    status: StatusCode,
+    body: Bytes,
+    extra_headers: Vec<(&'static str, String)>,
+}
+
 #[derive(Clone, Default)]
 struct ServerState {
-    responses: Arc<Mutex<VecDeque<(StatusCode, Bytes)>>>,
+    responses: Arc<Mutex<VecDeque<ServerResponse>>>,
     captured: Arc<Mutex<Vec<Captured>>>,
 }
 
@@ -36,17 +41,37 @@ struct Captured {
 
 impl ServerState {
     fn push_sse(&self, body: impl Into<String>) {
-        self.responses
-            .lock()
-            .unwrap()
-            .push_back((StatusCode::OK, Bytes::from(body.into())));
+        self.push_raw(StatusCode::OK, body.into(), vec![]);
     }
 
     fn push_error(&self, status: StatusCode, body: impl Into<String>) {
-        self.responses
-            .lock()
-            .unwrap()
-            .push_back((status, Bytes::from(body.into())));
+        self.push_raw(status, body.into(), vec![]);
+    }
+
+    /// Push a 429 response with `Retry-After: 0` so tests don't actually wait.
+    fn push_429(&self) {
+        self.push_raw(
+            StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":"rate limit exceeded"}"#.to_string(),
+            vec![("retry-after", "0".to_string())],
+        );
+    }
+
+    /// Push a 503 response with `Retry-After: 0`.
+    fn push_503(&self) {
+        self.push_raw(
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"error":"service unavailable"}"#.to_string(),
+            vec![("retry-after", "0".to_string())],
+        );
+    }
+
+    fn push_raw(&self, status: StatusCode, body: String, extra_headers: Vec<(&'static str, String)>) {
+        self.responses.lock().unwrap().push_back(ServerResponse {
+            status,
+            body: Bytes::from(body),
+            extra_headers,
+        });
     }
 
     fn last_auth(&self) -> Option<String> {
@@ -56,13 +81,17 @@ impl ServerState {
     fn last_body(&self) -> Option<serde_json::Value> {
         self.captured.lock().unwrap().last().map(|c| c.body.clone())
     }
+
+    fn request_count(&self) -> usize {
+        self.captured.lock().unwrap().len()
+    }
 }
 
 async fn chat_handler(
     State(state): State<ServerState>,
     headers: HeaderMap,
     body: Bytes,
-) -> Response {
+) -> axum::http::Response<axum::body::Body> {
     let auth = headers
         .get(header::AUTHORIZATION)
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
@@ -72,23 +101,20 @@ async fn chat_handler(
     let body_json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
     state.captured.lock().unwrap().push(Captured { auth, body: body_json });
 
-    let (status, resp_body) = state
-        .responses
-        .lock()
-        .unwrap()
-        .pop_front()
-        .unwrap_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, Bytes::from("queue empty")));
+    let resp = state.responses.lock().unwrap().pop_front().unwrap_or_else(|| ServerResponse {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        body: Bytes::from("queue empty"),
+        extra_headers: vec![],
+    });
 
-    if status == StatusCode::OK {
-        (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/event-stream")],
-            resp_body,
-        )
-            .into_response()
-    } else {
-        (status, resp_body).into_response()
+    let mut builder = axum::http::Response::builder().status(resp.status);
+    if resp.status == StatusCode::OK {
+        builder = builder.header(header::CONTENT_TYPE, "text/event-stream");
     }
+    for (k, v) in resp.extra_headers {
+        builder = builder.header(k, v);
+    }
+    builder.body(axum::body::Body::from(resp.body)).unwrap()
 }
 
 // ── TestServer ────────────────────────────────────────────────────────────────
@@ -220,23 +246,6 @@ async fn error_event_on_server_error_response() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn error_event_on_rate_limit_response() {
-    let srv = TestServer::new().await;
-    srv.state.push_error(
-        StatusCode::TOO_MANY_REQUESTS,
-        r#"{"error":{"message":"Rate limit exceeded"}}"#,
-    );
-
-    let events = srv.run("test-model", "sk-test").await;
-
-    assert_eq!(events.len(), 1);
-    assert!(
-        matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("429")),
-        "expected Error containing 429, got: {:?}",
-        events
-    );
-}
 
 #[tokio::test(flavor = "current_thread")]
 async fn bearer_token_is_sent_in_authorization_header() {
@@ -460,4 +469,97 @@ async fn request_includes_stream_options_with_usage() {
         true,
         "stream_options.include_usage must be true"
     );
+}
+
+// ── Retry tests ───────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "current_thread")]
+async fn retries_on_429_and_eventually_succeeds() {
+    let srv = TestServer::new().await;
+    // First request → 429 (with Retry-After: 0 so no real wait).
+    srv.state.push_429();
+    // Second request → success.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 2, "should have made exactly 2 requests");
+    assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "ok"));
+    assert!(matches!(&events[1], OpenRouterEvent::Done));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retries_on_503_and_eventually_succeeds() {
+    let srv = TestServer::new().await;
+    srv.state.push_503();
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"recovered"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 2);
+    assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "recovered"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn does_not_retry_on_401() {
+    let srv = TestServer::new().await;
+    srv.state.push_error(StatusCode::UNAUTHORIZED, r#"{"error":"invalid key"}"#);
+
+    let events = srv.run("test-model", "bad-key").await;
+
+    // Must have made exactly 1 request — no retry on auth failure.
+    assert_eq!(srv.state.request_count(), 1, "401 must not be retried");
+    assert_eq!(events.len(), 1);
+    assert!(matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("401")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn does_not_retry_on_400() {
+    let srv = TestServer::new().await;
+    srv.state.push_error(StatusCode::BAD_REQUEST, r#"{"error":"bad request"}"#);
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 1, "400 must not be retried");
+    assert!(matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("400")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn exhausts_retries_and_returns_error() {
+    let srv = TestServer::new().await;
+    // Queue four 429s — MAX_RETRIES=3 means 4 total attempts, all failing.
+    srv.state.push_429();
+    srv.state.push_429();
+    srv.state.push_429();
+    srv.state.push_429();
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 4, "should have made 4 attempts (1 + 3 retries)");
+    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("429")),
+        "expected Error with 429 after exhausting retries"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn multiple_retries_then_success() {
+    let srv = TestServer::new().await;
+    // Two 429s, then success — tests that attempt counter increments correctly.
+    srv.state.push_429();
+    srv.state.push_429();
+    srv.state.push_sse(sse(&["data: [DONE]"]));
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 3);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(&events[0], OpenRouterEvent::Done));
 }
