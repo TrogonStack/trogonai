@@ -14,7 +14,10 @@ use std::time::Duration;
 
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{AuthenticateRequest, ContentBlock, NewSessionRequest, PromptRequest};
+use agent_client_protocol::{
+    AuthenticateRequest, CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest,
+    SetSessionModelRequest,
+};
 use futures_util::StreamExt as _;
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
@@ -118,6 +121,21 @@ async fn do_new_session(nats: &async_nats::Client) -> String {
         .to_string();
     assert!(!session_id.is_empty(), "sessionId must be non-empty");
     session_id
+}
+
+async fn do_close_session(nats: &async_nats::Client, session_id: &str) {
+    let session_id = session_id.to_string();
+    let payload = serde_json::to_vec(&CloseSessionRequest::new(session_id.clone())).unwrap();
+    let resp = nats_req(nats, format!("acp.session.{session_id}.agent.close"), payload).await;
+    assert!(resp.get("error").is_none(), "close_session must not error: {resp}");
+}
+
+async fn do_set_session_model(nats: &async_nats::Client, session_id: &str, model: &str) {
+    let session_id = session_id.to_string();
+    let model = model.to_string();
+    let payload = serde_json::to_vec(&SetSessionModelRequest::new(session_id.clone(), model.clone())).unwrap();
+    let resp = nats_req(nats, format!("acp.session.{session_id}.agent.set_model"), payload).await;
+    assert!(resp.get("error").is_none(), "set_session_model to {model} must not error: {resp}");
 }
 
 async fn do_prompt(nats: &async_nats::Client, session_id: &str, text: &str) -> Value {
@@ -247,6 +265,139 @@ async fn bad_model_name_returns_end_turn_gracefully() {
         full_text.is_empty(),
         "bad model must produce no text chunks — got: {full_text:?}"
     );
+}
+
+/// close_session lifecycle: after closing a session, prompting it returns a not-found error.
+///
+/// Verifies the session is fully removed from the agent and that subsequent
+/// requests are rejected cleanly rather than hanging or panicking.
+/// Free test — no tokens consumed after the close.
+#[ignore = "requires OPENROUTER_TEST_KEY and Docker — see file header"]
+#[tokio::test]
+async fn close_session_then_prompt_returns_not_found() {
+    let key = test_key();
+    let model = std::env::var("OPENROUTER_TEST_MODEL")
+        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+
+    let (_container, nats) = start_nats().await;
+    start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
+
+    do_initialize(&nats).await;
+    do_authenticate_user_key(&nats, &key).await;
+    let session_id = do_new_session(&nats).await;
+    eprintln!("session_id={session_id}");
+
+    // Close the session.
+    do_close_session(&nats, &session_id).await;
+
+    // Prompt the now-closed session — expect a not-found error response.
+    let session_id_owned = session_id.clone();
+    let text_owned = "hello".to_string();
+    let payload = serde_json::to_vec(&PromptRequest::new(
+        session_id_owned.clone(),
+        vec![ContentBlock::from(text_owned)],
+    ))
+    .unwrap();
+    let subject = format!("acp.session.{session_id}.agent.prompt");
+    let resp = nats_req(&nats, subject, payload).await;
+    eprintln!("closed-session prompt response: {resp}");
+    assert!(
+        resp.get("code").is_some(),
+        "prompting a closed session must return an error with a code field: {resp}"
+    );
+    // ResourceNotFound = -32002
+    assert_eq!(
+        resp["code"].as_i64(),
+        Some(-32002),
+        "expected ResourceNotFound (-32002): {resp}"
+    );
+}
+
+/// Usage notifications carry non-zero token counts.
+///
+/// Verifies that the usage_update NATS notification is published after a
+/// successful prompt and that both prompt-token and completion-token counts
+/// are greater than zero.
+#[ignore = "requires OPENROUTER_TEST_KEY and Docker — see file header"]
+#[tokio::test]
+async fn usage_notification_reports_nonzero_token_counts() {
+    let key = test_key();
+    let model = std::env::var("OPENROUTER_TEST_MODEL")
+        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+
+    let (_container, nats) = start_nats().await;
+    start_agent_with_real_openrouter(nats.clone(), key.clone(), &model).await;
+
+    do_initialize(&nats).await;
+    do_authenticate_user_key(&nats, &key).await;
+    let session_id = do_new_session(&nats).await;
+    eprintln!("session_id={session_id}");
+
+    let notif_subject = format!("acp.session.{session_id}.client.session.update");
+    let mut notif_sub = nats.subscribe(notif_subject).await.expect("subscribe");
+
+    let resp = do_prompt(&nats, &session_id, "Reply with exactly one word: yes").await;
+    assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "{resp}");
+
+    // Drain all notifications and find the usage_update.
+    let mut usage_used: Option<u64> = None;
+    let mut usage_size: Option<u64> = None;
+    while let Ok(Some(msg)) =
+        tokio::time::timeout(Duration::from_millis(500), notif_sub.next()).await
+    {
+        let v: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+        if v["update"]["sessionUpdate"].as_str() == Some("usage_update") {
+            usage_used = v["update"]["used"].as_u64();
+            usage_size = v["update"]["size"].as_u64();
+        }
+    }
+
+    eprintln!("usage_used={usage_used:?}  usage_size={usage_size:?}");
+    assert!(
+        usage_used.map(|n| n > 0).unwrap_or(false),
+        "usage_update must have used > 0 (prompt tokens)"
+    );
+    assert!(
+        usage_size.map(|n| n > 0).unwrap_or(false),
+        "usage_update must have size > 0 (completion tokens)"
+    );
+}
+
+/// set_session_model: switching the model mid-session takes effect on the next prompt.
+///
+/// The agent defaults to openai/gpt-4o-mini. This test switches to openai/gpt-4o
+/// (which is in the default available-models list) and verifies a subsequent prompt
+/// still returns a non-empty text response, proving the model-switch plumbing works.
+#[ignore = "requires OPENROUTER_TEST_KEY and Docker — see file header"]
+#[tokio::test]
+async fn set_session_model_switches_model_for_next_prompt() {
+    let key = test_key();
+    // Start with the cheap default model; switch to another available model.
+    let default_model = std::env::var("OPENROUTER_TEST_MODEL")
+        .unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    // openai/gpt-4o is always in the default available_models list.
+    let target_model = "openai/gpt-4o";
+
+    let (_container, nats) = start_nats().await;
+    start_agent_with_real_openrouter(nats.clone(), key.clone(), &default_model).await;
+
+    do_initialize(&nats).await;
+    do_authenticate_user_key(&nats, &key).await;
+    let session_id = do_new_session(&nats).await;
+    eprintln!("session_id={session_id}");
+
+    // Switch model before sending any prompt.
+    do_set_session_model(&nats, &session_id, target_model).await;
+
+    let notif_subject = format!("acp.session.{session_id}.client.session.update");
+    let mut notif_sub = nats.subscribe(notif_subject).await.expect("subscribe");
+
+    let resp = do_prompt(&nats, &session_id, "Reply with exactly one word: yes").await;
+    assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "{resp}");
+
+    let full_text = collect_text_chunks(&mut notif_sub).await;
+    eprintln!("set_session_model full_text={full_text:?}");
+    assert!(!full_text.is_empty(), "prompt after set_session_model must return text via NATS");
 }
 
 /// Agent-key auth: authenticate using the server-configured API key.
