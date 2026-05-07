@@ -261,4 +261,50 @@ mod tests {
         let result = extract_before_marker(output).unwrap();
         assert!(result.contains("real output"), "got: {result}");
     }
+
+    // ── tool_def ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_def_name_is_bash() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
+        assert_eq!(def.name, "bash");
+    }
+
+    #[test]
+    fn tool_def_description_is_non_empty() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
+        assert!(!def.description.is_empty());
+    }
+
+    #[test]
+    fn tool_def_cache_control_is_none() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
+        assert!(def.cache_control.is_none());
+    }
+
+    #[test]
+    fn tool_def_schema_requires_command() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
+        let required = def.input_schema["required"]
+            .as_array()
+            .expect("required must be an array");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("command")),
+            "schema must require 'command', got: {required:?}"
+        );
+    }
+
+    #[test]
+    fn tool_def_schema_command_property_is_string_type() {
+        use crate::session_store::mock::MemorySessionStore;
+        let def = WasmRuntimeBashTool::<MemorySessionStore>::tool_def();
+        let ty = def.input_schema["properties"]["command"]["type"]
+            .as_str()
+            .expect("command type must be a string");
+        assert_eq!(ty, "string");
+    }
 }
