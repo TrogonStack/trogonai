@@ -215,6 +215,11 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         self
     }
 
+    pub fn with_prompt_timeout(mut self, timeout: Duration) -> Self {
+        self.prompt_timeout = timeout;
+        self
+    }
+
     fn build_snapshot(&self, session_id: &str, session: &OpenRouterSession) -> SessionSnapshot {
         let name = session
             .history
@@ -2204,13 +2209,20 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
             // Close the session — this should trigger the cancel sender.
-            agent2.close_session(CloseSessionRequest::new(sid2)).await.unwrap();
+            agent2.close_session(CloseSessionRequest::new(sid2.clone())).await.unwrap();
 
             let result = prompt_handle.await.unwrap();
             assert!(
                 matches!(result.stop_reason, agent_client_protocol::StopReason::Cancelled),
                 "close_session during active prompt must cancel it: {:?}",
                 result.stop_reason
+            );
+            // Session was removed by close_session before the prompt's history write —
+            // confirming the `if let Some(s) = sessions.get_mut(...)` None branch
+            // is hit and handled gracefully (no panic, no stale entry reinserted).
+            assert!(
+                agent2.sessions.lock().await.get(&sid2.to_string()).is_none(),
+                "session must remain absent after close_session — history write must not recreate it"
             );
         }).await;
     }
@@ -2426,6 +2438,35 @@ mod tests {
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_PROMPT_TIMEOUT_SECS"); }
         assert_eq!(agent.prompt_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn with_prompt_timeout_overrides_default() {
+        let agent = make_agent().with_prompt_timeout(Duration::from_millis(50));
+        assert_eq!(agent.prompt_timeout, Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn prompt_stream_timeout_breaks_loop_and_returns_end_turn() {
+        // A stream that never produces any event triggers the per-chunk timeout,
+        // emitting an Error event internally and breaking the loop.
+        let agent = make_agent_with_key("k")
+            .with_prompt_timeout(Duration::from_millis(10));
+        agent.client.push_pending_response();
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            // Timeout → Error event → breaks loop → EndTurn
+            assert!(matches!(resp.stop_reason, StopReason::EndTurn));
+            // No assistant text was accumulated, so history has only the user message.
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history.len(), 1, "timeout must not write empty assistant message");
+            assert_eq!(s.history[0].role, "user");
+        }).await;
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub mod mock {
     pub enum MockResponse {
         Events(Vec<OpenRouterEvent>),
         Slow(OpenRouterEvent),
+        /// Stream that never yields any event — used to trigger the per-chunk timeout.
+        Pending,
     }
 
     pub struct MockOpenRouterHttpClient {
@@ -64,6 +66,13 @@ pub mod mock {
                 .lock()
                 .unwrap()
                 .push_back(MockResponse::Slow(first));
+        }
+
+        pub fn push_pending_response(&self) {
+            self.responses
+                .lock()
+                .unwrap()
+                .push_back(MockResponse::Pending);
         }
     }
 
@@ -99,6 +108,7 @@ pub mod mock {
                 MockResponse::Slow(first) => stream::once(async move { first })
                     .chain(stream::pending::<OpenRouterEvent>())
                     .boxed_local(),
+                MockResponse::Pending => stream::pending::<OpenRouterEvent>().boxed_local(),
             }
         }
     }
