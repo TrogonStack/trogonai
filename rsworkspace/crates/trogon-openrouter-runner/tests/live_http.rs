@@ -24,8 +24,8 @@ use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
 use agent_client_protocol::{
-    Agent as _, CancelNotification, ContentBlock, NewSessionRequest, PromptRequest,
-    SessionNotification, StopReason,
+    Agent as _, AuthenticateRequest, CancelNotification, ContentBlock, ForkSessionRequest,
+    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest, StopReason,
 };
 use trogon_openrouter_runner::{
     FinishReason, Message, OpenRouterAgent, OpenRouterClient, OpenRouterEvent, SessionNotifier,
@@ -626,12 +626,13 @@ async fn multiple_retries_then_success() {
 // ── Cancel test ───────────────────────────────────────────────────────────────
 
 /// Minimal session notifier that signals when the first notification arrives
-/// and optionally tracks how many text-chunk bytes were delivered.
+/// and optionally tracks how many text-chunk bytes and usage events were delivered.
 #[derive(Clone)]
 struct TestNotifier {
     first_notification: Arc<Notify>,
     count: Arc<AtomicUsize>,
     text_bytes: Arc<AtomicUsize>,
+    usage_count: Arc<AtomicUsize>,
 }
 
 impl TestNotifier {
@@ -640,6 +641,7 @@ impl TestNotifier {
             first_notification: Arc::new(Notify::new()),
             count: Arc::new(AtomicUsize::new(0)),
             text_bytes: Arc::new(AtomicUsize::new(0)),
+            usage_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -653,16 +655,26 @@ impl TestNotifier {
     fn text_bytes_received(&self) -> usize {
         self.text_bytes.load(Ordering::Relaxed)
     }
+
+    fn usage_notifications_received(&self) -> usize {
+        self.usage_count.load(Ordering::Relaxed)
+    }
 }
 
 #[async_trait(?Send)]
 impl SessionNotifier for TestNotifier {
     async fn notify(&self, n: SessionNotification) {
         use agent_client_protocol::SessionUpdate;
-        if let SessionUpdate::AgentMessageChunk(chunk) = n.update {
-            if let ContentBlock::Text(t) = chunk.content {
-                self.text_bytes.fetch_add(t.text.len(), Ordering::Relaxed);
+        match n.update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                if let ContentBlock::Text(t) = chunk.content {
+                    self.text_bytes.fetch_add(t.text.len(), Ordering::Relaxed);
+                }
             }
+            SessionUpdate::UsageUpdate(_) => {
+                self.usage_count.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
         }
         let prev = self.count.fetch_add(1, Ordering::Relaxed);
         if prev == 0 {
@@ -1086,6 +1098,340 @@ async fn system_prompt_is_first_wire_message() {
                 messages[1]["role"].as_str(),
                 Some("user"),
                 "user message must follow the system prompt"
+            );
+        })
+        .await;
+}
+
+/// Authenticating with a per-user API key must use that key in the
+/// Authorization header, overriding any globally configured key.
+#[tokio::test(flavor = "current_thread")]
+async fn user_provided_api_key_used_in_wire_authorization() {
+    let srv = TestServer::new().await;
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    // Agent has NO global key (empty string → None).
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Authenticate with a user-provided key.
+            let mut meta = serde_json::Map::new();
+            meta.insert(
+                "OPENROUTER_API_KEY".to_string(),
+                serde_json::json!("user-provided-sk-123"),
+            );
+            agent
+                .authenticate(AuthenticateRequest::new("openrouter-api-key").meta(meta))
+                .await
+                .unwrap();
+
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let auth = srv.state.last_auth().expect("server must have captured auth header");
+            assert_eq!(
+                auth, "Bearer user-provided-sk-123",
+                "per-user key must appear verbatim in Authorization header"
+            );
+        })
+        .await;
+}
+
+/// A forked session inherits the source session's conversation history so that
+/// the first prompt on the fork includes prior turns.
+#[tokio::test(flavor = "current_thread")]
+async fn fork_session_inherits_history_in_next_prompt() {
+    let srv = TestServer::new().await;
+
+    // Source turn 1 → assistant says "original".
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"original"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Fork first prompt → server just needs to reply with anything.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Create source session and do one turn.
+            let src_resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let src_id = src_resp.session_id.clone();
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("question".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Fork the source session.
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id, std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id;
+
+            // Prompt from the fork.
+            agent
+                .prompt(PromptRequest::new(
+                    fork_id,
+                    vec![ContentBlock::from("follow-up".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The fork's wire body must contain the source history + the fork's own prompt.
+            let body = srv.state.last_body().expect("server must have captured the fork's request");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            let roles: Vec<&str> = messages
+                .iter()
+                .filter_map(|m| m["role"].as_str())
+                .collect();
+            assert_eq!(
+                roles,
+                ["user", "assistant", "user"],
+                "fork's prompt must include inherited history: {body}"
+            );
+            assert_eq!(messages[0]["content"].as_str(), Some("question"));
+            assert_eq!(messages[1]["content"].as_str(), Some("original"));
+            assert_eq!(messages[2]["content"].as_str(), Some("follow-up"));
+        })
+        .await;
+}
+
+/// Two sessions created from the same agent have completely independent
+/// conversation histories — neither sees the other's messages.
+#[tokio::test(flavor = "current_thread")]
+async fn two_sessions_have_independent_histories() {
+    let srv = TestServer::new().await;
+
+    // Session A turn 1 → "reply-a".
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"reply-a"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Session B turn 1 → "reply-b".
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"reply-b"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+    // Session A turn 2 — content doesn't matter; we check the request body.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let sid_a = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/a")))
+                .await
+                .unwrap()
+                .session_id;
+            let sid_b = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/b")))
+                .await
+                .unwrap()
+                .session_id;
+
+            // A and B each do one turn.
+            agent
+                .prompt(PromptRequest::new(
+                    sid_a.clone(),
+                    vec![ContentBlock::from("question-a".to_string())],
+                ))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(
+                    sid_b.clone(),
+                    vec![ContentBlock::from("question-b".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // A does a second turn; its wire body must contain only A's history.
+            agent
+                .prompt(PromptRequest::new(
+                    sid_a,
+                    vec![ContentBlock::from("follow-up-a".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let body = srv.state.last_body().expect("must have captured third request");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            // Must see: [user "question-a", assistant "reply-a", user "follow-up-a"]
+            // Must NOT contain anything from session B.
+            assert_eq!(messages.len(), 3, "session A must have exactly 3 messages: {body}");
+            assert_eq!(messages[0]["content"].as_str(), Some("question-a"));
+            assert_eq!(messages[1]["content"].as_str(), Some("reply-a"));
+            assert_eq!(messages[2]["content"].as_str(), Some("follow-up-a"));
+        })
+        .await;
+}
+
+/// A Usage chunk in the SSE stream must trigger a UsageUpdate notification
+/// to the session notifier.
+#[tokio::test(flavor = "current_thread")]
+async fn usage_chunk_fires_usage_notification() {
+    let srv = TestServer::new().await;
+
+    // Server sends one text delta + one usage chunk.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#,
+        r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("ping".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                notifier.usage_notifications_received(),
+                1,
+                "exactly one UsageUpdate notification must be sent for the usage chunk"
+            );
+        })
+        .await;
+}
+
+/// The wire request body "model" field must reflect the default model configured
+/// on the agent, and switching it via set_session_model must change it.
+#[tokio::test(flavor = "current_thread")]
+async fn wire_model_field_reflects_default_and_overridden_model() {
+    let srv = TestServer::new().await;
+
+    // First prompt uses default model, second uses switched model.
+    for _ in 0..2 {
+        srv.state.push_sse(sse(&[
+            r#"data: {"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+            "data: [DONE]",
+        ]));
+    }
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+
+    // Build agent with two known models.  `with_deps` auto-adds the default if
+    // it's not already present, so we set OPENROUTER_MODELS just for this agent.
+    unsafe { std::env::set_var("OPENROUTER_MODELS", "model-a:Model A,model-b:Model B"); }
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "model-a",
+        "test-key",
+        client,
+    ));
+    unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let sid = resp.session_id.clone();
+
+            // First prompt — uses default "model-a".
+            agent
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("q1".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let body1 = srv.state.last_body().expect("must have first captured body");
+            assert_eq!(
+                body1["model"].as_str(),
+                Some("model-a"),
+                "default model must appear in first wire request: {body1}"
+            );
+
+            // Switch to "model-b".
+            agent
+                .set_session_model(SetSessionModelRequest::new(sid.clone(), "model-b"))
+                .await
+                .unwrap();
+
+            // Second prompt — uses "model-b".
+            agent
+                .prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("q2".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let body2 = srv.state.last_body().expect("must have second captured body");
+            assert_eq!(
+                body2["model"].as_str(),
+                Some("model-b"),
+                "switched model must appear in second wire request: {body2}"
             );
         })
         .await;
