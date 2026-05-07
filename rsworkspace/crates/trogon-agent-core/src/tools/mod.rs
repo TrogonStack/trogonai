@@ -249,6 +249,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn all_tool_defs_contains_todo_tools() {
+        let defs = all_tool_defs();
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"todo_write"), "missing todo_write, got: {names:?}");
+        assert!(names.contains(&"todo_read"), "missing todo_read, got: {names:?}");
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_tool_returns_error_string() {
         let ctx = test_ctx();
