@@ -598,11 +598,13 @@ async fn multiple_retries_then_success() {
 
 // ── Cancel test ───────────────────────────────────────────────────────────────
 
-/// Minimal session notifier that signals when the first notification arrives.
+/// Minimal session notifier that signals when the first notification arrives
+/// and optionally tracks how many text-chunk bytes were delivered.
 #[derive(Clone)]
 struct TestNotifier {
     first_notification: Arc<Notify>,
     count: Arc<AtomicUsize>,
+    text_bytes: Arc<AtomicUsize>,
 }
 
 impl TestNotifier {
@@ -610,6 +612,7 @@ impl TestNotifier {
         Self {
             first_notification: Arc::new(Notify::new()),
             count: Arc::new(AtomicUsize::new(0)),
+            text_bytes: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -619,11 +622,21 @@ impl TestNotifier {
             self.first_notification.notified().await;
         }
     }
+
+    fn text_bytes_received(&self) -> usize {
+        self.text_bytes.load(Ordering::Relaxed)
+    }
 }
 
 #[async_trait(?Send)]
 impl SessionNotifier for TestNotifier {
-    async fn notify(&self, _: SessionNotification) {
+    async fn notify(&self, n: SessionNotification) {
+        use agent_client_protocol::SessionUpdate;
+        if let SessionUpdate::AgentMessageChunk(chunk) = n.update {
+            if let ContentBlock::Text(t) = chunk.content {
+                self.text_bytes.fetch_add(t.text.len(), Ordering::Relaxed);
+            }
+        }
         let prev = self.count.fetch_add(1, Ordering::Relaxed);
         if prev == 0 {
             self.first_notification.notify_one();
@@ -747,6 +760,69 @@ async fn cancel_before_first_chunk_returns_cancelled() {
                 .expect("task panicked");
 
             assert!(matches!(result.stop_reason, StopReason::Cancelled));
+        })
+        .await;
+}
+
+// ── Response size guard ───────────────────────────────────────────────────────
+
+/// Real HTTP: server streams many chunks whose total exceeds the configured
+/// limit. The agent must stop early and return `EndTurn` with partial content,
+/// rather than hanging or OOMing.
+#[tokio::test(flavor = "current_thread")]
+async fn response_size_limit_stops_stream_early() {
+    let srv = TestServer::new().await;
+
+    // 10 chunks × 20 bytes each = 200 bytes total.
+    // We set the limit to 50 bytes, so the guard should fire around chunk 3.
+    let chunk = r#"data: {"choices":[{"delta":{"content":"01234567890123456789"},"finish_reason":null}]}"#;
+    let mut lines: Vec<&str> = vec![chunk; 10];
+    lines.push("data: [DONE]");
+    srv.state.push_sse(sse(&lines));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(
+        OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", client)
+            .with_max_response_bytes(50),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.clone();
+
+            let agent_p = Arc::clone(&agent);
+            let sid = session_id.clone();
+            let result = tokio::task::LocalSet::new()
+                .run_until(async move {
+                    agent_p
+                        .prompt(PromptRequest::new(
+                            sid,
+                            vec![ContentBlock::from("hello".to_string())],
+                        ))
+                        .await
+                        .unwrap()
+                })
+                .await;
+
+            // Must complete (not hang), even though server would send more.
+            assert!(
+                matches!(result.stop_reason, StopReason::EndTurn),
+                "expected EndTurn after size limit, got {:?}",
+                result.stop_reason
+            );
+
+            // Notifier received some but not all 200 bytes of content.
+            let received = notifier.text_bytes_received();
+            assert!(received > 0, "must have received some content");
+            assert!(
+                received <= 80,
+                "guard should have fired well before 200 bytes, got {received}"
+            );
         })
         .await;
 }

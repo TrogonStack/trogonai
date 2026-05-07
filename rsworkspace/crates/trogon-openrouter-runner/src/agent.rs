@@ -67,6 +67,7 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
     pending_api_key: Arc<Mutex<Option<String>>>,
     system_prompt: Option<String>,
     max_history: usize,
+    max_response_bytes: usize,
     agent_id: Option<String>,
     agent_loader: Option<Arc<dyn AgentLoading>>,
     skill_loader: Option<Arc<dyn SkillLoading>>,
@@ -155,6 +156,12 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
             .filter(|&n| n > 0)
             .unwrap_or(20);
 
+        let max_response_bytes = std::env::var("OPENROUTER_MAX_RESPONSE_BYTES")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(4 * 1024 * 1024); // 4 MB
+
         let tenant_id = std::env::var("TENANT_ID")
             .ok()
             .filter(|s| !s.is_empty())
@@ -172,6 +179,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
             pending_api_key: Arc::new(Mutex::new(None)),
             system_prompt,
             max_history,
+            max_response_bytes,
             agent_id: None,
             agent_loader: None,
             skill_loader: None,
@@ -194,6 +202,11 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
 
     pub fn with_session_store(mut self, store: Arc<dyn SessionStoring>) -> Self {
         self.session_store = Some(store);
+        self
+    }
+
+    pub fn with_max_response_bytes(mut self, limit: usize) -> Self {
+        self.max_response_bytes = limit;
         self
     }
 
@@ -748,6 +761,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                             )),
                         ))
                         .await;
+                    if assistant_text.len() > self.max_response_bytes {
+                        warn!(
+                            session_id,
+                            limit = self.max_response_bytes,
+                            actual = assistant_text.len(),
+                            "openrouter: response exceeded size limit, stopping stream early"
+                        );
+                        break;
+                    }
                 }
                 OpenRouterEvent::Usage {
                     prompt_tokens,
@@ -1703,6 +1725,92 @@ mod tests {
             let assistant_msg = s.history.iter().find(|m| m.role == "assistant").unwrap();
             assert_eq!(assistant_msg.prompt_tokens, Some(10));
             assert_eq!(assistant_msg.completion_tokens, Some(5));
+        }).await;
+    }
+
+    // ── max_response_bytes ────────────────────────────────────────────────────
+
+    fn make_agent_with_size_limit(limit: usize) -> OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier> {
+        OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_max_response_bytes(limit)
+    }
+
+    #[tokio::test]
+    async fn response_within_size_limit_completes_normally() {
+        let agent = make_agent_with_size_limit(100);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "hello".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            assert!(matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn));
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.history.last().unwrap().content, "hello");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn response_exceeding_size_limit_stops_early() {
+        let agent = make_agent_with_size_limit(10); // 10 byte limit
+        // Push two deltas: first is fine, second pushes total over 10 bytes.
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "hello".to_string() },
+            OpenRouterEvent::TextDelta { text: " world!!!!".to_string() },
+            // Would never reach this:
+            OpenRouterEvent::TextDelta { text: "more content".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            // Prompt must complete (not hang).
+            assert!(matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn));
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            let assistant_text = &s.history.last().unwrap().content;
+            // Content is the text up to and including the chunk that tripped the limit.
+            assert!(assistant_text.contains("hello"), "should have first chunk");
+            assert!(!assistant_text.contains("more content"), "should not have chunk past limit");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn response_exactly_at_size_limit_does_not_stop() {
+        let agent = make_agent_with_size_limit(5); // exactly "hello" length
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "hello".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            // Exactly at the limit (not strictly greater) should not trigger the guard.
+            assert_eq!(s.history.last().unwrap().content, "hello");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn size_limit_guard_still_saves_partial_response_to_history() {
+        let agent = make_agent_with_size_limit(3);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "abcd".to_string() }, // 4 bytes > limit of 3
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            // Partial content must be saved (user message + assistant partial).
+            assert_eq!(s.history.len(), 2);
+            assert_eq!(s.history[1].role, "assistant");
+            assert_eq!(s.history[1].content, "abcd");
         }).await;
     }
 }
