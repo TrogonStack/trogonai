@@ -1594,3 +1594,69 @@ async fn fork_is_independent_after_source_is_closed() {
         })
         .await;
 }
+
+/// Prompting twice with the same message (resume path) must send only one copy of
+/// the user message on the wire for the second call.
+#[tokio::test(flavor = "current_thread")]
+async fn resume_path_does_not_duplicate_user_message_on_wire() {
+    let srv = TestServer::new().await;
+
+    // First prompt: no assistant text (simulates a crash/interrupted response).
+    srv.state.push_sse(sse(&["data: [DONE]"]));
+    // Second prompt (resume): server replies normally.
+    srv.state.push_sse(sse(&[
+        r#"data: {"choices":[{"delta":{"content":"resumed"},"finish_reason":null}]}"#,
+        "data: [DONE]",
+    ]));
+
+    let notifier = TestNotifier::new();
+    let client = srv.client();
+    let agent = Arc::new(OpenRouterAgent::with_deps(
+        notifier.clone(),
+        "test-model",
+        "test-key",
+        client,
+    ));
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+
+            // First call — user message stored but no assistant reply (Done only).
+            agent
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("ping".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Second call with the same message — resume path.
+            agent
+                .prompt(PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("ping".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The second wire request must contain "ping" only once, not twice.
+            let body = srv.state.last_body().expect("must have second request body");
+            let messages = body["messages"].as_array().expect("messages must be array");
+            let user_msgs: Vec<_> = messages
+                .iter()
+                .filter(|m| m["role"].as_str() == Some("user"))
+                .collect();
+            assert_eq!(
+                user_msgs.len(),
+                1,
+                "resume must not duplicate user message on wire: {body}"
+            );
+            assert_eq!(user_msgs[0]["content"].as_str(), Some("ping"));
+        })
+        .await;
+}
