@@ -39,5 +39,6 @@ tracing-subscriber = { workspace = true }
 uuid            = { workspace = true }
 
 [dev-dependencies]
+futures                 = { workspace = true }
 testcontainers-modules  = { version = "0.15", features = ["nats"] }
 trogon-nats             = { workspace = true, features = ["test-support"] }
