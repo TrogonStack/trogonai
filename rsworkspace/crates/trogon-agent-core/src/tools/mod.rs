@@ -384,4 +384,41 @@ mod tests {
         let result = dispatch_tool(&ctx, "notebook_edit", &json!({"path": "nb.ipynb", "cell_index": 0, "content": "new"})).await;
         assert_eq!(result, "OK");
     }
+
+    #[tokio::test]
+    async fn dispatch_routes_todo_write_to_todo() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+        };
+        let result = dispatch_tool(
+            &ctx,
+            "todo_write",
+            &json!({"id": "t1", "content": "do stuff", "status": "pending"}),
+        )
+        .await;
+        assert_eq!(result, "OK");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_todo_read_to_todo() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+        };
+        dispatch_tool(
+            &ctx,
+            "todo_write",
+            &json!({"id": "t1", "content": "pending task", "status": "pending"}),
+        )
+        .await;
+        let result = dispatch_tool(&ctx, "todo_read", &json!({})).await;
+        assert!(result.contains("t1"), "got: {result}");
+    }
 }
