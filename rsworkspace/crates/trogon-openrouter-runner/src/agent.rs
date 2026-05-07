@@ -1316,6 +1316,27 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test]
+    async fn list_sessions_fork_with_branch_at_index_includes_both_meta_fields() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/src"))).await.unwrap().session_id;
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({"branchAtIndex": 0})
+            ).unwrap();
+            agent.fork_session(
+                ForkSessionRequest::new(src_id.clone(), PathBuf::from("/f")).meta(meta)
+            ).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let fork = resp.sessions.iter().find(|s| s.session_id != src_id).unwrap();
+            let m = fork.meta.as_ref().expect("fork must have meta");
+            assert!(m.contains_key("parentSessionId"), "parentSessionId must be in meta");
+            assert!(m.contains_key("branchedAtIndex"), "branchedAtIndex must be in meta when set");
+            assert_eq!(m["branchedAtIndex"], serde_json::json!(0));
+        }).await;
+    }
+
     // ── set_session_mode / set_session_model ──────────────────────────────────
 
     #[tokio::test]
@@ -2584,6 +2605,34 @@ mod tests {
                 count_after > count_before,
                 "session store must be called for the forked session"
             );
+        }).await;
+    }
+
+    // ── list_sessions cwd ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_sessions_returns_cwd_from_new_session() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            agent.new_session(NewSessionRequest::new(PathBuf::from("/my/project"))).await.unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            assert_eq!(resp.sessions.len(), 1);
+            assert_eq!(
+                resp.sessions[0].cwd.to_string_lossy(), "/my/project",
+                "list_sessions must report the cwd from new_session"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn list_sessions_fork_carries_its_own_cwd() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/src"))).await.unwrap().session_id;
+            agent.fork_session(ForkSessionRequest::new(src_id, PathBuf::from("/fork-dir"))).await.unwrap();
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let fork_info = resp.sessions.iter().find(|s| s.cwd.to_string_lossy() == "/fork-dir");
+            assert!(fork_info.is_some(), "fork session must have its own cwd in list_sessions");
         }).await;
     }
 
