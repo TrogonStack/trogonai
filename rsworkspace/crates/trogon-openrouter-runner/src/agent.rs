@@ -2066,6 +2066,73 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test]
+    async fn prompt_embedded_blob_resource_without_mime_type_uses_binary_fallback() {
+        use agent_client_protocol::{EmbeddedResource, EmbeddedResourceResource, BlobResourceContents};
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            // mime_type left as None — code falls back to "binary"
+            let blob = BlobResourceContents::new("base64data==", "file:///data.bin");
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::BlobResourceContents(blob),
+                ))],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert!(
+                user_msg.content.contains("data.bin") && user_msg.content.contains("binary"),
+                "None mime_type must fall back to 'binary': {:?}",
+                user_msg.content
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_partial_match_is_not_treated_as_resume() {
+        // "ping world" is NOT equal to "ping" — must not skip the user message.
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "pong".to_string() }]);
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "pong2".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping".to_string())],
+            )).await.unwrap();
+            // Different (longer) message — must be treated as a new turn, not a resume.
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("ping world".to_string())],
+            )).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            let user_msgs: Vec<_> = s.history.iter().filter(|m| m.role == "user").collect();
+            assert_eq!(user_msgs.len(), 2, "partial-match must not skip the second user message");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_with_empty_content_still_calls_api() {
+        // Empty user input logs a warning but still sends the request.
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("".to_string())],
+            )).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1, "empty input must still trigger one API call");
+            let user_msg = calls[0].messages.iter().find(|m| m.role == "user").unwrap();
+            assert_eq!(user_msg.content, "", "empty string must be sent as-is");
+        }).await;
+    }
+
     // ── set_session_model affects wire model ──────────────────────────────────
 
     #[tokio::test]

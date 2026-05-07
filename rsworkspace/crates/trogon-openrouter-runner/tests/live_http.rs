@@ -590,6 +590,48 @@ async fn does_not_retry_on_400() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn does_not_retry_on_402() {
+    let srv = TestServer::new().await;
+    srv.state.push_error(
+        StatusCode::PAYMENT_REQUIRED,
+        r#"{"error":{"message":"Insufficient credits","code":402}}"#,
+    );
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 1, "402 must not be retried");
+    assert!(matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("402")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn does_not_retry_on_403() {
+    let srv = TestServer::new().await;
+    srv.state.push_error(
+        StatusCode::FORBIDDEN,
+        r#"{"error":{"message":"Forbidden","code":403}}"#,
+    );
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 1, "403 must not be retried");
+    assert!(matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("403")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn does_not_retry_on_404() {
+    let srv = TestServer::new().await;
+    srv.state.push_error(
+        StatusCode::NOT_FOUND,
+        r#"{"error":{"message":"Model not found","code":404}}"#,
+    );
+
+    let events = srv.run("test-model", "sk-test").await;
+
+    assert_eq!(srv.state.request_count(), 1, "404 must not be retried");
+    assert!(matches!(&events[0], OpenRouterEvent::Error { message } if message.contains("404")));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn exhausts_retries_and_returns_error() {
     let srv = TestServer::new().await;
     // Queue four 429s — MAX_RETRIES=3 means 4 total attempts, all failing.
