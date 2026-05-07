@@ -190,4 +190,40 @@ mod tests {
         assert_eq!(cfg.skill_ids, vec!["x"]);
         assert_eq!(cfg.model_id.as_deref(), Some("m1"));
     }
+
+    #[test]
+    fn empty_string_skill_id_is_kept_in_list() {
+        // Empty string skill IDs are not filtered — the caller decides what to do with them.
+        let cfg = parse(r#"{"skill_ids":["","valid-id"]}"#);
+        assert_eq!(cfg.skill_ids, vec!["", "valid-id"]);
+    }
+
+    #[test]
+    fn system_prompt_whitespace_only_is_kept() {
+        // Only strictly empty string is filtered; whitespace-only prompts are preserved.
+        let cfg = parse(r#"{"system_prompt":"   "}"#);
+        assert_eq!(cfg.system_prompt.as_deref(), Some("   "));
+    }
+
+    #[test]
+    fn all_optional_fields_absent_returns_all_defaults() {
+        let cfg = parse(r#"{}"#);
+        assert!(cfg.skill_ids.is_empty());
+        assert!(cfg.system_prompt.is_none());
+        assert!(cfg.model_id.is_none());
+    }
+
+    #[test]
+    fn model_id_whitespace_only_is_kept() {
+        // Only strictly empty model id is filtered; whitespace is kept.
+        let cfg = parse(r#"{"model":{"id":"  "}}"#);
+        assert_eq!(cfg.model_id.as_deref(), Some("  "));
+    }
+
+    #[test]
+    fn skill_ids_null_array_falls_back_to_empty() {
+        // skill_ids: null → treat as missing → empty vec.
+        let cfg = parse(r#"{"skill_ids":null}"#);
+        assert!(cfg.skill_ids.is_empty());
+    }
 }

@@ -327,4 +327,86 @@ mod tests {
         assert_eq!(v["parent_session_id"], "parent-id");
         assert_eq!(v["branched_at_index"], 3);
     }
+
+    #[test]
+    fn snapshot_tools_field_always_serializes() {
+        // tools: vec![] must serialize as an explicit empty array (not omitted).
+        let snap = SessionSnapshot {
+            id: "s".to_string(),
+            tenant_id: "t".to_string(),
+            name: "N".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "x".to_string(),
+            updated_at: "y".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        };
+        let v = serde_json::to_value(&snap).unwrap();
+        assert!(v["tools"].is_array(), "tools must always be serialized");
+        assert_eq!(v["tools"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn snapshot_with_messages_serializes_correctly() {
+        let snap = SessionSnapshot {
+            id: "s".to_string(),
+            tenant_id: "t".to_string(),
+            name: "N".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![SnapshotMessage {
+                role: "user".to_string(),
+                content: vec![TextBlock::new("hi")],
+                usage: Some(MessageUsage {
+                    input_tokens: 5,
+                    output_tokens: 3,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }),
+            }],
+            created_at: "x".to_string(),
+            updated_at: "y".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        };
+        let v = serde_json::to_value(&snap).unwrap();
+        let msgs = v["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"][0]["text"], "hi");
+        assert_eq!(msgs[0]["content"][0]["type"], "text");
+        assert_eq!(msgs[0]["usage"]["input_tokens"], 5);
+        assert_eq!(msgs[0]["usage"]["output_tokens"], 3);
+    }
+
+    #[test]
+    fn text_block_with_empty_content() {
+        let b = TextBlock::new("");
+        assert_eq!(b.kind, "text");
+        assert_eq!(b.text, "");
+        let v = serde_json::to_value(&b).unwrap();
+        assert_eq!(v["type"], "text");
+        assert_eq!(v["text"], "");
+    }
+
+    #[test]
+    fn message_usage_all_zero_cache_fields_are_omitted() {
+        let usage = MessageUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let v = serde_json::to_value(&usage).unwrap();
+        assert_eq!(v["input_tokens"], 0);
+        assert_eq!(v["output_tokens"], 0);
+        assert!(v.get("cache_creation_input_tokens").is_none());
+        assert!(v.get("cache_read_input_tokens").is_none());
+    }
 }

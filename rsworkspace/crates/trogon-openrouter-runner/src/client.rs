@@ -657,4 +657,108 @@ mod tests {
         let h = headers_with_retry_after("Wed, 21 Oct 2025 07:28:00 GMT");
         assert_eq!(retry_delay(&h, 0), Duration::from_secs(1));
     }
+
+    #[test]
+    fn retry_delay_at_attempt_4_is_below_cap() {
+        // 2^4 = 16, which is under the 30s cap.
+        assert_eq!(retry_delay(&empty_headers(), 4), Duration::from_secs(16));
+    }
+
+    // ── SSE parser edge cases ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_content_null_is_skipped() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":null},"finish_reason":null}]}"#,
+        ]);
+        assert!(events.is_empty(), "null content must not emit TextDelta");
+    }
+
+    #[test]
+    fn parse_finish_reason_null_is_skipped() {
+        // finish_reason: null means still generating — must not emit a Finished event.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"text"},"finish_reason":null}]}"#,
+        ]);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { .. }));
+    }
+
+    #[test]
+    fn parse_usage_empty_object_is_skipped() {
+        // Empty usage object must not emit a Usage event.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[],"usage":{}}"#,
+        ]);
+        assert!(events.is_empty(), "empty usage object must not emit Usage event");
+    }
+
+    #[test]
+    fn parse_usage_missing_completion_tokens_defaults_to_zero() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[],"usage":{"prompt_tokens":10}}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 0 }),
+            "missing completion_tokens must default to 0: {events:?}"
+        );
+    }
+
+    #[test]
+    fn parse_usage_missing_prompt_tokens_defaults_to_zero() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[],"usage":{"completion_tokens":5}}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 0, completion_tokens: 5 }),
+            "missing prompt_tokens must default to 0: {events:?}"
+        );
+    }
+
+    #[test]
+    fn parse_text_with_unicode_characters() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"こんにちは 🌸"},"finish_reason":null}]}"#,
+        ]);
+        assert!(
+            matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "こんにちは 🌸")
+        );
+    }
+
+    #[test]
+    fn parse_multiple_choices_uses_first() {
+        // When multiple choices are present (e.g., n>1), only the first is used.
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"first"},"finish_reason":null},{"delta":{"content":"second"},"finish_reason":null}]}"#,
+        ]);
+        assert_eq!(events.len(), 1, "only first choice must be used");
+        assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "first"));
+    }
+
+    // ── Message edge cases ────────────────────────────────────────────────────
+
+    #[test]
+    fn message_empty_content_has_correct_role() {
+        let m = Message::user("");
+        assert_eq!(m.role, "user");
+        assert_eq!(m.content, "");
+    }
+
+    #[test]
+    fn message_empty_content_serializes_correctly() {
+        let m = Message::user("");
+        let v = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["role"], "user");
+        assert_eq!(v["content"], "");
+        assert!(v.get("prompt_tokens").is_none());
+    }
+
+    #[test]
+    fn message_clone_is_independent() {
+        let m = Message::assistant_with_usage("hello", 10, 5);
+        let m2 = m.clone();
+        assert_eq!(m2.content, "hello");
+        assert_eq!(m2.prompt_tokens, Some(10));
+        assert_eq!(m2.completion_tokens, Some(5));
+    }
 }

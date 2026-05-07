@@ -172,4 +172,40 @@ mod tests {
         let out = format_skill_sections(vec![sec("Solo", "content")]).unwrap();
         assert!(!out.contains("---"), "single skill must not contain separator");
     }
+
+    #[test]
+    fn header_preamble_line_is_present() {
+        let out = format_skill_sections(vec![sec("A", "x")]).unwrap();
+        assert!(
+            out.contains("The following skills define specialized knowledge"),
+            "output must contain the preamble line: {out:?}"
+        );
+    }
+
+    #[test]
+    fn multiline_skill_content_is_preserved() {
+        let content = "line one\nline two\nline three";
+        let out = format_skill_sections(vec![sec("Docs", content)]).unwrap();
+        assert!(out.contains("line one\nline two\nline three"));
+    }
+
+    #[test]
+    fn separator_is_only_between_skills_not_at_end() {
+        let out = format_skill_sections(vec![
+            sec("First", "a"),
+            sec("Second", "b"),
+        ])
+        .unwrap();
+        // Exactly one separator between the two skills.
+        let sep_count = out.matches("\n\n---\n\n").count();
+        assert_eq!(sep_count, 1, "must have exactly one separator: {out:?}");
+        // No separator after the last skill.
+        assert!(!out.ends_with("---\n\n"), "must not have trailing separator");
+    }
+
+    #[test]
+    fn skill_section_header_format_is_h2() {
+        let out = format_skill_sections(vec![sec("MySkill", "body")]).unwrap();
+        assert!(out.contains("## Skill: MySkill\n\nbody"));
+    }
 }
