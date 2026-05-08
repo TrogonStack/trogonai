@@ -1,5 +1,9 @@
 use crate::EventId;
 
+mod error;
+
+pub use error::{EncodeEventError, EventDataEncodeError};
+
 pub trait EventCodec<T> {
     type Error;
 

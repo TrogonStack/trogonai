@@ -10,11 +10,9 @@ pub mod snapshot;
 mod stream;
 pub mod testing;
 
-pub use codec::{CanonicalEventCodec, EventCodec, EventIdentity, EventType};
+pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventDataEncodeError, EventIdentity, EventType};
 pub use decision::{Act, Decide, Decision, NonEmpty};
-pub use event::{
-    EncodeEventError, EventData, EventDataEncodeError, EventMetadata, EventMetadataError, MetadataKey, RecordedEvent,
-};
+pub use event::{EventData, EventMetadata, EventMetadataError, MetadataKey, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
