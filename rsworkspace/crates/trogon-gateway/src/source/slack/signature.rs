@@ -1,19 +1,35 @@
+use std::fmt;
+
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum SignatureError {
-    #[error("missing v0= prefix")]
     MissingPrefix,
-    #[error("invalid hex encoding")]
-    InvalidHex(#[source] hex::FromHexError),
-    #[error("invalid HMAC key")]
-    InvalidKey(#[source] hmac::digest::InvalidLength),
-    #[error("signature mismatch")]
+    InvalidHex(hex::FromHexError),
     Mismatch,
+}
+
+impl fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SignatureError::MissingPrefix => f.write_str("missing v0= prefix"),
+            SignatureError::InvalidHex(_) => f.write_str("invalid hex encoding"),
+            SignatureError::Mismatch => f.write_str("signature mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for SignatureError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SignatureError::InvalidHex(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 /// Verifies a Slack request signature using constant-time comparison.

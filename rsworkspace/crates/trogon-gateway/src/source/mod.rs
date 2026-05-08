@@ -7,6 +7,5 @@ pub mod microsoft_graph;
 pub mod notion;
 pub mod sentry;
 pub mod slack;
-mod standard_webhooks;
 pub mod telegram;
 pub mod twitter;

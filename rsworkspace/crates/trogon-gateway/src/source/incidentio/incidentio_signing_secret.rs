@@ -4,14 +4,30 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum IncidentioSigningSecretError {
-    #[error("signing secret must not be empty")]
     Empty,
-    #[error("signing secret must start with whsec_")]
     MissingPrefix,
-    #[error("signing secret must be valid base64")]
-    InvalidBase64(#[source] base64::DecodeError),
+    InvalidBase64(base64::DecodeError),
+}
+
+impl fmt::Display for IncidentioSigningSecretError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("signing secret must not be empty"),
+            Self::MissingPrefix => f.write_str("signing secret must start with whsec_"),
+            Self::InvalidBase64(_) => f.write_str("signing secret must be valid base64"),
+        }
+    }
+}
+
+impl std::error::Error for IncidentioSigningSecretError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidBase64(err) => Some(err),
+            Self::Empty | Self::MissingPrefix => None,
+        }
+    }
 }
 
 #[derive(Clone)]

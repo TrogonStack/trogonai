@@ -1,5 +1,6 @@
 #![cfg_attr(coverage, allow(dead_code))]
 
+use std::fmt;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -13,12 +14,30 @@ const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const TELEGRAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum RegistrationError {
-    #[error("Telegram webhook registration request failed: {0}")]
-    Request(#[source] reqwest::Error),
-    #[error("Telegram webhook registration rejected with {status}: {description}")]
+    Request(reqwest::Error),
     Rejected { status: StatusCode, description: String },
+}
+
+impl fmt::Display for RegistrationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Request(error) => write!(f, "Telegram webhook registration request failed: {error}"),
+            Self::Rejected { status, description } => {
+                write!(f, "Telegram webhook registration rejected with {status}: {description}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RegistrationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Request(error) => Some(error),
+            Self::Rejected { .. } => None,
+        }
+    }
 }
 
 impl From<reqwest::Error> for RegistrationError {
@@ -202,8 +221,7 @@ mod tests {
         body: Vec<u8>,
     }
 
-    #[derive(Debug, thiserror::Error)]
-    #[error("{0}")]
+    #[derive(Debug)]
     struct FakeHttpError(String);
 
     impl FakeHttpError {
@@ -211,6 +229,14 @@ mod tests {
             Self(message.into())
         }
     }
+
+    impl fmt::Display for FakeHttpError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl Error for FakeHttpError {}
 
     impl From<serde_json::Error> for FakeHttpError {
         fn from(error: serde_json::Error) -> Self {
@@ -309,10 +335,7 @@ mod tests {
             webhook_secret: TelegramWebhookSecret::new("webhook-secret").unwrap(),
             registration: Some(TelegramWebhookRegistrationConfig {
                 bot_token: TelegramBotToken::new(TEST_BOT_TOKEN).unwrap(),
-                public_webhook_url: TelegramPublicWebhookUrl::new(
-                    "https://example.com/sources/telegram/primary/webhook",
-                )
-                .unwrap(),
+                public_webhook_url: TelegramPublicWebhookUrl::new("https://example.com/telegram/webhook").unwrap(),
             }),
             subject_prefix: NatsToken::new("telegram").unwrap(),
             stream_name: NatsToken::new("TELEGRAM").unwrap(),
@@ -398,7 +421,7 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<Value>(&request.body).unwrap(),
             json!({
-                "url": "https://example.com/sources/telegram/primary/webhook",
+                "url": "https://example.com/telegram/webhook",
                 "secret_token": "webhook-secret",
             })
         );
@@ -520,7 +543,7 @@ mod tests {
             "http://not a valid url",
             &SetWebhook {
                 bot_token: TEST_BOT_TOKEN.to_string(),
-                public_webhook_url: "https://example.com/sources/telegram/primary/webhook".to_string(),
+                public_webhook_url: "https://example.com/telegram/webhook".to_string(),
                 webhook_secret: "webhook-secret".to_string(),
             },
         )
