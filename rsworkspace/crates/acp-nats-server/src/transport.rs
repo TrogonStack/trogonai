@@ -289,6 +289,14 @@ enum PendingRequest {
     },
 }
 
+fn fail_pending_initialize_on_close(pending_request: &mut Option<PendingRequest>) {
+    if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
+        let _ = response.send(Err(HttpTransportError::internal(
+            "HTTP connection closed before the request completed",
+        )));
+    }
+}
+
 #[derive(Clone, Debug)]
 struct PendingResponseContext {
     session_id: acp_nats::AcpSessionId,
@@ -1315,11 +1323,7 @@ pub async fn run_http_connection<N, J>(
         }
     }
 
-    if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
-        let _ = response.send(Err(HttpTransportError::internal(
-            "HTTP connection closed before the request completed",
-        )));
-    }
+    fail_pending_initialize_on_close(&mut pending_request);
 
     input_task.abort();
     output_task.abort();
@@ -2652,5 +2656,25 @@ mod tests {
                 .expect("HTTP connection task did not finish after shutdown");
             })
             .await;
+    }
+
+    #[tokio::test]
+    async fn fail_pending_initialize_on_close_sends_internal_error() {
+        let (response_tx, response_rx) = oneshot::channel();
+        let mut pending_request = Some(PendingRequest::Initialize {
+            request_id: RequestId::Number(1),
+            response: response_tx,
+        });
+
+        fail_pending_initialize_on_close(&mut pending_request);
+
+        assert!(pending_request.is_none());
+        assert!(matches!(
+            response_rx.await.unwrap(),
+            Err(HttpTransportError::Internal {
+                message: "HTTP connection closed before the request completed",
+                source: None,
+            })
+        ));
     }
 }

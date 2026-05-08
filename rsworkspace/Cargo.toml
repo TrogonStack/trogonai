@@ -13,6 +13,9 @@ all = "deny"
 # Internal crates
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
+mcp-nats = { path = "crates/mcp-nats" }
+mcp-nats-server = { path = "crates/mcp-nats-server" }
+mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-source-discord = { path = "crates/trogon-source-discord" }
@@ -30,6 +33,9 @@ trogon-std = { path = "crates/trogon-std" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
+
+# MCP
+rmcp = { version = "=1.6.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
 
 # Async runtime & networking
 async-compat = "=0.2.5"
