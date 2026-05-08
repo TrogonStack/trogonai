@@ -93,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref cfg) = resolved.telegram
         && cfg.registration.is_some()
     {
-        let telegram_http_client = crate::source::telegram::registration_http_client()?;
-        crate::source::telegram::register_webhook(cfg, &telegram_http_client).await?;
+        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
+        crate::source::telegram::registration::register_webhook(cfg, &telegram_http_client).await?;
     }
 
     let port = resolved.http_server.port;
