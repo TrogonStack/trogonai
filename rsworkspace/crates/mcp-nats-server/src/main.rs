@@ -2,13 +2,20 @@ mod allowed_host;
 mod config;
 mod constants;
 
+use axum::Router;
+use tokio::net::TcpListener;
+use tracing::{error, info};
+use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
+use trogon_telemetry::{ResourceAttribute, ServiceName};
+
+use crate::constants::MCP_ENDPOINT;
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 mod runtime {
     use std::collections::HashMap;
     use std::io;
 
-    use axum::Router;
     use mcp_nats::{
         ClientJsonRpcMessage, Config, ErrorData, FlushClient, McpPeerId, NatsTransport, PublishClient, RequestClient,
         RequestId, ServerJsonRpcMessage, SubscribeClient,
@@ -18,66 +25,16 @@ mod runtime {
     use rmcp::transport::Transport;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
     use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-    use tokio::net::TcpListener;
     use tokio::sync::{mpsc, oneshot};
-    use tracing::{error, info, warn};
-    use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
-    use trogon_telemetry::{ResourceAttribute, ServiceName};
+    use tracing::warn;
     use uuid::Uuid;
 
-    use crate::BoxError;
     use crate::allowed_host::AllowedHost;
-    use crate::config;
-    use crate::constants::MCP_ENDPOINT;
 
     type ProxyResponse = oneshot::Sender<Result<ServerResult, ErrorData>>;
     type ProxyAck = oneshot::Sender<Result<(), ErrorData>>;
 
-    pub async fn run() -> Result<(), BoxError> {
-        let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
-        let config::HttpBridgeConfig {
-            mcp,
-            client_id_prefix,
-            server_id,
-            bind_addr,
-            allowed_hosts,
-        } = config;
-        let mcp = mcp_nats::apply_timeout_overrides(mcp, &SystemEnv);
-        trogon_telemetry::init_logger(
-            ServiceName::McpNatsServer,
-            [ResourceAttribute::mcp_prefix(mcp.prefix_str())],
-            &SystemEnv,
-            &SystemFs,
-        );
-
-        let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
-        let nats_client = mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?;
-        let client_ids = ClientIdFactory::new(client_id_prefix);
-        let http_config = streamable_http_config(allowed_hosts);
-        let service = streamable_http_service(nats_client, mcp, client_ids, server_id, http_config);
-        let app = Router::new().route_service(MCP_ENDPOINT, service);
-        let listener = TcpListener::bind(bind_addr).await?;
-
-        info!(endpoint = %format!("http://{bind_addr}{MCP_ENDPOINT}"), "MCP HTTP bridge starting");
-
-        let result = axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await;
-
-        match &result {
-            Ok(()) => info!("MCP HTTP bridge stopped"),
-            Err(error) => error!(error = %error, "MCP HTTP bridge stopped with error"),
-        }
-
-        if let Err(error) = trogon_telemetry::shutdown_otel() {
-            error!(error = %error, "OpenTelemetry shutdown failed");
-        }
-
-        result?;
-        Ok(())
-    }
-
-    fn streamable_http_config(allowed_hosts: Vec<AllowedHost>) -> StreamableHttpServerConfig {
+    pub fn streamable_http_config(allowed_hosts: Vec<AllowedHost>) -> StreamableHttpServerConfig {
         let config = StreamableHttpServerConfig::default();
         if allowed_hosts.is_empty() {
             config
@@ -402,6 +359,7 @@ mod runtime {
 
     #[cfg(test)]
     mod tests {
+        use axum::Router;
         use axum::body::{Body, to_bytes};
         use axum::http::{Request, StatusCode, header};
         use rmcp::model::{
@@ -540,5 +498,45 @@ mod runtime {
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    runtime::run().await
+    let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
+    let config::HttpBridgeConfig {
+        mcp,
+        client_id_prefix,
+        server_id,
+        bind_addr,
+        allowed_hosts,
+    } = config;
+    let mcp = mcp_nats::apply_timeout_overrides(mcp, &SystemEnv);
+    trogon_telemetry::init_logger(
+        ServiceName::McpNatsServer,
+        [ResourceAttribute::mcp_prefix(mcp.prefix_str())],
+        &SystemEnv,
+        &SystemFs,
+    );
+
+    let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
+    let nats_client = mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?;
+    let client_ids = runtime::ClientIdFactory::new(client_id_prefix);
+    let http_config = runtime::streamable_http_config(allowed_hosts);
+    let service = runtime::streamable_http_service(nats_client, mcp, client_ids, server_id, http_config);
+    let app = Router::new().route_service(MCP_ENDPOINT, service);
+    let listener = TcpListener::bind(bind_addr).await?;
+
+    info!(endpoint = %format!("http://{bind_addr}{MCP_ENDPOINT}"), "MCP HTTP bridge starting");
+
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+
+    match &result {
+        Ok(()) => info!("MCP HTTP bridge stopped"),
+        Err(error) => error!(error = %error, "MCP HTTP bridge stopped with error"),
+    }
+
+    if let Err(error) = trogon_telemetry::shutdown_otel() {
+        error!(error = %error, "OpenTelemetry shutdown failed");
+    }
+
+    result?;
+    Ok(())
 }
