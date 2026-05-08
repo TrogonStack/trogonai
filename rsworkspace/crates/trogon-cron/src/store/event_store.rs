@@ -13,12 +13,19 @@ use crate::{error::CronError, projections::project_appended_events};
 #[derive(Clone)]
 pub struct EventStore {
     inner: JetStreamStore<JobEventSubjectResolver>,
+    cron_jobs_bucket: kv::Store,
 }
 
 impl EventStore {
-    pub fn new(js: jetstream::Context, events_stream: jetstream::stream::Stream, snapshot_bucket: kv::Store) -> Self {
+    pub fn new(
+        js: jetstream::Context,
+        events_stream: jetstream::stream::Stream,
+        command_snapshot_bucket: kv::Store,
+        cron_jobs_bucket: kv::Store,
+    ) -> Self {
         Self {
-            inner: JetStreamStore::new(js, events_stream, snapshot_bucket, JobEventSubjectResolver),
+            inner: JetStreamStore::new(js, events_stream, command_snapshot_bucket, JobEventSubjectResolver),
+            cron_jobs_bucket,
         }
     }
 
@@ -44,7 +51,7 @@ impl StreamAppend<str> for EventStore {
         let outcome = self.inner.append_stream(request).await.map_err(CronError::from)?;
 
         project_appended_events(
-            self.inner.snapshot_bucket(),
+            &self.cron_jobs_bucket,
             stream_id,
             projected_events.as_slice(),
             outcome.stream_position,

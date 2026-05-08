@@ -16,7 +16,7 @@ use trogon_std::{NowV7, UuidV7Generator, signal};
 use crate::{
     ResolvedJob,
     error::CronError,
-    kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY, LEGACY_EVENTS_SUBJECT_PREFIX},
+    kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
     proto::{JobEventCodec, v1},
     store::{Store, connect_store},
@@ -738,15 +738,12 @@ async fn nak_scheduler_message(message: &jetstream::Message) {
 }
 
 fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
-    let raw_id = subject
-        .strip_prefix(EVENTS_SUBJECT_PREFIX)
-        .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
-        .ok_or_else(|| {
-            CronError::event_source(
-                "failed to derive job stream id from event subject",
-                std::io::Error::other(subject.to_string()),
-            )
-        })?;
+    let raw_id = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
+        CronError::event_source(
+            "failed to derive job stream id from event subject",
+            std::io::Error::other(subject.to_string()),
+        )
+    })?;
 
     validate_event_job_id(raw_id)
         .map(|()| raw_id.to_string())

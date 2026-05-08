@@ -41,6 +41,6 @@ pub use read_model::{
     MessageEnvelope, MessageHeaders, MessageHeadersError,
 };
 pub use schedule::ResolvedJob;
-pub use store::{Store, connect_store, open_snapshot_bucket, snapshot_store_config};
+pub use store::{Store, connect_store, open_command_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_eventsourcing::{CommandFailure, CommandResult, ExecutionResult, StreamState};

@@ -19,8 +19,8 @@ mod tests {
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
         assert!(v1::JobRemoved::parse(&event.payload).is_ok());
         assert_eq!(
-            event.subject_with_prefix("cron.events.jobs."),
-            "cron.events.jobs.cleanup"
+            event.subject_with_prefix("cron.jobs.events."),
+            "cron.jobs.events.cleanup"
         );
 
         assert_eq!(event.decode_data_with(&JobEventCodec).unwrap(), removed);
@@ -35,8 +35,8 @@ mod tests {
         assert_eq!(recorded.recorded_stream_id, "cron.jobs.events.cleanup");
         assert_eq!(recorded.log_position, Some(9));
         assert_eq!(
-            recorded.subject_with_prefix("cron.events.jobs."),
-            "cron.events.jobs.cleanup"
+            recorded.subject_with_prefix("cron.jobs.events."),
+            "cron.jobs.events.cleanup"
         );
         let mut expected = v1::JobEvent::new();
         expected.set_job_removed(v1::JobRemoved::new());

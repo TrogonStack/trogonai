@@ -4,7 +4,7 @@ use trogon_eventsourcing::nats::jetstream::{StreamSubjectResolver, SubjectState,
 use crate::{
     config::JobWriteState,
     error::CronError,
-    nats::{EventSubjectPrefix, StreamSubjectState, resolve_event_subject_state},
+    nats::{StreamSubjectState, event_subject, resolve_event_subject_state},
 };
 
 async fn current_subject_state(
@@ -21,10 +21,9 @@ pub(crate) async fn stream_subject_state(
     stream: &jetstream::stream::Stream,
     job_id: &str,
 ) -> Result<StreamSubjectState, CronError> {
-    let canonical_state = current_subject_state(stream, &EventSubjectPrefix::Canonical.subject(job_id)).await?;
-    let legacy_state = current_subject_state(stream, &EventSubjectPrefix::Legacy.subject(job_id)).await?;
+    let canonical_state = current_subject_state(stream, &event_subject(job_id)).await?;
 
-    resolve_event_subject_state(job_id, canonical_state, legacy_state)
+    Ok(resolve_event_subject_state(canonical_state))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,7 +39,7 @@ impl StreamSubjectResolver<str> for JobEventSubjectResolver {
     ) -> Result<SubjectState, Self::Error> {
         let state = stream_subject_state(events_stream, stream_id).await?;
         Ok(SubjectState {
-            subject: state.prefix.subject(stream_id),
+            subject: event_subject(stream_id),
             current_position: state.write_state.current_position(),
         })
     }

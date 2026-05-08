@@ -11,9 +11,8 @@ pub const LEADER_KEY: &str = "lock";
 pub const EVENTS_STREAM: &str = "CRON_EVENTS";
 pub const EVENTS_SUBJECT_PREFIX: &str = "cron.jobs.events.";
 pub const EVENTS_SUBJECT_PATTERN: &str = "cron.jobs.events.>";
-pub const LEGACY_EVENTS_SUBJECT_PREFIX: &str = "cron.events.jobs.";
-pub const LEGACY_EVENTS_SUBJECT_PATTERN: &str = "cron.events.jobs.>";
-pub const SNAPSHOT_BUCKET: &str = "cron_snapshots";
+pub const COMMAND_SNAPSHOT_BUCKET: &str = "cron_command_snapshots";
+pub const CRON_JOBS_CHECKPOINT_KEY: &str = "_query.cron_jobs.last_event_sequence";
 pub const SCHEDULES_STREAM: &str = "CRON_SCHEDULES";
 pub const SCHEDULE_SUBJECT_PREFIX: &str = "cron.schedules.";
 pub const FIRE_SUBJECT_PREFIX: &str = "cron.fire.";
@@ -42,11 +41,11 @@ pub async fn get_or_create_cron_jobs_bucket(_js: &jetstream::Context) -> Result<
 }
 
 #[cfg(not(coverage))]
-pub async fn get_or_create_snapshot_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_command_snapshot_bucket(js: &jetstream::Context) -> Result<kv::Store, CronError> {
     get_or_create(
         js,
         kv::Config {
-            bucket: SNAPSHOT_BUCKET.to_string(),
+            bucket: COMMAND_SNAPSHOT_BUCKET.to_string(),
             history: 1,
             ..Default::default()
         },
@@ -55,10 +54,10 @@ pub async fn get_or_create_snapshot_bucket(js: &jetstream::Context) -> Result<kv
 }
 
 #[cfg(coverage)]
-pub async fn get_or_create_snapshot_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
+pub async fn get_or_create_command_snapshot_bucket(_js: &jetstream::Context) -> Result<kv::Store, CronError> {
     Err(CronError::kv_source(
-        "coverage stub does not provision snapshot buckets",
-        std::io::Error::other(SNAPSHOT_BUCKET),
+        "coverage stub does not provision command snapshot buckets",
+        std::io::Error::other(COMMAND_SNAPSHOT_BUCKET),
     ))
 }
 
@@ -124,10 +123,7 @@ pub async fn get_or_create_schedule_stream(_js: &jetstream::Context) -> Result<s
 pub async fn get_or_create_events_stream(js: &jetstream::Context) -> Result<stream::Stream, CronError> {
     let config = stream::Config {
         name: EVENTS_STREAM.to_string(),
-        subjects: vec![
-            EVENTS_SUBJECT_PATTERN.to_string(),
-            LEGACY_EVENTS_SUBJECT_PATTERN.to_string(),
-        ],
+        subjects: vec![EVENTS_SUBJECT_PATTERN.to_string()],
         allow_atomic_publish: true,
         ..Default::default()
     };
