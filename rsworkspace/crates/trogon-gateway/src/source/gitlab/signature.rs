@@ -1,35 +1,61 @@
-use axum::http::HeaderMap;
-use trogon_std::NonZeroDuration;
+use sha2::{Digest, Sha256};
+use std::fmt;
 
-use super::GitLabSigningToken;
-use super::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
-use crate::source::standard_webhooks::{self, HeaderNames};
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum SignatureError {
+    Missing,
+    Mismatch,
+}
 
-pub use crate::source::standard_webhooks::SignatureError;
-#[cfg(test)]
-pub use crate::source::standard_webhooks::{WebhookId, WebhookTimestamp};
+impl fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SignatureError::Missing => f.write_str("missing token"),
+            SignatureError::Mismatch => f.write_str("token mismatch"),
+        }
+    }
+}
 
-const HEADER_NAMES: HeaderNames = HeaderNames {
-    webhook_id: HEADER_WEBHOOK_ID,
-    webhook_timestamp: HEADER_WEBHOOK_TIMESTAMP,
-    webhook_signature: HEADER_WEBHOOK_SIGNATURE,
-};
+impl std::error::Error for SignatureError {}
 
-pub fn verify(
-    headers: &HeaderMap,
-    body: &[u8],
-    signing_token: &GitLabSigningToken,
-    timestamp_tolerance: NonZeroDuration,
-) -> Result<(), SignatureError> {
-    standard_webhooks::verify(
-        headers,
-        body,
-        signing_token.as_bytes(),
-        timestamp_tolerance,
-        HEADER_NAMES,
-    )
-    .map(|_| ())
+pub fn verify(secret: &str, provided_token: &str) -> Result<(), SignatureError> {
+    if provided_token.is_empty() {
+        return Err(SignatureError::Missing);
+    }
+
+    let expected = Sha256::digest(secret.as_bytes());
+    let provided = Sha256::digest(provided_token.as_bytes());
+
+    let ok = subtle::ConstantTimeEq::ct_eq(expected.as_slice(), provided.as_slice()).unwrap_u8();
+    if ok == 1 { Ok(()) } else { Err(SignatureError::Mismatch) }
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_display_messages() {
+        assert_eq!(SignatureError::Missing.to_string(), "missing token");
+        assert_eq!(SignatureError::Mismatch.to_string(), "token mismatch");
+    }
+
+    #[test]
+    fn valid_token_passes() {
+        assert!(verify("test-secret", "test-secret").is_ok());
+    }
+
+    #[test]
+    fn wrong_token_fails() {
+        assert!(matches!(
+            verify("correct-secret", "wrong-secret"),
+            Err(SignatureError::Mismatch)
+        ));
+    }
+
+    #[test]
+    fn missing_token_fails() {
+        assert!(matches!(verify("secret", ""), Err(SignatureError::Missing)));
+    }
+}

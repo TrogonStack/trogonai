@@ -8,12 +8,28 @@ use trogon_std::{EmptySecret, NonZeroDuration, SecretString};
 #[derive(Clone)]
 pub struct TelegramBotToken(SecretString);
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum TelegramBotTokenError {
-    #[error("{0}")]
-    Empty(#[source] EmptySecret),
-    #[error("must match Telegram bot token format")]
+    Empty(EmptySecret),
     InvalidFormat,
+}
+
+impl fmt::Display for TelegramBotTokenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty(error) => write!(f, "{error}"),
+            Self::InvalidFormat => f.write_str("must match Telegram bot token format"),
+        }
+    }
+}
+
+impl std::error::Error for TelegramBotTokenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Empty(error) => Some(error),
+            Self::InvalidFormat => None,
+        }
+    }
 }
 
 impl TelegramBotToken {
@@ -71,12 +87,28 @@ impl fmt::Debug for TelegramWebhookSecret {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TelegramPublicWebhookUrl(Url);
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum TelegramPublicWebhookUrlError {
-    #[error("invalid public webhook URL: {0}")]
-    Parse(#[source] url::ParseError),
-    #[error("invalid public webhook URL: must use https")]
+    Parse(url::ParseError),
     InsecureScheme,
+}
+
+impl fmt::Display for TelegramPublicWebhookUrlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(error) => write!(f, "invalid public webhook URL: {error}"),
+            Self::InsecureScheme => f.write_str("invalid public webhook URL: must use https"),
+        }
+    }
+}
+
+impl std::error::Error for TelegramPublicWebhookUrlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Parse(error) => Some(error),
+            Self::InsecureScheme => None,
+        }
+    }
 }
 
 impl TelegramPublicWebhookUrl {
@@ -109,4 +141,77 @@ pub struct TelegramSourceConfig {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn telegram_webhook_secret_roundtrips() {
+        let secret = TelegramWebhookSecret::new("super-secret").unwrap();
+        assert_eq!(secret.as_str(), "super-secret");
+    }
+
+    #[test]
+    fn telegram_webhook_secret_debug_redacts() {
+        let secret = TelegramWebhookSecret::new("super-secret").unwrap();
+        assert_eq!(format!("{secret:?}"), "TelegramWebhookSecret(****)");
+    }
+
+    #[test]
+    fn telegram_bot_token_roundtrips() {
+        let token = TelegramBotToken::new("123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
+        assert_eq!(token.as_str(), "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    }
+
+    #[test]
+    fn telegram_bot_token_debug_redacts() {
+        let token = TelegramBotToken::new("123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
+        assert_eq!(format!("{token:?}"), "TelegramBotToken(****)");
+    }
+
+    #[test]
+    fn telegram_bot_token_rejects_empty_secret() {
+        let err = TelegramBotToken::new("").unwrap_err();
+
+        assert!(matches!(err, TelegramBotTokenError::Empty(_)));
+        assert_eq!(err.to_string(), "secret must not be empty");
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn telegram_bot_token_rejects_invalid_shape() {
+        let err = TelegramBotToken::new("123:abc").unwrap_err();
+
+        assert!(matches!(err, TelegramBotTokenError::InvalidFormat));
+        assert_eq!(err.to_string(), "must match Telegram bot token format");
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn telegram_bot_token_rejects_missing_separator() {
+        let err = TelegramBotToken::new("not-a-telegram-token").unwrap_err();
+
+        assert!(matches!(err, TelegramBotTokenError::InvalidFormat));
+    }
+
+    #[test]
+    fn telegram_public_webhook_url_roundtrips() {
+        let url = TelegramPublicWebhookUrl::new("https://example.com/telegram/webhook").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/telegram/webhook");
+    }
+
+    #[test]
+    fn telegram_public_webhook_url_requires_https() {
+        let err = TelegramPublicWebhookUrl::new("http://example.com/telegram/webhook").unwrap_err();
+        assert_eq!(err.to_string(), "invalid public webhook URL: must use https");
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn telegram_public_webhook_url_preserves_parse_error_source() {
+        let err = TelegramPublicWebhookUrl::new("not a url").unwrap_err();
+
+        assert!(matches!(err, TelegramPublicWebhookUrlError::Parse(_)));
+        assert!(err.to_string().starts_with("invalid public webhook URL:"));
+        assert!(std::error::Error::source(&err).is_some());
+    }
+}
