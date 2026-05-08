@@ -217,6 +217,21 @@ mod tests {
         assert_eq!(memory_key("agent", "my agent"), "agent.my_agent");
     }
 
+    #[tokio::test]
+    async fn get_returns_store_error_when_bytes_are_corrupt() {
+        // Store that returns bytes that cannot be deserialized as EntityMemory.
+        let store = MockMemoryStore::new();
+        store
+            .put("pr.some_key", bytes::Bytes::from(b"not-valid-json".to_vec()))
+            .await
+            .unwrap();
+
+        let client = MemoryClient::new(store);
+        // get() should return Err(DreamerError::Store(...)), not panic or Ok(None)
+        let err = client.get("pr", "some/key").await.unwrap_err();
+        assert!(matches!(err, DreamerError::Store(_)));
+    }
+
     #[test]
     fn format_for_prompt_returns_none_when_no_facts() {
         let memory = EntityMemory::default();

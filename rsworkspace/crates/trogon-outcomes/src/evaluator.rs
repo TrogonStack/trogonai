@@ -290,6 +290,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn result_store_put_failure_propagates_as_error() {
+        // When results.put() fails, the error propagates (unlike provider errors
+        // which are swallowed). This documents the intentional asymmetry.
+        use bytes::Bytes;
+        use std::future::Future;
+
+        #[derive(Clone)]
+        struct ReadOnlyStore {
+            inner: MockOutcomesStore,
+        }
+
+        #[derive(Debug)]
+        struct PutErr;
+        impl std::fmt::Display for PutErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "store is read-only")
+            }
+        }
+        impl std::error::Error for PutErr {}
+
+        impl crate::store::OutcomesStore for ReadOnlyStore {
+            type PutError = PutErr;
+            type GetError = std::convert::Infallible;
+            type DeleteError = std::convert::Infallible;
+            type KeysError = std::convert::Infallible;
+
+            fn put(
+                &self,
+                _key: &str,
+                _value: Bytes,
+            ) -> impl Future<Output = Result<u64, PutErr>> + Send {
+                async { Err(PutErr) }
+            }
+            fn get(
+                &self,
+                key: &str,
+            ) -> impl Future<Output = Result<Option<Bytes>, std::convert::Infallible>> + Send {
+                let inner = self.inner.clone();
+                async move { inner.get(key).await }
+            }
+            fn delete(
+                &self,
+                _key: &str,
+            ) -> impl Future<Output = Result<(), std::convert::Infallible>> + Send {
+                async { Ok(()) }
+            }
+            fn keys(
+                &self,
+            ) -> impl Future<Output = Result<Vec<String>, std::convert::Infallible>> + Send {
+                let inner = self.inner.clone();
+                async move { inner.keys().await }
+            }
+        }
+
+        // Rubric store succeeds (read-only store with rubric data loaded in inner).
+        let inner = MockOutcomesStore::new();
+        let rubric_client = RubricClient::new(inner.clone());
+        rubric_client.put(&rubric("r1", None)).await.unwrap();
+        let rubric_store = ReadOnlyStore { inner: inner.clone() };
+        let result_store = ReadOnlyStore { inner: MockOutcomesStore::new() };
+
+        let provider = MockEvaluationProvider::returning(good_scores(), "ok");
+        let ev = Evaluator::new(provider, rubric_store, result_store);
+
+        let err = ev
+            .evaluate_session("pr", "repo/1", "sess-1", &sample_transcript(), &[])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, OutcomesError::Store(_)));
+    }
+
+    #[tokio::test]
     async fn returns_empty_when_no_rubrics_registered() {
         let rubric_store = MockOutcomesStore::new();
         let result_store = MockOutcomesStore::new();

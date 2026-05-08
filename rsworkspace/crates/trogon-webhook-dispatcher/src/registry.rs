@@ -175,6 +175,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_skips_corrupt_entries_and_returns_valid_ones() {
+        use crate::store::mock::MockSubscriptionStore;
+
+        // Pre-populate one corrupt entry and one valid entry directly via the store.
+        let store = MockSubscriptionStore::new();
+        // Valid subscription
+        store
+            .put("valid-id", bytes::Bytes::from(
+                serde_json::to_vec(&make_sub("valid-id", "transcripts.>", "https://ok.com")).unwrap(),
+            ))
+            .await
+            .unwrap();
+        // Corrupt bytes — not valid JSON
+        store
+            .put("corrupt-id", bytes::Bytes::from(b"not-json".to_vec()))
+            .await
+            .unwrap();
+
+        let registry = WebhookRegistry::new(store);
+        let list = registry.list().await.unwrap();
+        assert_eq!(list.len(), 1, "corrupt entry must be silently skipped");
+        assert_eq!(list[0].id, "valid-id");
+    }
+
+    #[tokio::test]
     async fn matching_returns_empty_when_store_fails() {
         #[derive(Clone)]
         struct FailingStore;

@@ -314,6 +314,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn duplicate_capability_uses_first_registered_agent() {
+        // Two agents both advertise "code_review". The first one registered must
+        // be selected (find() returns the first match in list_all() order).
+        let cap1 = AgentCapability::new("AgentA", ["code_review"], "actors.a.>");
+        let cap2 = AgentCapability::new("AgentB", ["code_review"], "actors.b.>");
+        let plan = plan_with(vec![subtask("1", "code_review")]);
+        let caller = MockAgentCaller::returning(b"from-agent".to_vec());
+        let engine = engine_with(vec![cap1, cap2], plan, "done", caller).await;
+
+        let result = engine.orchestrate("task").await.unwrap();
+
+        assert_eq!(result.sub_results.len(), 1);
+        assert!(result.sub_results[0].success);
+    }
+
+    #[tokio::test]
     async fn all_subtasks_fail_synthesis_is_still_called() {
         // No registered capabilities → all subtasks fail with "no agent registered"
         // The synthesis step is still reached and produces a result.

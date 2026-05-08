@@ -353,6 +353,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_error_is_logged_and_loop_continues_to_next_message() {
+        // An Err from the message stream should be skipped (warn + continue),
+        // not abort the dispatcher. A valid message arriving after the error
+        // must still be delivered.
+        let store = MockSubscriptionStore::new();
+        let registry = WebhookRegistry::new(store);
+        registry
+            .register(&WebhookSubscription {
+                id: "sub-1".to_string(),
+                subject_pattern: "transcripts.>".to_string(),
+                url: "https://example.com/hook".to_string(),
+                secret: None,
+            })
+            .await
+            .unwrap();
+
+        let http = MockWebhookClient::new();
+        let factory = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        factory.add_consumer(consumer);
+
+        // First: a stream error
+        tx.unbounded_send(Err(trogon_nats::mocks::MockError("transient error".into()))).unwrap();
+        // Then: a valid message
+        let msg = MockJsMessage::new(make_nats_msg("transcripts.pr.x.y.z", b"{}"));
+        tx.unbounded_send(Ok(msg)).unwrap();
+
+        let http_clone = http.clone();
+        let dispatcher = make_dispatcher(factory, registry, http);
+        drop(tx);
+        dispatcher.run().await.ok();
+
+        // The valid message must have been delivered despite the preceding error.
+        assert_eq!(http_clone.calls().len(), 1);
+    }
+
+    #[tokio::test]
     async fn non_2xx_delivery_does_not_prevent_other_subscriptions() {
         // Two matching subscriptions — even when delivery returns 500,
         // the dispatcher must attempt all subscriptions, not short-circuit.
