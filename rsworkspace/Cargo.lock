@@ -5292,6 +5292,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-memory"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-transcript",
+]
+
+[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
@@ -5309,6 +5329,50 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "trogon-std",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-std",
+ "trogon-transcript",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-outcomes"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-transcript",
  "uuid",
 ]
 
