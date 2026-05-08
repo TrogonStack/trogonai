@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use trogon_agent_core::agent_loop::Message;
 
+use crate::egress::EgressPolicy;
+
 /// A URL-based MCP server configuration stored per session.
 /// Stdio servers are not supported in the NATS model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +17,45 @@ pub struct StoredMcpServer {
     #[serde(default)]
     pub headers: Vec<(String, String)>,
 }
+
+// ── Feature 1: Path-scoped RBAC ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyAction {
+    Allow,
+    RequireApproval,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolPolicy {
+    pub tool: String,
+    pub path_pattern: String,
+    pub action: PolicyAction,
+}
+
+// ── Feature 3: Audit trail ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditOutcome {
+    Allowed,
+    Denied,
+    RequiredApproval,
+    ApprovedByUser,
+    DeniedByUser,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuditEntry {
+    pub timestamp: String,
+    pub tool: String,
+    pub input_summary: String,
+    pub outcome: AuditOutcome,
+}
+
+const AUDIT_LOG_CAP: usize = 500;
 
 const BUCKET: &str = "ACP_SESSIONS";
 
@@ -63,6 +104,24 @@ pub struct SessionState {
     /// None means the entire source history was copied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// Structured per-tool path policies evaluated before the interactive gate.
+    #[serde(default)]
+    pub tool_policies: Vec<ToolPolicy>,
+    /// Egress policy for outbound MCP server connections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_policy: Option<EgressPolicy>,
+    /// Audit log of permission decisions for this session.
+    #[serde(default)]
+    pub audit_log: Vec<AuditEntry>,
+}
+
+/// Append new audit entries to the log, trimming oldest entries if over cap.
+pub fn append_audit_entries(audit_log: &mut Vec<AuditEntry>, mut new_entries: Vec<AuditEntry>) {
+    audit_log.append(&mut new_entries);
+    if audit_log.len() > AUDIT_LOG_CAP {
+        let excess = audit_log.len() - AUDIT_LOG_CAP;
+        audit_log.drain(..excess);
+    }
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
