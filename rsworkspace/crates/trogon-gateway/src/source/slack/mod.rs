@@ -40,4 +40,3 @@ pub mod signature;
 
 pub use config::SlackConfig;
 pub use server::{provision, router};
-pub use signature::SignatureError;

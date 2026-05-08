@@ -11,7 +11,6 @@ pub mod server;
 pub mod signature;
 
 pub use config::NotionConfig;
-pub use notion_event_type::{NotionEventType, NotionEventTypeError};
+pub use notion_event_type::NotionEventType;
 pub use notion_verification_token::NotionVerificationToken;
 pub use server::{provision, router};
-pub use signature::SignatureError;

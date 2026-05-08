@@ -8,7 +8,6 @@ pub mod server;
 pub mod signature;
 
 pub use config::IncidentioConfig;
-pub use incidentio_event_type::{IncidentioEventType, IncidentioEventTypeError};
-pub use incidentio_signing_secret::{IncidentioSigningSecret, IncidentioSigningSecretError};
+pub use incidentio_event_type::IncidentioEventType;
+pub use incidentio_signing_secret::IncidentioSigningSecret;
 pub use server::{provision, router};
-pub use signature::SignatureError;

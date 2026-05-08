@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_imports)]
-
 pub mod discord;
 pub mod github;
 pub mod gitlab;

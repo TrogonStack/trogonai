@@ -25,10 +25,7 @@ pub enum SignatureError {
     },
     InvalidWebhookId(WebhookIdError),
     InvalidTimestamp(WebhookTimestampError),
-    StaleTimestamp {
-        age_secs: u64,
-        tolerance_secs: u64,
-    },
+    StaleTimestamp,
     InvalidSignatureEncoding(base64::DecodeError),
     MissingV1Signature,
     Mismatch,
@@ -43,7 +40,7 @@ impl fmt::Display for SignatureError {
             }
             Self::InvalidWebhookId(_) => f.write_str("invalid webhook id"),
             Self::InvalidTimestamp(_) => f.write_str("invalid webhook timestamp"),
-            Self::StaleTimestamp { .. } => f.write_str("webhook timestamp outside tolerance"),
+            Self::StaleTimestamp => f.write_str("webhook timestamp outside tolerance"),
             Self::InvalidSignatureEncoding(_) => f.write_str("invalid signature encoding"),
             Self::MissingV1Signature => f.write_str("missing v1 signature"),
             Self::Mismatch => f.write_str("signature mismatch"),
@@ -220,10 +217,7 @@ fn verify_timestamp(timestamp: &WebhookTimestamp, tolerance: NonZeroDuration) ->
     let age_secs = now.abs_diff(timestamp.as_secs());
     let tolerance_secs = Duration::from(tolerance).as_secs();
     if age_secs > tolerance_secs {
-        return Err(SignatureError::StaleTimestamp {
-            age_secs,
-            tolerance_secs,
-        });
+        return Err(SignatureError::StaleTimestamp);
     }
     Ok(())
 }
@@ -483,7 +477,7 @@ mod tests {
         headers.insert(HEADER_WEBHOOK_SIGNATURE, HeaderValue::from_str(&signature).unwrap());
 
         let err = verify(&headers, body, &secret, NonZeroDuration::from_secs(300).unwrap()).unwrap_err();
-        assert!(matches!(err, SignatureError::StaleTimestamp { .. }));
+        assert!(matches!(err, SignatureError::StaleTimestamp));
         assert_eq!(err.to_string(), "webhook timestamp outside tolerance");
         assert!(err.source().is_none());
     }

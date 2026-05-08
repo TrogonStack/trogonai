@@ -6,6 +6,5 @@ pub mod constants;
 pub mod server;
 pub mod signature;
 
-pub use config::{TwitterConfig, TwitterConsumerSecret};
+pub use config::TwitterConfig;
 pub use server::{provision, router};
-pub use signature::SignatureError;

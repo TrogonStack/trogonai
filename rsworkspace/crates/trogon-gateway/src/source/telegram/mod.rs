@@ -41,6 +41,5 @@ pub mod server;
 pub mod signature;
 
 pub use config::TelegramSourceConfig;
-pub use registration::{RegistrationError, register_webhook, registration_http_client};
+pub use registration::{register_webhook, registration_http_client};
 pub use server::{provision, router};
-pub use signature::SignatureError;

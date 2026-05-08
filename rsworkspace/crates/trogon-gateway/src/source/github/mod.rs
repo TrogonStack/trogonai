@@ -38,4 +38,3 @@ pub mod signature;
 
 pub use config::GithubConfig;
 pub use server::{provision, router};
-pub use signature::SignatureError;

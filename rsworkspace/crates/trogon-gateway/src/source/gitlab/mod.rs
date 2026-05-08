@@ -41,4 +41,3 @@ pub mod server;
 pub mod signature;
 pub use config::GitlabConfig;
 pub use server::{provision, router};
-pub use signature::SignatureError;
