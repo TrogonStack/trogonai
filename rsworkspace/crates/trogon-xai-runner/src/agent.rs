@@ -1762,6 +1762,10 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             .get(id)
             .and_then(|s| s.system_prompt.clone())
     }
+
+    pub fn test_notifier(&self) -> &N {
+        &self.notifier
+    }
 }
 
 #[cfg(test)]

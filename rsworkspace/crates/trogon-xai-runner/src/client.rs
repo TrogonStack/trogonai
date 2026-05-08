@@ -2205,4 +2205,423 @@ mod tests {
             "mid-stream connection drop must produce XaiEvent::Error; got: {events:?}"
         );
     }
+
+    // ── ToolSpec serialization ────────────────────────────────────────────────
+
+    // ── FinishReason::ToolCalls SSE parsing ──────────────────────────────────
+
+    #[test]
+    fn finish_reason_tool_calls_from_response_completed_status() {
+        // xAI emits "tool_calls" as the response status when the model stops
+        // to wait for client-side function results.
+        let line =
+            r#"data: {"type":"response.completed","response":{"status":"tool_calls"}}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::ToolCalls)),
+            "status 'tool_calls' must produce FinishReason::ToolCalls; got: {events:?}"
+        );
+    }
+
+    #[test]
+    fn finish_reason_tool_calls_from_requires_action_status() {
+        // Some OpenAI-compatible servers use "requires_action" for the same
+        // semantic — both must map to ToolCalls.
+        let line = r#"data: {"type":"response.done","status":"requires_action"}"#;
+        let events = parse_line_all(line);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, XaiEvent::Finished { reason, .. } if *reason == FinishReason::ToolCalls)),
+            "status 'requires_action' must produce FinishReason::ToolCalls; got: {events:?}"
+        );
+    }
+
+    // ── ToolSpec serialization ────────────────────────────────────────────────
+
+    #[test]
+    fn tool_spec_server_side_serializes_correctly() {
+        let spec = ToolSpec::ServerSide("web_search".to_string());
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["type"], "web_search");
+        assert!(json.get("function").is_none(), "ServerSide must not have a 'function' key");
+    }
+
+    #[test]
+    fn tool_spec_function_serializes_correctly() {
+        let spec = ToolSpec::Function {
+            name: "bash".to_string(),
+            description: "Run a shell command".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["type"], "function");
+        assert_eq!(json["function"]["name"], "bash");
+        assert_eq!(json["function"]["description"], "Run a shell command");
+        assert!(json.get("name").is_none(), "top-level 'name' key must not appear in Function spec");
+    }
+
+    // ── InputItem serialization ───────────────────────────────────────────────
+
+    #[test]
+    fn input_item_message_serializes_correctly() {
+        let item = InputItem::user("hello");
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"], "hello");
+        assert!(json.get("type").is_none(), "Message must not carry a 'type' field");
+    }
+
+    #[test]
+    fn input_item_function_call_output_serializes_correctly() {
+        let item = InputItem::function_call_output("cid_1", "output text");
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["type"], "function_call_output");
+        assert_eq!(json["call_id"], "cid_1");
+        assert_eq!(json["output"], "output text");
+        assert!(json.get("role").is_none(), "FunctionCallOutput must not carry a 'role' field");
+    }
+
+    // ── start_request: HTTP body and header verification ─────────────────────
+    //
+    // Each test spins up a capture-and-discard axum server: the handler stores
+    // the incoming body/headers into a shared Mutex and returns 429.
+    // `start_request` completes its full round-trip before returning the stream,
+    // so the Mutex is ready to read as soon as `chat_stream` returns.
+
+    #[tokio::test]
+    async fn start_request_omits_tools_field_when_tools_empty() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert!(
+            body.get("tools").is_none(),
+            "'tools' must be absent when tools is empty; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_omits_max_turns_when_tools_empty() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        // max_turns = Some(5) but tools = [] — max_turns must still be omitted
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, Some(5))
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert!(
+            body.get("max_turns").is_none(),
+            "'max_turns' must be absent when tools is empty; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_includes_previous_response_id_when_set() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let _stream = XaiHttpClient::chat_stream(
+            &client,
+            "grok-3",
+            &[InputItem::user("hi")],
+            "k",
+            &[],
+            Some("resp_abc_123"),
+            None,
+        )
+        .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert_eq!(
+            body.get("previous_response_id").and_then(|v| v.as_str()),
+            Some("resp_abc_123"),
+            "'previous_response_id' must appear in body when set; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_omits_previous_response_id_when_none() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert!(
+            body.get("previous_response_id").is_none(),
+            "'previous_response_id' must be absent when None; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_sends_authorization_bearer_header() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::{HeaderMap, StatusCode}, routing::post};
+
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |headers: HeaderMap, _body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    let auth = headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    *state.lock().unwrap() = Some(auth);
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let _stream = XaiHttpClient::chat_stream(
+            &client,
+            "grok-3",
+            &[InputItem::user("hi")],
+            "my-secret-key",
+            &[],
+            None,
+            None,
+        )
+        .await;
+        task.abort();
+
+        let auth = captured.lock().unwrap().take().expect("handler did not run");
+        assert_eq!(
+            auth,
+            "Bearer my-secret-key",
+            "Authorization header must be 'Bearer <api_key>'; got: {auth:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_includes_tools_field_when_non_empty() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let tools = [ToolSpec::ServerSide("web_search".to_string())];
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, None)
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        let tools_arr = body.get("tools").and_then(|v| v.as_array());
+        assert!(
+            tools_arr.is_some(),
+            "'tools' must be present in request body when tools is non-empty; body: {body}"
+        );
+        assert_eq!(
+            tools_arr.unwrap().len(),
+            1,
+            "'tools' array must have exactly one entry; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_includes_max_turns_when_tools_non_empty() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let tools = [ToolSpec::ServerSide("web_search".to_string())];
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &tools, None, Some(8))
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert_eq!(
+            body.get("max_turns").and_then(|v| v.as_u64()),
+            Some(8),
+            "'max_turns' must be present and equal 8 when tools is non-empty; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_always_includes_model_and_input_in_body() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let input = [InputItem::user("test-prompt")];
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3-mini", &input, "k", &[], None, None).await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert_eq!(
+            body.get("model").and_then(|v| v.as_str()),
+            Some("grok-3-mini"),
+            "'model' must always be present in request body; body: {body}"
+        );
+        assert!(
+            body.get("input").and_then(|v| v.as_array()).is_some(),
+            "'input' must always be present as an array in request body; body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_request_always_sends_stream_true() {
+        use std::sync::{Arc, Mutex};
+        use axum::{Router, body::Bytes, http::StatusCode, routing::post};
+
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let state = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/responses",
+            post(move |body: Bytes| {
+                let state = Arc::clone(&state);
+                async move {
+                    *state.lock().unwrap() = serde_json::from_slice(&body).ok();
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+        let (url, srv) = make_test_server(app).await;
+        let task = tokio::spawn(srv);
+
+        let client = XaiClient::with_base_url(url);
+        let _stream =
+            XaiHttpClient::chat_stream(&client, "grok-3", &[InputItem::user("hi")], "k", &[], None, None)
+                .await;
+        task.abort();
+
+        let body = captured.lock().unwrap().take().expect("handler did not run");
+        assert_eq!(
+            body.get("stream").and_then(|v| v.as_bool()),
+            Some(true),
+            "'stream' must always be true in request body; body: {body}"
+        );
+    }
 }

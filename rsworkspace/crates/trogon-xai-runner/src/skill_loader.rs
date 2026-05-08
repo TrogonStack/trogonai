@@ -235,4 +235,16 @@ mod tests {
         let pos_second = text.find("content-2").unwrap();
         assert!(pos_first < pos_second);
     }
+
+    #[test]
+    fn format_skill_sections_with_empty_content_includes_section() {
+        // format_skill_sections is a pure formatter with no empty-content filter;
+        // load_impl is responsible for filtering before calling this function.
+        let result = format_skill_sections(vec![("Guide".into(), "".into())]);
+        let text = result.unwrap();
+        assert!(
+            text.contains("## Skill: Guide"),
+            "section header must appear even when content is empty; got: {text:?}"
+        );
+    }
 }
