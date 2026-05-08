@@ -7,7 +7,9 @@ use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
-use trogon_acp_runner::{NatsSessionStore, SessionState, SessionStore};
+use trogon_acp_runner::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
+use trogon_acp_runner::{EgressPolicy, NatsSessionStore, SessionState, SessionStore};
+use trogon_acp_runner::egress::{EgressAction, EgressRule};
 
 async fn setup() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
     let container: ContainerAsync<Nats> = Nats::default()
@@ -287,6 +289,96 @@ async fn load_wrong_json_type_returns_error() {
         result.is_err(),
         "loading wrong JSON type must return an error"
     );
+}
+
+// ── new fields: tool_policies, egress_policy, audit_log ──────────────────────
+
+#[tokio::test]
+async fn save_and_load_tool_policies() {
+    let (_c, _nats, js) = setup().await;
+    let store = NatsSessionStore::open(&js).await.unwrap();
+
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "write_file".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    store.save("sess-tp", &state).await.unwrap();
+
+    let loaded = store.load("sess-tp").await.unwrap();
+    assert_eq!(loaded.tool_policies.len(), 1);
+    assert_eq!(loaded.tool_policies[0].tool, "write_file");
+    assert!(matches!(loaded.tool_policies[0].action, PolicyAction::Allow));
+}
+
+#[tokio::test]
+async fn save_and_load_egress_policy() {
+    let (_c, _nats, js) = setup().await;
+    let store = NatsSessionStore::open(&js).await.unwrap();
+
+    let state = SessionState {
+        egress_policy: Some(EgressPolicy {
+            default_action: EgressAction::Deny,
+            rules: vec![EgressRule {
+                host_pattern: "api.anthropic.com".to_string(),
+                action: EgressAction::Allow,
+            }],
+        }),
+        ..Default::default()
+    };
+    store.save("sess-egress", &state).await.unwrap();
+
+    let loaded = store.load("sess-egress").await.unwrap();
+    let policy = loaded.egress_policy.unwrap();
+    assert!(matches!(policy.default_action, EgressAction::Deny));
+    assert_eq!(policy.rules[0].host_pattern, "api.anthropic.com");
+}
+
+#[tokio::test]
+async fn save_and_load_audit_log() {
+    let (_c, _nats, js) = setup().await;
+    let store = NatsSessionStore::open(&js).await.unwrap();
+
+    let state = SessionState {
+        audit_log: vec![
+            AuditEntry {
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+                tool: "Read".to_string(),
+                input_summary: "/etc/hosts".to_string(),
+                outcome: AuditOutcome::Allowed,
+            },
+            AuditEntry {
+                timestamp: "2026-01-01T00:00:01Z".to_string(),
+                tool: "Bash".to_string(),
+                input_summary: "cargo build".to_string(),
+                outcome: AuditOutcome::ApprovedByUser,
+            },
+        ],
+        ..Default::default()
+    };
+    store.save("sess-audit", &state).await.unwrap();
+
+    let loaded = store.load("sess-audit").await.unwrap();
+    assert_eq!(loaded.audit_log.len(), 2);
+    assert_eq!(loaded.audit_log[0].tool, "Read");
+    assert_eq!(loaded.audit_log[0].outcome, AuditOutcome::Allowed);
+    assert_eq!(loaded.audit_log[1].tool, "Bash");
+    assert_eq!(loaded.audit_log[1].outcome, AuditOutcome::ApprovedByUser);
+}
+
+#[tokio::test]
+async fn egress_policy_none_not_stored_in_json() {
+    let (_c, _nats, js) = setup().await;
+    let store = NatsSessionStore::open(&js).await.unwrap();
+
+    let state = SessionState::default();
+    store.save("sess-no-egress", &state).await.unwrap();
+
+    let loaded = store.load("sess-no-egress").await.unwrap();
+    assert!(loaded.egress_policy.is_none());
 }
 
 // ── open idempotency ──────────────────────────────────────────────────────────
