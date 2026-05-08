@@ -18,17 +18,6 @@ mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
-trogon-source-discord = { path = "crates/trogon-source-discord" }
-trogon-source-github = { path = "crates/trogon-source-github" }
-trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
-trogon-source-incidentio = { path = "crates/trogon-source-incidentio" }
-trogon-source-linear = { path = "crates/trogon-source-linear" }
-trogon-source-microsoft-graph = { path = "crates/trogon-source-microsoft-graph" }
-trogon-source-notion = { path = "crates/trogon-source-notion" }
-trogon-source-sentry = { path = "crates/trogon-source-sentry" }
-trogon-source-slack = { path = "crates/trogon-source-slack" }
-trogon-source-telegram = { path = "crates/trogon-source-telegram" }
-trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
 
 # ACP

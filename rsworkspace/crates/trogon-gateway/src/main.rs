@@ -5,6 +5,8 @@ mod config;
 #[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
+mod source;
+#[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
 #[cfg_attr(coverage, allow(dead_code))]
 mod streams;
@@ -91,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref cfg) = resolved.telegram
         && cfg.registration.is_some()
     {
-        let telegram_http_client = trogon_source_telegram::registration_http_client()?;
-        trogon_source_telegram::register_webhook(cfg, &telegram_http_client).await?;
+        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
+        crate::source::telegram::registration::register_webhook(cfg, &telegram_http_client).await?;
     }
 
     let port = resolved.http_server.port;
@@ -110,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let p = publisher.clone();
             let discord_cfg = cfg.clone();
             join_set.spawn(async move {
-                trogon_source_discord::gateway_runner::run(p, &discord_cfg).await;
+                crate::source::discord::gateway_runner::run(p, &discord_cfg).await;
                 ("discord-gateway", Ok(()))
             });
             info!(source = "discord", "gateway runner spawned");

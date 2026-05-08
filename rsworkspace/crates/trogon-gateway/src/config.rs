@@ -2,26 +2,26 @@ use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use crate::source::discord::config::DiscordBotToken;
+use crate::source::github::config::GitHubWebhookSecret;
+use crate::source::gitlab::config::GitLabWebhookSecret;
+use crate::source::incidentio::config::IncidentioConfig as IncidentioSourceConfig;
+use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecret;
+use crate::source::linear::config::LinearWebhookSecret;
+use crate::source::microsoft_graph::MicrosoftGraphClientState;
+use crate::source::notion::NotionVerificationToken;
+use crate::source::sentry::SentryClientSecret;
+use crate::source::slack::config::SlackSigningSecret;
+use crate::source::telegram::config::{
+    TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
+};
+use crate::source::twitter::config::TwitterConsumerSecret;
 use confique::Config;
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolation};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
-use trogon_source_discord::config::DiscordBotToken;
-use trogon_source_github::config::GitHubWebhookSecret;
-use trogon_source_gitlab::config::GitLabWebhookSecret;
-use trogon_source_incidentio::config::IncidentioConfig as IncidentioSourceConfig;
-use trogon_source_incidentio::incidentio_signing_secret::IncidentioSigningSecret;
-use trogon_source_linear::config::LinearWebhookSecret;
-use trogon_source_microsoft_graph::MicrosoftGraphClientState;
-use trogon_source_notion::NotionVerificationToken;
-use trogon_source_sentry::SentryClientSecret;
-use trogon_source_slack::config::SlackSigningSecret;
-use trogon_source_telegram::config::{
-    TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
-};
-use trogon_source_twitter::config::TwitterConsumerSecret;
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
 use crate::source_status::SourceStatus;
@@ -455,17 +455,17 @@ pub struct ResolvedConfig {
     pub http_server: ResolvedHttpServerConfig,
     pub nats: trogon_nats::NatsConfig,
     pub nats_max_payload_bytes: NonZeroUsize,
-    pub github: Option<trogon_source_github::GithubConfig>,
-    pub discord: Option<trogon_source_discord::DiscordConfig>,
-    pub slack: Option<trogon_source_slack::SlackConfig>,
-    pub telegram: Option<trogon_source_telegram::TelegramSourceConfig>,
-    pub twitter: Option<trogon_source_twitter::TwitterConfig>,
-    pub gitlab: Option<trogon_source_gitlab::GitlabConfig>,
-    pub incidentio: Option<trogon_source_incidentio::IncidentioConfig>,
-    pub linear: Option<trogon_source_linear::LinearConfig>,
-    pub microsoft_graph: Option<trogon_source_microsoft_graph::MicrosoftGraphConfig>,
-    pub notion: Option<trogon_source_notion::NotionConfig>,
-    pub sentry: Option<trogon_source_sentry::SentryConfig>,
+    pub github: Option<crate::source::github::GithubConfig>,
+    pub discord: Option<crate::source::discord::DiscordConfig>,
+    pub slack: Option<crate::source::slack::SlackConfig>,
+    pub telegram: Option<crate::source::telegram::TelegramSourceConfig>,
+    pub twitter: Option<crate::source::twitter::TwitterConfig>,
+    pub gitlab: Option<crate::source::gitlab::GitlabConfig>,
+    pub incidentio: Option<crate::source::incidentio::IncidentioConfig>,
+    pub linear: Option<crate::source::linear::LinearConfig>,
+    pub microsoft_graph: Option<crate::source::microsoft_graph::MicrosoftGraphConfig>,
+    pub notion: Option<crate::source::notion::NotionConfig>,
+    pub sentry: Option<crate::source::sentry::SentryConfig>,
 }
 
 impl ResolvedConfig {
@@ -552,7 +552,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
 fn resolve_github(
     section: GithubConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_github::GithubConfig> {
+) -> Option<crate::source::github::GithubConfig> {
     if !resolve_source_status("github", section.status.as_deref(), errors) {
         return None;
     }
@@ -602,7 +602,7 @@ fn resolve_github(
         }
     };
 
-    Some(trogon_source_github::GithubConfig {
+    Some(crate::source::github::GithubConfig {
         webhook_secret,
         subject_prefix,
         stream_name,
@@ -614,7 +614,7 @@ fn resolve_github(
 fn resolve_discord(
     section: DiscordConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_discord::DiscordConfig> {
+) -> Option<crate::source::discord::DiscordConfig> {
     if !resolve_source_status("discord", section.status.as_deref(), errors) {
         return None;
     }
@@ -629,7 +629,7 @@ fn resolve_discord(
     };
 
     let intents = if let Some(s) = section.gateway_intents.as_deref().filter(|s| !s.is_empty()) {
-        match trogon_source_discord::config::parse_gateway_intents(s) {
+        match crate::source::discord::config::parse_gateway_intents(s) {
             Ok(i) => i,
             Err(e) => {
                 errors.push(ConfigValidationError::invalid("discord", "gateway_intents", e));
@@ -637,7 +637,7 @@ fn resolve_discord(
             }
         }
     } else {
-        trogon_source_discord::config::default_intents()
+        crate::source::discord::config::default_intents()
     };
 
     let subject_prefix = match NatsToken::new(section.subject_prefix) {
@@ -680,7 +680,7 @@ fn resolve_discord(
         }
     };
 
-    Some(trogon_source_discord::DiscordConfig {
+    Some(crate::source::discord::DiscordConfig {
         bot_token,
         intents,
         subject_prefix,
@@ -693,7 +693,7 @@ fn resolve_discord(
 fn resolve_slack(
     section: SlackConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_slack::SlackConfig> {
+) -> Option<crate::source::slack::SlackConfig> {
     if !resolve_source_status("slack", section.status.as_deref(), errors) {
         return None;
     }
@@ -751,7 +751,7 @@ fn resolve_slack(
         }
     };
 
-    Some(trogon_source_slack::SlackConfig {
+    Some(crate::source::slack::SlackConfig {
         signing_secret,
         subject_prefix,
         stream_name,
@@ -764,7 +764,7 @@ fn resolve_slack(
 fn resolve_telegram(
     section: TelegramConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_telegram::TelegramSourceConfig> {
+) -> Option<crate::source::telegram::TelegramSourceConfig> {
     if !resolve_source_status("telegram", section.status.as_deref(), errors) {
         return None;
     }
@@ -829,7 +829,7 @@ fn resolve_telegram(
         }
     };
 
-    Some(trogon_source_telegram::TelegramSourceConfig {
+    Some(crate::source::telegram::TelegramSourceConfig {
         webhook_secret,
         registration,
         subject_prefix,
@@ -905,7 +905,7 @@ fn resolve_telegram_registration(
 fn resolve_twitter(
     section: TwitterConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_twitter::TwitterConfig> {
+) -> Option<crate::source::twitter::TwitterConfig> {
     if !resolve_source_status("twitter", section.status.as_deref(), errors) {
         return None;
     }
@@ -963,7 +963,7 @@ fn resolve_twitter(
         }
     };
 
-    Some(trogon_source_twitter::TwitterConfig {
+    Some(crate::source::twitter::TwitterConfig {
         consumer_secret,
         subject_prefix,
         stream_name,
@@ -975,7 +975,7 @@ fn resolve_twitter(
 fn resolve_gitlab(
     section: GitlabConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_gitlab::GitlabConfig> {
+) -> Option<crate::source::gitlab::GitlabConfig> {
     if !resolve_source_status("gitlab", section.status.as_deref(), errors) {
         return None;
     }
@@ -1025,7 +1025,7 @@ fn resolve_gitlab(
         }
     };
 
-    Some(trogon_source_gitlab::GitlabConfig {
+    Some(crate::source::gitlab::GitlabConfig {
         webhook_secret,
         subject_prefix,
         stream_name,
@@ -1037,7 +1037,7 @@ fn resolve_gitlab(
 fn resolve_linear(
     section: LinearConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_linear::LinearConfig> {
+) -> Option<crate::source::linear::LinearConfig> {
     if !resolve_source_status("linear", section.status.as_deref(), errors) {
         return None;
     }
@@ -1087,7 +1087,7 @@ fn resolve_linear(
         }
     };
 
-    Some(trogon_source_linear::LinearConfig {
+    Some(crate::source::linear::LinearConfig {
         webhook_secret,
         subject_prefix,
         stream_name,
@@ -1100,7 +1100,7 @@ fn resolve_linear(
 fn resolve_microsoft_graph(
     section: MicrosoftGraphConfigInput,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_microsoft_graph::MicrosoftGraphConfig> {
+) -> Option<crate::source::microsoft_graph::MicrosoftGraphConfig> {
     let explicitly_enabled = matches!(
         section.status.as_deref(),
         Some(status) if status.trim().eq_ignore_ascii_case("enabled")
@@ -1174,7 +1174,7 @@ fn resolve_microsoft_graph(
         }
     };
 
-    Some(trogon_source_microsoft_graph::MicrosoftGraphConfig {
+    Some(crate::source::microsoft_graph::MicrosoftGraphConfig {
         client_state,
         subject_prefix,
         stream_name,
@@ -1269,7 +1269,7 @@ fn resolve_incidentio(
 fn resolve_notion(
     section: NotionConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_notion::NotionConfig> {
+) -> Option<crate::source::notion::NotionConfig> {
     if !resolve_source_status("notion", section.status.as_deref(), errors) {
         return None;
     }
@@ -1329,7 +1329,7 @@ fn resolve_notion(
         }
     };
 
-    Some(trogon_source_notion::NotionConfig {
+    Some(crate::source::notion::NotionConfig {
         verification_token,
         subject_prefix,
         stream_name,
@@ -1341,7 +1341,7 @@ fn resolve_notion(
 fn resolve_sentry(
     section: SentryConfig,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<trogon_source_sentry::SentryConfig> {
+) -> Option<crate::source::sentry::SentryConfig> {
     let explicitly_enabled = matches!(
         section.status.as_deref(),
         Some(status) if status.trim().eq_ignore_ascii_case("enabled")
@@ -1415,7 +1415,7 @@ fn resolve_sentry(
         }
     };
 
-    Some(trogon_source_sentry::SentryConfig {
+    Some(crate::source::sentry::SentryConfig {
         client_secret,
         subject_prefix,
         stream_name,
