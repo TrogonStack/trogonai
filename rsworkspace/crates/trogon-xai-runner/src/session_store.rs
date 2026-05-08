@@ -282,4 +282,109 @@ mod tests {
         // 2000-01-01: 30*365 + 7 leap years in [1972..=1996] = 10950 + 7 = 10957
         assert_eq!(days_to_ymd(10957), (2000, 1, 1));
     }
+
+    fn base_snapshot() -> SessionSnapshot {
+        SessionSnapshot {
+            id: "s1".into(),
+            tenant_id: "t1".into(),
+            name: "Test".into(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            updated_at: "2026-01-01T00:00:00.000Z".into(),
+            parent_session_id: None,
+            branched_at_index: None,
+        }
+    }
+
+    #[test]
+    fn snapshot_includes_parent_session_id_when_some() {
+        let snap = SessionSnapshot {
+            parent_session_id: Some("parent-abc".into()),
+            ..base_snapshot()
+        };
+        let v: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        assert_eq!(
+            v.get("parent_session_id").and_then(|v| v.as_str()),
+            Some("parent-abc"),
+            "'parent_session_id' must appear in JSON when Some"
+        );
+    }
+
+    #[test]
+    fn snapshot_omits_parent_session_id_when_none() {
+        let snap = base_snapshot(); // parent_session_id: None
+        let v: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        assert!(
+            v.get("parent_session_id").is_none(),
+            "'parent_session_id' must be absent from JSON when None"
+        );
+    }
+
+    #[test]
+    fn snapshot_includes_branched_at_index_when_some() {
+        let snap = SessionSnapshot {
+            branched_at_index: Some(7),
+            ..base_snapshot()
+        };
+        let v: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        assert_eq!(
+            v.get("branched_at_index").and_then(|v| v.as_u64()),
+            Some(7),
+            "'branched_at_index' must appear in JSON when Some"
+        );
+    }
+
+    #[test]
+    fn snapshot_omits_branched_at_index_when_none() {
+        let snap = base_snapshot(); // branched_at_index: None
+        let v: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        assert!(
+            v.get("branched_at_index").is_none(),
+            "'branched_at_index' must be absent from JSON when None"
+        );
+    }
+
+    #[test]
+    fn message_usage_includes_cache_tokens_when_non_zero() {
+        let usage = MessageUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 3,
+            cache_read_input_tokens: 7,
+        };
+        let v: serde_json::Value = serde_json::to_value(&usage).unwrap();
+        assert_eq!(
+            v.get("cache_creation_input_tokens").and_then(|v| v.as_u64()),
+            Some(3),
+            "'cache_creation_input_tokens' must appear in JSON when non-zero"
+        );
+        assert_eq!(
+            v.get("cache_read_input_tokens").and_then(|v| v.as_u64()),
+            Some(7),
+            "'cache_read_input_tokens' must appear in JSON when non-zero"
+        );
+    }
+
+    #[test]
+    fn message_usage_omits_cache_tokens_when_zero() {
+        let usage = MessageUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let v: serde_json::Value = serde_json::to_value(&usage).unwrap();
+        assert!(
+            v.get("cache_creation_input_tokens").is_none(),
+            "'cache_creation_input_tokens' must be absent from JSON when zero"
+        );
+        assert!(
+            v.get("cache_read_input_tokens").is_none(),
+            "'cache_read_input_tokens' must be absent from JSON when zero"
+        );
+    }
 }

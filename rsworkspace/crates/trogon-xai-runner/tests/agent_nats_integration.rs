@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent as _, CloseSessionRequest, ContentBlock, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, SessionNotification,
+    PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -58,11 +58,37 @@ impl XaiHttpClient for NoOpHttpClient {
         _model: &str,
         _input: &[InputItem],
         _api_key: &str,
-        _tools: &[String],
+        _tools: &[trogon_xai_runner::ToolSpec],
         _previous_response_id: Option<&str>,
         _max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
         Box::pin(stream::empty())
+    }
+}
+
+/// Returns a fixed assistant reply with token usage then ends.
+struct ReplyWithUsageHttpClient;
+
+#[async_trait(?Send)]
+impl XaiHttpClient for ReplyWithUsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        Box::pin(stream::iter(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+            },
+            XaiEvent::TextDelta {
+                text: "Hello with usage!".to_string(),
+            },
+        ]))
     }
 }
 
@@ -76,7 +102,7 @@ impl XaiHttpClient for ReplyHttpClient {
         _model: &str,
         _input: &[InputItem],
         _api_key: &str,
-        _tools: &[String],
+        _tools: &[trogon_xai_runner::ToolSpec],
         _previous_response_id: Option<&str>,
         _max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
@@ -486,7 +512,128 @@ async fn fork_with_branch_at_index_persists_branched_at_index_to_nats() {
         .await;
 }
 
+// ── set_session_model → updated model persisted to SESSIONS ──────────────────
+
+#[tokio::test]
+async fn set_session_model_reflected_in_sessions_kv_after_close() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = make_agent(store);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+            let session_id_val = resp.session_id.clone();
+
+            // Change model then force a save via close_session.
+            agent
+                .set_session_model(SetSessionModelRequest::new(
+                    session_id.clone(),
+                    "grok-3-mini",
+                ))
+                .await
+                .unwrap();
+            agent
+                .close_session(CloseSessionRequest::new(session_id_val))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist after close");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["model"], "grok-3-mini",
+                "SESSIONS KV model must reflect set_session_model change"
+            );
+        })
+        .await;
+}
+
+// ── session name derived from first user message ──────────────────────────────
+
+#[tokio::test]
+async fn session_name_derived_from_first_user_message_after_prompt() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("My first message".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist after prompt");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["name"], "My first message",
+                "session name must be set to the first user message text after prompt"
+            );
+        })
+        .await;
+}
+
 // ── prompt with assistant response persists both messages ─────────────────────
+
+#[tokio::test]
+async fn agent_id_written_to_sessions_kv_when_with_loaders() {
+    let (js, _c) = make_js().await;
+
+    let agent_loader = AgentLoader::open(&js).await.expect("AgentLoader");
+    let skill_loader = SkillLoader::open(&js).await.expect("SkillLoader");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "", NoOpHttpClient)
+        .with_loaders("my-agent-id", Arc::new(agent_loader), Arc::new(skill_loader))
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["agent_id"], "my-agent-id",
+                "agent_id must be written to SESSIONS KV; got: {v}"
+            );
+        })
+        .await;
+}
 
 #[tokio::test]
 async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
@@ -525,6 +672,109 @@ async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
             assert_eq!(messages[0]["content"][0]["text"], "Hi");
             assert_eq!(messages[1]["role"], "assistant");
             assert_eq!(messages[1]["content"][0]["text"], "Hello back!");
+        })
+        .await;
+}
+
+// ── token usage persisted to SESSIONS KV ─────────────────────────────────────
+
+/// When `XaiEvent::Usage` fires during a prompt, the assistant message stored
+/// in SESSIONS KV must carry `input_tokens` and `output_tokens`.
+#[tokio::test]
+async fn prompt_token_usage_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyWithUsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("count my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 2, "user + assistant messages expected");
+            let usage = &messages[1]["usage"];
+            assert_eq!(
+                usage["input_tokens"], 10,
+                "input_tokens must match prompt_tokens from Usage event; got: {usage}"
+            );
+            assert_eq!(
+                usage["output_tokens"], 5,
+                "output_tokens must match completion_tokens from Usage event; got: {usage}"
+            );
+        })
+        .await;
+}
+
+// ── session name truncation ───────────────────────────────────────────────────
+
+/// When the first user message exceeds 60 characters, `build_snapshot` must
+/// truncate the session name to 60 chars and append "…".
+#[tokio::test]
+async fn session_name_truncated_to_60_chars_in_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store));
+
+    // 80-character message — well over the 60-char limit.
+    let long_message = "A".repeat(80);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from(long_message.clone())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist after prompt");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let name = v["name"].as_str().expect("name must be a string");
+
+            assert!(
+                name.ends_with('…'),
+                "truncated name must end with '…'; got: {name:?}"
+            );
+            // 60 ASCII chars + the 3-byte UTF-8 ellipsis = 63 bytes, 61 chars.
+            assert_eq!(
+                name.chars().count(),
+                61,
+                "truncated name must be 60 chars + '…'; got: {name:?}"
+            );
         })
         .await;
 }

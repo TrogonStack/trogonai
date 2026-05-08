@@ -18,13 +18,15 @@ use std::time::Duration;
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
-    CloseSessionResponse, ContentBlock, ExtRequest, ForkSessionRequest, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    AuthenticateRequest, AuthenticateResponse, BlobResourceContents, CancelNotification,
+    CloseSessionRequest, CloseSessionResponse, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, ExtRequest, ForkSessionRequest, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ProtocolVersion,
+    ResourceLink, ResumeSessionRequest, ResumeSessionResponse, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse, StopReason,
+    TextResourceContents,
 };
 use async_nats::Message;
 use async_trait::async_trait;
@@ -33,7 +35,8 @@ use futures_util::StreamExt as _;
 use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_xai_runner::{
-    FinishReason, InputItem, SessionNotifier, XaiAgent, XaiEvent, XaiHttpClient,
+    AgentConfig, AgentLoading, FinishReason, InputItem, SessionNotifier, SkillLoading, XaiAgent,
+    XaiEvent, XaiHttpClient,
 };
 
 // ── Inline mock: xAI HTTP client ─────────────────────────────────────────────
@@ -59,6 +62,7 @@ struct HttpCall {
     pub inputs: Vec<InputItem>,
     pub previous_response_id: Option<String>,
     pub max_turns: Option<u32>,
+    pub tools: Vec<trogon_xai_runner::ToolSpec>,
 }
 
 #[derive(Clone)]
@@ -102,7 +106,7 @@ impl XaiHttpClient for TestHttpClient {
         model: &str,
         input: &[InputItem],
         _api_key: &str,
-        _tools: &[String],
+        tools: &[trogon_xai_runner::ToolSpec],
         previous_response_id: Option<&str>,
         max_turns: Option<u32>,
     ) -> LocalBoxStream<'static, XaiEvent> {
@@ -112,6 +116,7 @@ impl XaiHttpClient for TestHttpClient {
             inputs: input.to_vec(),
             previous_response_id: previous_response_id.map(str::to_string),
             max_turns,
+            tools: tools.to_vec(),
         });
 
         let response = self
@@ -228,6 +233,76 @@ impl Harness {
     /// Inject a serialized notification on the session stream (no reply subject).
     fn session_notify(&self, subject: &str, payload: impl serde::Serialize) {
         self.inject(&self.session_tx, subject, payload, None);
+    }
+
+    /// Build with a fixed system prompt injected via an inline `AgentLoading` impl.
+    /// Useful for verifying that the `with_loaders` path correctly injects the
+    /// system prompt into the HTTP request through the NATS wire protocol.
+    fn new_with_loader_prompt(system_prompt: &'static str) -> Self {
+        struct FixedPromptLoader(&'static str);
+        impl AgentLoading for FixedPromptLoader {
+            fn load_config<'a>(
+                &'a self,
+                _: &'a str,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = AgentConfig> + Send + 'a>,
+            > {
+                let sp = self.0.to_string();
+                Box::pin(async move {
+                    AgentConfig {
+                        skill_ids: vec![],
+                        system_prompt: Some(sp),
+                        model_id: None,
+                    }
+                })
+            }
+        }
+
+        struct NullSkillLoader;
+        impl SkillLoading for NullSkillLoader {
+            fn load<'a>(
+                &'a self,
+                _: &'a [String],
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>,
+            > {
+                Box::pin(std::future::ready(None))
+            }
+        }
+
+        let nats = MockNatsClient::new();
+        let http = TestHttpClient::new();
+        let notifier = TestNotifier::new();
+
+        let global_tx = nats.inject_messages();
+        let session_tx = nats.inject_messages();
+
+        let http_clone = http.clone();
+        let notifier_clone = notifier.clone();
+
+        let agent =
+            XaiAgent::with_deps(notifier_clone, "grok-3", "test-key", http_clone).with_loaders(
+                "agent-id",
+                Arc::new(FixedPromptLoader(system_prompt)),
+                Arc::new(NullSkillLoader),
+            );
+
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let (_, io_task) =
+            AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+        tokio::task::spawn_local(async move {
+            let _ = io_task.await;
+        });
+
+        Self {
+            nats,
+            http,
+            notifier,
+            global_tx,
+            session_tx,
+        }
     }
 
     /// Inject raw bytes on the global stream — useful for malformed-JSON tests.
@@ -2165,15 +2240,18 @@ async fn system_prompt_prepended_to_input() {
                 "first turn with system prompt: input must be [system, user] = 2 items"
             );
             assert_eq!(
-                call.inputs[0].role, "system",
+                call.inputs[0].role(),
+                Some("system"),
                 "first item must have role 'system'"
             );
             assert_eq!(
-                call.inputs[0].content, "You are a pirate.",
+                call.inputs[0].content(),
+                Some("You are a pirate."),
                 "system item content must match XAI_SYSTEM_PROMPT"
             );
             assert_eq!(
-                call.inputs[1].role, "user",
+                call.inputs[1].role(),
+                Some("user"),
                 "second item must be the user message"
             );
         })
@@ -2235,7 +2313,8 @@ async fn system_prompt_not_sent_when_previous_response_id_cached() {
                 "with previous_response_id, only the new user message is sent"
             );
             assert_eq!(
-                call.inputs[0].role, "user",
+                call.inputs[0].role(),
+                Some("user"),
                 "the single input item must be the user message — not the system prompt"
             );
         })
@@ -2837,11 +2916,13 @@ async fn prompt_empty_input_with_cached_response_id_sends_single_empty_user_item
                 "shortcut path with empty input must send exactly one user item"
             );
             assert_eq!(
-                call.inputs[0].role, "user",
+                call.inputs[0].role(),
+                Some("user"),
                 "the single item must be role 'user'"
             );
             assert_eq!(
-                call.inputs[0].content, "",
+                call.inputs[0].content(),
+                Some(""),
                 "empty content blocks produce empty content"
             );
         })
@@ -3191,7 +3272,8 @@ async fn prompt_with_multiple_content_blocks_joins_text_with_newline() {
             // Full-history path: [user_item] — the user item content must be "hello\nworld".
             let user_item = call.inputs.last().unwrap();
             assert_eq!(
-                user_item.content, "hello\nworld",
+                user_item.content(),
+                Some("hello\nworld"),
                 "multiple text blocks must be joined with '\\n'"
             );
         })
@@ -3562,6 +3644,2118 @@ async fn ext_list_children_returns_empty_for_root_session_via_nats() {
                 resp["children"].as_array().map(Vec::len),
                 Some(0),
                 "root session must have no children"
+            );
+        })
+        .await;
+}
+
+// ── ext_method: unknown method returns ACP error via NATS ─────────────────────
+
+/// Sending an unrecognised `ext_method` name over NATS must produce an ACP
+/// error response (`code` field present) — not a panic or silent no-op.
+#[tokio::test]
+async fn ext_method_unknown_method_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let _ = create_session(&h).await; // publishes: 1
+
+            let params =
+                serde_json::value::RawValue::from_string(r#"{}"#.to_string()).unwrap();
+            h.global(
+                "acp.agent.ext.unknown/method",
+                ExtRequest::new("unknown/method", params.into()),
+                "r.ext",
+            );
+            let payloads = h.expect_n_publishes(2).await; // publishes: 2
+
+            let val: serde_json::Value = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "unknown ext method must return an ACP error with 'code'; got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── with_loaders: system prompt from AgentLoader reaches the HTTP client ──────
+
+/// When the agent is configured with `with_loaders`, the system prompt from
+/// `AgentLoader` must appear as the first `system`-role item in the HTTP
+/// request sent to xAI — verified end-to-end through the NATS wire protocol.
+#[tokio::test]
+async fn with_loaders_system_prompt_injected_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new_with_loader_prompt("You are a loader-injected assistant.");
+
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().expect("HTTP client must have been called");
+            let system_item = call
+                .inputs
+                .iter()
+                .find(|i| i.role() == Some("system"))
+                .expect("a 'system'-role input must be present when with_loaders is configured");
+            assert!(
+                system_item
+                    .content()
+                    .map(|c| c.contains("loader-injected"))
+                    .unwrap_or(false),
+                "system item must contain the loader-provided prompt text; inputs: {:?}",
+                call.inputs
+            );
+        })
+        .await;
+}
+
+// ── Incomplete continuation ───────────────────────────────────────────────────
+
+/// `ResponseId` + `Finished(Incomplete)` must trigger a second `chat_stream`
+/// call with `previous_response_id` set to that ID. For `max_output_tokens`
+/// the continuation input must be empty (the model continues from where it stopped).
+#[tokio::test]
+async fn incomplete_continuation_triggers_second_http_call_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First response: partial text, a response ID, then Incomplete.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-partial".to_string() },
+                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Finished {
+                    reason: FinishReason::Incomplete,
+                    incomplete_reason: Some("max_output_tokens".to_string()),
+                },
+            ]);
+            // Continuation response: finishes normally.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: " world".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("continue this")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2, "expected 2 HTTP calls (initial + continuation)");
+
+            let cont = &calls[1];
+            assert_eq!(
+                cont.previous_response_id.as_deref(),
+                Some("resp-partial"),
+                "continuation must carry the partial response's ID"
+            );
+            assert!(
+                cont.inputs.is_empty(),
+                "max_output_tokens continuation must send empty input; got: {:?}",
+                cont.inputs
+            );
+        })
+        .await;
+}
+
+/// When `incomplete_reason` is NOT `"max_output_tokens"`, the continuation
+/// request must re-send the original user message (not empty input).
+#[tokio::test]
+async fn incomplete_continuation_non_max_output_tokens_resends_user_input_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First response: incomplete due to max_turns (not max_output_tokens).
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-mt".to_string() },
+                XaiEvent::TextDelta { text: "partial".to_string() },
+                XaiEvent::Finished {
+                    reason: FinishReason::Incomplete,
+                    incomplete_reason: Some("max_turns".to_string()),
+                },
+            ]);
+            // Continuation response.
+            h.http.push(vec![XaiEvent::Done]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("original message")],
+                ),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2, "expected 2 HTTP calls (initial + continuation)");
+
+            let cont = &calls[1];
+            assert_eq!(
+                cont.previous_response_id.as_deref(),
+                Some("resp-mt"),
+                "continuation must carry the incomplete response's ID"
+            );
+            let cont_input = cont
+                .inputs
+                .iter()
+                .filter(|i| i.role() == Some("user"))
+                .filter_map(|i| i.content())
+                .last()
+                .unwrap_or("");
+            assert_eq!(
+                cont_input, "original message",
+                "non-max_output_tokens continuation must re-send the user message; got: {cont_input:?}"
+            );
+        })
+        .await;
+}
+
+// ── set_session_config_option: "off" and invalid value ───────────────────────
+
+/// Disabling a tool via `set_session_config_option("off")` must remove it from
+/// the `tools` slice forwarded to the HTTP client on the next prompt.
+#[tokio::test]
+async fn disabled_tool_not_forwarded_to_http_client_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_cfg_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"),
+                "r.cfg1",
+            );
+            h.expect_n_publishes(2).await;
+
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "off"),
+                "r.cfg2",
+            );
+            h.expect_n_publishes(3).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().expect("HTTP client must have been called");
+            assert!(
+                !call.tools.iter().any(|t| t.name() == "web_search"),
+                "web_search must not be forwarded after being disabled; tools: {:?}",
+                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+/// An invalid config option value (not `"on"` or `"off"`) must return an ACP error.
+#[tokio::test]
+async fn set_session_config_option_invalid_value_returns_acp_error() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_cfg_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "foo"),
+                "r.cfg",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "invalid config option value must return ACP error; got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── ContentBlock::ResourceLink ────────────────────────────────────────────────
+
+/// A `ContentBlock::ResourceLink` in the prompt must be converted to
+/// `[Resource: name | uri]` text and forwarded to the HTTP client.
+#[tokio::test]
+async fn resource_link_content_block_forwarded_as_text_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::ResourceLink(ResourceLink::new(
+                        "README",
+                        "file:///README.md",
+                    ))],
+                ),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().expect("HTTP client must have been called");
+            let user_text = call
+                .inputs
+                .iter()
+                .filter(|i| i.role() == Some("user"))
+                .filter_map(|i| i.content())
+                .last()
+                .unwrap_or("");
+            assert!(
+                user_text.contains("README") && user_text.contains("file:///README.md"),
+                "ResourceLink must be forwarded as text; input: {user_text:?}"
+            );
+        })
+        .await;
+}
+
+/// `FinishReason::Other` (unknown status string) must be treated as end-of-turn —
+/// a valid `PromptResponse` must be published, not an error.
+#[tokio::test]
+async fn prompt_finished_other_status_treated_as_end_of_turn_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "partial".to_string() },
+                XaiEvent::Finished {
+                    reason: FinishReason::Other("some_future_status".to_string()),
+                    incomplete_reason: None,
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let _: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+        })
+        .await;
+}
+
+/// A `ContentBlock::Resource(TextResourceContents)` in the prompt must have its
+/// text content forwarded to the HTTP client directly (no wrapping).
+#[tokio::test]
+async fn embedded_text_resource_content_forwarded_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::Resource(EmbeddedResource::new(
+                        EmbeddedResourceResource::TextResourceContents(
+                            TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
+                        ),
+                    ))],
+                ),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().expect("HTTP client must have been called");
+            let user_text = call
+                .inputs
+                .iter()
+                .filter(|i| i.role() == Some("user"))
+                .filter_map(|i| i.content())
+                .last()
+                .unwrap_or("");
+            assert_eq!(
+                user_text, "fn main() {}",
+                "TextResourceContents text must be forwarded directly; got: {user_text:?}"
+            );
+        })
+        .await;
+}
+
+/// Enabling `web_search` via `set_session_config_option` causes the tool to
+/// appear in the `tools` slice forwarded to the HTTP client on the next prompt.
+#[tokio::test]
+async fn enabled_tool_forwarded_to_http_client_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Enable web_search for this session.
+            let set_cfg_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"),
+                "r.cfg",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Prompt — the HTTP call must include web_search in tools.
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search something")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().expect("HTTP client must have been called");
+            assert!(
+                call.tools.iter().any(|t| t.name() == "web_search"),
+                "web_search must be forwarded to HTTP client after being enabled; tools: {:?}",
+                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+// ── authenticate: error paths ─────────────────────────────────────────────────
+
+/// `authenticate` with an unrecognised `method_id` must return an ACP error.
+#[tokio::test]
+async fn authenticate_unknown_method_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("oauth2-mystery"),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "unknown auth method must return ACP error; got: {val}"
+            );
+        })
+        .await;
+}
+
+/// `authenticate` with method `"agent"` on an agent that has no global API key
+/// must return an ACP error — the "agent" method is only available when a
+/// server-wide key is configured.
+#[tokio::test]
+async fn authenticate_agent_method_without_server_key_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Empty key → no global API key configured.
+            let h = Harness::with_api_key("");
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("agent"),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "'agent' auth without server key must return ACP error; got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── set_session_mode: unknown mode ────────────────────────────────────────────
+
+/// `set_session_mode` with a mode_id other than `"default"` must return an ACP
+/// error — the agent only supports the "default" mode.
+#[tokio::test]
+async fn set_session_mode_unknown_mode_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_mode_subj = format!("acp.session.{sid}.agent.set_mode");
+            h.session_req(
+                &set_mode_subj,
+                SetSessionModeRequest::new(sid.clone(), "restricted"),
+                "r.mode",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "unknown mode must return ACP error; got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── authenticate: key validation errors ──────────────────────────────────────
+
+/// `authenticate` with method `"xai-api-key"` but no `XAI_API_KEY` field in
+/// meta (or a wrong field name) must return an ACP error with "XAI_API_KEY
+/// missing" in the message.
+#[tokio::test]
+async fn authenticate_missing_key_in_meta_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key("");
+
+            // No meta at all.
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key"),
+                "r.auth1",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "missing XAI_API_KEY must return ACP error; got: {val}"
+            );
+            let msg = val["message"].as_str().unwrap_or("");
+            assert!(
+                msg.contains("XAI_API_KEY"),
+                "error message must mention XAI_API_KEY; got: {msg}"
+            );
+
+            // Wrong key name in meta.
+            let mut bad_meta = serde_json::Map::new();
+            bad_meta.insert("WRONG_KEY".to_string(), serde_json::json!("value"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key").meta(bad_meta),
+                "r.auth2",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val2: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val2.get("code").is_some(),
+                "wrong meta key must return ACP error; got: {val2}"
+            );
+        })
+        .await;
+}
+
+/// `authenticate` with method `"xai-api-key"` and an empty string as the key
+/// value must return an ACP error containing "must not be empty".
+#[tokio::test]
+async fn authenticate_empty_key_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key("");
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!(""));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key").meta(meta),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "empty key must return ACP error; got: {val}"
+            );
+            let msg = val["message"].as_str().unwrap_or("");
+            assert!(
+                msg.contains("must not be empty"),
+                "error must say 'must not be empty'; got: {msg}"
+            );
+        })
+        .await;
+}
+
+// ── forked session inherits API key ───────────────────────────────────────────
+
+/// A forked session must inherit the API key of its parent. Authenticate → new
+/// session (attaches key) → fork → prompt on fork must succeed without an extra
+/// authenticate call.
+#[tokio::test]
+async fn forked_session_inherits_api_key_from_parent_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key(""); // no global key
+
+            // Authenticate to set pending key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key-fork"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key").meta(meta),
+                "r.auth",
+            );
+            h.expect_n_publishes(1).await;
+
+            // Create session — consumes pending key, attaches it to session.
+            let sid = create_session(&h).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fork_val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt on forked session — must succeed using inherited key.
+            h.http.push(vec![XaiEvent::TextDelta { text: "hi".to_string() }, XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(4).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::EndTurn,
+                "fork prompt must succeed using inherited key"
+            );
+        })
+        .await;
+}
+
+// ── UsageUpdate notification ──────────────────────────────────────────────────
+
+/// When the HTTP stream yields `XaiEvent::Usage` the agent must emit a
+/// `SessionUpdate::UsageUpdate` notification through the `SessionNotifier`.
+#[tokio::test]
+async fn usage_update_notification_sent_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::Usage { prompt_tokens: 12, completion_tokens: 7 },
+                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            // Wait for at least 2 notifications: UsageUpdate + AgentMessageChunk.
+            h.expect_n_notifications(2).await;
+
+            let notifs = h.notifier.notifications.lock().unwrap();
+            let has_usage = notifs.iter().any(|n| {
+                matches!(&n.update, SessionUpdate::UsageUpdate(_))
+            });
+            assert!(
+                has_usage,
+                "XaiEvent::Usage must produce a SessionUpdate::UsageUpdate notification; got: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── non-bash FunctionCall gets Completed notification ─────────────────────────
+
+/// A `FunctionCall` for a tool that is not bash (no execution backend) followed
+/// by `FinishReason::ToolCalls` must result in a `ToolCallUpdate` with status
+/// `Completed` in the notifier. The agent ends the turn normally.
+#[tokio::test]
+async fn non_bash_function_call_gets_completed_notification_via_nats() {
+    use agent_client_protocol::ToolCallStatus;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-tool".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-unknown".to_string(),
+                    name: "unknown_tool".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("do something")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Wait for ToolCallUpdate(Completed) notification.
+            h.expect_n_notifications(2).await; // ToolCall(Pending) + ToolCallUpdate(Completed)
+
+            let notifs = h.notifier.notifications.lock().unwrap();
+            let completed = notifs.iter().find(|n| {
+                if let SessionUpdate::ToolCallUpdate(u) = &n.update {
+                    u.tool_call_id.to_string() == "cid-unknown"
+                        && u.fields.status == Some(ToolCallStatus::Completed)
+                } else {
+                    false
+                }
+            });
+            assert!(
+                completed.is_some(),
+                "non-bash FunctionCall must emit ToolCallUpdate(Completed); got: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── stale-ID retry ────────────────────────────────────────────────────────────
+
+/// When turn N stored a `response_id` and turn N+1 receives a non-4xx error,
+/// the agent must retry transparently:
+/// — retry call omits `previous_response_id`
+/// — retry call includes full history
+/// — final `PromptResponse` is `EndTurn`
+#[tokio::test]
+async fn stale_id_retry_on_non_4xx_error_succeeds_transparently_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Turn 1: succeeds, stores last_response_id = "resp-t1".
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-t1".to_string() },
+                XaiEvent::TextDelta { text: "first".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: first attempt returns a 500-style error → triggers stale-ID retry.
+            h.http.push(vec![
+                XaiEvent::Error { message: "xAI API error 500: internal server error".to_string() },
+            ]);
+            // Turn 2, retry: succeeds.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "second".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 2")]),
+                "r.p2",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn, "stale-ID retry must succeed");
+
+            // Verify: 3 HTTP calls total (turn1, turn2-first-attempt, turn2-retry).
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 3, "expected 3 HTTP calls: turn1 + failed attempt + retry");
+
+            // Turn 2 first attempt must carry previous_response_id.
+            assert_eq!(
+                calls[1].previous_response_id.as_deref(),
+                Some("resp-t1"),
+                "first attempt must send previous_response_id"
+            );
+
+            // Retry must NOT carry previous_response_id.
+            assert!(
+                calls[2].previous_response_id.is_none(),
+                "stale-ID retry must not send previous_response_id"
+            );
+
+            // Retry must include full history (at least 2 messages: user + assistant from turn 1).
+            assert!(
+                calls[2].inputs.len() >= 2,
+                "retry must include full history; got {} inputs",
+                calls[2].inputs.len()
+            );
+        })
+        .await;
+}
+
+/// A 4xx error must NOT trigger the stale-ID retry. We pre-load exactly one
+/// error response — if the agent retried, the empty queue would cause a panic.
+#[tokio::test]
+async fn api_4xx_error_does_not_trigger_stale_id_retry_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Turn 1: succeeds, stores response_id.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-t1".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: 401 error — must NOT retry (only one response queued).
+            h.http.push(vec![
+                XaiEvent::Error { message: "xAI API error 401: unauthorized".to_string() },
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 2")]),
+                "r.p2",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "4xx error must surface as ACP error without retry; got: {val}"
+            );
+
+            // Only 2 HTTP calls: turn1 + turn2 (no retry).
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2, "4xx must not trigger retry; expected 2 HTTP calls");
+        })
+        .await;
+}
+
+// ── binary blob resource ──────────────────────────────────────────────────────
+
+/// A `ContentBlock::Resource` wrapping `BlobResourceContents` must be forwarded
+/// to the HTTP client as a text placeholder `[Binary resource: <uri> (<mime>)]`.
+#[tokio::test]
+async fn binary_blob_resource_content_forwarded_as_text_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::Resource(EmbeddedResource::new(
+                        EmbeddedResourceResource::BlobResourceContents(
+                            BlobResourceContents::new("aGVsbG8=", "file:///data.bin")
+                                .mime_type("application/octet-stream"),
+                        ),
+                    ))],
+                ),
+                "r.blob",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 1);
+            let content = calls[0]
+                .inputs
+                .iter()
+                .filter(|i| i.role() == Some("user"))
+                .filter_map(|i| i.content())
+                .last()
+                .unwrap_or("");
+            assert_eq!(
+                content,
+                "[Binary resource: file:///data.bin (application/octet-stream)]",
+                "binary blob must be forwarded as a text placeholder via NATS; got: {content:?}"
+            );
+        })
+        .await;
+}
+
+// ── initialize: agent auth method conditional on server key ──────────────────
+
+/// `initialize` must advertise the `"agent"` auth method when a server key is
+/// configured, and must NOT advertise it when no key is present.
+#[tokio::test]
+async fn initialize_advertises_agent_auth_method_only_with_server_key_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // With a server key — "agent" method must appear.
+            let h_with_key = Harness::new(); // uses "test-key"
+            h_with_key.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init1",
+            );
+            let payloads = h_with_key.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
+                "agent with server key must advertise 'agent' auth method; got: {:?}",
+                resp.auth_methods
+            );
+        })
+        .await;
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Without a server key — "agent" method must NOT appear.
+            let h_no_key = Harness::with_api_key("");
+            h_no_key.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init2",
+            );
+            let payloads = h_no_key.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                !resp.auth_methods.iter().any(|m| m.id().to_string() == "agent"),
+                "agent without server key must NOT advertise 'agent' auth method; got: {:?}",
+                resp.auth_methods
+            );
+        })
+        .await;
+}
+
+// ── MAX_CONTINUATIONS exhaustion ──────────────────────────────────────────────
+
+/// After 5 `Incomplete` continuations the agent must give up and return
+/// `StopReason::Cancelled`.  We push 6 `[ResponseId, Finished(Incomplete)]`
+/// responses (the guard fires on the 6th iteration) and verify the final
+/// `PromptResponse` carries `stop_reason == Cancelled`.
+#[tokio::test]
+async fn max_continuations_exhausted_returns_cancelled_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // 6 incomplete responses — MAX_CONTINUATIONS = 5, guard fires on 6th.
+            for i in 0u32..6 {
+                h.http.push(vec![
+                    XaiEvent::ResponseId { id: format!("resp-{i}") },
+                    XaiEvent::Finished {
+                        reason: FinishReason::Incomplete,
+                        incomplete_reason: Some("max_output_tokens".to_string()),
+                    },
+                ]);
+            }
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("keep going")]),
+                "r.cont",
+            );
+            // new_session reply (1) + prompt reply (1)
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::Cancelled,
+                "exhausted MAX_CONTINUATIONS must return StopReason::Cancelled via NATS"
+            );
+        })
+        .await;
+}
+
+// ── no tools: empty tools array ───────────────────────────────────────────────
+
+/// When no tools are enabled, the `tools` slice passed to `chat_stream` must be
+/// empty. Verifies that the agent does not forward an empty-but-allocated vec as
+/// a tools list through the NATS wire path.
+#[tokio::test]
+async fn no_tools_omits_tools_from_http_request_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("plain query")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            assert!(
+                call.tools.is_empty(),
+                "tools must be empty when no tools are enabled; got: {:?}",
+                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+// ── fork inherits enabled tools ───────────────────────────────────────────────
+
+/// A forked session must inherit the tool configuration of the source session.
+/// Enable `web_search` on the source, fork it, then prompt the fork — the HTTP
+/// call must include `web_search` in the tools array.
+#[tokio::test]
+async fn fork_session_inherits_enabled_tools_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Enable web_search on source session.
+            let set_cfg_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "web_search", "on"),
+                "r.cfg",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fork_val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt the forked session.
+            h.http.push(vec![XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("search this")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert!(
+                call.tools.iter().any(|t| t.name() == "web_search"),
+                "forked session must inherit web_search tool from source; got tools: {:?}",
+                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+// ── set_session_model clears cached response ID ───────────────────────────────
+
+/// After a prompt that stores a `ResponseId`, calling `set_session_model` must
+/// clear the cached ID. The next prompt must use the full-history path (no
+/// `previous_response_id`) so it doesn't carry a stale ID from a prior model.
+#[tokio::test]
+async fn set_session_model_clears_last_response_id_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: server returns a ResponseId — agent caches it.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-model-test".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Change the model — must clear the cached response ID.
+            let set_model_subj = format!("acp.session.{sid}.agent.set_model");
+            h.session_req(
+                &set_model_subj,
+                SetSessionModelRequest::new(sid.clone(), "grok-3-mini"),
+                "r.model",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 2: must NOT use previous_response_id.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("world")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(4).await;
+
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2);
+            assert_eq!(
+                calls[1].previous_response_id,
+                None,
+                "set_session_model must clear the cached response ID; turn 2 must not send previous_response_id"
+            );
+        })
+        .await;
+}
+
+// ── fork inherits system prompt ───────────────────────────────────────────────
+
+/// A forked session must send the loader's system prompt as the first input
+/// item on its first full-history prompt. The fork clears the parent's cached
+/// `ResponseId`, forcing it through `build_full_history_input`.
+#[tokio::test]
+async fn fork_session_inherits_system_prompt_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new_with_loader_prompt("Be concise.");
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Parent turn: no ResponseId so history is built from scratch.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "parent reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("parent question")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fork_val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // Fork's first prompt: no ResponseId → full history with system prompt.
+            h.http.push(vec![XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("fork question")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.inputs[0].role(),
+                Some("system"),
+                "first input of fork's prompt must be the system role item"
+            );
+            assert_eq!(
+                call.inputs[0].content(),
+                Some("Be concise."),
+                "system prompt content must match the loader's value"
+            );
+        })
+        .await;
+}
+
+// ── tool-call-only response does not add assistant to history ─────────────────
+
+/// A response that contains only a `FunctionCall` + `FinishReason::ToolCalls`
+/// (no `TextDelta`) must not add an assistant entry to the session history.
+/// The next prompt's HTTP input must be `[user_t1, user_t2]` — two items, no
+/// assistant in between.
+#[tokio::test]
+async fn tool_call_response_ends_turn_without_updating_history_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1: FunctionCall only — no TextDelta, no ResponseId.
+            h.http.push(vec![
+                XaiEvent::FunctionCall {
+                    call_id: "cid-ws".to_string(),
+                    name: "web_search".to_string(),
+                    arguments: r#"{"query":"rust"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: full-history path — expect [user_t1, user_t2], no assistant.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("follow up")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 2,
+                "tool-call-only turn must not save an assistant entry; \
+                 turn 2 must see exactly [user_t1, user_t2]"
+            );
+            assert!(
+                call.inputs.iter().all(|i| i.role() != Some("assistant")),
+                "no assistant input must appear after a tool-call-only turn; got: {:?}",
+                call.inputs.iter().map(|i| i.role()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+// ── history truncation edge cases ─────────────────────────────────────────────
+
+/// With `max_history=2`, after turn 2 the history `[u1,a1,u2,a2]` exceeds the
+/// limit and is trimmed to `[u2,a2]`. Turn 3's HTTP input is `[u2,a2,u3]`
+/// (3 items), and the first user item is `"u2"` — confirming the oldest pair
+/// was dropped, not the newest.
+#[tokio::test]
+async fn history_truncation_drops_oldest_pair_first_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "2") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1 → history: [u1, a1] = 2, at limit.
+            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 → saves [u1,a1,u2,a2] = 4 > 2 → trim to [u2,a2].
+            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 3: full-history input is built from trimmed [u2,a2] + user_t3:
+            // [u2, a2, u3] = 3 items.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 3,
+                "oldest pair [u1,a1] must be dropped; expected [u2,a2,u3]=3, got {}",
+                call.input_len
+            );
+            let first_user_content = call
+                .inputs
+                .iter()
+                .find(|i| i.role() == Some("user"))
+                .and_then(|i| i.content())
+                .unwrap_or("");
+            assert_eq!(
+                first_user_content, "u2",
+                "first user input must be u2 (oldest pair dropped), not u1"
+            );
+        })
+        .await;
+}
+
+/// With `max_history=4`, exactly 4 stored messages must NOT be trimmed.
+/// Turn 3's HTTP input is `[u1, a1, u2, a2, u3]` = 5 items (no trim at boundary).
+#[tokio::test]
+async fn history_at_exactly_the_limit_is_not_trimmed_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "4") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Turn 1 → [u1, a1].
+            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2 → [u1, a1, u2, a2] — exactly at max_history=4, no trim.
+            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 3: history is exactly 4 before trimming would fire (trim only when
+            // len > max). Input = [u1, a1, u2, a2, u3] = 5 items.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 5,
+                "at exactly max_history=4 no trim should occur; expected [u1,a1,u2,a2,u3]=5, got {}",
+                call.input_len
+            );
+        })
+        .await;
+}
+
+/// With an odd `max_history` (e.g. 3), the trim loop drops pairs while
+/// `len > max`, so after turn 2 `[u1,a1,u2,a2]=4 > 3` → drops `[u1,a1]` →
+/// `[u2,a2]=2 ≤ 3`. Turn 3's HTTP input is `[u2,a2,u3]` = 3 items —
+/// identical to `max_history=2` behaviour (never leaves an incomplete pair).
+#[tokio::test]
+async fn history_truncation_odd_max_drops_one_pair_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // max=3 (odd): 4 > 3 → drop oldest pair → 2 remain.
+            let h = {
+                let _guard = env_lock().lock().unwrap();
+                unsafe { std::env::set_var("XAI_MAX_HISTORY_MESSAGES", "3") };
+                let h = Harness::new();
+                unsafe { std::env::remove_var("XAI_MAX_HISTORY_MESSAGES") };
+                h
+            };
+
+            let sid = create_session(&h).await;
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+
+            // Two turns → saves [u1,a1,u2,a2] = 4 > 3 → trim to [u2,a2].
+            h.http.push(vec![XaiEvent::TextDelta { text: "a1".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            h.http.push(vec![XaiEvent::TextDelta { text: "a2".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            // Turn 3: full-history input is [u2, a2, u3] = 3 items.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("u3")]),
+                "r.p3",
+            );
+            h.expect_n_publishes(4).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 3,
+                "odd max=3 must trim to 2 stored messages; turn 3 must see [u2,a2,u3]=3, got {}",
+                call.input_len
+            );
+            let first_user = call
+                .inputs
+                .iter()
+                .find(|i| i.role() == Some("user"))
+                .and_then(|i| i.content())
+                .unwrap_or("");
+            assert_eq!(first_user, "u2", "u1 must have been dropped");
+        })
+        .await;
+}
+
+// ── authenticate: agent method uses server key ────────────────────────────────
+
+/// `authenticate` with method `"agent"` on an agent that HAS a server key must
+/// succeed (no `code` field in the response) and the resulting session must be
+/// able to prompt.
+#[tokio::test]
+async fn authenticate_agent_method_uses_server_key_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new(); // "test-key" is the configured server key
+
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("agent"),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "'agent' auth with server key must succeed (no 'code'); got: {val}"
+            );
+
+            // Session created after authenticate must be usable.
+            let sid = create_session(&h).await;
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "ok".to_string() }, XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::EndTurn,
+                "session after agent-auth must reach EndTurn"
+            );
+        })
+        .await;
+}
+
+// ── authenticate: non-string key in meta ─────────────────────────────────────
+
+/// `authenticate` with `XAI_API_KEY` set to a non-string JSON value (integer 42)
+/// must return an ACP error whose message mentions `XAI_API_KEY`.
+#[tokio::test]
+async fn authenticate_non_string_key_in_meta_returns_acp_error_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key("");
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!(42_u64));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key").meta(meta),
+                "r.auth",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "non-string XAI_API_KEY must return ACP error; got: {val}"
+            );
+            let msg = val["message"].as_str().unwrap_or("");
+            assert!(
+                msg.contains("XAI_API_KEY"),
+                "error must mention XAI_API_KEY; got: {msg}"
+            );
+        })
+        .await;
+}
+
+// ── pending API key consumed by first new_session ─────────────────────────────
+
+/// The pending API key set by `authenticate` must be consumed by the first
+/// `new_session` call. A second session created in the same agent must have no
+/// key and its `prompt` must return an ACP error.
+#[tokio::test]
+async fn pending_api_key_consumed_by_first_new_session_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key(""); // no global key
+
+            // Authenticate — sets a pending key.
+            let mut meta = serde_json::Map::new();
+            meta.insert("XAI_API_KEY".to_string(), serde_json::json!("user-key"));
+            h.global(
+                "acp.agent.authenticate",
+                AuthenticateRequest::new("xai-api-key").meta(meta),
+                "r.auth",
+            );
+            h.expect_n_publishes(1).await; // auth response
+
+            // sess1 — consumes the pending key.
+            let sess1 = create_session(&h).await; // total publishes: 2
+
+            // sess2 — no pending key remaining.
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new("/tmp"),
+                "r.sess2",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let v: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let sess2 = v["sessionId"].as_str().unwrap().to_string();
+
+            // Prompt sess2 — must fail immediately (no API key).
+            let p2_subj = format!("acp.session.{sess2}.agent.prompt");
+            h.session_req(
+                &p2_subj,
+                PromptRequest::new(sess2.clone(), vec![ContentBlock::from("hello")]),
+                "r.p2",
+            );
+            let payloads = h.expect_n_publishes(4).await;
+            let val2: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val2.get("code").is_some(),
+                "sess2 prompt without key must return ACP error; got: {val2}"
+            );
+
+            // Prompt sess1 — must succeed using the key it absorbed.
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "reply".to_string() }, XaiEvent::Done]);
+            let p1_subj = format!("acp.session.{sess1}.agent.prompt");
+            h.session_req(
+                &p1_subj,
+                PromptRequest::new(sess1.clone(), vec![ContentBlock::from("hello")]),
+                "r.p1",
+            );
+            let payloads = h.expect_n_publishes(5).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::EndTurn,
+                "sess1 must succeed using the consumed pending key"
+            );
+        })
+        .await;
+}
+
+// ── session usable after cancel ───────────────────────────────────────────────
+
+/// Cancelling an in-flight prompt must return `Cancelled`; the same session must
+/// then accept and complete a second prompt with `EndTurn`.
+#[tokio::test]
+async fn session_is_usable_after_cancel_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First prompt: slow — blocks indefinitely after the first event.
+            h.http.push_slow(XaiEvent::TextDelta {
+                text: "partial".to_string(),
+            });
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("first")]),
+                "r.p1",
+            );
+
+            // Yield so the agent task starts streaming before we cancel.
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+
+            // Cancel — fires the abort channel.
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
+
+            // Wait for the cancelled prompt response (new_session + prompt = 2 publishes).
+            let payloads = h.expect_n_publishes(2).await;
+            let resp1: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert_eq!(
+                resp1.stop_reason,
+                StopReason::Cancelled,
+                "cancelled prompt must return Cancelled"
+            );
+
+            // Second prompt: normal — must complete.
+            h.http
+                .push(vec![XaiEvent::TextDelta { text: "second reply".to_string() }, XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("second")]),
+                "r.p2",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let resp2: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp2.stop_reason,
+                StopReason::EndTurn,
+                "session must be usable after cancel; second prompt must reach EndTurn"
+            );
+        })
+        .await;
+}
+
+// ── initialize: xai-api-key always advertised ─────────────────────────────────
+
+/// `initialize` must always include an auth method with id `"xai-api-key"` in
+/// `auth_methods`, whether or not a server key is configured.
+#[tokio::test]
+async fn initialize_always_advertises_xai_api_key_method_via_nats() {
+    // With server key.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init1",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                resp.auth_methods.iter().any(|m| m.id().to_string() == "xai-api-key"),
+                "agent with server key must advertise 'xai-api-key'; got: {:?}",
+                resp.auth_methods
+            );
+        })
+        .await;
+
+    // Without server key.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::with_api_key("");
+            h.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init2",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                resp.auth_methods.iter().any(|m| m.id().to_string() == "xai-api-key"),
+                "agent without server key must also advertise 'xai-api-key'; got: {:?}",
+                resp.auth_methods
+            );
+        })
+        .await;
+}
+
+// ── initialize: embedded_context capability ───────────────────────────────────
+
+/// `initialize` must declare `agent_capabilities.prompt_capabilities.embedded_context = true`.
+#[tokio::test]
+async fn initialize_declares_embedded_context_prompt_capability_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                resp.agent_capabilities.prompt_capabilities.embedded_context,
+                "agent must declare embedded_context=true via NATS"
+            );
+        })
+        .await;
+}
+
+// ── list_sessions before any session ─────────────────────────────────────────
+
+/// `list_sessions` before any session is created must return an empty sessions list.
+#[tokio::test]
+async fn list_sessions_is_empty_before_any_session_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.session.list",
+                ListSessionsRequest::new(),
+                "r.list",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[0]).unwrap();
+            assert!(
+                resp.sessions.is_empty(),
+                "sessions must be empty before any session is created; got: {:?}",
+                resp.sessions
+            );
+        })
+        .await;
+}
+
+// ── new_session: config_options exposed as off ────────────────────────────────
+
+/// `new_session` must return `config_options` with `web_search` and `x_search`
+/// both set to `"off"` by default.
+#[tokio::test]
+async fn new_session_exposes_all_tool_config_options_as_off_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new("/tmp"),
+                "r.new",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            // Inspect via raw JSON to avoid importing SessionConfigKind.
+            let val: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+            let opts = val["configOptions"]
+                .as_array()
+                .expect("configOptions must be present in new_session response");
+            assert_eq!(opts.len(), 2, "expected 2 tool toggles; got: {opts:?}");
+            let ids: Vec<&str> = opts.iter().filter_map(|o| o["id"].as_str()).collect();
+            assert!(
+                ids.contains(&"web_search"),
+                "web_search must be in configOptions; got: {ids:?}"
+            );
+            assert!(
+                ids.contains(&"x_search"),
+                "x_search must be in configOptions; got: {ids:?}"
+            );
+            for opt in opts {
+                let current = opt["currentValue"].as_str().unwrap_or_default();
+                assert_eq!(
+                    current,
+                    "off",
+                    "option '{}' must default to 'off'",
+                    opt["id"].as_str().unwrap_or("?")
+                );
+            }
+        })
+        .await;
+}
+
+// ── multiple tool calls in one turn ──────────────────────────────────────────
+
+/// Two `FunctionCall` events in a single response must not cause a panic.
+/// The agent must return `EndTurn` (no execution backend, so no tool loop).
+#[tokio::test]
+async fn multiple_tool_calls_in_one_turn_do_not_panic_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ResponseId {
+                    id: "resp_tools".to_string(),
+                },
+                XaiEvent::FunctionCall {
+                    call_id: "call_a".to_string(),
+                    name: "web_search".to_string(),
+                    arguments: "{\"q\":\"rust\"}".to_string(),
+                },
+                XaiEvent::FunctionCall {
+                    call_id: "call_b".to_string(),
+                    name: "get_weather".to_string(),
+                    arguments: "{\"city\":\"London\"}".to_string(),
+                },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("use two tools")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::EndTurn,
+                "two FunctionCall events in one turn must not panic and must return EndTurn"
+            );
+        })
+        .await;
+}
+
+// ── text assembled from multiple deltas ──────────────────────────────────────
+
+/// Multiple `TextDelta` events in one response must each produce an
+/// `AgentMessageChunk` notification and the final `PromptResponse` must have
+/// `stop_reason == EndTurn`.
+#[tokio::test]
+async fn text_is_assembled_from_multiple_deltas_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::TextDelta {
+                    text: "Hel".to_string(),
+                },
+                XaiEvent::TextDelta {
+                    text: "lo".to_string(),
+                },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: PromptResponse = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::EndTurn,
+                "multiple TextDelta events must assemble into EndTurn response"
+            );
+
+            // Each TextDelta must produce one AgentMessageChunk notification.
+            h.expect_n_notifications(2).await;
+            assert_eq!(
+                h.notifier.count(),
+                2,
+                "each TextDelta must produce exactly one AgentMessageChunk notification"
+            );
+        })
+        .await;
+}
+
+// ── tool call + response.failed compensates history ──────────────────────────
+
+/// A `FunctionCall` event followed by `FinishReason::Failed` must cause the
+/// agent to return an ACP error. The error response must have a `code` field.
+#[tokio::test]
+async fn tool_call_then_response_failed_compensates_history_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ResponseId {
+                    id: "resp_err".to_string(),
+                },
+                XaiEvent::FunctionCall {
+                    call_id: "call_1".to_string(),
+                    name: "web_search".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                XaiEvent::Finished {
+                    reason: FinishReason::Failed,
+                    incomplete_reason: None,
+                },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search something")]),
+                "r.prompt",
+            );
+            let payloads = h.expect_n_publishes(2).await;
+            let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            assert!(
+                val.get("code").is_some(),
+                "FunctionCall + FinishReason::Failed must return ACP error with 'code'; got: {val}"
+            );
+        })
+        .await;
+}
+
+// ── fork histories are independent after diverging prompts ────────────────────
+
+/// After forking a session and prompting each branch independently, the HTTP
+/// call inputs for each branch must contain only that branch's message.
+/// Neither branch must have the other branch's message in its inputs.
+#[tokio::test]
+async fn fork_histories_are_independent_after_diverging_prompts_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Shared prompt on parent — no ResponseId so history is stored.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "shared reply".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("shared")]),
+                "r.shared",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fval: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let fork_id = fval["sessionId"].as_str().unwrap().to_string();
+
+            // Parent-only prompt — verify fork's message does NOT appear.
+            h.http.push(vec![XaiEvent::Done]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("parent-only")]),
+                "r.parent",
+            );
+            h.expect_n_publishes(4).await;
+            let parent_call = h.http.last_call().unwrap();
+            let parent_contents: Vec<_> =
+                parent_call.inputs.iter().filter_map(|i| i.content()).collect();
+            assert!(
+                parent_contents.contains(&"parent-only"),
+                "parent inputs must contain 'parent-only'; got: {parent_contents:?}"
+            );
+            assert!(
+                !parent_contents.contains(&"fork-only"),
+                "parent inputs must NOT contain 'fork-only'; got: {parent_contents:?}"
+            );
+
+            // Fork-only prompt — verify parent's message does NOT appear.
+            h.http.push(vec![XaiEvent::Done]);
+            let fork_prompt_subj = format!("acp.session.{fork_id}.agent.prompt");
+            h.session_req(
+                &fork_prompt_subj,
+                PromptRequest::new(fork_id.clone(), vec![ContentBlock::from("fork-only")]),
+                "r.fork-prompt",
+            );
+            h.expect_n_publishes(5).await;
+            let fork_call = h.http.last_call().unwrap();
+            let fork_contents: Vec<_> =
+                fork_call.inputs.iter().filter_map(|i| i.content()).collect();
+            assert!(
+                fork_contents.contains(&"fork-only"),
+                "fork inputs must contain 'fork-only'; got: {fork_contents:?}"
+            );
+            assert!(
+                !fork_contents.contains(&"parent-only"),
+                "fork inputs must NOT contain 'parent-only'; got: {fork_contents:?}"
+            );
+        })
+        .await;
+}
+
+// ── x_search tool enabled ─────────────────────────────────────────────────────
+
+/// Enabling `x_search` on a session must cause the tool to appear in the tools
+/// array forwarded to the xAI HTTP client on the next prompt.
+#[tokio::test]
+async fn x_search_tool_enabled_is_included_in_tools_array_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            let set_cfg_subj = format!("acp.session.{sid}.agent.set_config_option");
+            h.session_req(
+                &set_cfg_subj,
+                SetSessionConfigOptionRequest::new(sid.clone(), "x_search", "on"),
+                "r.cfg",
+            );
+            h.expect_n_publishes(2).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search X")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(3).await;
+
+            let call = h.http.last_call().unwrap();
+            assert!(
+                call.tools.iter().any(|t| t.name() == "x_search"),
+                "x_search must be forwarded to the HTTP client after being enabled; tools: {:?}",
+                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+        })
+        .await;
+}
+
+// ── initialize: EnvVar auth method fields ─────────────────────────────────────
+
+/// `initialize` must advertise an `EnvVar` auth method whose first var has
+/// `name == "XAI_API_KEY"` and whose `link` points to the xAI API docs.
+#[tokio::test]
+async fn initialize_env_var_method_advertises_correct_var_name_and_link_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use agent_client_protocol::AuthMethod;
+
+            let h = Harness::new();
+            h.global(
+                "acp.agent.initialize",
+                InitializeRequest::new(ProtocolVersion::LATEST),
+                "r.init",
+            );
+            let payloads = h.expect_n_publishes(1).await;
+            let resp: InitializeResponse = serde_json::from_slice(&payloads[0]).unwrap();
+
+            let ev = resp
+                .auth_methods
+                .iter()
+                .find_map(|m| match m {
+                    AuthMethod::EnvVar(e) => Some(e),
+                    _ => None,
+                })
+                .expect("initialize must advertise an EnvVar auth method");
+
+            assert_eq!(ev.vars.len(), 1, "expected exactly one env var entry");
+            assert_eq!(
+                ev.vars[0].name, "XAI_API_KEY",
+                "env var name must be XAI_API_KEY; got: {}",
+                ev.vars[0].name
+            );
+            assert_eq!(
+                ev.link.as_deref(),
+                Some("https://x.ai/api"),
+                "EnvVar link must point to https://x.ai/api; got: {:?}",
+                ev.link
+            );
+        })
+        .await;
+}
+
+// ── pending tool calls cleared on incomplete response ─────────────────────────
+
+/// When an `Incomplete` response contains a `FunctionCall` event, the pending
+/// tool call must be discarded before the continuation request. The continuation
+/// HTTP call must NOT include any `FunctionCallOutput` items in its inputs.
+#[tokio::test]
+async fn pending_tool_calls_cleared_when_incomplete_response_contains_function_call_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // First response: FunctionCall followed by Incomplete(max_turns).
+            h.http.push(vec![
+                XaiEvent::ResponseId {
+                    id: "resp-part".to_string(),
+                },
+                XaiEvent::FunctionCall {
+                    call_id: "cid_discard".to_string(),
+                    name: "bash".to_string(),
+                    arguments: r#"{"command":"echo hi"}"#.to_string(),
+                },
+                XaiEvent::Finished {
+                    reason: FinishReason::Incomplete,
+                    incomplete_reason: Some("max_turns".to_string()),
+                },
+            ]);
+            // Continuation response: finishes normally.
+            h.http.push(vec![XaiEvent::Done]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("run bash")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap().clone();
+            assert_eq!(calls.len(), 2, "expected 2 HTTP calls (initial + continuation)");
+
+            let has_fco = calls[1]
+                .inputs
+                .iter()
+                .any(|i| matches!(i, InputItem::FunctionCallOutput { .. }));
+            assert!(
+                !has_fco,
+                "continuation round must NOT forward a FunctionCallOutput for the discarded tool call; inputs: {:?}",
+                calls[1].inputs
+            );
+        })
+        .await;
+}
+
+// ── system prompt absent when env var not set ─────────────────────────────────
+
+/// When `XAI_SYSTEM_PROMPT` is not set the first-turn HTTP call must contain
+/// exactly one input item — the user message — with no preceding system item.
+#[tokio::test]
+async fn system_prompt_absent_when_env_var_not_set_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Ensure XAI_SYSTEM_PROMPT is absent during agent construction.
+            let h = {
+                let _env_guard = env_mutex().lock().unwrap();
+                // SAFETY: guarded by ENV_MUTEX; only read during with_deps().
+                unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+                Harness::new()
+            };
+
+            let sid = create_session(&h).await;
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            assert_eq!(
+                call.input_len, 1,
+                "without XAI_SYSTEM_PROMPT the input must contain only the user message; got {}",
+                call.input_len
+            );
+            assert_eq!(
+                call.inputs[0].role(),
+                Some("user"),
+                "the single input item must have role 'user'"
             );
         })
         .await;
