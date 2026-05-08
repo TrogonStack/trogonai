@@ -2,7 +2,7 @@ use futures::StreamExt;
 
 use async_nats::jetstream::kv;
 
-use crate::{error::CronError, read_model::CronJob};
+use crate::{error::CronError, kv::CRON_JOBS_CHECKPOINT_KEY, read_model::CronJob};
 
 #[derive(Debug, Clone, Default)]
 pub struct ListJobsCommand;
@@ -16,6 +16,9 @@ pub async fn run(store: &kv::Store, _command: ListJobsCommand) -> Result<Vec<Cro
 
     while let Some(result) = keys.next().await {
         let key = result.map_err(|source| CronError::kv_source("failed to read projected cron job key", source))?;
+        if key == CRON_JOBS_CHECKPOINT_KEY {
+            continue;
+        }
         let Some(entry) = store
             .entry(key)
             .await

@@ -7,61 +7,28 @@ use crate::{
     config::JobWriteState,
     error::CronError,
     kv::{
-        EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PATTERN,
-        LEGACY_EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM, get_or_create_schedule_stream,
+        EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, SCHEDULES_STREAM, get_or_create_schedule_stream,
     },
     traits::SchedulePublisher,
 };
 use async_nats::jetstream::{self};
 use futures::TryStreamExt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EventSubjectPrefix {
-    Canonical,
-    Legacy,
-}
-
-impl EventSubjectPrefix {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Canonical => EVENTS_SUBJECT_PREFIX,
-            Self::Legacy => LEGACY_EVENTS_SUBJECT_PREFIX,
-        }
-    }
-
-    pub(crate) fn subject(self, job_id: &str) -> String {
-        format!("{}{}", self.as_str(), job_id)
-    }
+pub(crate) fn event_subject(job_id: &str) -> String {
+    format!("{EVENTS_SUBJECT_PREFIX}{job_id}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StreamSubjectState {
-    pub(crate) prefix: EventSubjectPrefix,
     pub(crate) write_state: JobWriteState,
 }
 
-pub(crate) fn resolve_event_subject_state(
-    job_id: &str,
-    canonical_state: Option<JobWriteState>,
-    legacy_state: Option<JobWriteState>,
-) -> Result<StreamSubjectState, CronError> {
-    match (canonical_state, legacy_state) {
-        (Some(_), Some(_)) => Err(CronError::event_source(
-            "job stream has conflicting event subjects",
-            std::io::Error::other(format!("job '{job_id}'")),
-        )),
-        (Some(write_state), None) => Ok(StreamSubjectState {
-            prefix: EventSubjectPrefix::Canonical,
-            write_state,
-        }),
-        (None, Some(write_state)) => Ok(StreamSubjectState {
-            prefix: EventSubjectPrefix::Legacy,
-            write_state,
-        }),
-        (None, None) => Ok(StreamSubjectState {
-            prefix: EventSubjectPrefix::Canonical,
+pub(crate) fn resolve_event_subject_state(canonical_state: Option<JobWriteState>) -> StreamSubjectState {
+    match canonical_state {
+        Some(write_state) => StreamSubjectState { write_state },
+        None => StreamSubjectState {
             write_state: JobWriteState::new(None, false),
-        }),
+        },
     }
 }
 
@@ -224,16 +191,6 @@ pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Resu
             std::io::Error::other(EVENTS_STREAM),
         ));
     }
-    if !config
-        .subjects
-        .iter()
-        .any(|subject| subject == LEGACY_EVENTS_SUBJECT_PATTERN)
-    {
-        return Err(CronError::event_source(
-            "events stream is missing legacy job event subject coverage",
-            std::io::Error::other(EVENTS_STREAM),
-        ));
-    }
     Ok(())
 }
 
@@ -288,42 +245,17 @@ mod tests {
 
     #[test]
     fn new_streams_use_canonical_event_subject() {
-        let state = resolve_event_subject_state("alpha", None, None).unwrap();
+        let state = resolve_event_subject_state(None);
 
-        assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
         assert_eq!(state.write_state.current_position(), None);
         assert!(!state.write_state.exists());
     }
 
     #[test]
-    fn legacy_streams_keep_legacy_event_subject() {
-        let state =
-            resolve_event_subject_state("alpha", None, Some(JobWriteState::new(Some(position(12)), true))).unwrap();
-
-        assert_eq!(state.prefix, EventSubjectPrefix::Legacy);
-        assert_eq!(state.write_state.current_position(), Some(position(12)));
-        assert!(state.write_state.exists());
-    }
-
-    #[test]
     fn deleted_streams_keep_their_subject_and_still_count_as_existing() {
-        let state =
-            resolve_event_subject_state("alpha", Some(JobWriteState::new(Some(position(12)), true)), None).unwrap();
+        let state = resolve_event_subject_state(Some(JobWriteState::new(Some(position(12)), true)));
 
-        assert_eq!(state.prefix, EventSubjectPrefix::Canonical);
         assert_eq!(state.write_state.current_position(), Some(position(12)));
         assert!(state.write_state.exists());
-    }
-
-    #[test]
-    fn split_stream_subjects_are_rejected() {
-        let error = resolve_event_subject_state(
-            "alpha",
-            Some(JobWriteState::new(Some(position(7)), true)),
-            Some(JobWriteState::new(Some(position(9)), true)),
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("job stream has conflicting event subjects"));
     }
 }

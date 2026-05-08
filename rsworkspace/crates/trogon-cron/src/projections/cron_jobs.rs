@@ -8,23 +8,19 @@ use async_nats::jetstream::{
     kv,
 };
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::snapshot::{Snapshot, SnapshotChange};
-use trogon_eventsourcing::{
-    EventData, RecordedEvent, StreamPosition, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint,
-    read_snapshot, read_snapshot_map, record_stream_message, write_checkpoint,
-};
+use trogon_eventsourcing::{EventData, RecordedEvent, StreamPosition, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
     error::CronError,
-    kv::{EVENTS_SUBJECT_PREFIX, LEGACY_EVENTS_SUBJECT_PREFIX},
+    kv::{CRON_JOBS_CHECKPOINT_KEY, EVENTS_SUBJECT_PREFIX},
     proto::{JobEventCodec, v1},
     read_model::{
         CronJob, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
         MessageEnvelope, MessageHeaders,
     },
-    store::{open_cron_jobs_bucket, open_events_stream, open_snapshot_bucket, snapshot_store_config},
+    store::{open_cron_jobs_bucket, open_events_stream},
 };
 
 pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
@@ -227,25 +223,11 @@ impl JobStreamState {
             Self::Present(job) => Some(job),
         }
     }
-
-    pub fn into_snapshot(self, position: StreamPosition) -> Option<Snapshot<CronJob>> {
-        self.into_job().map(|job| Snapshot::new(position, job))
-    }
-}
-
-fn stream_position(value: u64, context: &'static str) -> Result<StreamPosition, CronError> {
-    StreamPosition::try_new(value).map_err(|source| CronError::event_source(context, source))
 }
 
 impl From<CronJob> for JobStreamState {
     fn from(job: CronJob) -> Self {
         Self::Present(job)
-    }
-}
-
-impl From<Snapshot<CronJob>> for JobStreamState {
-    fn from(value: Snapshot<CronJob>) -> Self {
-        Self::Present(value.payload)
     }
 }
 
@@ -310,7 +292,7 @@ where
     let state = initial_jobs
         .iter()
         .cloned()
-        .map(|job| (job.payload.id.to_string(), JobStreamState::Present(job.payload)))
+        .map(|job| (job.id.to_string(), JobStreamState::Present(job)))
         .collect::<BTreeMap<_, _>>();
     let watcher: CronJobWatchStream = Box::pin(futures::stream::unfold(
         (state, subscriber, kv),
@@ -352,73 +334,63 @@ where
         },
     ));
 
-    Ok((initial_jobs.into_iter().map(|job| job.payload).collect(), watcher))
+    Ok((initial_jobs, watcher))
 }
 
-pub(crate) async fn catch_up_snapshots<J>(js: &J) -> Result<(), CronError>
+pub(crate) async fn catch_up_cron_jobs_read_model<J>(js: &J) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store> + JetStreamGetStream<Stream = jetstream::stream::Stream>,
 {
     let stream: jetstream::stream::Stream = open_events_stream(js).await?;
     let info = stream.get_info().await.map_err(|source| {
-        CronError::event_source("failed to query events stream info for snapshot catch-up", source)
+        CronError::event_source(
+            "failed to query events stream info for cron jobs read-model catch-up",
+            source,
+        )
     })?;
     if info.state.messages == 0 {
         return Ok(());
     }
 
-    let bucket = open_snapshot_bucket(js).await?;
-    let checkpoint = read_checkpoint(&bucket, &snapshot_store_config())
-        .await
-        .map_err(CronError::from)?;
+    let bucket = open_cron_jobs_bucket(js).await?;
+    let checkpoint = read_read_model_checkpoint(&bucket).await?;
     if checkpoint >= info.state.last_sequence {
         return Ok(());
     }
 
-    let mut snapshots = read_snapshot_map(&bucket, &snapshot_store_config())
-        .await
-        .map_err(CronError::from)?;
-    let mut states = snapshot_state_map(&snapshots);
+    let mut states = read_model_state_map(&bucket).await?;
     let start = checkpoint.max(info.state.first_sequence.saturating_sub(1)) + 1;
 
     let consumer = stream
         .create_consumer(event_replay_consumer_config(start))
         .await
-        .map_err(|source| CronError::event_source("failed to create snapshot catch-up consumer", source))?;
+        .map_err(|source| CronError::event_source("failed to create cron jobs read-model catch-up consumer", source))?;
     let mut messages = consumer
         .messages()
         .await
-        .map_err(|source| CronError::event_source("failed to open snapshot catch-up stream", source))?;
+        .map_err(|source| CronError::event_source("failed to open cron jobs read-model catch-up stream", source))?;
 
     while let Some(message) = messages.next().await {
-        let message = message
-            .map_err(|source| CronError::event_source("failed to read job event during snapshot catch-up", source))?;
-        let sequence = event_message_sequence(&message, "failed to read snapshot catch-up event metadata")?;
+        let message = message.map_err(|source| {
+            CronError::event_source("failed to read job event during cron jobs read-model catch-up", source)
+        })?;
+        let sequence = event_message_sequence(&message, "failed to read cron jobs read-model catch-up event metadata")?;
         if sequence > info.state.last_sequence {
             break;
         }
         let reached_tail = sequence >= info.state.last_sequence;
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
-        let data = event
-            .decode_data_with(&JobEventCodec)
-            .map_err(|source| CronError::event_source("failed to decode job event during snapshot catch-up", source))?;
-        let change = apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &data,
-            stream_position(
-                sequence,
-                "snapshot catch-up event sequence must be a valid stream position",
-            )?,
-        )?;
-        persist_snapshot_change(&bucket, &snapshot_store_config(), change)
-            .await
-            .map_err(CronError::from)?;
-        write_checkpoint(&bucket, &snapshot_store_config(), sequence)
-            .await
-            .map_err(CronError::from)?;
+        let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
+            CronError::event_source(
+                "failed to decode job event during cron jobs read-model catch-up",
+                source,
+            )
+        })?;
+        if let Some(change) = apply_event_to_read_model_state(&mut states, &stream_id, &data)? {
+            apply_projection_change(&bucket, &change).await?;
+        }
+        write_read_model_checkpoint(&bucket, sequence).await?;
         if reached_tail {
             break;
         }
@@ -443,57 +415,30 @@ pub(crate) async fn project_appended_events(
         })
     })?;
 
-    let mut snapshots = BTreeMap::new();
     let mut states = BTreeMap::new();
-    if let Some(snapshot) = read_snapshot(bucket, &snapshot_store_config(), job_id)
-        .await
-        .map_err(CronError::from)?
-    {
-        states.insert(job_id.to_string(), JobStreamState::from(snapshot.clone()));
-        snapshots.insert(job_id.to_string(), snapshot);
+    if let Some(job) = read_projected_job(bucket, job_id).await? {
+        states.insert(job_id.to_string(), JobStreamState::from(job));
     }
 
-    let start_position = final_position
-        .get()
-        .checked_sub(events.len() as u64 - 1)
-        .ok_or_else(|| {
-            CronError::event_source(
-                "stream snapshot projection requires a valid batch position range",
-                std::io::Error::other(format!("job '{job_id}'")),
-            )
-        })?;
-
-    for (index, event) in events.iter().enumerate() {
+    for event in events {
         let decoded = event
             .decode_data_with(&JobEventCodec)
-            .map_err(|source| CronError::event_source("failed to decode job event for snapshot projection", source))?;
-        let change = apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            job_id,
-            &decoded,
-            stream_position(
-                start_position + index as u64,
-                "stream snapshot projection requires a valid event position",
-            )?,
-        )?;
-        persist_snapshot_change(bucket, &snapshot_store_config(), change)
-            .await
-            .map_err(CronError::from)?;
+            .map_err(|source| CronError::event_source("failed to decode job event for cron jobs read model", source))?;
+        if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
+            apply_projection_change(bucket, &change).await?;
+        }
     }
-    maybe_advance_checkpoint(bucket, &snapshot_store_config(), final_position.get())
-        .await
-        .map_err(CronError::from)
+    maybe_advance_read_model_checkpoint(bucket, final_position.get()).await
 }
 
-async fn rewrite_cron_jobs_projection<J>(js: &J, jobs: &[Snapshot<CronJob>]) -> Result<(), CronError>
+async fn rewrite_cron_jobs_projection<J>(js: &J, jobs: &[CronJob]) -> Result<(), CronError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
 {
     let kv: kv::Store = open_cron_jobs_bucket(js).await?;
     let desired_ids = jobs
         .iter()
-        .map(|job| job.payload.id.as_str())
+        .map(|job| job.id.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let mut keys = kv
         .keys()
@@ -502,6 +447,9 @@ where
 
     while let Some(result) = keys.next().await {
         let key = result.map_err(|source| CronError::kv_source("failed to read projection key", source))?;
+        if is_read_model_metadata_key(&key) {
+            continue;
+        }
         if desired_ids.contains(key.as_str()) {
             continue;
         }
@@ -511,8 +459,8 @@ where
     }
 
     for job in jobs {
-        let value = serde_json::to_vec(&job.payload)?;
-        kv.put(job.payload.id.to_string(), value.into())
+        let value = serde_json::to_vec(job)?;
+        kv.put(job.id.to_string(), value.into())
             .await
             .map_err(|source| CronError::kv_source("failed to write projected job state", source))?;
     }
@@ -524,8 +472,7 @@ async fn rebuild_jobs_from_stream(
     stream: &jetstream::stream::Stream,
     first_sequence: u64,
     last_sequence: u64,
-) -> Result<Vec<Snapshot<CronJob>>, CronError> {
-    let mut snapshots = BTreeMap::new();
+) -> Result<Vec<CronJob>, CronError> {
     let mut states = BTreeMap::new();
     if last_sequence == 0 || first_sequence == 0 || first_sequence > last_sequence {
         return Ok(Vec::new());
@@ -543,29 +490,23 @@ async fn rebuild_jobs_from_stream(
     while let Some(message) = messages.next().await {
         let message =
             message.map_err(|source| CronError::event_source("failed to read job event from stream", source))?;
-        let position = event_message_sequence(&message, "failed to read job event metadata")?;
-        if position > last_sequence {
+        let sequence = event_message_sequence(&message, "failed to read job event metadata")?;
+        if sequence > last_sequence {
             break;
         }
-        let reached_tail = position >= last_sequence;
+        let reached_tail = sequence >= last_sequence;
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &data,
-            stream_position(position, "recorded job event sequence must be a valid stream position")?,
-        )?;
+        apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
         if reached_tail {
             break;
         }
     }
 
-    Ok(snapshots.into_values().collect())
+    Ok(states.into_values().filter_map(JobStreamState::into_job).collect())
 }
 
 fn decode_recorded_job_event(
@@ -695,6 +636,79 @@ fn event_message_sequence(message: &jetstream::Message, context: &'static str) -
         .map_err(|source| CronError::event_source(context, std::io::Error::other(source.to_string())))
 }
 
+fn is_read_model_metadata_key(key: &str) -> bool {
+    key == CRON_JOBS_CHECKPOINT_KEY
+}
+
+async fn read_projected_job(bucket: &kv::Store, id: &str) -> Result<Option<CronJob>, CronError> {
+    let Some(entry) = bucket
+        .entry(id.to_string())
+        .await
+        .map_err(|source| CronError::kv_source("failed to read projected cron job", source))?
+    else {
+        return Ok(None);
+    };
+
+    serde_json::from_slice(&entry.value).map(Some).map_err(CronError::from)
+}
+
+async fn read_model_state_map(bucket: &kv::Store) -> Result<BTreeMap<String, JobStreamState>, CronError> {
+    let mut keys = bucket
+        .keys()
+        .await
+        .map_err(|source| CronError::kv_source("failed to list cron jobs read-model keys", source))?;
+    let mut states = BTreeMap::new();
+
+    while let Some(result) = keys.next().await {
+        let key = result.map_err(|source| CronError::kv_source("failed to read cron jobs read-model key", source))?;
+        if is_read_model_metadata_key(&key) {
+            continue;
+        }
+        if let Some(job) = read_projected_job(bucket, &key).await? {
+            states.insert(key, JobStreamState::Present(job));
+        }
+    }
+
+    Ok(states)
+}
+
+async fn read_read_model_checkpoint(bucket: &kv::Store) -> Result<u64, CronError> {
+    let Some(entry) = bucket
+        .entry(CRON_JOBS_CHECKPOINT_KEY.to_string())
+        .await
+        .map_err(|source| CronError::kv_source("failed to read cron jobs read-model checkpoint", source))?
+    else {
+        return Ok(0);
+    };
+
+    String::from_utf8(entry.value.to_vec())
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| {
+            CronError::kv_source(
+                "failed to decode cron jobs read-model checkpoint",
+                std::io::Error::other(CRON_JOBS_CHECKPOINT_KEY),
+            )
+        })
+}
+
+async fn write_read_model_checkpoint(bucket: &kv::Store, sequence: u64) -> Result<(), CronError> {
+    bucket
+        .put(CRON_JOBS_CHECKPOINT_KEY.to_string(), sequence.to_string().into())
+        .await
+        .map(|_| ())
+        .map_err(|source| CronError::kv_source("failed to write cron jobs read-model checkpoint", source))
+}
+
+async fn maybe_advance_read_model_checkpoint(bucket: &kv::Store, sequence: u64) -> Result<(), CronError> {
+    let current = read_read_model_checkpoint(bucket).await?;
+    if current != sequence.saturating_sub(1) {
+        return Ok(());
+    }
+
+    write_read_model_checkpoint(bucket, sequence).await
+}
+
 async fn apply_projection_change(kv: &kv::Store, change: &ProjectionChange) -> Result<(), CronError> {
     match change {
         ProjectionChange::Upsert(job) => {
@@ -720,49 +734,35 @@ fn change_from_projection_change(change: ProjectionChange) -> CronJobChange {
     }
 }
 
-fn apply_event_to_snapshot_map(
+fn apply_event_to_read_model_state(
     states: &mut BTreeMap<String, JobStreamState>,
-    snapshots: &mut BTreeMap<String, Snapshot<CronJob>>,
     stream_id: &str,
     event: &v1::JobEvent,
-    position: StreamPosition,
-) -> Result<SnapshotChange<CronJob>, CronError> {
+) -> Result<Option<ProjectionChange>, CronError> {
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next_state = apply(stream_id, current_state, event)
-        .map_err(|source| CronError::event_source("failed to apply job event to stream snapshot state", source))?;
+    let next_state = apply(stream_id, current_state.clone(), event)
+        .map_err(|source| CronError::event_source("failed to apply job event to cron jobs read model", source))?;
+    let change = projection_change(&current_state, &next_state);
 
-    states.insert(stream_id.to_string(), next_state.clone());
-
-    match next_state {
-        JobStreamState::Present(job) => {
-            let snapshot = Snapshot::new(position, job);
-            snapshots.insert(stream_id.to_string(), snapshot.clone());
-            Ok(SnapshotChange::upsert(stream_id.to_string(), snapshot))
+    match next_state.clone() {
+        JobStreamState::Present(_) | JobStreamState::Deleted(_) => {
+            states.insert(stream_id.to_string(), next_state);
         }
-        JobStreamState::Initial | JobStreamState::Deleted(_) => {
-            snapshots.remove(stream_id);
-            Ok(SnapshotChange::delete(stream_id.to_string()))
+        JobStreamState::Initial => {
+            states.remove(stream_id);
         }
     }
-}
 
-fn snapshot_state_map(snapshots: &BTreeMap<String, Snapshot<CronJob>>) -> BTreeMap<String, JobStreamState> {
-    snapshots
-        .iter()
-        .map(|(stream_id, snapshot)| (stream_id.clone(), JobStreamState::from(snapshot.clone())))
-        .collect()
+    Ok(change)
 }
 
 fn job_id_from_event_subject(subject: &str) -> Result<String, CronError> {
-    let raw_id = subject
-        .strip_prefix(EVENTS_SUBJECT_PREFIX)
-        .or_else(|| subject.strip_prefix(LEGACY_EVENTS_SUBJECT_PREFIX))
-        .ok_or_else(|| {
-            CronError::event_source(
-                "failed to derive job stream id from event subject",
-                std::io::Error::other(subject.to_string()),
-            )
-        })?;
+    let raw_id = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
+        CronError::event_source(
+            "failed to derive job stream id from event subject",
+            std::io::Error::other(subject.to_string()),
+        )
+    })?;
 
     validate_event_job_id(raw_id)
         .map(|()| raw_id.to_string())
@@ -785,10 +785,6 @@ mod tests {
     use crate::{
         CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope, MessageHeaders,
     };
-
-    fn position(value: u64) -> StreamPosition {
-        StreamPosition::try_new(value).expect("test stream position must be non-zero")
-    }
 
     fn expected_job(id: &str) -> CronJob {
         CronJob {
@@ -961,65 +957,29 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_projection_rejects_recreating_deleted_job() {
+    fn read_model_state_rejects_recreating_deleted_job() {
         let mut states = BTreeMap::new();
-        let mut snapshots = BTreeMap::new();
         let stream_id = "alpha".to_string();
 
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &added_event("alpha"),
-            position(1),
-        )
-        .unwrap();
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &paused_event("alpha"),
-            position(2),
-        )
-        .unwrap();
-        apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &removed_event("alpha"),
-            position(3),
-        )
-        .unwrap();
-        let error = apply_event_to_snapshot_map(
-            &mut states,
-            &mut snapshots,
-            &stream_id,
-            &added_event("alpha"),
-            position(4),
-        )
-        .unwrap_err();
+        apply_event_to_read_model_state(&mut states, &stream_id, &added_event("alpha")).unwrap();
+        apply_event_to_read_model_state(&mut states, &stream_id, &paused_event("alpha")).unwrap();
+        apply_event_to_read_model_state(&mut states, &stream_id, &removed_event("alpha")).unwrap();
+        let error = apply_event_to_read_model_state(&mut states, &stream_id, &added_event("alpha")).unwrap_err();
 
         assert!(error.to_string().contains("deleted"));
-        assert!(!snapshots.contains_key("alpha"));
         assert_eq!(states.get("alpha"), Some(&JobStreamState::Deleted(stream_id)));
     }
 
     #[test]
-    fn snapshot_projection_rejects_invalid_transition_sequence() {
+    fn read_model_state_rejects_invalid_transition_sequence() {
         let stream_id = "alpha".to_string();
-        let error = apply_event_to_snapshot_map(
-            &mut BTreeMap::new(),
-            &mut BTreeMap::new(),
-            &stream_id,
-            &paused_event("alpha"),
-            position(1),
-        )
-        .unwrap_err();
+        let error =
+            apply_event_to_read_model_state(&mut BTreeMap::new(), &stream_id, &paused_event("alpha")).unwrap_err();
 
         assert!(
             error
                 .to_string()
-                .contains("failed to apply job event to stream snapshot state")
+                .contains("failed to apply job event to cron jobs read model")
         );
     }
 }

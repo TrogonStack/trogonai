@@ -244,7 +244,7 @@ fn job_message_eq(left: v1::JobMessageView<'_>, right: v1::JobMessageView<'_>) -
 }
 
 impl SnapshotSchema for state_v1::State {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.job.v3.";
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.snapshots.jobs.v1.";
 }
 
 impl Serialize for state_v1::State {

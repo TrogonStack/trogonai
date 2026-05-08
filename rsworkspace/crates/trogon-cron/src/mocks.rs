@@ -140,7 +140,7 @@ impl ReleaseLease for MockLeaderLock {
 
 #[derive(Clone, Default)]
 pub struct MockCronStore {
-    jobs: Arc<Mutex<HashMap<String, Snapshot<CronJob>>>>,
+    jobs: Arc<Mutex<HashMap<String, CronJob>>>,
     stream_positions: Arc<Mutex<HashMap<String, StreamPosition>>>,
     events: Arc<Mutex<HashMap<String, Vec<EventData>>>>,
     command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
@@ -172,10 +172,7 @@ impl MockCronStore {
             id.clone(),
             vec![EventData::from_event(&id, &JobEventCodec, &event).unwrap()],
         );
-        self.jobs
-            .lock()
-            .unwrap()
-            .insert(id.clone(), Snapshot::new(initial_position, job));
+        self.jobs.lock().unwrap().insert(id.clone(), job);
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
@@ -197,35 +194,15 @@ impl MockCronStore {
     }
 
     pub async fn get_job(&self, command: GetJobCommand) -> Result<Option<CronJob>, CronError> {
-        Ok(self
-            .jobs
-            .lock()
-            .unwrap()
-            .get(command.id.as_str())
-            .cloned()
-            .map(|job| job.payload))
+        Ok(self.jobs.lock().unwrap().get(command.id.as_str()).cloned())
     }
 
     pub async fn list_jobs(&self, _command: ListJobsCommand) -> Result<Vec<CronJob>, CronError> {
-        Ok(self
-            .jobs
-            .lock()
-            .unwrap()
-            .values()
-            .cloned()
-            .map(|job| job.payload)
-            .collect())
+        Ok(self.jobs.lock().unwrap().values().cloned().collect())
     }
 
     pub async fn load_and_watch_cron_jobs(&self) -> LoadAndWatchCronJobsResult {
-        let jobs = self
-            .jobs
-            .lock()
-            .unwrap()
-            .values()
-            .cloned()
-            .map(|job| job.payload)
-            .collect();
+        let jobs = self.jobs.lock().unwrap().values().cloned().collect();
         Ok((jobs, Box::pin(futures::stream::pending()) as CronJobWatchStream))
     }
 }
@@ -436,7 +413,7 @@ impl StreamAppend<str> for MockCronStore {
         let mut stream_positions = stream_positions.lock().unwrap();
         let mut stream_events = event_log.lock().unwrap();
 
-        let current_snapshot = jobs.get(stream_id.as_str()).cloned();
+        let current_job = jobs.get(stream_id.as_str()).cloned();
         let current_position = stream_positions.get(stream_id.as_str()).copied();
         let write_state = JobWriteState::new(current_position, current_position.is_some());
         match expected_state {
@@ -458,7 +435,7 @@ impl StreamAppend<str> for MockCronStore {
         }
 
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
-        let mut projected_snapshot = current_snapshot;
+        let mut projected_job = current_job;
         let mut raw_position = current_position.map(StreamPosition::get).unwrap_or(0);
 
         for event_data in events {
@@ -466,39 +443,33 @@ impl StreamAppend<str> for MockCronStore {
                 .decode_data_with(&JobEventCodec)
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
-            let event_position = stream_position(raw_position)?;
             stored_events.push(event_data);
             match event.event() {
                 v1::job_event::EventOneof::JobAdded(inner) => {
-                    projected_snapshot = Some(Snapshot::new(
-                        event_position,
-                        cron_job_from_proto(stream_id.as_str(), inner.job()),
-                    ));
+                    projected_job = Some(cron_job_from_proto(stream_id.as_str(), inner.job()));
                 }
                 v1::job_event::EventOneof::JobPaused(_) => {
-                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
+                    let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
-                            "failed to project mocked job pause without current snapshot",
+                            "failed to project mocked job pause without current read model",
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    snapshot.position = event_position;
-                    snapshot.payload.status = crate::JobEventStatus::Disabled;
-                    projected_snapshot = Some(snapshot);
+                    job.status = crate::JobEventStatus::Disabled;
+                    projected_job = Some(job);
                 }
                 v1::job_event::EventOneof::JobResumed(_) => {
-                    let mut snapshot = projected_snapshot.take().ok_or_else(|| {
+                    let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
-                            "failed to project mocked job resume without current snapshot",
+                            "failed to project mocked job resume without current read model",
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    snapshot.position = event_position;
-                    snapshot.payload.status = crate::JobEventStatus::Enabled;
-                    projected_snapshot = Some(snapshot);
+                    job.status = crate::JobEventStatus::Enabled;
+                    projected_job = Some(job);
                 }
                 v1::job_event::EventOneof::JobRemoved(_) => {
-                    projected_snapshot = None;
+                    projected_job = None;
                 }
                 _ => {
                     return Err(CronError::event_source(
@@ -511,8 +482,8 @@ impl StreamAppend<str> for MockCronStore {
 
         let final_position = stream_position(raw_position)?;
         stream_positions.insert(stream_id.to_string(), final_position);
-        if let Some(snapshot) = projected_snapshot {
-            jobs.insert(stream_id.to_string(), snapshot);
+        if let Some(job) = projected_job {
+            jobs.insert(stream_id.to_string(), job);
         } else {
             jobs.remove(stream_id.as_str());
         }
@@ -654,7 +625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_cron_store_covers_crud_and_watch_snapshot() {
+    async fn mock_cron_store_covers_crud_and_read_model_watch() {
         let store = MockCronStore::new();
         store.seed_job(base_job("seeded"));
 
