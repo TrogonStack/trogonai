@@ -3,7 +3,6 @@
 /// guarantees the values are path-safe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceName {
-    AcpNatsServer,
     AcpNatsStdio,
     AcpNatsServer,
     AcpNatsWs,
@@ -22,7 +21,6 @@ pub enum ServiceName {
 impl ServiceName {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::AcpNatsServer => "acp-nats-server",
             Self::AcpNatsStdio => "acp-nats-stdio",
             Self::AcpNatsServer => "acp-nats-server",
             Self::AcpNatsWs => "acp-nats-ws",
@@ -52,7 +50,6 @@ mod tests {
 
     #[test]
     fn as_str_returns_expected_values() {
-        assert_eq!(ServiceName::AcpNatsServer.as_str(), "acp-nats-server");
         assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
         assert_eq!(ServiceName::AcpNatsServer.as_str(), "acp-nats-server");
         assert_eq!(ServiceName::AcpNatsWs.as_str(), "acp-nats-ws");
@@ -70,7 +67,6 @@ mod tests {
 
     #[test]
     fn display_delegates_to_as_str() {
-        assert_eq!(format!("{}", ServiceName::AcpNatsServer), "acp-nats-server");
         assert_eq!(format!("{}", ServiceName::AcpNatsStdio), "acp-nats-stdio");
         assert_eq!(format!("{}", ServiceName::AcpNatsServer), "acp-nats-server");
         assert_eq!(format!("{}", ServiceName::AcpNatsWs), "acp-nats-ws");
