@@ -382,4 +382,39 @@ mod tests {
         let err = extract_text_content(&resp).unwrap_err();
         assert!(matches!(err, OrchestratorError::Planning(_)));
     }
+
+    // ── extract_json_block unit tests ─────────────────────────────────────────
+
+    #[test]
+    fn extract_json_block_returns_plain_json_unchanged() {
+        let json = r#"{"subtasks":[],"reasoning":"ok"}"#;
+        assert_eq!(extract_json_block(json), json);
+    }
+
+    #[test]
+    fn extract_json_block_extracts_from_trailing_prose() {
+        // JSON followed by explanatory text: rfind('}') picks up the JSON's
+        // closing brace correctly.
+        let text = r#"{"subtasks":[],"reasoning":"ok"} That's the plan."#;
+        assert_eq!(extract_json_block(text), r#"{"subtasks":[],"reasoning":"ok"}"#);
+    }
+
+    #[test]
+    fn extract_json_block_with_braces_in_leading_prose_returns_mangled_slice() {
+        // When prose before the JSON block itself contains '{', find('{') picks
+        // the wrong start. The returned slice is not valid JSON — callers
+        // surface this as a parse error (Planning error), not silent data loss.
+        let text = r#"Here {is} the plan: {"subtasks":[],"reasoning":"ok"}"#;
+        let extracted = extract_json_block(text);
+        // The extraction is wrong (starts at `{is}`), so parsing should fail.
+        assert!(serde_json::from_str::<TaskPlan>(extracted).is_err());
+    }
+
+    #[test]
+    fn extract_json_block_prefers_code_fence_over_brace_search() {
+        // ```json fences take priority over the brace-search fallback.
+        let text = "preamble {broken} ```json\n{\"subtasks\":[],\"reasoning\":\"ok\"}\n```";
+        let extracted = extract_json_block(text);
+        assert!(serde_json::from_str::<TaskPlan>(extracted).is_ok());
+    }
 }
