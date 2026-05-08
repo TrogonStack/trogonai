@@ -351,4 +351,51 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert!(parsed["data"].is_null());
     }
+
+    #[tokio::test]
+    async fn non_2xx_delivery_does_not_prevent_other_subscriptions() {
+        // Two matching subscriptions — even when delivery returns 500,
+        // the dispatcher must attempt all subscriptions, not short-circuit.
+        let store = MockSubscriptionStore::new();
+        let registry = WebhookRegistry::new(store);
+        registry
+            .register(&WebhookSubscription {
+                id: "sub-a".to_string(),
+                subject_pattern: "transcripts.>".to_string(),
+                url: "https://a.example.com/hook".to_string(),
+                secret: None,
+            })
+            .await
+            .unwrap();
+        registry
+            .register(&WebhookSubscription {
+                id: "sub-b".to_string(),
+                subject_pattern: "transcripts.>".to_string(),
+                url: "https://b.example.com/hook".to_string(),
+                secret: None,
+            })
+            .await
+            .unwrap();
+
+        let http = MockWebhookClient::new();
+        http.set_status(500);
+
+        let factory = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        factory.add_consumer(consumer);
+
+        let msg = MockJsMessage::new(make_nats_msg("transcripts.pr.x.y.z", b"{}"));
+        tx.unbounded_send(Ok(msg)).unwrap();
+
+        let http_clone = http.clone();
+        let dispatcher = make_dispatcher(factory, registry, http);
+        drop(tx);
+        dispatcher.run().await.ok();
+
+        let calls = http_clone.calls();
+        assert_eq!(calls.len(), 2, "both subscriptions must be attempted despite non-2xx");
+        let urls: std::collections::HashSet<_> = calls.iter().map(|c| c.url.as_str()).collect();
+        assert!(urls.contains("https://a.example.com/hook"));
+        assert!(urls.contains("https://b.example.com/hook"));
+    }
 }

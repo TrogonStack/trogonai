@@ -296,4 +296,38 @@ mod tests {
         let err = engine.orchestrate("impossible task").await.unwrap_err();
         assert!(matches!(err, OrchestratorError::Planning(_)));
     }
+
+    #[tokio::test]
+    async fn synthesis_failure_propagates_as_error() {
+        let cap = AgentCapability::new("PrActor", ["code_review"], "actors.pr.>");
+        let plan = plan_with(vec![subtask("1", "code_review")]);
+        // synthesis: None → MockOrchestratorProvider returns Synthesis error
+        let provider = MockOrchestratorProvider { plan: Some(plan), synthesis: None };
+        let store = MockRegistryStore::new();
+        let registry = Registry::new(store.clone());
+        registry.register(&cap).await.unwrap();
+        let caller = MockAgentCaller::returning(b"ok".to_vec());
+        let engine = OrchestratorEngine::new(provider, caller, registry);
+
+        let err = engine.orchestrate("task").await.unwrap_err();
+        assert!(matches!(err, OrchestratorError::Synthesis(_)));
+    }
+
+    #[tokio::test]
+    async fn all_subtasks_fail_synthesis_is_still_called() {
+        // No registered capabilities → all subtasks fail with "no agent registered"
+        // The synthesis step is still reached and produces a result.
+        let plan = plan_with(vec![
+            subtask("1", "missing_cap_a"),
+            subtask("2", "missing_cap_b"),
+        ]);
+        let caller = MockAgentCaller::returning(b"".to_vec());
+        let engine = engine_with(vec![], plan, "degraded synthesis", caller).await;
+
+        let result = engine.orchestrate("task with no agents").await.unwrap();
+
+        assert_eq!(result.sub_results.len(), 2);
+        assert!(result.sub_results.iter().all(|r| !r.success));
+        assert_eq!(result.synthesis, "degraded synthesis");
+    }
 }

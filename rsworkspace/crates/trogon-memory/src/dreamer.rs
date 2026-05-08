@@ -223,4 +223,46 @@ mod tests {
             .unwrap();
         assert!(result.facts.is_empty());
     }
+
+    #[tokio::test]
+    async fn process_session_propagates_store_put_error() {
+        #[derive(Clone)]
+        struct FailingPutStore;
+
+        #[derive(Debug)]
+        struct PutErr;
+        impl std::fmt::Display for PutErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "storage unavailable")
+            }
+        }
+        impl std::error::Error for PutErr {}
+
+        impl MemoryStore for FailingPutStore {
+            type PutError = PutErr;
+            type GetError = std::convert::Infallible;
+
+            async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<u64, PutErr> {
+                Err(PutErr)
+            }
+            async fn get(
+                &self,
+                _key: &str,
+            ) -> Result<Option<bytes::Bytes>, std::convert::Infallible> {
+                Ok(None)
+            }
+        }
+
+        let provider = MockMemoryProvider::returning(vec![RawFact {
+            category: "fact".into(),
+            content: "some fact".into(),
+            confidence: 0.9,
+        }]);
+        let dreamer = Dreamer::new(provider, FailingPutStore);
+        let err = dreamer
+            .process_session("agent", "proj/1", "sess-1", &sample_transcript())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DreamerError::Store(_)));
+    }
 }

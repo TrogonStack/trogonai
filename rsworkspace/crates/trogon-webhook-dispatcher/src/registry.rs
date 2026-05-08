@@ -167,4 +167,48 @@ mod tests {
         let matched = registry.matching("transcripts.pr.x.y.z").await;
         assert_eq!(matched.len(), 2);
     }
+
+    #[tokio::test]
+    async fn deregister_nonexistent_id_returns_ok() {
+        let registry = WebhookRegistry::new(MockSubscriptionStore::new());
+        registry.deregister("does-not-exist").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn matching_returns_empty_when_store_fails() {
+        #[derive(Clone)]
+        struct FailingStore;
+
+        #[derive(Debug)]
+        struct StoreErr;
+        impl std::fmt::Display for StoreErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "store unavailable")
+            }
+        }
+        impl std::error::Error for StoreErr {}
+
+        impl crate::store::SubscriptionStore for FailingStore {
+            type PutError = StoreErr;
+            type GetError = StoreErr;
+            type DeleteError = StoreErr;
+            type KeysError = StoreErr;
+            async fn put(&self, _: &str, _: bytes::Bytes) -> Result<u64, StoreErr> {
+                Err(StoreErr)
+            }
+            async fn get(&self, _: &str) -> Result<Option<bytes::Bytes>, StoreErr> {
+                Err(StoreErr)
+            }
+            async fn delete(&self, _: &str) -> Result<(), StoreErr> {
+                Err(StoreErr)
+            }
+            async fn keys(&self) -> Result<Vec<String>, StoreErr> {
+                Err(StoreErr)
+            }
+        }
+
+        let registry = WebhookRegistry::new(FailingStore);
+        let matched = registry.matching("transcripts.anything").await;
+        assert!(matched.is_empty(), "store failure should yield empty, not panic");
+    }
 }
