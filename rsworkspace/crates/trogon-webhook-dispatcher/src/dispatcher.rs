@@ -434,5 +434,21 @@ mod tests {
         let urls: std::collections::HashSet<_> = calls.iter().map(|c| c.url.as_str()).collect();
         assert!(urls.contains("https://a.example.com/hook"));
         assert!(urls.contains("https://b.example.com/hook"));
+
+        // All deliveries for the same NATS message must share the same delivery ID.
+        let delivery_ids: Vec<_> = calls
+            .iter()
+            .filter_map(|c| {
+                c.headers
+                    .iter()
+                    .find(|(k, _)| k == "X-Trogon-Delivery")
+                    .map(|(_, v)| v.as_str())
+            })
+            .collect();
+        assert_eq!(delivery_ids.len(), 2, "both calls must carry X-Trogon-Delivery");
+        assert_eq!(
+            delivery_ids[0], delivery_ids[1],
+            "delivery ID must be the same for all subscriptions of one message"
+        );
     }
 }

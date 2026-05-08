@@ -290,6 +290,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mixed_success_and_failure_in_batch_stores_only_successful_results() {
+        // Provider fails for one specific rubric and succeeds for the others.
+        // Verifies that successful results are stored and returned while the
+        // failed one is silently skipped.
+        #[derive(Clone)]
+        struct SequencedProvider {
+            // Maps rubric id → whether it should fail
+            fail_ids: Arc<Mutex<std::collections::HashSet<String>>>,
+            scores: Vec<CriterionScore>,
+        }
+
+        impl EvaluationProvider for SequencedProvider {
+            fn evaluate<'a>(
+                &'a self,
+                rubric: &'a Rubric,
+                _transcript: &'a [TranscriptEntry],
+            ) -> impl Future<Output = Result<(Vec<CriterionScore>, String), OutcomesError>> + Send + 'a
+            {
+                let should_fail = self.fail_ids.lock().unwrap().contains(&rubric.id);
+                let scores = self.scores.clone();
+                async move {
+                    if should_fail {
+                        Err(OutcomesError::Llm("LLM failed for this rubric".into()))
+                    } else {
+                        Ok((scores, "ok".into()))
+                    }
+                }
+            }
+        }
+
+        let rubric_store = MockOutcomesStore::new();
+        let result_store = MockOutcomesStore::new();
+        let client = RubricClient::new(rubric_store.clone());
+        client.put(&rubric("r-ok-1", None)).await.unwrap();
+        client.put(&rubric("r-fail", None)).await.unwrap();
+        client.put(&rubric("r-ok-2", None)).await.unwrap();
+
+        let mut fail_ids = std::collections::HashSet::new();
+        fail_ids.insert("r-fail".to_string());
+
+        let provider = SequencedProvider {
+            fail_ids: Arc::new(Mutex::new(fail_ids)),
+            scores: good_scores(),
+        };
+        let ev = Evaluator::new(provider, rubric_store, result_store);
+
+        let results = ev
+            .evaluate_session("pr", "repo/1", "sess-1", &sample_transcript(), &[])
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2, "two rubrics succeed, one fails and is skipped");
+        assert!(results.iter().all(|r| r.rubric_id != "r-fail"));
+        assert!(results.iter().all(|r| r.passed));
+    }
+
+    #[tokio::test]
     async fn result_store_put_failure_propagates_as_error() {
         // When results.put() fails, the error propagates (unlike provider errors
         // which are swallowed). This documents the intentional asymmetry.
