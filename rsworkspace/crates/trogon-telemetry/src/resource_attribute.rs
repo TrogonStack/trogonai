@@ -3,11 +3,16 @@ use opentelemetry::KeyValue;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResourceAttribute {
     AcpPrefix(String),
+    McpPrefix(String),
 }
 
 impl ResourceAttribute {
     pub fn acp_prefix(prefix: impl std::fmt::Display) -> Self {
         Self::AcpPrefix(prefix.to_string())
+    }
+
+    pub fn mcp_prefix(prefix: impl std::fmt::Display) -> Self {
+        Self::McpPrefix(prefix.to_string())
     }
 }
 
@@ -16,6 +21,9 @@ impl From<ResourceAttribute> for KeyValue {
         match attribute {
             ResourceAttribute::AcpPrefix(prefix) => {
                 KeyValue::new(crate::constants::RESOURCE_ATTRIBUTE_ACP_PREFIX, prefix)
+            }
+            ResourceAttribute::McpPrefix(prefix) => {
+                KeyValue::new(crate::constants::RESOURCE_ATTRIBUTE_MCP_PREFIX, prefix)
             }
         }
     }
@@ -30,6 +38,14 @@ mod tests {
         assert_eq!(
             KeyValue::from(ResourceAttribute::acp_prefix("test")),
             KeyValue::new(crate::constants::RESOURCE_ATTRIBUTE_ACP_PREFIX, "test")
+        );
+    }
+
+    #[test]
+    fn mcp_prefix_maps_to_expected_key_value() {
+        assert_eq!(
+            KeyValue::from(ResourceAttribute::mcp_prefix("test")),
+            KeyValue::new(crate::constants::RESOURCE_ATTRIBUTE_MCP_PREFIX, "test")
         );
     }
 }

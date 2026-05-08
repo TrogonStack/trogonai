@@ -6,20 +6,19 @@ mod config;
 mod constants;
 mod runtime;
 
-#[cfg(not(coverage))]
-use {
-    crate::constants::MCP_ENDPOINT,
-    anyhow::Result,
-    axum::Router,
-    tokio::net::TcpListener,
-    tracing::{error, info},
-    trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
-    trogon_telemetry::{ResourceAttribute, ServiceName},
-};
+use axum::Router;
+use tokio::net::TcpListener;
+use tracing::{error, info};
+use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
+use trogon_telemetry::{ResourceAttribute, ServiceName};
+
+use crate::constants::MCP_ENDPOINT;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(not(coverage))]
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), BoxError> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::HttpBridgeConfig {
         mcp,
