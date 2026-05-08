@@ -28,7 +28,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = "0.5"
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 futures-util = "0.3"
 hmac = "0.12"

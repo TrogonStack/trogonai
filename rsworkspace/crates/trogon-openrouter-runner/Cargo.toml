@@ -1,18 +1,10 @@
 [package]
-name = "trogon-xai-runner"
+name = "trogon-openrouter-runner"
 version = "0.0.1"
 edition = "2024"
 
 [features]
 test-helpers = []
-
-[[test]]
-name = "xai_integration"
-required-features = ["test-helpers"]
-
-[[test]]
-name = "nats_e2e"
-required-features = ["test-helpers"]
 
 [lints]
 workspace = true

@@ -23,5 +23,5 @@ trogon-vault-nats = { path = "../trogon-vault-nats" }
 
 [dev-dependencies]
 httpmock               = "0.7"
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio                  = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }

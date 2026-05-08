@@ -22,7 +22,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 futures-util = { workspace = true }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }

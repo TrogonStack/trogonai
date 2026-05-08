@@ -23,7 +23,7 @@ trogon-std = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 futures-util = { workspace = true }
 serde_json = { workspace = true }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
