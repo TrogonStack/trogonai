@@ -15,7 +15,7 @@ use trogon_eventsourcing::nats::{
 };
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CanonicalEventCodec, CommandExecution, CommandFailure, Decide, Decision,
-    EventCodec, EventData, EventId, EventIdentity, EventMetadata, EventType, FrequencySnapshot, NonEmpty,
+    EventCodec, EventData, EventId, EventIdentity, EventMetadata, EventType, FrequencySnapshot, MetadataKey, NonEmpty,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotChange, SnapshotRead, SnapshotStoreConfig, SnapshotWrite,
     Snapshots, StreamAppend, StreamPosition, StreamRead, StreamState, WriteSnapshotRequest, spawn_on_tokio,
 };
@@ -1055,7 +1055,7 @@ async fn jetstream_store_rejects_invalid_batches_and_preserves_metadata() -> Tes
     let metadata_payload = TestEvent {
         value: "metadata".to_string(),
     };
-    let metadata = EventMetadata::one("trace-id", "trace-1")?;
+    let metadata = EventMetadata::one(MetadataKey::new("trace-id")?, "trace-1")?;
     let metadata_event =
         EventData::from_event("alpha", &TestJsonCodec, &metadata_payload)?.with_metadata(metadata.clone());
     fixture

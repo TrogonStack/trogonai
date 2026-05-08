@@ -157,7 +157,7 @@ fn build_publish_message(
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
     for (name, value) in event.metadata.iter() {
-        publish = publish.header(metadata_header_name(name), value);
+        publish = publish.header(metadata_header_name(name.as_str()), value);
     }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
         publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);

@@ -158,6 +158,14 @@ impl PartialEq for v1::JobEvent {
 
 impl Eq for v1::JobEvent {}
 
+impl PartialEq for v1::JobDetails {
+    fn eq(&self, other: &Self) -> bool {
+        job_details_eq(protobuf::AsView::as_view(self), protobuf::AsView::as_view(other))
+    }
+}
+
+impl Eq for v1::JobDetails {}
+
 fn job_added_eq(left: v1::JobAddedView<'_>, right: v1::JobAddedView<'_>) -> bool {
     left.has_job() == right.has_job() && job_details_eq(left.job(), right.job())
 }
@@ -317,6 +325,12 @@ mod tests {
     #[test]
     fn job_event_partial_eq_detects_nested_differences() {
         assert_ne!(job_added_event(30), job_added_event(60));
+    }
+
+    #[test]
+    fn job_details_partial_eq_compares_fields() {
+        assert_eq!(job_details(30), job_details(30));
+        assert_ne!(job_details(30), job_details(60));
     }
 
     #[test]

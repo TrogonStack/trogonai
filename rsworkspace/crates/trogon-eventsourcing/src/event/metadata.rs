@@ -1,8 +1,59 @@
-use std::collections::BTreeMap;
+use std::{borrow::Borrow, collections::BTreeMap, str::FromStr};
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MetadataKey(String);
+
+impl MetadataKey {
+    pub fn new(value: impl Into<String>) -> Result<Self, EventMetadataError> {
+        let value = value.into();
+        validate_key(&value)?;
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for MetadataKey {
+    type Err = EventMetadataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<String> for MetadataKey {
+    type Error = EventMetadataError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for MetadataKey {
+    type Error = EventMetadataError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl std::fmt::Display for MetadataKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Borrow<str> for MetadataKey {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventMetadata {
-    entries: BTreeMap<String, String>,
+    entries: BTreeMap<MetadataKey, String>,
 }
 
 impl EventMetadata {
@@ -10,9 +61,9 @@ impl EventMetadata {
         Self::default()
     }
 
-    pub fn one(name: impl Into<String>, value: impl Into<String>) -> Result<Self, EventMetadataError> {
+    pub fn one(key: MetadataKey, value: impl Into<String>) -> Result<Self, EventMetadataError> {
         let mut metadata = Self::empty();
-        metadata.insert(name, value)?;
+        metadata.insert(key, value)?;
         Ok(metadata)
     }
 
@@ -24,21 +75,15 @@ impl EventMetadata {
     {
         let mut metadata = Self::empty();
         for (name, value) in entries {
-            metadata.insert(name, value)?;
+            metadata.insert(MetadataKey::new(name)?, value)?;
         }
         Ok(metadata)
     }
 
-    pub fn insert(
-        &mut self,
-        name: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Result<Option<String>, EventMetadataError> {
-        let name = name.into();
+    pub fn insert(&mut self, key: MetadataKey, value: impl Into<String>) -> Result<Option<String>, EventMetadataError> {
         let value = value.into();
-        validate_name(&name)?;
-        validate_value(&name, &value)?;
-        Ok(self.entries.insert(name, value))
+        validate_value(&key, &value)?;
+        Ok(self.entries.insert(key, value))
     }
 
     pub fn get(&self, name: &str) -> Option<&str> {
@@ -53,8 +98,8 @@ impl EventMetadata {
         self.entries.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.entries.iter().map(|(name, value)| (name.as_str(), value.as_str()))
+    pub fn iter(&self) -> impl Iterator<Item = (&MetadataKey, &str)> {
+        self.entries.iter().map(|(key, value)| (key, value.as_str()))
     }
 }
 
@@ -79,22 +124,28 @@ impl std::fmt::Display for EventMetadataError {
 
 impl std::error::Error for EventMetadataError {}
 
-fn validate_name(name: &str) -> Result<(), EventMetadataError> {
-    if name.is_empty() {
+fn validate_key(value: &str) -> Result<(), EventMetadataError> {
+    if value.is_empty() {
         return Err(EventMetadataError::EmptyName);
     }
-    if starts_with_ascii_case_insensitive(name, "nats-") || starts_with_ascii_case_insensitive(name, "trogon-") {
-        return Err(EventMetadataError::ReservedName { name: name.to_string() });
+    if starts_with_ascii_case_insensitive(value, "nats-") || starts_with_ascii_case_insensitive(value, "trogon-") {
+        return Err(EventMetadataError::ReservedName {
+            name: value.to_string(),
+        });
     }
-    if name.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
-        return Err(EventMetadataError::InvalidName { name: name.to_string() });
+    if value.contains(|c: char| c == ':' || (c as u8) < 33 || (c as u8) > 126) {
+        return Err(EventMetadataError::InvalidName {
+            name: value.to_string(),
+        });
     }
     Ok(())
 }
 
-fn validate_value(name: &str, value: &str) -> Result<(), EventMetadataError> {
+fn validate_value(key: &MetadataKey, value: &str) -> Result<(), EventMetadataError> {
     if value.contains(['\r', '\n']) {
-        return Err(EventMetadataError::InvalidValue { name: name.to_string() });
+        return Err(EventMetadataError::InvalidValue {
+            name: key.as_str().to_string(),
+        });
     }
     Ok(())
 }
