@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner as _};
+use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use trogon_memory::{
     AnthropicMemoryProvider, Dreamer, DreamingService, MemoryClient, MemoryLlmConfig,
     provision_kv, provision_stream, trigger_dreaming,
@@ -33,12 +33,44 @@ async fn spawn_mock_llm(facts_json: &'static str) -> String {
     format!("http://127.0.0.1:{}/v1/messages", addr.port())
 }
 
+async fn spawn_sequenced_mock_llm(responses: Vec<&'static str>) -> String {
+    use axum::{Router, http::StatusCode, routing::post};
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+
+    let queue = Arc::new(Mutex::new(responses));
+    let app = Router::new().route(
+        "/v1/messages",
+        post({
+            let queue = Arc::clone(&queue);
+            move || {
+                let queue = Arc::clone(&queue);
+                async move {
+                    let resp = queue.lock().unwrap().drain(..1).next().unwrap_or("[]");
+                    (
+                        StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "stop_reason": "end_turn",
+                            "content": [{ "type": "text", "text": resp }]
+                        })),
+                    )
+                }
+            }
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://127.0.0.1:{}/v1/messages", addr.port())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn dreaming_service_extracts_and_stores_memory() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -108,7 +140,7 @@ async fn dreaming_service_extracts_and_stores_memory() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn memory_accumulates_across_multiple_sessions() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -122,29 +154,25 @@ async fn memory_accumulates_across_multiple_sessions() {
     provision_stream(&js).await.unwrap();
     let kv = provision_kv(&js).await.unwrap();
 
-    let llm_responses = [
+    // Single service with a sequenced LLM: first call → session 1 facts, second → session 2 facts.
+    // Using one service avoids a race where service-0 (still alive) steals trigger for proj/1.
+    let llm_url = spawn_sequenced_mock_llm(vec![
         r#"[{"category":"preference","content":"fact from session 1","confidence":0.9}]"#,
         r#"[{"category":"goal","content":"fact from session 2","confidence":0.85}]"#,
-    ];
+    ])
+    .await;
+    let provider = AnthropicMemoryProvider::with_client(
+        MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
+        reqwest::Client::new(),
+    );
+    let dreamer = DreamingService::new(js.clone(), "dreamer-multi".to_string(), Dreamer::new(provider, kv.clone()));
+    tokio::spawn(async move { dreamer.run().await.ok() });
 
-    for (i, facts_json) in llm_responses.iter().enumerate() {
+    for i in 0..2usize {
         let publisher = NatsTranscriptPublisher::new(js.clone());
         let session = Session::new(publisher, "agent", &format!("proj/{i}"));
         session.append_user_message("Hello", None).await.unwrap();
         let session_id = session.id().to_string();
-
-        let llm_url = spawn_mock_llm(facts_json).await;
-        let http_client = reqwest::Client::new();
-        let provider = AnthropicMemoryProvider::with_client(
-            MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
-            http_client,
-        );
-        let dreamer = Dreamer::new(provider, kv.clone());
-
-        let svc =
-            DreamingService::new(js.clone(), format!("dreamer-{i}"), dreamer);
-        tokio::spawn(async move { svc.run().await.ok() });
-
         trigger_dreaming(&js, "agent", &format!("proj/{i}"), &session_id)
             .await
             .unwrap();
@@ -164,7 +192,7 @@ async fn memory_accumulates_across_multiple_sessions() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn malformed_trigger_payload_is_skipped_gracefully() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -176,11 +204,15 @@ async fn malformed_trigger_payload_is_skipped_gracefully() {
     provision_stream(&js).await.unwrap();
     let kv = provision_kv(&js).await.unwrap();
 
-    let llm_url = spawn_mock_llm("[]").await;
-    let http_client = reqwest::Client::new();
+    // Single service: the LLM returns facts only for the valid trigger.
+    // The malformed payload is skipped before the LLM is called.
+    let llm_url = spawn_mock_llm(
+        r#"[{"category":"fact","content":"still alive","confidence":1.0}]"#,
+    )
+    .await;
     let provider = AnthropicMemoryProvider::with_client(
         MemoryLlmConfig { api_url: llm_url, api_key: "test".into(), ..Default::default() },
-        http_client,
+        reqwest::Client::new(),
     );
     let dreamer = Dreamer::new(provider, kv.clone());
     let service = DreamingService::new(js.clone(), "dreamer-skip".to_string(), dreamer);
@@ -201,24 +233,10 @@ async fn malformed_trigger_payload_is_skipped_gracefully() {
     session.append_user_message("Hi", None).await.unwrap();
     let session_id = session.id().to_string();
 
-    let llm_url2 = spawn_mock_llm(
-        r#"[{"category":"fact","content":"still alive","confidence":1.0}]"#,
-    )
-    .await;
-    let http_client2 = reqwest::Client::new();
-    let provider2 = AnthropicMemoryProvider::with_client(
-        MemoryLlmConfig { api_url: llm_url2, api_key: "test".into(), ..Default::default() },
-        http_client2,
-    );
-    let kv2 = provision_kv(&js).await.unwrap();
-    let dreamer2 = Dreamer::new(provider2, kv2.clone());
-    let service2 = DreamingService::new(js.clone(), "dreamer-skip-2".to_string(), dreamer2);
-    tokio::spawn(async move { service2.run().await.ok() });
-
     trigger_dreaming(&js, "test", "key", &session_id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    let client = MemoryClient::new(kv2);
+    let client = MemoryClient::new(kv);
     let memory = client.get("test", "key").await.unwrap();
     assert!(memory.is_some());
     assert_eq!(memory.unwrap().facts[0].content, "still alive");

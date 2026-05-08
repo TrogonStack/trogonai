@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use axum::{Router, body::Bytes, extract::State, http::StatusCode, routing::post};
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner as _};
+use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use tokio::net::TcpListener;
 use trogon_webhook_dispatcher::{
     Dispatcher, ReqwestWebhookClient, WebhookRegistry, provision,
@@ -35,7 +35,7 @@ impl ReceivedHooks {
 
 async fn hook_receiver(
     State(received): State<ReceivedHooks>,
-    axum::http::header::HeaderMap(headers): axum::http::header::HeaderMap,
+    headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> StatusCode {
     received.bodies.lock().unwrap().push(body.to_vec());
@@ -118,7 +118,7 @@ async fn setup(
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn dispatches_transcript_event_to_webhook() {
-    let container = Nats::default().start().await.unwrap();
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let port = container.get_host_port_ipv4(4222).await.unwrap();
     let nats_url = format!("127.0.0.1:{port}");
 
@@ -160,7 +160,7 @@ async fn dispatches_transcript_event_to_webhook() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn signed_delivery_includes_signature_header() {
-    let container = Nats::default().start().await.unwrap();
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let port = container.get_host_port_ipv4(4222).await.unwrap();
     let nats_url = format!("127.0.0.1:{port}");
 
@@ -200,7 +200,7 @@ async fn signed_delivery_includes_signature_header() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn non_matching_subject_is_not_dispatched() {
-    let container = Nats::default().start().await.unwrap();
+    let container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let port = container.get_host_port_ipv4(4222).await.unwrap();
     let nats_url = format!("127.0.0.1:{port}");
 

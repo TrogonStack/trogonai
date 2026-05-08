@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_nats::jetstream;
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner as _};
+use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use trogon_outcomes::{
     AnthropicEvaluationProvider, Criterion, EvalAuthStyle, EvalLlmConfig,
     EvaluationService, Evaluator, ResultClient, RubricClient, Rubric,
@@ -49,7 +49,7 @@ fn llm_config(api_url: String) -> EvalLlmConfig {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn evaluation_service_stores_result_for_matching_rubric() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -113,7 +113,7 @@ async fn evaluation_service_stores_result_for_matching_rubric() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn evaluation_skips_rubric_with_non_matching_actor_type() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -168,7 +168,7 @@ async fn evaluation_skips_rubric_with_non_matching_actor_type() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn malformed_trigger_is_skipped_and_service_continues() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()

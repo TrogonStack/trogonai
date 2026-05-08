@@ -58,7 +58,7 @@ impl<P: EvaluationProvider, S: OutcomesStore> EvaluationService<P, S> {
                 durable_name: Some(self.consumer_name.clone()),
                 filter_subject: "sessions.evaluate.>".to_string(),
                 ack_policy: AckPolicy::Explicit,
-                deliver_policy: DeliverPolicy::New,
+                deliver_policy: DeliverPolicy::All,
                 ..Default::default()
             })
             .await

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use futures_util::StreamExt as _;
-use testcontainers_modules::{nats::Nats, testcontainers::runners::AsyncRunner as _};
+use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use trogon_orchestrator::{
     AnthropicOrchestratorProvider, OrchestratorAuthStyle, OrchestratorEngine,
     OrchestratorLlmConfig,
@@ -65,7 +65,7 @@ fn llm_config(api_url: String) -> OrchestratorLlmConfig {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn orchestrator_plans_and_dispatches_to_registered_agent() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -114,7 +114,7 @@ async fn orchestrator_plans_and_dispatches_to_registered_agent() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn orchestrator_reports_failed_subtask_for_unregistered_capability() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
@@ -154,7 +154,7 @@ async fn orchestrator_reports_failed_subtask_for_unregistered_capability() {
 #[tokio::test]
 #[ignore = "requires Docker"]
 async fn orchestrator_dispatches_to_multiple_agents_in_parallel() {
-    let nats_container = Nats::default().start().await.unwrap();
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
     let nats_url = format!(
         "nats://127.0.0.1:{}",
         nats_container.get_host_port_ipv4(4222).await.unwrap()
