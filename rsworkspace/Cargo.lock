@@ -5343,6 +5343,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tower",
  "tracing",
