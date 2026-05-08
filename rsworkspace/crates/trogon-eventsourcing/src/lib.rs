@@ -12,7 +12,7 @@ pub mod testing;
 
 pub use codec::{CanonicalEventCodec, EventCodec, EventIdentity, EventType};
 pub use decision::{Act, Decide, Decision, NonEmpty};
-pub use event::{EncodeEventError, EventData, EventDataEncodeError, RecordedEvent};
+pub use event::{EncodeEventError, EventData, EventDataEncodeError, EventMetadata, EventMetadataError, RecordedEvent};
 pub use event_id::EventId;
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
@@ -24,7 +24,8 @@ pub use nats::snapshot_store::{
     read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
 };
 pub use nats::{
-    StreamStoreError, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range, record_stream_message,
+    StreamStoreError, TROGON_EVENT_METADATA_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream,
+    read_stream_range, record_stream_message,
 };
 pub use snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema,

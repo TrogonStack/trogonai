@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{EventCodec, EventId, StreamPosition};
+use crate::{EventCodec, EventId, EventMetadata, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordedEvent {
@@ -8,10 +8,8 @@ pub struct RecordedEvent {
     pub event_type: String,
     pub event_stream_id: String,
     pub payload: Vec<u8>,
-    pub metadata: Option<Vec<u8>>,
-    pub recorded_stream_id: String,
+    pub metadata: EventMetadata,
     pub stream_position: Option<StreamPosition>,
-    pub log_position: Option<u64>,
     pub recorded_at: DateTime<Utc>,
 }
 
@@ -29,15 +27,5 @@ impl RecordedEvent {
         C: EventCodec<E>,
     {
         codec.decode(&self.event_type, &self.event_stream_id, &self.payload)
-    }
-
-    pub fn decode_metadata_with<M, C>(&self, codec: &C) -> Result<Option<M>, C::Error>
-    where
-        C: EventCodec<M>,
-    {
-        self.metadata
-            .as_deref()
-            .map(|value| codec.decode(&self.event_type, &self.event_stream_id, value))
-            .transpose()
     }
 }

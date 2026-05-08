@@ -380,7 +380,7 @@ where
         }
         let reached_tail = sequence >= info.state.last_sequence;
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
             CronError::event_source(
                 "failed to decode job event during cron jobs read-model catch-up",
@@ -496,7 +496,7 @@ async fn rebuild_jobs_from_stream(
         }
         let reached_tail = sequence >= last_sequence;
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
@@ -559,7 +559,7 @@ fn prepare_watched_projection_change(
         }
     };
 
-    let stream_id = match job_id_from_event_subject(&event.recorded_stream_id) {
+    let stream_id = match job_id_from_event_subject(event.stream_id()) {
         Ok(stream_id) => stream_id,
         Err(error) => {
             tracing::error!(error = %error, "Failed to derive watched cron job stream id from subject");

@@ -436,7 +436,7 @@ async fn rebuild_scheduler_state_from_stream(
         let reached_bootstrap_tail = sequence >= last_sequence;
 
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
             .decode_data_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
@@ -525,7 +525,7 @@ async fn handle_scheduler_message(
     message: &jetstream::Message,
 ) -> Result<(SchedulerChange, DesiredJobsRollback), CronError> {
     let event = decode_recorded_watch_message(message)?;
-    let stream_id = job_id_from_event_subject(&event.recorded_stream_id)?;
+    let stream_id = job_id_from_event_subject(event.stream_id())?;
     let data = event
         .decode_data_with(&JobEventCodec)
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;

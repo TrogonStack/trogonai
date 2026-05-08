@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use trogon_std::UuidV7Generator;
 
-use super::{EncodeEventError, EventDataEncodeError, RecordedEvent};
+use super::{EncodeEventError, EventDataEncodeError, EventMetadata, RecordedEvent};
 use crate::{EventCodec, EventId, EventIdentity, EventType, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +10,7 @@ pub struct EventData {
     pub event_type: String,
     pub stream_id: String,
     pub payload: Vec<u8>,
-    pub metadata: Option<Vec<u8>>,
+    pub metadata: EventMetadata,
 }
 
 impl EventData {
@@ -29,34 +29,23 @@ impl EventData {
             event_type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
             stream_id: stream_id.as_ref().to_string(),
             payload: codec.encode(event).map_err(EncodeEventError::EventCodec)?,
-            metadata: None,
+            metadata: EventMetadata::empty(),
         })
     }
 
-    pub fn with_metadata<M, C>(mut self, codec: &C, metadata: Option<&M>) -> Result<Self, C::Error>
-    where
-        C: EventCodec<M>,
-    {
-        self.metadata = metadata.map(|value| codec.encode(value)).transpose()?;
-        Ok(self)
+    pub fn with_metadata(mut self, metadata: EventMetadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 
-    pub fn record(
-        self,
-        recorded_stream_id: impl Into<String>,
-        stream_position: Option<StreamPosition>,
-        log_position: Option<u64>,
-        recorded_at: DateTime<Utc>,
-    ) -> RecordedEvent {
+    pub fn record(self, stream_position: Option<StreamPosition>, recorded_at: DateTime<Utc>) -> RecordedEvent {
         RecordedEvent {
             event_id: self.event_id,
             event_type: self.event_type,
             event_stream_id: self.stream_id,
             payload: self.payload,
             metadata: self.metadata,
-            recorded_stream_id: recorded_stream_id.into(),
             stream_position,
-            log_position,
             recorded_at,
         }
     }
@@ -74,15 +63,5 @@ impl EventData {
         C: EventCodec<E>,
     {
         codec.decode(&self.event_type, &self.stream_id, &self.payload)
-    }
-
-    pub fn decode_metadata_with<M, C>(&self, codec: &C) -> Result<Option<M>, C::Error>
-    where
-        C: EventCodec<M>,
-    {
-        self.metadata
-            .as_deref()
-            .map(|value| codec.decode(&self.event_type, &self.stream_id, value))
-            .transpose()
     }
 }
