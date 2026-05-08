@@ -115,3 +115,57 @@ pub mod mock {
         }
     }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::mock::MockWebhookClient;
+    use super::WebhookClient;
+
+    #[tokio::test]
+    async fn mock_records_url_and_payload() {
+        let client = MockWebhookClient::new();
+        client.post("https://example.com/hook", b"hello", vec![]).await.unwrap();
+        let calls = client.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].url, "https://example.com/hook");
+        assert_eq!(calls[0].payload, b"hello");
+    }
+
+    #[tokio::test]
+    async fn mock_returns_configured_status_code() {
+        let client = MockWebhookClient::new();
+        client.set_status(201);
+        let status = client.post("https://example.com", b"", vec![]).await.unwrap();
+        assert_eq!(status, 201);
+    }
+
+    #[tokio::test]
+    async fn mock_records_all_headers() {
+        let client = MockWebhookClient::new();
+        let headers = vec![
+            ("X-Trogon-Event".to_string(), "push".to_string()),
+            ("X-Trogon-Delivery".to_string(), "abc123".to_string()),
+        ];
+        client.post("https://example.com", b"", headers).await.unwrap();
+        let calls = client.calls();
+        assert_eq!(calls[0].headers.len(), 2);
+        assert_eq!(calls[0].headers[0].0, "X-Trogon-Event");
+    }
+
+    #[tokio::test]
+    async fn mock_accumulates_multiple_calls() {
+        let client = MockWebhookClient::new();
+        client.post("https://a.com", b"1", vec![]).await.unwrap();
+        client.post("https://b.com", b"2", vec![]).await.unwrap();
+        assert_eq!(client.calls().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn mock_default_status_is_200() {
+        let client = MockWebhookClient::new();
+        let status = client.post("https://example.com", b"", vec![]).await.unwrap();
+        assert_eq!(status, 200);
+    }
+}

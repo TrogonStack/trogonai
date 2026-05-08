@@ -106,3 +106,47 @@ pub mod mock {
         }
     }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::mock::MockAgentCaller;
+    use super::AgentCaller;
+    use bytes::Bytes;
+    use trogon_registry::AgentCapability;
+
+    fn cap() -> AgentCapability {
+        AgentCapability::new("TestActor", ["review"], "actors.test.>")
+    }
+
+    #[tokio::test]
+    async fn returning_gives_configured_bytes() {
+        let caller = MockAgentCaller::returning(b"agent reply".to_vec());
+        let result = caller.call(&cap(), Bytes::from("payload")).await.unwrap();
+        assert_eq!(result.as_ref(), b"agent reply");
+    }
+
+    #[tokio::test]
+    async fn failing_returns_error() {
+        let caller = MockAgentCaller::failing("connection refused");
+        let err = caller.call(&cap(), Bytes::new()).await.unwrap_err();
+        assert!(err.to_string().contains("connection refused"));
+    }
+
+    #[tokio::test]
+    async fn returning_empty_bytes_is_valid() {
+        let caller = MockAgentCaller::returning(vec![]);
+        let result = caller.call(&cap(), Bytes::new()).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn caller_is_callable_multiple_times() {
+        let caller = MockAgentCaller::returning(b"ok".to_vec());
+        for _ in 0..3 {
+            let result = caller.call(&cap(), Bytes::new()).await.unwrap();
+            assert_eq!(result.as_ref(), b"ok");
+        }
+    }
+}

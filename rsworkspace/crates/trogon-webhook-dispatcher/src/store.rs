@@ -75,6 +75,62 @@ impl SubscriptionStore for kv::Store {
     }
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::mock::MockSubscriptionStore;
+    use super::SubscriptionStore;
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn put_and_get_round_trips() {
+        let store = MockSubscriptionStore::new();
+        store.put("key1", Bytes::from("value1")).await.unwrap();
+        let got = store.get("key1").await.unwrap();
+        assert_eq!(got, Some(Bytes::from("value1")));
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_missing_key() {
+        let store = MockSubscriptionStore::new();
+        assert!(store.get("absent").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_removes_key() {
+        let store = MockSubscriptionStore::new();
+        store.put("key1", Bytes::from("v")).await.unwrap();
+        store.delete("key1").await.unwrap();
+        assert!(store.get("key1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn keys_returns_all_inserted_keys() {
+        let store = MockSubscriptionStore::new();
+        store.put("a", Bytes::from("1")).await.unwrap();
+        store.put("b", Bytes::from("2")).await.unwrap();
+        let mut keys = store.keys().await.unwrap();
+        keys.sort();
+        assert_eq!(keys, vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn put_overwrites_existing_value() {
+        let store = MockSubscriptionStore::new();
+        store.put("key", Bytes::from("old")).await.unwrap();
+        store.put("key", Bytes::from("new")).await.unwrap();
+        let got = store.get("key").await.unwrap();
+        assert_eq!(got, Some(Bytes::from("new")));
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_key_is_idempotent() {
+        let store = MockSubscriptionStore::new();
+        store.delete("nope").await.unwrap();
+    }
+}
+
 // ── Mock implementation ───────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "test-support"))]
