@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::tools::ToolContext;
+use crate::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
 

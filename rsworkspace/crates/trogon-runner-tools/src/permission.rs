@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
-use trogon_agent_core::agent_loop::PermissionChecker;
+use trogon_tools::PermissionChecker;
 
 use crate::permission_rules::{PermissionRules, RuleDecision};
 
@@ -105,7 +105,7 @@ impl PermissionChecker for RulesPermissionChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_agent_core::agent_loop::PermissionChecker;
+    use trogon_tools::PermissionChecker;
 
     fn make_checker(tx: PermissionTx, allowed_tools: Vec<String>) -> ChannelPermissionChecker {
         ChannelPermissionChecker {

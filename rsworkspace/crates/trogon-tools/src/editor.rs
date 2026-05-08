@@ -1,7 +1,7 @@
 use serde_json::Value;
 
-use crate::tools::ToolContext;
-use crate::tools::fs::resolve_path;
+use crate::ToolContext;
+use crate::fs::resolve_path;
 
 pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
     let path = match input.get("path").and_then(|v| v.as_str()) {

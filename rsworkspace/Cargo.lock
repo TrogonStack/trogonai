@@ -5135,6 +5135,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-util",
+ "globset",
  "httpmock",
  "opentelemetry",
  "reqwest",
@@ -5149,7 +5150,9 @@ dependencies = [
  "trogon-mcp",
  "trogon-nats",
  "trogon-registry",
+ "trogon-runner-tools",
  "trogon-std",
+ "trogon-tools",
  "uuid",
 ]
 
@@ -5215,10 +5218,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
- "globset",
- "html2text",
  "httpmock",
- "ignore",
  "reqwest",
  "serde",
  "serde_json",
@@ -5227,7 +5227,7 @@ dependencies = [
  "tracing",
  "trogon-mcp",
  "trogon-std",
- "walkdir",
+ "trogon-tools",
 ]
 
 [[package]]
@@ -5556,6 +5556,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-runner-tools"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "futures-util",
+ "globset",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-mcp",
+ "trogon-tools",
+]
+
+[[package]]
 name = "trogon-secret-proxy"
 version = "0.1.0"
 dependencies = [
@@ -5870,6 +5888,21 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+]
+
+[[package]]
+name = "trogon-tools"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "html2text",
+ "httpmock",
+ "ignore",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
