@@ -1,7 +1,7 @@
 use async_nats::jetstream;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use trogon_agent_core::agent_loop::Message;
+use trogon_tools::Message;
 
 /// A URL-based MCP server configuration stored per session.
 /// Stdio servers are not supported in the NATS model.

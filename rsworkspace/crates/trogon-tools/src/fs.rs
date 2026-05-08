@@ -1,9 +1,7 @@
 use serde_json::Value;
 
-use crate::tools::ToolContext;
+use crate::ToolContext;
 
-/// Resolve a user-supplied path against `cwd`, rejecting traversal outside it.
-/// Does not require the path to exist on disk.
 pub(crate) fn resolve_path(
     cwd: &str,
     path: &str,
@@ -301,8 +299,6 @@ mod tests {
         }
     }
 
-    // ── resolve_path ──────────────────────────────────────────────────────────
-
     #[test]
     fn resolve_path_normal_relative() {
         let dir = TempDir::new().unwrap();
@@ -351,8 +347,6 @@ mod tests {
         let err = resolve_path(&cwd, "/etc/passwd").unwrap_err();
         assert!(err.contains("outside"), "got: {err}");
     }
-
-    // ── read_file ─────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn read_file_missing_path_returns_error() {
@@ -490,9 +484,7 @@ mod tests {
     async fn list_dir_nonexistent_path_returns_error_or_empty() {
         let dir = TempDir::new().unwrap();
         let ctx = ctx(&dir);
-        // A subdirectory that doesn't exist — resolve_path succeeds but the walker yields nothing
         let result = list_dir(&ctx, &json!({"path": "no_such_dir"})).await;
-        // Either "(empty directory)" or an Error — both are acceptable signals
         assert!(
             result == "(empty directory)" || result.starts_with("Error"),
             "got: {result}"

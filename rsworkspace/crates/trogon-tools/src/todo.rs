@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
-use super::ToolContext;
+use crate::ToolContext;
 
 const TODO_FILE: &str = ".trogon/todos.json";
 
@@ -46,7 +46,6 @@ async fn save_store(cwd: &str, store: &TodoStore) -> Result<(), String> {
     Ok(())
 }
 
-/// Write (create or update) a todo item.
 pub async fn todo_write(ctx: &ToolContext, input: &Value) -> String {
     let id = match input["id"].as_str() {
         Some(s) => s.to_string(),
@@ -80,7 +79,6 @@ pub async fn todo_write(ctx: &ToolContext, input: &Value) -> String {
     }
 }
 
-/// Read active todos (status != completed).
 pub async fn todo_read(ctx: &ToolContext, _input: &Value) -> String {
     let store = load_store(&ctx.cwd).await;
     let active: Vec<&TodoItem> = store

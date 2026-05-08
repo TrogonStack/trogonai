@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
-use trogon_agent_core::tools::ToolDef;
+use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
 use crate::session_store::{SessionStore, TodoItem};

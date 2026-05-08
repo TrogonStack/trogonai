@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use trogon_agent_core::tools::ToolDef;
+use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);

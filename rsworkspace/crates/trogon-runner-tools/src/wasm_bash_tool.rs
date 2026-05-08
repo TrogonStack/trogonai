@@ -8,7 +8,7 @@ use agent_client_protocol::{
     CreateTerminalRequest, CreateTerminalResponse, TerminalOutputRequest,
 };
 use serde_json::Value;
-use trogon_agent_core::tools::ToolDef;
+use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
 use crate::session_store::SessionStore;

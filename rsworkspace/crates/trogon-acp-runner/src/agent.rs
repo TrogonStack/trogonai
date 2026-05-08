@@ -27,12 +27,12 @@ use trogon_agent_core::tools::ToolDef;
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
-use crate::permission::{ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
-use crate::permission_rules::PermissionRules;
-use crate::wasm_bash_tool::WasmRuntimeBashTool;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
-use crate::session_store::{NatsSessionStore, SessionStore, StoredMcpServer, now_iso8601};
+use trogon_runner_tools::permission::{ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
+use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::session_store::{NatsSessionStore, SessionStore, StoredMcpServer, now_iso8601};
+use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -785,7 +785,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
             .to_string();
 
         let now = now_iso8601();
-        let state = crate::session_store::SessionState {
+        let state = trogon_runner_tools::session_store::SessionState {
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
             system_prompt,

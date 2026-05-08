@@ -18,114 +18,9 @@ use tracing::{debug, info, warn};
 
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
-// ── PermissionChecker ─────────────────────────────────────────────────────────
-
-/// Called by the agent loop before each tool execution.
-/// Returns `true` to allow the tool to run, `false` to deny it.
-pub trait PermissionChecker: Send + Sync {
-    fn check<'a>(
-        &'a self,
-        tool_call_id: &'a str,
-        tool_name: &'a str,
-        tool_input: &'a serde_json::Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
-}
-
-// ── ElicitationProvider ───────────────────────────────────────────────────────
-
-/// Called by the agent loop when the model uses the built-in `ask_user` tool.
-/// Returns the user's answer, or `None` if the user declined or cancelled.
-pub trait ElicitationProvider: Send + Sync {
-    fn elicit<'a>(
-        &'a self,
-        question: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
-}
-
-// ── Wire types ────────────────────────────────────────────────────────────────
-
-/// A single message in the Anthropic conversation history.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: String,
-    pub content: Vec<ContentBlock>,
-}
-
-impl Message {
-    /// Simple user turn with plain text.
-    #[cfg_attr(coverage, coverage(off))]
-    pub fn user_text(text: impl Into<String>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: vec![ContentBlock::Text { text: text.into() }],
-        }
-    }
-
-    /// Assistant turn (used when appending a model response to history).
-    #[cfg_attr(coverage, coverage(off))]
-    pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content,
-        }
-    }
-
-    /// User turn carrying `tool_result` blocks.
-    pub fn tool_results(results: Vec<ToolResult>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: results
-                .into_iter()
-                .map(|r| ContentBlock::ToolResult {
-                    tool_use_id: r.tool_use_id,
-                    content: r.content,
-                })
-                .collect(),
-        }
-    }
-}
-
-/// Source for an image content block sent to the Anthropic API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ImageSource {
-    /// Base64-encoded image data.
-    Base64 { media_type: String, data: String },
-    /// Remote image URL.
-    Url { url: String },
-}
-
-/// A single block within a message's `content` array.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ContentBlock {
-    /// Plain text from the model or the user.
-    Text { text: String },
-    /// Image sent by the user (base64 or URL).
-    Image { source: ImageSource },
-    /// Extended thinking block produced by the model (requires thinking beta).
-    Thinking { thinking: String },
-    /// Tool invocation requested by the model.
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_tool_use_id: Option<String>,
-    },
-    /// Result returned to the model after executing a tool.
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-    },
-}
-
-/// Pair of tool-use ID and the string result to feed back to the model.
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    pub tool_use_id: String,
-    pub content: String,
-}
+pub use trogon_tools::{
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+};
 
 /// A single block in the Anthropic `system` array.
 ///
@@ -370,6 +265,36 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
                 },
             ),
         )
+    }
+}
+
+/// [`AnthropicStreamingClient`] that returns a static `end_turn` SSE response
+/// without making any network calls. Use it to run the agent loop fully offline.
+#[derive(Clone)]
+pub struct NoopStreamingClient;
+
+impl AnthropicStreamingClient for NoopStreamingClient {
+    fn complete_streaming(
+        &self,
+        _body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Model not connected.\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        Box::pin(futures_util::stream::once(std::future::ready(Ok(
+            Bytes::from_static(sse.as_bytes()),
+        ))))
     }
 }
 

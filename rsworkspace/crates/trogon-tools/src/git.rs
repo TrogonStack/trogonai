@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::tools::ToolContext;
+use crate::ToolContext;
 
 const MAX_OUTPUT: usize = 4 * 1024;
 
@@ -71,7 +71,6 @@ mod tests {
     #[tokio::test]
     async fn git_status_runs_without_error() {
         let result = status(&ctx(), &json!({})).await;
-        // In a git repo the result is either empty or a list of files — never an exec error
         assert!(!result.starts_with("Error running git"));
     }
 
@@ -97,7 +96,6 @@ mod tests {
     async fn git_diff_truncates_large_output() {
         use tempfile::TempDir;
         let dir = TempDir::new().unwrap();
-        // Init a fresh repo and create a file large enough to exceed 4KB diff output.
         tokio::process::Command::new("git")
             .args(["init", "-b", "main"])
             .current_dir(dir.path())
@@ -146,7 +144,6 @@ mod tests {
             http_client: reqwest::Client::new(),
         };
         let result = status(&non_git_ctx, &json!({})).await;
-        // git status in a non-repo writes to stderr; we return that rather than an empty string
         assert!(!result.is_empty());
     }
 }

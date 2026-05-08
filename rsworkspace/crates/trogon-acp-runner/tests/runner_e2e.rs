@@ -36,7 +36,7 @@ mod client_subjects {
 }
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ImageContent, PromptRequest, TextContent, TerminalId};
-use trogon_acp_runner::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;

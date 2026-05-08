@@ -17,10 +17,7 @@ tracing       = "0.1"
 
 trogon-mcp     = { path = "../trogon-mcp" }
 trogon-std     = { path = "../trogon-std" }
-globset        = "0.4"
-html2text      = "0.12"
-ignore         = "0.4"
-walkdir        = "2"
+trogon-tools   = { path = "../trogon-tools" }
 
 [dev-dependencies]
 httpmock       = "0.7"
