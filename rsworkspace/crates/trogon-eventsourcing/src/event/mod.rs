@@ -1,9 +1,7 @@
-mod codec_error;
 mod data;
 mod metadata;
 mod recorded;
 
-pub use codec_error::{EncodeEventError, EventDataEncodeError};
 pub use data::EventData;
 pub use metadata::{EventMetadata, EventMetadataError, MetadataKey};
 pub use recorded::RecordedEvent;

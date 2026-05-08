@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use trogon_std::UuidV7Generator;
 
-use super::{EncodeEventError, EventDataEncodeError, EventMetadata, RecordedEvent};
-use crate::{EventCodec, EventId, EventIdentity, EventType, StreamPosition};
+use super::{EventMetadata, RecordedEvent};
+use crate::{EncodeEventError, EventCodec, EventDataEncodeError, EventId, EventIdentity, EventType, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventData {
