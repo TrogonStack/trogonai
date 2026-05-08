@@ -5,7 +5,7 @@ mod recorded;
 
 pub use codec_error::{EncodeEventError, EventDataEncodeError};
 pub use data::EventData;
-pub use metadata::{EventMetadata, EventMetadataError};
+pub use metadata::{EventMetadata, EventMetadataError, MetadataKey};
 pub use recorded::RecordedEvent;
 
 #[cfg(test)]
@@ -153,7 +153,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let metadata = EventMetadata::one("trace-id", "trace-1").unwrap();
+        let metadata = EventMetadata::one(MetadataKey::new("trace-id").unwrap(), "trace-1").unwrap();
 
         let generated = EventData::from_event("alpha", &TestEventCodec, &event)
             .unwrap()
@@ -189,20 +189,20 @@ mod tests {
 
     #[test]
     fn event_metadata_validates_header_safe_names_and_values() {
-        assert_eq!(
-            EventMetadata::one("", "value").unwrap_err(),
-            EventMetadataError::EmptyName
-        );
+        let key = MetadataKey::new("trace-id").unwrap();
+        assert_eq!(key.as_str(), "trace-id");
+
+        assert_eq!(MetadataKey::new("").unwrap_err(), EventMetadataError::EmptyName);
         assert!(matches!(
-            EventMetadata::one("Nats-Expected-Last-Subject-Sequence", "1"),
+            MetadataKey::new("Nats-Expected-Last-Subject-Sequence"),
             Err(EventMetadataError::ReservedName { .. })
         ));
         assert!(matches!(
-            EventMetadata::one("trace id", "value"),
+            MetadataKey::new("trace id"),
             Err(EventMetadataError::InvalidName { .. })
         ));
         assert!(matches!(
-            EventMetadata::one("trace-id", "line\r\nbreak"),
+            EventMetadata::one(MetadataKey::new("trace-id").unwrap(), "line\r\nbreak"),
             Err(EventMetadataError::InvalidValue { .. })
         ));
     }
