@@ -72,11 +72,45 @@ impl EventCodec<v1::JobEvent> for JobEventCodec {
     type Error = JobEventCodecError;
 
     fn encode(&self, value: &v1::JobEvent) -> Result<Vec<u8>, Self::Error> {
-        encode_job_event(value)
+        match value.event() {
+            v1::job_event::EventOneof::JobAdded(inner) => {
+                protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
+            }
+            v1::job_event::EventOneof::JobPaused(inner) => {
+                protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
+            }
+            v1::job_event::EventOneof::JobResumed(inner) => {
+                protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
+            }
+            v1::job_event::EventOneof::JobRemoved(inner) => {
+                protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
+            }
+            v1::job_event::EventOneof::not_set(_) => Err(JobEventCodecError::MissingEvent),
+        }
     }
 
     fn decode(&self, event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<v1::JobEvent, Self::Error> {
-        decode_job_event(event_type, payload)
+        let mut event = v1::JobEvent::new();
+        match event_type {
+            JOB_ADDED_EVENT_TYPE => {
+                event.set_job_added(v1::JobAdded::parse(payload).map_err(JobEventCodecError::Decode)?);
+            }
+            JOB_PAUSED_EVENT_TYPE => {
+                event.set_job_paused(v1::JobPaused::parse(payload).map_err(JobEventCodecError::Decode)?);
+            }
+            JOB_RESUMED_EVENT_TYPE => {
+                event.set_job_resumed(v1::JobResumed::parse(payload).map_err(JobEventCodecError::Decode)?);
+            }
+            JOB_REMOVED_EVENT_TYPE => {
+                event.set_job_removed(v1::JobRemoved::parse(payload).map_err(JobEventCodecError::Decode)?);
+            }
+            value => {
+                return Err(JobEventCodecError::UnknownEventType {
+                    value: value.to_string(),
+                });
+            }
+        }
+        Ok(event)
     }
 }
 
@@ -86,7 +120,13 @@ impl EventType for v1::JobEvent {
     type Error = JobEventCodecError;
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
-        job_event_type(self)
+        match self.event() {
+            v1::job_event::EventOneof::JobAdded(_) => Ok(JOB_ADDED_EVENT_TYPE),
+            v1::job_event::EventOneof::JobPaused(_) => Ok(JOB_PAUSED_EVENT_TYPE),
+            v1::job_event::EventOneof::JobResumed(_) => Ok(JOB_RESUMED_EVENT_TYPE),
+            v1::job_event::EventOneof::JobRemoved(_) => Ok(JOB_REMOVED_EVENT_TYPE),
+            v1::job_event::EventOneof::not_set(_) => Err(JobEventCodecError::MissingEvent),
+        }
     }
 }
 
@@ -98,78 +138,25 @@ impl CanonicalEventCodec for v1::JobEvent {
     }
 }
 
-fn job_event_type(event: &v1::JobEvent) -> Result<&'static str, JobEventCodecError> {
-    match event.event() {
-        v1::job_event::EventOneof::JobAdded(_) => Ok(JOB_ADDED_EVENT_TYPE),
-        v1::job_event::EventOneof::JobPaused(_) => Ok(JOB_PAUSED_EVENT_TYPE),
-        v1::job_event::EventOneof::JobResumed(_) => Ok(JOB_RESUMED_EVENT_TYPE),
-        v1::job_event::EventOneof::JobRemoved(_) => Ok(JOB_REMOVED_EVENT_TYPE),
-        v1::job_event::EventOneof::not_set(_) => Err(JobEventCodecError::MissingEvent),
-    }
-}
-
-fn encode_job_event(event: &v1::JobEvent) -> Result<Vec<u8>, JobEventCodecError> {
-    match event.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => {
-            protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
-        }
-        v1::job_event::EventOneof::JobPaused(inner) => {
-            protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
-        }
-        v1::job_event::EventOneof::JobResumed(inner) => {
-            protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
-        }
-        v1::job_event::EventOneof::JobRemoved(inner) => {
-            protobuf::Serialize::serialize(&inner).map_err(JobEventCodecError::Encode)
-        }
-        v1::job_event::EventOneof::not_set(_) => Err(JobEventCodecError::MissingEvent),
-    }
-}
-
-fn decode_job_event(event_type: &str, payload: &[u8]) -> Result<v1::JobEvent, JobEventCodecError> {
-    let mut event = v1::JobEvent::new();
-    match event_type {
-        JOB_ADDED_EVENT_TYPE => {
-            event.set_job_added(v1::JobAdded::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_PAUSED_EVENT_TYPE => {
-            event.set_job_paused(v1::JobPaused::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_RESUMED_EVENT_TYPE => {
-            event.set_job_resumed(v1::JobResumed::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        JOB_REMOVED_EVENT_TYPE => {
-            event.set_job_removed(v1::JobRemoved::parse(payload).map_err(JobEventCodecError::Decode)?);
-        }
-        value => {
-            return Err(JobEventCodecError::UnknownEventType {
-                value: value.to_string(),
-            });
-        }
-    }
-    Ok(event)
-}
-
 impl PartialEq for v1::JobEvent {
     fn eq(&self, other: &Self) -> bool {
-        job_event_eq(protobuf::AsView::as_view(self), protobuf::AsView::as_view(other))
+        match (
+            protobuf::AsView::as_view(self).event(),
+            protobuf::AsView::as_view(other).event(),
+        ) {
+            (v1::job_event::EventOneof::JobAdded(left), v1::job_event::EventOneof::JobAdded(right)) => {
+                job_added_eq(left, right)
+            }
+            (v1::job_event::EventOneof::JobPaused(_), v1::job_event::EventOneof::JobPaused(_))
+            | (v1::job_event::EventOneof::JobResumed(_), v1::job_event::EventOneof::JobResumed(_))
+            | (v1::job_event::EventOneof::JobRemoved(_), v1::job_event::EventOneof::JobRemoved(_))
+            | (v1::job_event::EventOneof::not_set(_), v1::job_event::EventOneof::not_set(_)) => true,
+            _ => false,
+        }
     }
 }
 
 impl Eq for v1::JobEvent {}
-
-fn job_event_eq(left: v1::JobEventView<'_>, right: v1::JobEventView<'_>) -> bool {
-    match (left.event(), right.event()) {
-        (v1::job_event::EventOneof::JobAdded(left), v1::job_event::EventOneof::JobAdded(right)) => {
-            job_added_eq(left, right)
-        }
-        (v1::job_event::EventOneof::JobPaused(_), v1::job_event::EventOneof::JobPaused(_))
-        | (v1::job_event::EventOneof::JobResumed(_), v1::job_event::EventOneof::JobResumed(_))
-        | (v1::job_event::EventOneof::JobRemoved(_), v1::job_event::EventOneof::JobRemoved(_))
-        | (v1::job_event::EventOneof::not_set(_), v1::job_event::EventOneof::not_set(_)) => true,
-        _ => false,
-    }
-}
 
 fn job_added_eq(left: v1::JobAddedView<'_>, right: v1::JobAddedView<'_>) -> bool {
     left.has_job() == right.has_job() && job_details_eq(left.job(), right.job())
