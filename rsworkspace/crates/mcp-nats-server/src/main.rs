@@ -12,7 +12,7 @@ use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 use crate::constants::MCP_ENDPOINT;
 
-use anyhow::Result;
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 mod runtime {
     use std::collections::HashMap;
@@ -499,7 +499,7 @@ mod runtime {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), BoxError> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
     let config::HttpBridgeConfig {
         mcp,

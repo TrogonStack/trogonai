@@ -2,14 +2,11 @@
 name = "mcp-nats-stdio"
 version = "0.0.1"
 edition = "2024"
-license = "Apache-2.0"
 
 [lints]
 workspace = true
 
 [dependencies]
-anyhow = { workspace = true }
-thiserror = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 mcp-nats = { workspace = true }
 rmcp = { workspace = true }

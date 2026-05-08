@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -350,38 +351,73 @@ fn method_suffix(method: &str) -> Result<&'static str, NatsTransportError> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum NatsTransportError {
-    #[error("failed to subscribe to MCP NATS subject")]
-    Subscribe { source: Box<dyn Error + Send + Sync> },
-    #[error("failed to request MCP NATS subject {subject}")]
+    Subscribe {
+        source: Box<dyn Error + Send + Sync>,
+    },
     Request {
         subject: String,
         source: Box<dyn Error + Send + Sync>,
     },
-    #[error("timed out requesting MCP NATS subject {subject}")]
-    RequestTimedOut { subject: String },
-    #[error("failed to publish MCP NATS subject {subject}")]
+    RequestTimedOut {
+        subject: String,
+    },
     Publish {
         subject: String,
         source: Box<dyn Error + Send + Sync>,
     },
-    #[error("timed out publishing MCP NATS subject {subject}")]
-    PublishTimedOut { subject: String },
-    #[error("failed to flush MCP NATS client")]
-    Flush { source: Box<dyn Error + Send + Sync> },
-    #[error("failed to serialize MCP JSON-RPC message")]
-    Serialize(#[source] serde_json::Error),
-    #[error("failed to deserialize MCP JSON-RPC message")]
-    Deserialize(#[source] serde_json::Error),
-    #[error("MCP JSON-RPC message is missing a method")]
+    PublishTimedOut {
+        subject: String,
+    },
+    Flush {
+        source: Box<dyn Error + Send + Sync>,
+    },
+    Serialize(serde_json::Error),
+    Deserialize(serde_json::Error),
     MissingMethod,
-    #[error("unsupported MCP method for NATS routing: {method}")]
-    UnsupportedMethod { method: String },
-    #[error("missing reply subject for MCP response")]
+    UnsupportedMethod {
+        method: String,
+    },
     MissingReplySubject,
-    #[error("MCP NATS inbound queue is closed")]
     InboundClosed,
+}
+
+impl Display for NatsTransportError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Subscribe { .. } => write!(f, "failed to subscribe to MCP NATS subject"),
+            Self::Request { subject, .. } => write!(f, "failed to request MCP NATS subject {subject}"),
+            Self::RequestTimedOut { subject } => write!(f, "timed out requesting MCP NATS subject {subject}"),
+            Self::Publish { subject, .. } => write!(f, "failed to publish MCP NATS subject {subject}"),
+            Self::PublishTimedOut { subject } => write!(f, "timed out publishing MCP NATS subject {subject}"),
+            Self::Flush { .. } => write!(f, "failed to flush MCP NATS client"),
+            Self::Serialize(_) => write!(f, "failed to serialize MCP JSON-RPC message"),
+            Self::Deserialize(_) => write!(f, "failed to deserialize MCP JSON-RPC message"),
+            Self::MissingMethod => write!(f, "MCP JSON-RPC message is missing a method"),
+            Self::UnsupportedMethod { method } => write!(f, "unsupported MCP method for NATS routing: {method}"),
+            Self::MissingReplySubject => write!(f, "missing reply subject for MCP response"),
+            Self::InboundClosed => write!(f, "MCP NATS inbound queue is closed"),
+        }
+    }
+}
+
+impl Error for NatsTransportError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Subscribe { source }
+            | Self::Request { source, .. }
+            | Self::Publish { source, .. }
+            | Self::Flush { source } => Some(source.as_ref()),
+            Self::Serialize(source) | Self::Deserialize(source) => Some(source),
+            Self::RequestTimedOut { .. }
+            | Self::PublishTimedOut { .. }
+            | Self::MissingMethod
+            | Self::UnsupportedMethod { .. }
+            | Self::MissingReplySubject
+            | Self::InboundClosed => None,
+        }
+    }
 }
 
 #[cfg(test)]
