@@ -19,7 +19,6 @@ use super::constants::{
     NATS_HEADER_REJECT_REASON, NATS_HEADER_SUBSCRIPTION_ID,
 };
 use super::signature;
-use super::verification_token::verification_subject;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
@@ -76,10 +75,25 @@ struct VerificationRequest {
     verification_token: NotionVerificationToken,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 enum VerificationRequestParseError {
-    #[error("verification_token must not be empty")]
-    InvalidVerificationToken(#[source] EmptySecret),
+    InvalidVerificationToken(EmptySecret),
+}
+
+impl fmt::Display for VerificationRequestParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidVerificationToken(_) => f.write_str("verification_token must not be empty"),
+        }
+    }
+}
+
+impl std::error::Error for VerificationRequestParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidVerificationToken(err) => Some(err),
+        }
+    }
 }
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
@@ -123,7 +137,7 @@ async fn publish_verification<P: JetStreamPublisher, S: ObjectStorePut>(
     body: Bytes,
     ack_timeout: NonZeroDuration,
 ) -> StatusCode {
-    let subject = verification_subject(subject_prefix);
+    let subject = format!("{subject_prefix}.subscription.verification");
     let outcome = publisher
         .publish_event(subject, async_nats::HeaderMap::new(), body, ack_timeout.into())
         .await;
@@ -223,7 +237,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
                 return StatusCode::UNAUTHORIZED;
             }
 
-            let subject = verification_subject(&state.subject_prefix);
+            let subject = format!("{}.subscription.verification", state.subject_prefix);
             span.record("event_type", "subscription.verification");
             span.record("subject", &subject);
 

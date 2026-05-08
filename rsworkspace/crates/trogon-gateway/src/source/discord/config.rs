@@ -42,11 +42,18 @@ pub fn default_intents() -> Intents {
     Intents::all().difference(PRIVILEGED_INTENTS)
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("unknown gateway intent: '{intent}'")]
+#[derive(Debug)]
 pub struct UnknownIntentError {
     intent: String,
 }
+
+impl fmt::Display for UnknownIntentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown gateway intent: '{}'", self.intent)
+    }
+}
+
+impl std::error::Error for UnknownIntentError {}
 
 pub fn parse_gateway_intents(s: &str) -> Result<Intents, UnknownIntentError> {
     let mut intents = Intents::empty();

@@ -3,34 +3,31 @@ use std::fmt;
 use trogon_nats::DottedNatsToken;
 use trogon_nats::SubjectTokenViolation;
 
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum IncidentioEventTypeError {
-    #[error("event_type must not be empty")]
-    Empty,
-    #[error("event_type contains invalid character: {0:?}")]
-    InvalidCharacter(char),
-    #[error("event_type is too long: {0} bytes (max 128)")]
-    TooLong(usize),
-}
+#[derive(Debug, Clone, PartialEq)]
+pub struct IncidentioEventTypeError(pub SubjectTokenViolation);
 
-impl From<SubjectTokenViolation> for IncidentioEventTypeError {
-    fn from(violation: SubjectTokenViolation) -> Self {
-        match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+impl fmt::Display for IncidentioEventTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            SubjectTokenViolation::Empty => f.write_str("event_type must not be empty"),
+            SubjectTokenViolation::InvalidCharacter(ch) => {
+                write!(f, "event_type contains invalid character: {:?}", ch)
+            }
+            SubjectTokenViolation::TooLong(len) => {
+                write!(f, "event_type is too long: {} bytes (max 128)", len)
+            }
         }
     }
 }
+
+impl std::error::Error for IncidentioEventTypeError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IncidentioEventType(DottedNatsToken);
 
 impl IncidentioEventType {
     pub fn new(value: impl AsRef<str>) -> Result<Self, IncidentioEventTypeError> {
-        DottedNatsToken::new(value)
-            .map(Self)
-            .map_err(IncidentioEventTypeError::from)
+        DottedNatsToken::new(value).map(Self).map_err(IncidentioEventTypeError)
     }
 
     pub fn as_str(&self) -> &str {
@@ -85,7 +82,7 @@ mod tests {
     fn rejects_empty() {
         assert!(matches!(
             IncidentioEventType::new(""),
-            Err(IncidentioEventTypeError::Empty)
+            Err(IncidentioEventTypeError(SubjectTokenViolation::Empty))
         ));
     }
 
