@@ -237,4 +237,63 @@ mod tests {
         assert!(result.sub_results.is_empty());
         assert_eq!(result.synthesis, "nothing to do");
     }
+
+    #[tokio::test]
+    async fn orchestrate_returns_error_when_registry_fails() {
+        // A registry store whose keys() always errors.
+        #[derive(Clone)]
+        struct FailingStore;
+
+        #[derive(Debug)]
+        struct StoreErr;
+        impl std::fmt::Display for StoreErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "store unavailable")
+            }
+        }
+        impl std::error::Error for StoreErr {}
+
+        impl trogon_registry::RegistryStore for FailingStore {
+            type PutError = StoreErr;
+            type GetError = StoreErr;
+            type DeleteError = StoreErr;
+            type KeysError = StoreErr;
+
+            async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<u64, StoreErr> {
+                Err(StoreErr)
+            }
+            async fn get(&self, _key: &str) -> Result<Option<bytes::Bytes>, StoreErr> {
+                Err(StoreErr)
+            }
+            async fn delete(&self, _key: &str) -> Result<(), StoreErr> {
+                Err(StoreErr)
+            }
+            async fn keys(&self) -> Result<Vec<String>, StoreErr> {
+                Err(StoreErr)
+            }
+        }
+
+        let registry = Registry::new(FailingStore);
+        let plan = plan_with(vec![subtask("1", "code_review")]);
+        let provider = MockOrchestratorProvider::returning(plan, "ok");
+        let caller = MockAgentCaller::returning(b"ok".to_vec());
+        let engine = OrchestratorEngine::new(provider, caller, registry);
+
+        let err = engine.orchestrate("task").await.unwrap_err();
+        assert!(matches!(err, OrchestratorError::Planning(_)));
+        assert!(err.to_string().contains("planning failed"));
+    }
+
+    #[tokio::test]
+    async fn provider_planning_failure_propagates_as_error() {
+        // MockOrchestratorProvider with no plan set always returns Planning error
+        let provider = MockOrchestratorProvider { plan: None, synthesis: None };
+        let store = MockRegistryStore::new();
+        let registry = Registry::new(store);
+        let caller = MockAgentCaller::returning(b"".to_vec());
+        let engine = OrchestratorEngine::new(provider, caller, registry);
+
+        let err = engine.orchestrate("impossible task").await.unwrap_err();
+        assert!(matches!(err, OrchestratorError::Planning(_)));
+    }
 }

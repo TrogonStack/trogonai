@@ -276,4 +276,58 @@ mod tests {
         let results: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(results.len(), 1);
     }
+
+    #[tokio::test]
+    async fn orchestrate_returns_422_when_planning_fails() {
+        // Provider that always fails at planning
+        #[derive(Clone)]
+        struct FailingProvider;
+        impl OrchestratorProvider for FailingProvider {
+            fn plan_task<'a>(
+                &'a self,
+                _task: &'a str,
+                _capabilities: &'a [trogon_registry::AgentCapability],
+            ) -> impl Future<Output = Result<TaskPlan, OrchestratorError>> + Send + 'a {
+                async { Err(OrchestratorError::Planning("LLM unavailable".into())) }
+            }
+            fn synthesize_results<'a>(
+                &'a self,
+                _task: &'a str,
+                _plan: &'a TaskPlan,
+                _results: &'a [crate::types::SubTaskResult],
+            ) -> impl Future<Output = Result<String, OrchestratorError>> + Send + 'a {
+                async { Ok(String::new()) }
+            }
+        }
+
+        let store = MockRegistryStore::new();
+        let registry = Registry::new(store);
+        let caller = MockAgentCaller::returning(b"".to_vec());
+        let engine = OrchestratorEngine::new(FailingProvider, caller, registry);
+        let state: AppState<FailingProvider, MockAgentCaller, MockRegistryStore> = AppState {
+            engine: Arc::new(engine),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let app = Router::new()
+            .route(
+                "/orchestrate",
+                post(handle_orchestrate::<FailingProvider, MockAgentCaller, MockRegistryStore>),
+            )
+            .with_state(state);
+
+        let body = serde_json::json!({"task": "do something"});
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/orchestrate")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }

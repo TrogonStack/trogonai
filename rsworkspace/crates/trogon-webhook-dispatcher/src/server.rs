@@ -266,4 +266,102 @@ mod tests {
         let sub: WebhookSubscription = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(sub.secret.as_deref(), Some("my-secret"));
     }
+
+    // ── Error path tests using a store that always fails ──────────────────────
+
+    #[derive(Clone)]
+    struct FailingStore;
+
+    #[derive(Debug)]
+    struct StoreErr;
+    impl std::fmt::Display for StoreErr {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "store unavailable")
+        }
+    }
+    impl std::error::Error for StoreErr {}
+
+    impl crate::store::SubscriptionStore for FailingStore {
+        type PutError = StoreErr;
+        type GetError = StoreErr;
+        type DeleteError = StoreErr;
+        type KeysError = StoreErr;
+        async fn put(&self, _: &str, _: bytes::Bytes) -> Result<u64, StoreErr> {
+            Err(StoreErr)
+        }
+        async fn get(&self, _: &str) -> Result<Option<bytes::Bytes>, StoreErr> {
+            Err(StoreErr)
+        }
+        async fn delete(&self, _: &str) -> Result<(), StoreErr> {
+            Err(StoreErr)
+        }
+        async fn keys(&self) -> Result<Vec<String>, StoreErr> {
+            Err(StoreErr)
+        }
+    }
+
+    fn failing_app() -> Router {
+        let registry = WebhookRegistry::new(FailingStore);
+        let state = AppState { registry };
+        Router::new()
+            .route(
+                "/subscriptions",
+                post(handle_register::<FailingStore>).get(handle_list::<FailingStore>),
+            )
+            .route(
+                "/subscriptions/{id}",
+                delete(handle_deregister::<FailingStore>),
+            )
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn register_returns_500_when_store_fails() {
+        let body = serde_json::json!({
+            "subject_pattern": "transcripts.>",
+            "url": "https://example.com/hook"
+        });
+        let resp = failing_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/subscriptions")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn list_returns_500_when_store_fails() {
+        let resp = failing_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/subscriptions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn deregister_returns_500_when_store_fails() {
+        let resp = failing_app()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/subscriptions/any-id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
