@@ -26,14 +26,10 @@ mod tests {
         assert_eq!(event.decode_data_with(&JobEventCodec).unwrap(), removed);
 
         let recorded = event.record(
-            "cron.jobs.events.cleanup",
             None,
-            Some(9),
             chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
         assert_eq!(recorded.stream_id(), "cleanup");
-        assert_eq!(recorded.recorded_stream_id, "cron.jobs.events.cleanup");
-        assert_eq!(recorded.log_position, Some(9));
         assert_eq!(
             recorded.subject_with_prefix("cron.jobs.events."),
             "cron.jobs.events.cleanup"

@@ -1,9 +1,11 @@
 mod codec_error;
 mod data;
+mod metadata;
 mod recorded;
 
 pub use codec_error::{EncodeEventError, EventDataEncodeError};
 pub use data::EventData;
+pub use metadata::{EventMetadata, EventMetadataError};
 pub use recorded::RecordedEvent;
 
 #[cfg(test)]
@@ -41,11 +43,6 @@ mod tests {
     struct TestEvent {
         id: String,
         value: String,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    struct TestMetadata {
-        trace_id: String,
     }
 
     impl EventIdentity for TestEvent {}
@@ -122,16 +119,12 @@ mod tests {
         let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
 
         let recorded = event.record(
-            "stream-alpha",
             Some(position(2)),
-            Some(10),
             DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
 
         assert_eq!(recorded.stream_id(), "alpha");
-        assert_eq!(recorded.recorded_stream_id, "stream-alpha");
         assert_eq!(recorded.stream_position, Some(position(2)));
-        assert_eq!(recorded.log_position, Some(10));
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
@@ -147,12 +140,7 @@ mod tests {
             "alpha"
         );
 
-        let recorded = event.record(
-            "stream-alpha",
-            None,
-            Some(42),
-            DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
-        );
+        let recorded = event.record(None, DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap());
         assert_eq!(
             recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
             "alpha"
@@ -165,35 +153,19 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let metadata = TestMetadata {
-            trace_id: "trace-1".to_string(),
-        };
+        let metadata = EventMetadata::one("trace-id", "trace-1").unwrap();
 
         let generated = EventData::from_event("alpha", &TestEventCodec, &event)
             .unwrap()
-            .with_metadata(&TestEventCodec, Some(&metadata))
-            .unwrap();
+            .with_metadata(metadata.clone());
         assert_eq!(
             generated.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
             event
         );
-        assert_eq!(
-            generated
-                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
-                .unwrap(),
-            Some(metadata.clone())
-        );
+        assert_eq!(generated.metadata.get("trace-id"), Some("trace-1"));
 
-        let no_metadata = EventData::from_event("alpha", &TestEventCodec, &event)
-            .unwrap()
-            .with_metadata::<TestMetadata, _>(&TestEventCodec, None)
-            .unwrap();
-        assert_eq!(
-            no_metadata
-                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
-                .unwrap(),
-            None
-        );
+        let no_metadata = EventData::from_event("alpha", &TestEventCodec, &event).unwrap();
+        assert!(no_metadata.metadata.is_empty());
 
         let recorded = RecordedEvent {
             event_id: generated.event_id,
@@ -201,26 +173,37 @@ mod tests {
             event_stream_id: generated.stream_id.clone(),
             payload: generated.payload.clone(),
             metadata: generated.metadata.clone(),
-            recorded_stream_id: "recorded-alpha".to_string(),
             stream_position: Some(position(7)),
-            log_position: Some(9),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_002, 0).unwrap(),
         };
 
         assert_eq!(recorded.stream_id(), "alpha");
-        assert_eq!(recorded.recorded_stream_id, "recorded-alpha");
         assert_eq!(recorded.stream_position, Some(position(7)));
-        assert_eq!(recorded.log_position, Some(9));
         assert_eq!(
             recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
             event
         );
-        assert_eq!(
-            recorded
-                .decode_metadata_with::<TestMetadata, _>(&TestEventCodec)
-                .unwrap(),
-            Some(metadata)
-        );
+        assert_eq!(recorded.metadata, metadata);
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
+    }
+
+    #[test]
+    fn event_metadata_validates_header_safe_names_and_values() {
+        assert_eq!(
+            EventMetadata::one("", "value").unwrap_err(),
+            EventMetadataError::EmptyName
+        );
+        assert!(matches!(
+            EventMetadata::one("Nats-Expected-Last-Subject-Sequence", "1"),
+            Err(EventMetadataError::ReservedName { .. })
+        ));
+        assert!(matches!(
+            EventMetadata::one("trace id", "value"),
+            Err(EventMetadataError::InvalidName { .. })
+        ));
+        assert!(matches!(
+            EventMetadata::one("trace-id", "line\r\nbreak"),
+            Err(EventMetadataError::InvalidValue { .. })
+        ));
     }
 }

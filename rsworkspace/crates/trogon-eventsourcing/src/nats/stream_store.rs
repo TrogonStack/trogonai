@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
 
-use crate::{EventData, EventId, NonEmpty, RecordedEvent};
+use crate::{EventData, EventId, EventMetadata, NonEmpty, RecordedEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
@@ -15,6 +15,7 @@ type StreamMessage = async_nats::jetstream::message::StreamMessage;
 const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 const NATS_BATCH_ID: &str = "Nats-Batch-Id";
 const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
+pub const TROGON_EVENT_METADATA_HEADER_PREFIX: &str = "Trogon-Metadata-";
 pub const TROGON_EVENT_TYPE: &str = "Trogon-Event-Type";
 
 #[derive(Debug)]
@@ -85,13 +86,6 @@ where
             std::io::Error::other("batch contains events across multiple streams"),
         ));
     }
-    if events.iter().any(|event| event.metadata.is_some()) {
-        return Err(StreamStoreError::publish_source(
-            "failed to publish stream event batch",
-            std::io::Error::other("event metadata is not supported by the JetStream stream store"),
-        ));
-    }
-
     let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
 
@@ -162,6 +156,9 @@ fn build_publish_message(
         .header(TROGON_EVENT_TYPE, event.event_type.as_str())
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
+    for (name, value) in event.metadata.iter() {
+        publish = publish.header(metadata_header_name(name), value);
+    }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
         publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);
     }
@@ -271,18 +268,42 @@ pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, St
         .map_err(|source| StreamStoreError::read_source("failed to read stream message event id", source))?;
     let event_type = required_header(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
     let subject = message.subject.to_string();
+    let stream_position = crate::StreamPosition::try_new(message.sequence)
+        .map_err(|source| StreamStoreError::read_source("failed to read stream message position", source))?;
+    let metadata = metadata_from_headers(headers)?;
 
     Ok(RecordedEvent {
         event_id,
         event_type,
         event_stream_id: subject.clone(),
         payload: message.payload.to_vec(),
-        metadata: None,
-        recorded_stream_id: subject,
-        stream_position: None,
-        log_position: Some(message.sequence),
+        metadata,
+        stream_position: Some(stream_position),
         recorded_at,
     })
+}
+
+fn metadata_header_name(name: &str) -> String {
+    format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}{name}")
+}
+
+fn metadata_from_headers(headers: &HeaderMap) -> Result<EventMetadata, StreamStoreError> {
+    let mut entries = Vec::new();
+    for (name, values) in headers.iter() {
+        let header_name = name.to_string();
+        let Some(metadata_name) = header_name.strip_prefix(TROGON_EVENT_METADATA_HEADER_PREFIX) else {
+            continue;
+        };
+        let [value] = values.as_slice() else {
+            return Err(StreamStoreError::read_source(
+                "failed to read stream message metadata",
+                std::io::Error::other(format!("metadata header '{header_name}' must have exactly one value")),
+            ));
+        };
+        entries.push((metadata_name.to_string(), value.as_str().to_string()));
+    }
+    EventMetadata::from_entries(entries)
+        .map_err(|source| StreamStoreError::read_source("failed to read stream message metadata", source))
 }
 
 fn required_header<'a>(
@@ -300,12 +321,18 @@ fn required_header<'a>(
 
 #[cfg(test)]
 mod tests {
-    use async_nats::header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID};
+    use async_nats::{
+        HeaderMap,
+        header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
+    };
     use uuid::Uuid;
 
-    use crate::{EventData, EventId};
+    use crate::{EventData, EventId, EventMetadata};
 
-    use super::{NATS_BATCH_COMMIT, TROGON_EVENT_TYPE, build_publish_message};
+    use super::{
+        NATS_BATCH_COMMIT, TROGON_EVENT_METADATA_HEADER_PREFIX, TROGON_EVENT_TYPE, build_publish_message,
+        metadata_from_headers,
+    };
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
@@ -314,7 +341,7 @@ mod tests {
             event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             stream_id: "backup".to_string(),
             payload: Vec::new(),
-            metadata: None,
+            metadata: EventMetadata::empty(),
         };
 
         let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
@@ -332,13 +359,55 @@ mod tests {
     }
 
     #[test]
+    fn build_publish_message_maps_event_metadata_to_trogon_headers() {
+        let event = EventData {
+            event_id: EventId::from(Uuid::from_u128(1)),
+            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            stream_id: "backup".to_string(),
+            payload: Vec::new(),
+            metadata: EventMetadata::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
+        };
+
+        let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
+            .outbound_message("cron.jobs.events.backup")
+            .headers
+            .unwrap_or_default();
+
+        assert_eq!(
+            headers
+                .get(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}trace-id").as_str())
+                .map(|value| value.as_str()),
+            Some("trace-1")
+        );
+        assert_eq!(
+            headers
+                .get(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}tenant").as_str())
+                .map(|value| value.as_str()),
+            Some("trogon")
+        );
+    }
+
+    #[test]
+    fn metadata_from_headers_reads_trogon_metadata_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}trace-id"), "trace-1");
+        headers.insert("Trogon-Event-Type", "test.event");
+        headers.insert("Nats-Msg-Id", "00000000-0000-0000-0000-000000000001");
+
+        let metadata = metadata_from_headers(&headers).unwrap();
+
+        assert_eq!(metadata.get("trace-id"), Some("trace-1"));
+        assert_eq!(metadata.len(), 1);
+    }
+
+    #[test]
     fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
         let event = EventData {
             event_id: EventId::from(Uuid::from_u128(1)),
             event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             stream_id: "backup".to_string(),
             payload: Vec::new(),
-            metadata: None,
+            metadata: EventMetadata::empty(),
         };
 
         let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
@@ -373,7 +442,7 @@ mod tests {
             event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             stream_id: "backup".to_string(),
             payload: Vec::new(),
-            metadata: None,
+            metadata: EventMetadata::empty(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)

@@ -994,7 +994,9 @@ mod tests {
                 events: self
                     .recorded_events
                     .iter()
-                    .filter(|event| event.log_position.unwrap_or(0) >= request.from_sequence)
+                    .filter(|event| {
+                        event.stream_position.map(StreamPosition::get).unwrap_or(0) >= request.from_sequence
+                    })
                     .cloned()
                     .collect(),
             })
@@ -1062,9 +1064,7 @@ mod tests {
         EventData::from_event(stream_id, &TestEventCodec, &event)
             .unwrap()
             .record(
-                "stream-alpha",
                 Some(position(sequence)),
-                Some(sequence),
                 DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
             )
     }
@@ -1287,9 +1287,7 @@ mod tests {
                 )
                 .unwrap()
                 .record(
-                    "stream-alpha",
                     Some(position(1)),
-                    Some(1),
                     DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
                 ),
             ],

@@ -374,9 +374,7 @@ impl StreamRead<str> for MockCronStore {
                 continue;
             }
             recorded.push(event.record(
-                stream_id.to_string(),
                 Some(stream_position(sequence)?),
-                Some(sequence),
                 DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
                     CronError::event_source(
                         "failed to build mocked recorded event timestamp",
