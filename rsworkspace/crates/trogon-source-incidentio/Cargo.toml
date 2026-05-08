@@ -26,5 +26,5 @@ tower = "0.5"
 tracing-subscriber = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 futures-util = { workspace = true }

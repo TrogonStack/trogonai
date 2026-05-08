@@ -32,7 +32,7 @@ trogon-std = { workspace = true }
 
 [dev-dependencies]
 serde_json                = { workspace = true }
-testcontainers-modules    = { version = "0.8", features = ["nats"] }
+testcontainers-modules    = { version = "0.15", features = ["nats"] }
 tokio                     = { workspace = true, features = ["test-util"] }
 tracing-subscriber        = { workspace = true, features = ["fmt"] }
 trogon-nats               = { workspace = true, features = ["test-support"] }
