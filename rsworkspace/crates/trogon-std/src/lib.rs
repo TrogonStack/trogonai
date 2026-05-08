@@ -46,7 +46,7 @@ pub mod time;
 #[cfg(feature = "uuid")]
 pub mod uuid;
 
-#[cfg(all(feature = "clap", not(coverage)))]
+#[cfg(feature = "clap")]
 pub use args::CliArgs;
 #[cfg(any(test, feature = "test-support"))]
 pub use args::FixedArgs;

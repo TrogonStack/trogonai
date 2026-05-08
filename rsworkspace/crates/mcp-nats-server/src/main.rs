@@ -2,10 +2,10 @@ mod allowed_host;
 mod config;
 mod constants;
 
-#[cfg(not(coverage))]
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 mod runtime {
     use std::collections::HashMap;
-    use std::error::Error;
     use std::io;
 
     use axum::Router;
@@ -25,16 +25,15 @@ mod runtime {
     use trogon_telemetry::{ResourceAttribute, ServiceName};
     use uuid::Uuid;
 
+    use crate::BoxError;
     use crate::allowed_host::AllowedHost;
     use crate::config;
     use crate::constants::MCP_ENDPOINT;
 
-    type BoxError = Box<dyn Error + Send + Sync>;
     type ProxyResponse = oneshot::Sender<Result<ServerResult, ErrorData>>;
     type ProxyAck = oneshot::Sender<Result<(), ErrorData>>;
 
-    #[tokio::main]
-    pub async fn main() -> Result<(), BoxError> {
+    pub async fn run() -> Result<(), BoxError> {
         let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
         let config::HttpBridgeConfig {
             mcp,
@@ -539,18 +538,7 @@ mod runtime {
     }
 }
 
-#[cfg(not(coverage))]
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    runtime::main()
-}
-
-#[cfg(coverage)]
-fn main() {}
-
-#[cfg(all(test, coverage))]
-mod coverage_tests {
-    #[test]
-    fn coverage_main_stub_is_callable() {
-        super::main();
-    }
+#[tokio::main]
+async fn main() -> Result<(), BoxError> {
+    runtime::run().await
 }
