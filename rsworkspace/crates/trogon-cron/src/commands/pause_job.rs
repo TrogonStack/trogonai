@@ -1,7 +1,6 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
-use super::JobStateProtoError;
 use super::domain::JobId;
 
 #[derive(Debug, Clone)]
@@ -10,11 +9,12 @@ pub struct PauseJobCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PauseJobDecisionError {
+pub enum PauseJobDecideError {
     JobNotFound { id: JobId },
     JobDeleted { id: JobId },
     AlreadyPaused { id: JobId },
-    InvalidState { source: JobStateProtoError },
+    MissingStateValue,
+    UnknownStateValue { value: i32 },
 }
 
 impl PauseJobCommand {
@@ -27,8 +27,8 @@ impl Decide for PauseJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
-    type DecideError = PauseJobDecisionError;
-    type EvolveError = JobStateProtoError;
+    type DecideError = PauseJobDecideError;
+    type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id.as_str()
@@ -43,22 +43,26 @@ impl Decide for PauseJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        match super::state::state_value(state).map_err(|source| PauseJobDecisionError::InvalidState { source })? {
+        let Some(value) = state.state.as_ref() else {
+            return Err(PauseJobDecideError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(PauseJobDecideError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => {
-                Err(PauseJobDecisionError::JobNotFound { id: command.id.clone() })
+                Err(PauseJobDecideError::JobNotFound { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_DELETED => {
-                Err(PauseJobDecisionError::JobDeleted { id: command.id.clone() })
+                Err(PauseJobDecideError::JobDeleted { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
-                Err(PauseJobDecisionError::AlreadyPaused { id: command.id.clone() })
+                Err(PauseJobDecideError::AlreadyPaused { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => Ok(Decision::event(v1::JobEvent {
                 event: Some(v1::JobPaused {}.into()),
             })),
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(PauseJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue { value: 0 },
-            }),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(PauseJobDecideError::UnknownStateValue { value: 0 }),
         }
     }
 }
@@ -135,7 +139,7 @@ mod tests {
             .given([added("backup")])
             .given([paused()])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(PauseJobDecisionError::AlreadyPaused {
+            .then_error(PauseJobDecideError::AlreadyPaused {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -145,7 +149,7 @@ mod tests {
         TestCase::new(decider::<PauseJobCommand>())
             .given_no_history()
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(PauseJobDecisionError::JobNotFound {
+            .then_error(PauseJobDecideError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -157,7 +161,7 @@ mod tests {
             .given([paused()])
             .given([removed()])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(PauseJobDecisionError::JobDeleted {
+            .then_error(PauseJobDecideError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             });
     }

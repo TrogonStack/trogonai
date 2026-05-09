@@ -14,13 +14,13 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator, signal};
 
 use crate::{
-    ResolvedJob,
+    JobEventCase, JobEventCodec, ResolvedJob,
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
-    proto::{JobEventCodec, v1},
     store::{Store, connect_store},
     traits::{LeaderLock, SchedulePublisher},
+    v1,
 };
 
 const WATCH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
@@ -389,7 +389,7 @@ fn apply_scheduler_event(
     })?;
 
     match &event.event {
-        Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => {
+        Some(JobEventCase::JobAdded(inner)) => {
             if matches!(desired_jobs.get(stream_id), Some(DesiredJobState::Deleted)) {
                 return Err(CronError::event_source(
                     "scheduler received an add event for a deleted job stream",
@@ -406,7 +406,7 @@ fn apply_scheduler_event(
             desired_jobs.insert(job.id.clone(), DesiredJobState::Present(Box::new(job.clone())));
             Ok(SchedulerChange::Upsert(job))
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => {
+        Some(JobEventCase::JobPaused(_)) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a pause without current job state",
@@ -424,7 +424,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => {
+        Some(JobEventCase::JobResumed(_)) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a resume without current job state",
@@ -442,7 +442,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => {
+        Some(JobEventCase::JobRemoved(_)) => {
             desired_jobs.insert(stream_id.to_string(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(stream_id.to_string()))
         }
@@ -705,7 +705,7 @@ mod tests {
         scheduler_consumer_config, scheduler_replay_consumer_config,
     };
     use crate::mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher};
-    use crate::proto::v1;
+    use crate::v1;
 
     fn base_job_details() -> v1::JobDetails {
         v1::JobDetails {

@@ -2,7 +2,6 @@ use buffa::MessageField;
 use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamState};
 
-use super::JobStateProtoError;
 use super::domain::{Job, JobId};
 
 #[derive(Debug, Clone)]
@@ -11,10 +10,11 @@ pub struct AddJobCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AddJobDecisionError {
+pub enum AddJobDecideError {
     AlreadyExists { id: JobId },
     JobDeleted { id: JobId },
-    InvalidState { source: JobStateProtoError },
+    MissingStateValue,
+    UnknownStateValue { value: i32 },
 }
 
 impl AddJobCommand {
@@ -27,8 +27,8 @@ impl Decide for AddJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
-    type DecideError = AddJobDecisionError;
-    type EvolveError = JobStateProtoError;
+    type DecideError = AddJobDecideError;
+    type EvolveError = super::EvolveError;
 
     const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
 
@@ -45,7 +45,13 @@ impl Decide for AddJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        match super::state::state_value(state).map_err(|source| AddJobDecisionError::InvalidState { source })? {
+        let Some(value) = state.state.as_ref() else {
+            return Err(AddJobDecideError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(AddJobDecideError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => Ok(Decision::event(v1::JobEvent {
                 event: Some(
                     v1::JobAdded {
@@ -55,16 +61,14 @@ impl Decide for AddJobCommand {
                 ),
             })),
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
-                Err(AddJobDecisionError::AlreadyExists {
+                Err(AddJobDecideError::AlreadyExists {
                     id: command.job.id.clone(),
                 })
             }
-            state_v1::StateValue::STATE_VALUE_DELETED => Err(AddJobDecisionError::JobDeleted {
+            state_v1::StateValue::STATE_VALUE_DELETED => Err(AddJobDecideError::JobDeleted {
                 id: command.job.id.clone(),
             }),
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(AddJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue { value: 0 },
-            }),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(AddJobDecideError::UnknownStateValue { value: 0 }),
         }
     }
 }
@@ -153,7 +157,7 @@ mod tests {
         TestCase::new(decider::<AddJobCommand>())
             .given([added("backup")])
             .when(AddJobCommand::new(job("backup")))
-            .then_error(AddJobDecisionError::AlreadyExists {
+            .then_error(AddJobDecideError::AlreadyExists {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -164,7 +168,7 @@ mod tests {
             .given([added("backup")])
             .given([removed()])
             .when(AddJobCommand::new(job("backup")))
-            .then_error(AddJobDecisionError::JobDeleted {
+            .then_error(AddJobDecideError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -218,7 +222,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(AddJobDecisionError::AlreadyExists { ref id })
+            CommandFailure::Decide(AddJobDecideError::AlreadyExists { ref id })
                 if id.to_string() == "backup"
         ));
     }
@@ -249,7 +253,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(AddJobDecisionError::JobDeleted { ref id })
+            CommandFailure::Decide(AddJobDecideError::JobDeleted { ref id })
                 if id.to_string() == "backup"
         ));
     }

@@ -6,8 +6,8 @@ mod resume_job;
 mod snapshot;
 mod state;
 
-pub use add_job::{AddJobCommand, AddJobDecisionError};
-pub use pause_job::{PauseJobCommand, PauseJobDecisionError};
-pub use remove_job::{RemoveJobCommand, RemoveJobDecisionError};
-pub use resume_job::{ResumeJobCommand, ResumeJobDecisionError};
-pub use state::JobStateProtoError;
+pub use add_job::{AddJobCommand, AddJobDecideError};
+pub use pause_job::{PauseJobCommand, PauseJobDecideError};
+pub use remove_job::{RemoveJobCommand, RemoveJobDecideError};
+pub use resume_job::{ResumeJobCommand, ResumeJobDecideError};
+pub use state::EvolveError;

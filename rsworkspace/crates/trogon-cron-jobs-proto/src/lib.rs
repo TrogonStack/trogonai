@@ -7,6 +7,7 @@ pub mod generated;
 
 pub use generated::trogon::cron::jobs::state::v1 as state_v1;
 pub use generated::trogon::cron::jobs::v1;
+pub use generated::trogon::cron::jobs::v1::__buffa::oneof::job_event::Event as JobEventCase;
 
 pub const JOB_ADDED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobAdded";
 pub const JOB_PAUSED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobPaused";
@@ -47,10 +48,10 @@ impl EventCodec<v1::JobEvent> for JobEventCodec {
 
     fn encode(&self, value: &v1::JobEvent) -> Result<Vec<u8>, Self::Error> {
         match &value.event {
-            Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => Ok(inner.encode_to_vec()),
-            Some(v1::__buffa::oneof::job_event::Event::JobPaused(inner)) => Ok(inner.encode_to_vec()),
-            Some(v1::__buffa::oneof::job_event::Event::JobResumed(inner)) => Ok(inner.encode_to_vec()),
-            Some(v1::__buffa::oneof::job_event::Event::JobRemoved(inner)) => Ok(inner.encode_to_vec()),
+            Some(JobEventCase::JobAdded(inner)) => Ok(inner.encode_to_vec()),
+            Some(JobEventCase::JobPaused(inner)) => Ok(inner.encode_to_vec()),
+            Some(JobEventCase::JobResumed(inner)) => Ok(inner.encode_to_vec()),
+            Some(JobEventCase::JobRemoved(inner)) => Ok(inner.encode_to_vec()),
             None => Err(JobEventCodecError::MissingEvent),
         }
     }
@@ -86,10 +87,10 @@ impl EventType for v1::JobEvent {
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
         match &self.event {
-            Some(v1::__buffa::oneof::job_event::Event::JobAdded(_)) => Ok(JOB_ADDED_EVENT_TYPE),
-            Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => Ok(JOB_PAUSED_EVENT_TYPE),
-            Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => Ok(JOB_RESUMED_EVENT_TYPE),
-            Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => Ok(JOB_REMOVED_EVENT_TYPE),
+            Some(JobEventCase::JobAdded(_)) => Ok(JOB_ADDED_EVENT_TYPE),
+            Some(JobEventCase::JobPaused(_)) => Ok(JOB_PAUSED_EVENT_TYPE),
+            Some(JobEventCase::JobResumed(_)) => Ok(JOB_RESUMED_EVENT_TYPE),
+            Some(JobEventCase::JobRemoved(_)) => Ok(JOB_REMOVED_EVENT_TYPE),
             None => Err(JobEventCodecError::MissingEvent),
         }
     }
@@ -109,7 +110,8 @@ impl SnapshotSchema for state_v1::State {
 
 #[cfg(test)]
 mod tests {
-    use buffa::MessageField;
+    use buffa::{Message as _, MessageField};
+    use trogon_eventsourcing::{EventCodec, EventData};
 
     use super::*;
 
@@ -180,6 +182,58 @@ mod tests {
 
         assert_eq!(left, right);
         assert_ne!(left, different);
+    }
+
+    #[test]
+    fn event_data_and_recorded_event_helpers_work() {
+        let removed = v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        };
+        let event = EventData::from_event("cleanup", &JobEventCodec, &removed).unwrap();
+        assert_eq!(event.stream_id(), "cleanup");
+        assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
+        assert!(v1::JobRemoved::decode_from_slice(&event.payload).is_ok());
+        assert_eq!(
+            event.subject_with_prefix("cron.jobs.events."),
+            "cron.jobs.events.cleanup"
+        );
+
+        assert_eq!(event.decode_data_with(&JobEventCodec).unwrap(), removed);
+
+        let recorded = event.record(
+            None,
+            chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
+        );
+        assert_eq!(recorded.stream_id(), "cleanup");
+        assert_eq!(
+            recorded.subject_with_prefix("cron.jobs.events."),
+            "cron.jobs.events.cleanup"
+        );
+        let expected = v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        };
+        assert_eq!(recorded.decode_data_with(&JobEventCodec).unwrap(), expected);
+    }
+
+    #[test]
+    fn invalid_payload_fails_decode() {
+        assert!(JobEventCodec.decode(JOB_REMOVED_EVENT_TYPE, "cleanup", b"\0").is_err());
+        assert!(
+            JobEventCodec
+                .decode("trogon.cron.jobs.v1.Unknown", "cleanup", &[])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn job_added_round_trips_through_contract() {
+        let event = job_added_event(30);
+
+        let encoded = JobEventCodec.encode(&event).unwrap();
+        let decoded = JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap();
+
+        assert_eq!(decoded, event);
+        assert!(matches!(decoded.event, Some(JobEventCase::JobAdded(_))));
     }
 
     #[test]

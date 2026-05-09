@@ -13,14 +13,15 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
+    JobEventCase, JobEventCodec,
     error::CronError,
     kv::{CRON_JOBS_CHECKPOINT_KEY, EVENTS_SUBJECT_PREFIX},
-    proto::{JobEventCodec, v1},
     read_model::{
         CronJob, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
         MessageEnvelope, MessageHeaders,
     },
     store::{open_cron_jobs_bucket, open_events_stream},
+    v1,
 };
 
 pub type CronJobWatchStream = Pin<Box<dyn Stream<Item = CronJobChange> + Send + 'static>>;
@@ -79,49 +80,47 @@ pub fn apply(
     })?;
 
     match (state, &event.event) {
-        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner))) => {
+        (JobStreamState::Initial, Some(JobEventCase::JobAdded(inner))) => {
             let job = inner.job.as_option().ok_or(JobTransitionError::MalformedEvent {
                 context: "job added event has no job details",
             })?;
             Ok(JobStreamState::Present(project_job(stream_id, job)?))
         }
-        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
+        (JobStreamState::Initial, Some(JobEventCase::JobPaused(_))) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: stream_id.to_string(),
             })
         }
-        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
+        (JobStreamState::Initial, Some(JobEventCase::JobResumed(_))) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: stream_id.to_string(),
             })
         }
-        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
+        (JobStreamState::Initial, Some(JobEventCase::JobRemoved(_))) => {
             Ok(JobStreamState::Deleted(stream_id.to_string()))
         }
-        (JobStreamState::Present(job), Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))) => {
+        (JobStreamState::Present(job), Some(JobEventCase::JobAdded(_))) => {
             Err(JobTransitionError::CannotAddExistingJob { id: job.id })
         }
-        (JobStreamState::Present(mut job), Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
+        (JobStreamState::Present(mut job), Some(JobEventCase::JobPaused(_))) => {
             job.status = JobEventStatus::Disabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(mut job), Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
+        (JobStreamState::Present(mut job), Some(JobEventCase::JobResumed(_))) => {
             job.status = JobEventStatus::Enabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(job), Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
-            Ok(JobStreamState::Deleted(job.id))
-        }
-        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))) => {
+        (JobStreamState::Present(job), Some(JobEventCase::JobRemoved(_))) => Ok(JobStreamState::Deleted(job.id)),
+        (JobStreamState::Deleted(id), Some(JobEventCase::JobAdded(_))) => {
             Err(JobTransitionError::CannotAddDeletedJob { id })
         }
-        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
+        (JobStreamState::Deleted(id), Some(JobEventCase::JobPaused(_))) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
+        (JobStreamState::Deleted(id), Some(JobEventCase::JobResumed(_))) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
+        (JobStreamState::Deleted(id), Some(JobEventCase::JobRemoved(_))) => {
             Err(JobTransitionError::DeletedJobForRemoval { id })
         }
         (_, None) => Err(JobTransitionError::MalformedEvent {
@@ -792,7 +791,7 @@ mod tests {
     use buffa::MessageField;
 
     use super::*;
-    use crate::proto::v1;
+    use crate::v1;
     use crate::{
         CronJob, JobEventDelivery, JobEventSchedule, JobEventStatus, MessageContent, MessageEnvelope, MessageHeaders,
     };

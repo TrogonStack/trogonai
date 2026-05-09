@@ -1,7 +1,6 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
-use super::JobStateProtoError;
 use super::domain::JobId;
 
 #[derive(Debug, Clone)]
@@ -10,11 +9,12 @@ pub struct ResumeJobCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResumeJobDecisionError {
+pub enum ResumeJobDecideError {
     JobNotFound { id: JobId },
     JobDeleted { id: JobId },
     AlreadyActive { id: JobId },
-    InvalidState { source: JobStateProtoError },
+    MissingStateValue,
+    UnknownStateValue { value: i32 },
 }
 
 impl ResumeJobCommand {
@@ -27,8 +27,8 @@ impl Decide for ResumeJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
-    type DecideError = ResumeJobDecisionError;
-    type EvolveError = JobStateProtoError;
+    type DecideError = ResumeJobDecideError;
+    type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id.as_str()
@@ -43,22 +43,26 @@ impl Decide for ResumeJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        match super::state::state_value(state).map_err(|source| ResumeJobDecisionError::InvalidState { source })? {
+        let Some(value) = state.state.as_ref() else {
+            return Err(ResumeJobDecideError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(ResumeJobDecideError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => {
-                Err(ResumeJobDecisionError::JobNotFound { id: command.id.clone() })
+                Err(ResumeJobDecideError::JobNotFound { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_DELETED => {
-                Err(ResumeJobDecisionError::JobDeleted { id: command.id.clone() })
+                Err(ResumeJobDecideError::JobDeleted { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => {
-                Err(ResumeJobDecisionError::AlreadyActive { id: command.id.clone() })
+                Err(ResumeJobDecideError::AlreadyActive { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => Ok(Decision::event(v1::JobEvent {
                 event: Some(v1::JobResumed {}.into()),
             })),
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue { value: 0 },
-            }),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeJobDecideError::UnknownStateValue { value: 0 }),
         }
     }
 }
@@ -141,7 +145,7 @@ mod tests {
         TestCase::new(decider::<ResumeJobCommand>())
             .given([added("backup")])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(ResumeJobDecisionError::AlreadyActive {
+            .then_error(ResumeJobDecideError::AlreadyActive {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -151,7 +155,7 @@ mod tests {
         TestCase::new(decider::<ResumeJobCommand>())
             .given_no_history()
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(ResumeJobDecisionError::JobNotFound {
+            .then_error(ResumeJobDecideError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -163,7 +167,7 @@ mod tests {
             .given([paused()])
             .given([removed()])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(ResumeJobDecisionError::JobDeleted {
+            .then_error(ResumeJobDecideError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             });
     }
