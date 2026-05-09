@@ -1,8 +1,11 @@
 version: v2
 clean: true
 plugins:
-  - protoc_builtin: rust
+  - local: protoc-gen-buffa
     out: rsworkspace/crates/trogon-cron-jobs-proto/src/gen
     opt:
-      - experimental-codegen=enabled
-      - kernel=upb
+      - json=true
+      - unknown_fields=false
+  - local: protoc-gen-buffa-packaging
+    out: rsworkspace/crates/trogon-cron-jobs-proto/src/gen
+    strategy: all

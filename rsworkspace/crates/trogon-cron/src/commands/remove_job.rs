@@ -42,19 +42,20 @@ impl Decide for RemoveJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        let state = state.state();
-        match state {
-            state_v1::StateValue::Missing => Err(RemoveJobDecisionError::JobNotFound { id: command.id.clone() }),
-            state_v1::StateValue::PresentEnabled | state_v1::StateValue::PresentDisabled => {
-                let mut event = v1::JobEvent::new();
-                event.set_job_removed(v1::JobRemoved::new());
-                Ok(Decision::event(event))
+        match super::state::state_value(state).map_err(|source| RemoveJobDecisionError::InvalidState { source })? {
+            state_v1::StateValue::STATE_VALUE_MISSING => {
+                Err(RemoveJobDecisionError::JobNotFound { id: command.id.clone() })
             }
-            state_v1::StateValue::Deleted => Err(RemoveJobDecisionError::JobDeleted { id: command.id.clone() }),
-            _ => Err(RemoveJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue {
-                    value: i32::from(state),
-                },
+            state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
+                Ok(Decision::event(v1::JobEvent {
+                    event: Some(v1::JobRemoved {}.into()),
+                }))
+            }
+            state_v1::StateValue::STATE_VALUE_DELETED => {
+                Err(RemoveJobDecisionError::JobDeleted { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(RemoveJobDecisionError::InvalidState {
+                source: JobStateProtoError::UnknownStateValue { value: 0 },
             }),
         }
     }
@@ -67,6 +68,7 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 
 #[cfg(test)]
 mod tests {
+    use buffa::MessageField;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, NonEmpty, run_task_immediately,
@@ -95,17 +97,20 @@ mod tests {
     }
 
     fn added(id: &str) -> v1::JobEvent {
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(v1::JobDetails::from(&job(id)));
-        let mut event = v1::JobEvent::new();
-        event.set_job_added(inner);
-        event
+        v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(v1::JobDetails::from(&job(id))),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn removed() -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_removed(v1::JobRemoved::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        }
     }
 
     #[test]

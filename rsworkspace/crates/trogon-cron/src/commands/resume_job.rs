@@ -43,22 +43,21 @@ impl Decide for ResumeJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        let state = state.state();
-        match state {
-            state_v1::StateValue::Missing => Err(ResumeJobDecisionError::JobNotFound { id: command.id.clone() }),
-            state_v1::StateValue::Deleted => Err(ResumeJobDecisionError::JobDeleted { id: command.id.clone() }),
-            state_v1::StateValue::PresentEnabled => {
+        match super::state::state_value(state).map_err(|source| ResumeJobDecisionError::InvalidState { source })? {
+            state_v1::StateValue::STATE_VALUE_MISSING => {
+                Err(ResumeJobDecisionError::JobNotFound { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_DELETED => {
+                Err(ResumeJobDecisionError::JobDeleted { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => {
                 Err(ResumeJobDecisionError::AlreadyActive { id: command.id.clone() })
             }
-            state_v1::StateValue::PresentDisabled => {
-                let mut event = v1::JobEvent::new();
-                event.set_job_resumed(v1::JobResumed::new());
-                Ok(Decision::event(event))
-            }
-            _ => Err(ResumeJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue {
-                    value: i32::from(state),
-                },
+            state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => Ok(Decision::event(v1::JobEvent {
+                event: Some(v1::JobResumed {}.into()),
+            })),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeJobDecisionError::InvalidState {
+                source: JobStateProtoError::UnknownStateValue { value: 0 },
             }),
         }
     }
@@ -71,6 +70,7 @@ impl CommandSnapshotPolicy for ResumeJobCommand {
 
 #[cfg(test)]
 mod tests {
+    use buffa::MessageField;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
         CommandExecution, NonEmpty, run_task_immediately,
@@ -99,29 +99,32 @@ mod tests {
     }
 
     fn added(id: &str) -> v1::JobEvent {
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(v1::JobDetails::from(&active_job(id)));
-        let mut event = v1::JobEvent::new();
-        event.set_job_added(inner);
-        event
+        v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(v1::JobDetails::from(&active_job(id))),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn paused() -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_paused(v1::JobPaused::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobPaused {}.into()),
+        }
     }
 
     fn resumed() -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_resumed(v1::JobResumed::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobResumed {}.into()),
+        }
     }
 
     fn removed() -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_removed(v1::JobRemoved::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        }
     }
 
     #[test]

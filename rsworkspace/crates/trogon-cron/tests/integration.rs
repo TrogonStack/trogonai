@@ -21,6 +21,10 @@ fn command_job_id(id: &str) -> command_domain::JobId {
     command_domain::JobId::parse(id).unwrap()
 }
 
+fn state_value(state: &state_v1::State) -> Option<state_v1::StateValue> {
+    state.state.as_ref().and_then(|value| value.as_known())
+}
+
 async fn connect() -> async_nats::Client {
     let config = NatsConfig::from_url(test_url());
     nats_connect(&config, Duration::from_secs(10))
@@ -374,7 +378,10 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .await
         .unwrap();
     let added_position = added.stream_position;
-    assert_eq!(added.state.state(), state_v1::StateValue::PresentEnabled);
+    assert_eq!(
+        state_value(&added.state),
+        Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+    );
 
     let paused = CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_id.clone()))
         .with_snapshot(&store.event_store)
@@ -383,7 +390,10 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .await
         .unwrap();
     assert_eq!(paused.stream_position.get(), added_position.get() + 1);
-    assert_eq!(paused.state.state(), state_v1::StateValue::PresentDisabled);
+    assert_eq!(
+        state_value(&paused.state),
+        Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
+    );
 
     let resumed = CommandExecution::new(&store.event_store, &ResumeJobCommand::new(command_id.clone()))
         .with_snapshot(&store.event_store)
@@ -392,7 +402,10 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .await
         .unwrap();
     assert_eq!(resumed.stream_position.get(), paused.stream_position.get() + 1);
-    assert_eq!(resumed.state.state(), state_v1::StateValue::PresentEnabled);
+    assert_eq!(
+        state_value(&resumed.state),
+        Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+    );
 
     let removed = CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_id))
         .with_snapshot(&store.event_store)
@@ -401,7 +414,10 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .await
         .unwrap();
     assert_eq!(removed.stream_position.get(), resumed.stream_position.get() + 1);
-    assert_eq!(removed.state.state(), state_v1::StateValue::Deleted);
+    assert_eq!(
+        state_value(&removed.state),
+        Some(state_v1::StateValue::STATE_VALUE_DELETED)
+    );
 
     let fresh = connect_store(nats).await.unwrap();
     let stream = fresh
@@ -417,8 +433,20 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .iter()
         .map(|event| event.decode_data_with::<v1::JobEvent, _>(&JobEventCodec).unwrap())
         .collect::<Vec<_>>();
-    assert!(matches!(events[0].event(), v1::job_event::EventOneof::JobAdded(_)));
-    assert!(matches!(events[1].event(), v1::job_event::EventOneof::JobPaused(_)));
-    assert!(matches!(events[2].event(), v1::job_event::EventOneof::JobResumed(_)));
-    assert!(matches!(events[3].event(), v1::job_event::EventOneof::JobRemoved(_)));
+    assert!(matches!(
+        &events[0].event,
+        Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))
+    ));
+    assert!(matches!(
+        &events[1].event,
+        Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))
+    ));
+    assert!(matches!(
+        &events[2].event,
+        Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))
+    ));
+    assert!(matches!(
+        &events[3].event,
+        Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))
+    ));
 }

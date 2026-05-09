@@ -139,15 +139,18 @@ impl AsRef<[u8]> for MessageContent {
 
 impl From<&MessageEnvelope> for v1::JobMessage {
     fn from(value: &MessageEnvelope) -> Self {
-        let mut message = v1::JobMessage::new();
-        message.set_content(value.content.as_str());
-        for (name, val) in value.headers.as_slice() {
-            let mut header = v1::Header::new();
-            header.set_name(name.as_str());
-            header.set_value(val.as_str());
-            message.headers_mut().push(header);
+        v1::JobMessage {
+            content: value.content.as_str().to_string(),
+            headers: value
+                .headers
+                .as_slice()
+                .iter()
+                .map(|(name, value)| v1::Header {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
         }
-        message
     }
 }
 

@@ -51,7 +51,7 @@ struct ResolvedJobParts {
 }
 
 impl ResolvedJob {
-    pub fn from_event(job_id: &str, job: v1::JobDetailsView<'_>) -> Result<Self, CronError> {
+    pub fn from_event(job_id: &str, job: &v1::JobDetails) -> Result<Self, CronError> {
         let ResolvedJobParts {
             job_id,
             enabled,
@@ -132,26 +132,43 @@ impl ResolvedJob {
     }
 }
 
-fn resolved_job_parts(job_id: &str, job: v1::JobDetailsView<'_>) -> Result<ResolvedJobParts, CronError> {
+fn resolved_job_parts(job_id: &str, job: &v1::JobDetails) -> Result<ResolvedJobParts, CronError> {
     let job_id = parse_job_id(job_id)?;
-    let (schedule_expression, timezone) = schedule_parts(job.schedule())?;
-    let (route, ttl_sec, source_subject) = delivery_parts(job.delivery())?;
-    let headers = job
-        .message()
-        .headers()
+    let schedule = job.schedule.as_option().ok_or_else(|| {
+        CronError::event_source(
+            "scheduler received job details without schedule",
+            std::io::Error::other("missing schedule"),
+        )
+    })?;
+    let delivery = job.delivery.as_option().ok_or_else(|| {
+        CronError::event_source(
+            "scheduler received job details without delivery",
+            std::io::Error::other("missing delivery"),
+        )
+    })?;
+    let message = job.message.as_option().ok_or_else(|| {
+        CronError::event_source(
+            "scheduler received job details without message",
+            std::io::Error::other("missing message"),
+        )
+    })?;
+    let (schedule_expression, timezone) = schedule_parts(schedule)?;
+    let (route, ttl_sec, source_subject) = delivery_parts(delivery)?;
+    let headers = message
+        .headers
         .iter()
-        .map(|header| (header.name().to_string(), header.value().to_string()))
+        .map(|header| (header.name.clone(), header.value.clone()))
         .collect::<Vec<_>>();
     validate_scheduler_headers(&headers)?;
     let body = if source_subject.is_some() {
         Bytes::from_static(br#"{}"#)
     } else {
-        Bytes::from(job.message().content().to_string())
+        Bytes::from(message.content.clone())
     };
 
     Ok(ResolvedJobParts {
         job_id,
-        enabled: job.status() != v1::JobStatus::Disabled,
+        enabled: job.status != v1::JobStatus::JOB_STATUS_DISABLED,
         route,
         schedule_expression,
         timezone,
@@ -171,42 +188,38 @@ fn parse_job_id(id: &str) -> Result<NatsToken, CronError> {
     })
 }
 
-fn schedule_parts(schedule: v1::JobScheduleView<'_>) -> Result<(String, Option<String>), CronError> {
-    match schedule.kind() {
-        v1::job_schedule::KindOneof::At(inner) => Ok((format!("@at {}", inner.at()), None)),
-        v1::job_schedule::KindOneof::Every(inner) => {
-            let every_sec = inner.every_sec();
+fn schedule_parts(schedule: &v1::JobSchedule) -> Result<(String, Option<String>), CronError> {
+    match schedule.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => Ok((format!("@at {}", inner.at), None)),
+        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => {
+            let every_sec = inner.every_sec;
             if every_sec == 0 {
                 return Err(CronError::invalid_job_spec(JobSpecError::EverySecondsMustBePositive));
             }
             Ok((format!("@every {every_sec}s"), None))
         }
-        v1::job_schedule::KindOneof::Cron(inner) => {
-            let expr = inner.expr().to_string();
+        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => {
+            let expr = inner.expr.clone();
             cron::Schedule::from_str(&expr).map_err(|source| {
                 CronError::invalid_job_spec(JobSpecError::InvalidCronExpression {
                     expr: expr.clone(),
                     source: Box::new(source),
                 })
             })?;
-            Ok((
-                expr,
-                validate_timezone(inner.has_timezone().then(|| inner.timezone().to_string()))?,
-            ))
+            let timezone = (!inner.timezone.is_empty()).then(|| inner.timezone.clone());
+            Ok((expr, validate_timezone(timezone)?))
         }
-        _ => Err(CronError::event_source(
+        None => Err(CronError::event_source(
             "scheduler received job details without a schedule kind",
             std::io::Error::other("missing schedule kind"),
         )),
     }
 }
 
-fn delivery_parts(
-    delivery: v1::JobDeliveryView<'_>,
-) -> Result<(DottedNatsToken, Option<u64>, Option<String>), CronError> {
-    match delivery.kind() {
-        v1::job_delivery::KindOneof::NatsEvent(inner) => {
-            let route = inner.route().to_string();
+fn delivery_parts(delivery: &v1::JobDelivery) -> Result<(DottedNatsToken, Option<u64>, Option<String>), CronError> {
+    match delivery.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => {
+            let route = inner.route.clone();
             Ok((
                 DottedNatsToken::new(&route).map_err(|source| {
                     CronError::invalid_job_spec(JobSpecError::InvalidRoute {
@@ -214,21 +227,21 @@ fn delivery_parts(
                         source,
                     })
                 })?,
-                inner.has_ttl_sec().then(|| inner.ttl_sec()),
-                inner.has_source().then(|| source_subject(inner.source())).transpose()?,
+                inner.ttl_sec,
+                inner.source.as_option().map(source_subject).transpose()?,
             ))
         }
-        _ => Err(CronError::event_source(
+        None => Err(CronError::event_source(
             "scheduler received job details without a delivery kind",
             std::io::Error::other("missing delivery kind"),
         )),
     }
 }
 
-fn source_subject(source: v1::JobSamplingSourceView<'_>) -> Result<String, CronError> {
-    match source.kind() {
-        v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(inner.subject().to_string()),
-        _ => Err(CronError::event_source(
+fn source_subject(source: &v1::JobSamplingSource) -> Result<String, CronError> {
+    match source.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
+        None => Err(CronError::event_source(
             "scheduler received job details without a sampling source kind",
             std::io::Error::other("missing sampling source kind"),
         )),
@@ -264,76 +277,83 @@ fn validate_scheduler_headers(headers: &[(String, String)]) -> Result<(), CronEr
 
 #[cfg(test)]
 mod tests {
+    use buffa::MessageField;
+
     use super::*;
 
     fn base_job() -> v1::JobDetails {
-        let mut job = v1::JobDetails::new();
-        job.set_status(v1::JobStatus::Enabled);
-        job.set_schedule(every_schedule(30));
-        job.set_delivery(nats_delivery(None));
-        job.set_message(message(r#"{"kind":"heartbeat"}"#, [("x-kind", "heartbeat")]));
-        job
+        v1::JobDetails {
+            status: v1::JobStatus::JOB_STATUS_ENABLED,
+            schedule: MessageField::some(every_schedule(30)),
+            delivery: MessageField::some(nats_delivery(None)),
+            message: MessageField::some(message(r#"{"kind":"heartbeat"}"#, [("x-kind", "heartbeat")])),
+        }
     }
 
     fn every_schedule(every_sec: u64) -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut every = v1::EverySchedule::new();
-        every.set_every_sec(every_sec);
-        schedule.set_every(every);
-        schedule
+        v1::JobSchedule {
+            kind: Some(v1::EverySchedule { every_sec }.into()),
+        }
     }
 
     fn at_schedule(at: &str) -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut inner = v1::AtSchedule::new();
-        inner.set_at(at);
-        schedule.set_at(inner);
-        schedule
+        v1::JobSchedule {
+            kind: Some(v1::AtSchedule { at: at.to_string() }.into()),
+        }
     }
 
     fn cron_schedule(expr: &str, timezone: Option<&str>) -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut inner = v1::CronSchedule::new();
-        inner.set_expr(expr);
-        if let Some(timezone) = timezone {
-            inner.set_timezone(timezone);
+        v1::JobSchedule {
+            kind: Some(
+                v1::CronSchedule {
+                    expr: expr.to_string(),
+                    timezone: timezone.unwrap_or_default().to_string(),
+                }
+                .into(),
+            ),
         }
-        schedule.set_cron(inner);
-        schedule
     }
 
     fn nats_delivery(source: Option<&str>) -> v1::JobDelivery {
-        let mut delivery = v1::JobDelivery::new();
-        let mut nats = v1::NatsEventDelivery::new();
-        nats.set_route("agent.run");
-        nats.set_ttl_sec(15);
-        if let Some(subject) = source {
-            let mut sampling = v1::JobSamplingSource::new();
-            let mut latest = v1::LatestFromSubjectSampling::new();
-            latest.set_subject(subject);
-            sampling.set_latest_from_subject(latest);
-            nats.set_source(sampling);
+        v1::JobDelivery {
+            kind: Some(
+                v1::NatsEventDelivery {
+                    route: "agent.run".to_string(),
+                    ttl_sec: Some(15),
+                    source: source
+                        .map(|subject| v1::JobSamplingSource {
+                            kind: Some(
+                                v1::LatestFromSubjectSampling {
+                                    subject: subject.to_string(),
+                                }
+                                .into(),
+                            ),
+                        })
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
+                }
+                .into(),
+            ),
         }
-        delivery.set_nats_event(nats);
-        delivery
     }
 
     fn message<const N: usize>(content: &str, headers: [(&str, &str); N]) -> v1::JobMessage {
-        let mut message = v1::JobMessage::new();
-        message.set_content(content);
-        for (name, value) in headers {
-            let mut header = v1::Header::new();
-            header.set_name(name);
-            header.set_value(value);
-            message.headers_mut().push(header);
+        v1::JobMessage {
+            content: content.to_string(),
+            headers: headers
+                .into_iter()
+                .map(|(name, value)| v1::Header {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                })
+                .collect(),
         }
-        message
     }
 
     #[test]
     fn resolved_job_derives_subjects_and_headers() {
         let job = base_job();
-        let resolved = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("heartbeat", &job).unwrap();
         let headers = resolved.schedule_headers();
 
         assert_eq!(resolved.schedule_subject(), "cron.schedules.heartbeat");
@@ -348,9 +368,9 @@ mod tests {
     #[test]
     fn resolved_job_preserves_duplicate_headers() {
         let mut job = base_job();
-        job.set_message(message("{}", [("x-kind", "heartbeat"), ("x-kind", "retry")]));
+        job.message = MessageField::some(message("{}", [("x-kind", "heartbeat"), ("x-kind", "retry")]));
 
-        let resolved = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("heartbeat", &job).unwrap();
         let schedule_headers = resolved.schedule_headers();
         let values = schedule_headers
             .get_all("x-kind")
@@ -363,9 +383,9 @@ mod tests {
     #[test]
     fn at_schedule_maps_to_rfc3339() {
         let mut job = base_job();
-        job.set_schedule(at_schedule("2026-04-11T12:00:00+00:00"));
+        job.schedule = MessageField::some(at_schedule("2026-04-11T12:00:00+00:00"));
 
-        let resolved = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("heartbeat", &job).unwrap();
 
         assert_eq!(
             resolved
@@ -379,9 +399,9 @@ mod tests {
     #[test]
     fn source_uses_placeholder_body() {
         let mut job = base_job();
-        job.set_delivery(nats_delivery(Some("sensors.latest")));
+        job.delivery = MessageField::some(nats_delivery(Some("sensors.latest")));
 
-        let resolved = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("heartbeat", &job).unwrap();
 
         assert_eq!(resolved.schedule_body(), Bytes::from_static(br#"{}"#));
         assert_eq!(
@@ -396,15 +416,15 @@ mod tests {
     #[test]
     fn resolved_job_accepts_valid_job() {
         let job = base_job();
-        ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        ResolvedJob::from_event("heartbeat", &job).unwrap();
     }
 
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
         let mut job = base_job();
-        job.set_status(v1::JobStatus::Disabled);
+        job.status = v1::JobStatus::JOB_STATUS_DISABLED;
 
-        let resolved = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("heartbeat", &job).unwrap();
 
         assert_eq!(resolved.id(), "heartbeat");
         assert!(!resolved.enabled());
@@ -416,36 +436,36 @@ mod tests {
     #[test]
     fn zero_every_seconds_is_rejected() {
         let mut job = base_job();
-        job.set_schedule(every_schedule(0));
+        job.schedule = MessageField::some(every_schedule(0));
 
-        let error = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap_err();
+        let error = ResolvedJob::from_event("heartbeat", &job).unwrap_err();
         assert!(error.to_string().contains("every_sec"));
     }
 
     #[test]
     fn invalid_cron_expression_is_rejected() {
         let mut job = base_job();
-        job.set_schedule(cron_schedule("not-a-cron", None));
+        job.schedule = MessageField::some(cron_schedule("not-a-cron", None));
 
-        let error = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap_err();
+        let error = ResolvedJob::from_event("heartbeat", &job).unwrap_err();
         assert!(error.to_string().contains("cron expression"));
     }
 
     #[test]
     fn invalid_timezone_is_rejected() {
         let mut job = base_job();
-        job.set_schedule(cron_schedule("0 * * * * *", Some(" America/New_York ")));
+        job.schedule = MessageField::some(cron_schedule("0 * * * * *", Some(" America/New_York ")));
 
-        let error = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap_err();
+        let error = ResolvedJob::from_event("heartbeat", &job).unwrap_err();
         assert!(error.to_string().contains("timezone"));
     }
 
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
         let mut job = base_job();
-        job.set_message(message("{}", [("Nats-Schedule-Target", "cron.fire.evil.target")]));
+        job.message = MessageField::some(message("{}", [("Nats-Schedule-Target", "cron.fire.evil.target")]));
 
-        let error = ResolvedJob::from_event("heartbeat", job.as_view()).unwrap_err();
+        let error = ResolvedJob::from_event("heartbeat", &job).unwrap_err();
         assert!(error.to_string().contains("reserved"));
     }
 }
