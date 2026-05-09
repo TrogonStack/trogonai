@@ -7,7 +7,7 @@ use trogon_nats::{DottedNatsToken, NatsToken};
 use crate::{
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
-    proto::v1,
+    v1,
 };
 
 const NATS_SCHEDULE: &str = "Nats-Schedule";

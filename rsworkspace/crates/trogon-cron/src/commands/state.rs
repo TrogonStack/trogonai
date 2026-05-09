@@ -1,14 +1,14 @@
 use buffa::EnumValue;
-use trogon_cron_jobs_proto::{state_v1, v1};
+use trogon_cron_jobs_proto::{JobEventCase, state_v1, v1};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JobStateProtoError {
+pub enum EvolveError {
     MissingStateValue,
     UnsupportedEvent,
     UnknownStateValue { value: i32 },
 }
 
-impl std::fmt::Display for JobStateProtoError {
+impl std::fmt::Display for EvolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingStateValue => f.write_str("protobuf state is missing its state value"),
@@ -18,7 +18,7 @@ impl std::fmt::Display for JobStateProtoError {
     }
 }
 
-impl std::error::Error for JobStateProtoError {}
+impl std::error::Error for EvolveError {}
 
 pub(super) fn initial_state() -> state_v1::State {
     state_v1::State {
@@ -26,64 +26,57 @@ pub(super) fn initial_state() -> state_v1::State {
     }
 }
 
-pub(super) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<state_v1::State, JobStateProtoError> {
-    let current_state = state_value(&state)?;
+pub(super) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<state_v1::State, EvolveError> {
+    let Some(value) = state.state.as_ref() else {
+        return Err(EvolveError::MissingStateValue);
+    };
+    let Some(current_state) = value.as_known() else {
+        return Err(EvolveError::UnknownStateValue { value: value.to_i32() });
+    };
+    let current_state = match current_state {
+        state_v1::StateValue::STATE_VALUE_MISSING
+        | state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
+        | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
+        | state_v1::StateValue::STATE_VALUE_DELETED => current_state,
+        state_v1::StateValue::STATE_VALUE_UNSPECIFIED => {
+            return Err(EvolveError::UnknownStateValue {
+                value: current_state as i32,
+            });
+        }
+    };
     let next_state = match &event.event {
-        Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => {
+        Some(JobEventCase::JobAdded(inner)) => {
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
-            } else if job_added_status(inner)? == v1::JobStatus::JOB_STATUS_DISABLED {
+            } else if inner.job.as_option().ok_or(EvolveError::UnsupportedEvent)?.status
+                == v1::JobStatus::JOB_STATUS_DISABLED
+            {
                 state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
             } else {
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
             }
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => {
+        Some(JobEventCase::JobPaused(_)) => {
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
             } else {
                 state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
             }
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => {
+        Some(JobEventCase::JobResumed(_)) => {
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
             } else {
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
             }
         }
-        Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => state_v1::StateValue::STATE_VALUE_DELETED,
-        None => return Err(JobStateProtoError::UnsupportedEvent),
+        Some(JobEventCase::JobRemoved(_)) => state_v1::StateValue::STATE_VALUE_DELETED,
+        None => return Err(EvolveError::UnsupportedEvent),
     };
 
     Ok(state_v1::State {
         state: Some(EnumValue::from(next_state)),
     })
-}
-
-pub(super) fn state_value(state: &state_v1::State) -> Result<state_v1::StateValue, JobStateProtoError> {
-    let Some(value) = state.state.as_ref() else {
-        return Err(JobStateProtoError::MissingStateValue);
-    };
-    let Some(value) = value.as_known() else {
-        return Err(JobStateProtoError::UnknownStateValue { value: value.to_i32() });
-    };
-    match value {
-        state_v1::StateValue::STATE_VALUE_MISSING
-        | state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
-        | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
-        | state_v1::StateValue::STATE_VALUE_DELETED => Ok(value),
-        state_v1::StateValue::STATE_VALUE_UNSPECIFIED => {
-            Err(JobStateProtoError::UnknownStateValue { value: value as i32 })
-        }
-    }
-}
-
-fn job_added_status(inner: &v1::JobAdded) -> Result<v1::JobStatus, JobStateProtoError> {
-    let Some(job) = inner.job.as_option() else {
-        return Err(JobStateProtoError::UnsupportedEvent);
-    };
-    Ok(job.status)
 }
 
 #[cfg(test)]
@@ -93,7 +86,7 @@ mod tests {
 
     use super::*;
     use crate::commands::domain::JobId;
-    use crate::commands::{PauseJobCommand, PauseJobDecisionError, RemoveJobCommand, ResumeJobCommand};
+    use crate::commands::{PauseJobCommand, PauseJobDecideError, RemoveJobCommand, ResumeJobCommand};
 
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
@@ -175,6 +168,6 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_MISSING)),
             })
-            .then_error(PauseJobDecisionError::JobNotFound { id: job_id("backup") });
+            .then_error(PauseJobDecideError::JobNotFound { id: job_id("backup") });
     }
 }

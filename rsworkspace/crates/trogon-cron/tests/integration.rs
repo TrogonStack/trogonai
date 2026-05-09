@@ -6,7 +6,7 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, GetJobCommand, JobEventCodec, JobEventSchedule, JobEventStatus, JobId,
+    AddJobCommand, CronController, GetJobCommand, JobEventCase, JobEventCodec, JobEventSchedule, JobEventStatus, JobId,
     PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
     state_v1, v1,
 };
@@ -19,10 +19,6 @@ fn test_url() -> String {
 
 fn command_job_id(id: &str) -> command_domain::JobId {
     command_domain::JobId::parse(id).unwrap()
-}
-
-fn state_value(state: &state_v1::State) -> Option<state_v1::StateValue> {
-    state.state.as_ref().and_then(|value| value.as_known())
 }
 
 async fn connect() -> async_nats::Client {
@@ -379,7 +375,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .unwrap();
     let added_position = added.stream_position;
     assert_eq!(
-        state_value(&added.state),
+        added.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
     );
 
@@ -391,7 +387,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .unwrap();
     assert_eq!(paused.stream_position.get(), added_position.get() + 1);
     assert_eq!(
-        state_value(&paused.state),
+        paused.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
     );
 
@@ -403,7 +399,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .unwrap();
     assert_eq!(resumed.stream_position.get(), paused.stream_position.get() + 1);
     assert_eq!(
-        state_value(&resumed.state),
+        resumed.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
     );
 
@@ -415,7 +411,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .unwrap();
     assert_eq!(removed.stream_position.get(), resumed.stream_position.get() + 1);
     assert_eq!(
-        state_value(&removed.state),
+        removed.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_DELETED)
     );
 
@@ -433,20 +429,8 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .iter()
         .map(|event| event.decode_data_with::<v1::JobEvent, _>(&JobEventCodec).unwrap())
         .collect::<Vec<_>>();
-    assert!(matches!(
-        &events[0].event,
-        Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))
-    ));
-    assert!(matches!(
-        &events[1].event,
-        Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))
-    ));
-    assert!(matches!(
-        &events[2].event,
-        Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))
-    ));
-    assert!(matches!(
-        &events[3].event,
-        Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))
-    ));
+    assert!(matches!(&events[0].event, Some(JobEventCase::JobAdded(_))));
+    assert!(matches!(&events[1].event, Some(JobEventCase::JobPaused(_))));
+    assert!(matches!(&events[2].event, Some(JobEventCase::JobResumed(_))));
+    assert!(matches!(&events[3].event, Some(JobEventCase::JobRemoved(_))));
 }

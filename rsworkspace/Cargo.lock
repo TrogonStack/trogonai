@@ -3187,6 +3187,7 @@ name = "trogon-cron-jobs-proto"
 version = "0.1.0"
 dependencies = [
  "buffa",
+ "chrono",
  "serde",
  "serde_json",
  "trogon-eventsourcing",

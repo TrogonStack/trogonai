@@ -19,7 +19,7 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    GetJobCommand, JobEventCodec, ListJobsCommand, ResolvedJob,
+    GetJobCommand, JobEventCase, JobEventCodec, ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
@@ -460,7 +460,7 @@ impl StreamAppend<str> for MockCronStore {
             raw_position += 1;
             stored_events.push(event_data);
             match &event.event {
-                Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => {
+                Some(JobEventCase::JobAdded(inner)) => {
                     let details = inner.job.as_option().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job add without job details",
@@ -469,7 +469,7 @@ impl StreamAppend<str> for MockCronStore {
                     })?;
                     projected_job = Some(cron_job_from_proto(stream_id.as_str(), details));
                 }
-                Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => {
+                Some(JobEventCase::JobPaused(_)) => {
                     let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job pause without current read model",
@@ -479,7 +479,7 @@ impl StreamAppend<str> for MockCronStore {
                     job.status = crate::JobEventStatus::Disabled;
                     projected_job = Some(job);
                 }
-                Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => {
+                Some(JobEventCase::JobResumed(_)) => {
                     let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job resume without current read model",
@@ -489,7 +489,7 @@ impl StreamAppend<str> for MockCronStore {
                     job.status = crate::JobEventStatus::Enabled;
                     projected_job = Some(job);
                 }
-                Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => {
+                Some(JobEventCase::JobRemoved(_)) => {
                     projected_job = None;
                 }
                 None => {
@@ -719,7 +719,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandFailure::Decide(crate::AddJobDecisionError::JobDeleted { .. })
+            CommandFailure::Decide(crate::AddJobDecideError::JobDeleted { .. })
         ));
     }
 
@@ -753,7 +753,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandFailure::Decide(crate::ResumeJobDecisionError::AlreadyActive { .. })
+            CommandFailure::Decide(crate::ResumeJobDecideError::AlreadyActive { .. })
         ));
 
         let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("missing")))
@@ -764,7 +764,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandFailure::Decide(crate::PauseJobDecisionError::JobNotFound { .. })
+            CommandFailure::Decide(crate::PauseJobDecideError::JobNotFound { .. })
         ));
     }
 

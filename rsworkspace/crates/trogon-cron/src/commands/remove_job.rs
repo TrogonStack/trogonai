@@ -1,7 +1,6 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
 
-use super::JobStateProtoError;
 use super::domain::JobId;
 
 #[derive(Debug, Clone)]
@@ -10,10 +9,11 @@ pub struct RemoveJobCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RemoveJobDecisionError {
+pub enum RemoveJobDecideError {
     JobNotFound { id: JobId },
     JobDeleted { id: JobId },
-    InvalidState { source: JobStateProtoError },
+    MissingStateValue,
+    UnknownStateValue { value: i32 },
 }
 
 impl RemoveJobCommand {
@@ -26,8 +26,8 @@ impl Decide for RemoveJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
-    type DecideError = RemoveJobDecisionError;
-    type EvolveError = JobStateProtoError;
+    type DecideError = RemoveJobDecideError;
+    type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.id.as_str()
@@ -42,9 +42,15 @@ impl Decide for RemoveJobCommand {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
-        match super::state::state_value(state).map_err(|source| RemoveJobDecisionError::InvalidState { source })? {
+        let Some(value) = state.state.as_ref() else {
+            return Err(RemoveJobDecideError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(RemoveJobDecideError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => {
-                Err(RemoveJobDecisionError::JobNotFound { id: command.id.clone() })
+                Err(RemoveJobDecideError::JobNotFound { id: command.id.clone() })
             }
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
                 Ok(Decision::event(v1::JobEvent {
@@ -52,11 +58,9 @@ impl Decide for RemoveJobCommand {
                 }))
             }
             state_v1::StateValue::STATE_VALUE_DELETED => {
-                Err(RemoveJobDecisionError::JobDeleted { id: command.id.clone() })
+                Err(RemoveJobDecideError::JobDeleted { id: command.id.clone() })
             }
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(RemoveJobDecisionError::InvalidState {
-                source: JobStateProtoError::UnknownStateValue { value: 0 },
-            }),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(RemoveJobDecideError::UnknownStateValue { value: 0 }),
         }
     }
 }
@@ -126,7 +130,7 @@ mod tests {
         TestCase::new(decider::<RemoveJobCommand>())
             .given_no_history()
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(RemoveJobDecisionError::JobNotFound {
+            .then_error(RemoveJobDecideError::JobNotFound {
                 id: JobId::parse("backup").unwrap(),
             });
     }
@@ -137,7 +141,7 @@ mod tests {
             .given([added("backup")])
             .given([removed()])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then_error(RemoveJobDecisionError::JobDeleted {
+            .then_error(RemoveJobDecideError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             });
     }

@@ -12,7 +12,6 @@ pub mod kv;
 pub mod nats;
 mod processors;
 pub mod projections;
-pub mod proto;
 pub mod queries;
 mod read_model;
 mod schedule;
@@ -23,8 +22,8 @@ pub mod traits;
 pub mod mocks;
 
 pub use commands::{
-    AddJobCommand, AddJobDecisionError, JobStateProtoError, PauseJobCommand, PauseJobDecisionError, RemoveJobCommand,
-    RemoveJobDecisionError, ResumeJobCommand, ResumeJobDecisionError,
+    AddJobCommand, AddJobDecideError, EvolveError, PauseJobCommand, PauseJobDecideError, RemoveJobCommand,
+    RemoveJobDecideError, ResumeJobCommand, ResumeJobDecideError,
 };
 pub use config::JobWriteCondition;
 pub use error::{CronError, JobSpecError};
@@ -34,7 +33,6 @@ pub use projections::{
     CronJobChange, CronJobWatchStream, JobStreamState, JobTransitionError, LoadAndWatchCronJobsResult,
     ProjectionChange, apply, initial_state, load_and_watch_cron_jobs, projection_change,
 };
-pub use proto::{JobEventCodec, state_v1, v1};
 pub use queries::{GetJobCommand, JobId, JobIdError, ListJobsCommand, get_job, list_jobs};
 pub use read_model::{
     CronJob, JobDetails, JobEventDelivery, JobEventSamplingSource, JobEventSchedule, JobEventStatus, MessageContent,
@@ -43,4 +41,5 @@ pub use read_model::{
 pub use schedule::ResolvedJob;
 pub use store::{Store, connect_store, open_command_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
+pub use trogon_cron_jobs_proto::{JobEventCase, JobEventCodec, state_v1, v1};
 pub use trogon_eventsourcing::{CommandFailure, CommandResult, ExecutionResult, StreamState};
