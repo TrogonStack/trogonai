@@ -12,14 +12,14 @@ message JobSchedule {
 
 message AtSchedule {
   // RFC 3339 timestamp.
-  string at = 1;
+  string at = 1 [features.field_presence = LEGACY_REQUIRED];
 }
 
 message EverySchedule {
-  uint64 every_sec = 1;
+  uint64 every_sec = 1 [features.field_presence = LEGACY_REQUIRED];
 }
 
 message CronSchedule {
-  string expr = 1;
-  string timezone = 2;
+  string expr = 1 [features.field_presence = LEGACY_REQUIRED];
+  string timezone = 2 [features.field_presence = LEGACY_REQUIRED];
 }

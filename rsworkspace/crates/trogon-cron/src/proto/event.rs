@@ -6,18 +6,19 @@ pub use trogon_cron_jobs_proto::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protobuf::Parse as _;
+    use buffa::{Message as _, MessageField};
     use trogon_cron_jobs_proto::v1;
     use trogon_eventsourcing::{EventCodec, EventData};
 
     #[test]
     fn event_data_and_recorded_event_helpers_work() {
-        let mut removed = v1::JobEvent::new();
-        removed.set_job_removed(v1::JobRemoved::new());
+        let removed = v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        };
         let event = EventData::from_event("cleanup", &JobEventCodec, &removed).unwrap();
         assert_eq!(event.stream_id(), "cleanup");
         assert_eq!(event.event_type, JOB_REMOVED_EVENT_TYPE);
-        assert!(v1::JobRemoved::parse(&event.payload).is_ok());
+        assert!(v1::JobRemoved::decode_from_slice(&event.payload).is_ok());
         assert_eq!(
             event.subject_with_prefix("cron.jobs.events."),
             "cron.jobs.events.cleanup"
@@ -34,8 +35,9 @@ mod tests {
             recorded.subject_with_prefix("cron.jobs.events."),
             "cron.jobs.events.cleanup"
         );
-        let mut expected = v1::JobEvent::new();
-        expected.set_job_removed(v1::JobRemoved::new());
+        let expected = v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        };
         assert_eq!(recorded.decode_data_with(&JobEventCodec).unwrap(), expected);
     }
 
@@ -51,57 +53,73 @@ mod tests {
 
     #[test]
     fn job_added_round_trips_through_contract() {
-        let mut event = v1::JobEvent::new();
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(job_details());
-        event.set_job_added(inner);
+        let event = v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(job_details()),
+                }
+                .into(),
+            ),
+        };
 
         let encoded = JobEventCodec.encode(&event).unwrap();
         let decoded = JobEventCodec.decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap();
 
         assert_eq!(decoded, event);
-        assert!(matches!(decoded.event(), v1::job_event::EventOneof::JobAdded(_)));
+        assert!(matches!(
+            decoded.event,
+            Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))
+        ));
     }
 
     fn job_details() -> v1::JobDetails {
-        let mut details = v1::JobDetails::new();
-        details.set_status(v1::JobStatus::Enabled);
-        details.set_schedule(cron_schedule());
-        details.set_delivery(nats_delivery());
-        details.set_message(message());
-        details
+        v1::JobDetails {
+            status: v1::JobStatus::JOB_STATUS_ENABLED,
+            schedule: MessageField::some(cron_schedule()),
+            delivery: MessageField::some(nats_delivery()),
+            message: MessageField::some(message()),
+        }
     }
 
     fn cron_schedule() -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut cron = v1::CronSchedule::new();
-        cron.set_expr("0 * * * * *");
-        cron.set_timezone("UTC");
-        schedule.set_cron(cron);
-        schedule
+        v1::JobSchedule {
+            kind: Some(
+                v1::CronSchedule {
+                    expr: "0 * * * * *".to_string(),
+                    timezone: "UTC".to_string(),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn nats_delivery() -> v1::JobDelivery {
-        let mut delivery = v1::JobDelivery::new();
-        let mut nats = v1::NatsEventDelivery::new();
-        nats.set_route("ops.backup");
-        nats.set_ttl_sec(30);
-        let mut source = v1::JobSamplingSource::new();
-        let mut latest = v1::LatestFromSubjectSampling::new();
-        latest.set_subject("events.backup");
-        source.set_latest_from_subject(latest);
-        nats.set_source(source);
-        delivery.set_nats_event(nats);
-        delivery
+        v1::JobDelivery {
+            kind: Some(
+                v1::NatsEventDelivery {
+                    route: "ops.backup".to_string(),
+                    ttl_sec: Some(30),
+                    source: MessageField::some(v1::JobSamplingSource {
+                        kind: Some(
+                            v1::LatestFromSubjectSampling {
+                                subject: "events.backup".to_string(),
+                            }
+                            .into(),
+                        ),
+                    }),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn message() -> v1::JobMessage {
-        let mut message = v1::JobMessage::new();
-        message.set_content("hello");
-        let mut header = v1::Header::new();
-        header.set_name("x-kind");
-        header.set_value("backup");
-        message.headers_mut().push(header);
-        message
+        v1::JobMessage {
+            content: "hello".to_string(),
+            headers: vec![v1::Header {
+                name: "x-kind".to_string(),
+                value: "backup".to_string(),
+            }],
+        }
     }
 }

@@ -6,6 +6,7 @@ use std::sync::{
 };
 
 use async_nats::jetstream::kv;
+use buffa::MessageField;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
@@ -158,10 +159,14 @@ impl MockCronStore {
 
     pub fn seed_job(&self, job: CronJob) {
         let id = job.id.clone();
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(cron_job_to_proto_details(&job));
-        let mut event = v1::JobEvent::new();
-        event.set_job_added(inner);
+        let event = v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(cron_job_to_proto_details(&job)),
+                }
+                .into(),
+            ),
+        };
 
         let initial_position = StreamPosition::new(NonZeroU64::MIN);
         self.stream_positions
@@ -208,122 +213,132 @@ impl MockCronStore {
 }
 
 fn cron_job_to_proto_details(job: &CronJob) -> v1::JobDetails {
-    let mut details = v1::JobDetails::new();
-    details.set_status(match job.status {
-        JobEventStatus::Enabled => v1::JobStatus::Enabled,
-        JobEventStatus::Disabled => v1::JobStatus::Disabled,
-    });
-    details.set_schedule(proto_schedule(&job.schedule));
-    details.set_delivery(proto_delivery(&job.delivery));
-    details.set_message(proto_message(&job.message));
-    details
+    v1::JobDetails {
+        status: match job.status {
+            JobEventStatus::Enabled => v1::JobStatus::JOB_STATUS_ENABLED,
+            JobEventStatus::Disabled => v1::JobStatus::JOB_STATUS_DISABLED,
+        },
+        schedule: MessageField::some(proto_schedule(&job.schedule)),
+        delivery: MessageField::some(proto_delivery(&job.delivery)),
+        message: MessageField::some(proto_message(&job.message)),
+    }
 }
 
 fn proto_schedule(schedule: &JobEventSchedule) -> v1::JobSchedule {
-    let mut proto = v1::JobSchedule::new();
-    match schedule {
-        JobEventSchedule::At { at } => {
-            let mut inner = v1::AtSchedule::new();
-            inner.set_at(at);
-            proto.set_at(inner);
+    let kind = match schedule {
+        JobEventSchedule::At { at } => v1::AtSchedule { at: at.clone() }.into(),
+        JobEventSchedule::Every { every_sec } => v1::EverySchedule { every_sec: *every_sec }.into(),
+        JobEventSchedule::Cron { expr, timezone } => v1::CronSchedule {
+            expr: expr.clone(),
+            timezone: timezone.clone().unwrap_or_default(),
         }
-        JobEventSchedule::Every { every_sec } => {
-            let mut inner = v1::EverySchedule::new();
-            inner.set_every_sec(*every_sec);
-            proto.set_every(inner);
-        }
-        JobEventSchedule::Cron { expr, timezone } => {
-            let mut inner = v1::CronSchedule::new();
-            inner.set_expr(expr);
-            if let Some(timezone) = timezone {
-                inner.set_timezone(timezone);
-            }
-            proto.set_cron(inner);
-        }
-    }
-    proto
+        .into(),
+    };
+    v1::JobSchedule { kind: Some(kind) }
 }
 
 fn proto_delivery(delivery: &JobEventDelivery) -> v1::JobDelivery {
-    let mut proto = v1::JobDelivery::new();
     match delivery {
-        JobEventDelivery::NatsEvent { route, ttl_sec, source } => {
-            let mut inner = v1::NatsEventDelivery::new();
-            inner.set_route(route);
-            if let Some(ttl_sec) = ttl_sec {
-                inner.set_ttl_sec(*ttl_sec);
-            }
-            if let Some(source) = source {
-                inner.set_source(proto_sampling_source(source));
-            }
-            proto.set_nats_event(inner);
-        }
+        JobEventDelivery::NatsEvent { route, ttl_sec, source } => v1::JobDelivery {
+            kind: Some(
+                v1::NatsEventDelivery {
+                    route: route.clone(),
+                    ttl_sec: *ttl_sec,
+                    source: source
+                        .as_ref()
+                        .map(proto_sampling_source)
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
+                }
+                .into(),
+            ),
+        },
     }
-    proto
 }
 
 fn proto_sampling_source(source: &JobEventSamplingSource) -> v1::JobSamplingSource {
-    let mut proto = v1::JobSamplingSource::new();
     match source {
-        JobEventSamplingSource::LatestFromSubject { subject } => {
-            let mut inner = v1::LatestFromSubjectSampling::new();
-            inner.set_subject(subject);
-            proto.set_latest_from_subject(inner);
-        }
+        JobEventSamplingSource::LatestFromSubject { subject } => v1::JobSamplingSource {
+            kind: Some(
+                v1::LatestFromSubjectSampling {
+                    subject: subject.clone(),
+                }
+                .into(),
+            ),
+        },
     }
-    proto
 }
 
 fn proto_message(message: &MessageEnvelope) -> v1::JobMessage {
-    let mut proto = v1::JobMessage::new();
-    proto.set_content(message.content.as_str());
-    for (name, value) in message.headers.as_slice() {
-        let mut header = v1::Header::new();
-        header.set_name(name);
-        header.set_value(value);
-        proto.headers_mut().push(header);
+    v1::JobMessage {
+        content: message.content.as_str().to_string(),
+        headers: message
+            .headers
+            .as_slice()
+            .iter()
+            .map(|(name, value)| v1::Header {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect(),
     }
-    proto
 }
 
-fn cron_job_from_proto(stream_id: &str, details: v1::JobDetailsView<'_>) -> CronJob {
+fn cron_job_from_proto(stream_id: &str, details: &v1::JobDetails) -> CronJob {
     CronJob {
         id: stream_id.to_string(),
-        status: if details.status() == v1::JobStatus::Disabled {
+        status: if details.status == v1::JobStatus::JOB_STATUS_DISABLED {
             JobEventStatus::Disabled
         } else {
             JobEventStatus::Enabled
         },
-        schedule: schedule_from_proto(details.schedule()),
-        delivery: delivery_from_proto(details.delivery()),
-        message: message_from_proto(details.message()),
+        schedule: details
+            .schedule
+            .as_option()
+            .map(schedule_from_proto)
+            .unwrap_or(JobEventSchedule::Every { every_sec: 0 }),
+        delivery: details
+            .delivery
+            .as_option()
+            .map(delivery_from_proto)
+            .unwrap_or_else(|| JobEventDelivery::NatsEvent {
+                route: String::new(),
+                ttl_sec: None,
+                source: None,
+            }),
+        message: details
+            .message
+            .as_option()
+            .map(message_from_proto)
+            .unwrap_or_else(|| MessageEnvelope {
+                content: MessageContent::new(String::new()),
+                headers: MessageHeaders::default(),
+            }),
     }
 }
 
-fn schedule_from_proto(schedule: v1::JobScheduleView<'_>) -> JobEventSchedule {
-    match schedule.kind() {
-        v1::job_schedule::KindOneof::At(inner) => JobEventSchedule::At {
-            at: inner.at().to_string(),
+fn schedule_from_proto(schedule: &v1::JobSchedule) -> JobEventSchedule {
+    match schedule.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => JobEventSchedule::At { at: inner.at.clone() },
+        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => JobEventSchedule::Every {
+            every_sec: inner.every_sec,
         },
-        v1::job_schedule::KindOneof::Every(inner) => JobEventSchedule::Every {
-            every_sec: inner.every_sec(),
+        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => JobEventSchedule::Cron {
+            expr: inner.expr.clone(),
+            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
         },
-        v1::job_schedule::KindOneof::Cron(inner) => JobEventSchedule::Cron {
-            expr: inner.expr().to_string(),
-            timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
-        },
-        _ => JobEventSchedule::Every { every_sec: 0 },
+        None => JobEventSchedule::Every { every_sec: 0 },
     }
 }
 
-fn delivery_from_proto(delivery: v1::JobDeliveryView<'_>) -> JobEventDelivery {
-    match delivery.kind() {
-        v1::job_delivery::KindOneof::NatsEvent(inner) => JobEventDelivery::NatsEvent {
-            route: inner.route().to_string(),
-            ttl_sec: inner.has_ttl_sec().then(|| inner.ttl_sec()),
-            source: inner.has_source().then(|| sampling_source_from_proto(inner.source())),
+fn delivery_from_proto(delivery: &v1::JobDelivery) -> JobEventDelivery {
+    match delivery.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => JobEventDelivery::NatsEvent {
+            route: inner.route.clone(),
+            ttl_sec: inner.ttl_sec,
+            source: inner.source.as_option().map(sampling_source_from_proto),
         },
-        _ => JobEventDelivery::NatsEvent {
+        None => JobEventDelivery::NatsEvent {
             route: String::new(),
             ttl_sec: None,
             source: None,
@@ -331,23 +346,25 @@ fn delivery_from_proto(delivery: v1::JobDeliveryView<'_>) -> JobEventDelivery {
     }
 }
 
-fn sampling_source_from_proto(source: v1::JobSamplingSourceView<'_>) -> JobEventSamplingSource {
-    match source.kind() {
-        v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => JobEventSamplingSource::LatestFromSubject {
-            subject: inner.subject().to_string(),
-        },
-        _ => JobEventSamplingSource::LatestFromSubject { subject: String::new() },
+fn sampling_source_from_proto(source: &v1::JobSamplingSource) -> JobEventSamplingSource {
+    match source.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => {
+            JobEventSamplingSource::LatestFromSubject {
+                subject: inner.subject.clone(),
+            }
+        }
+        None => JobEventSamplingSource::LatestFromSubject { subject: String::new() },
     }
 }
 
-fn message_from_proto(message: v1::JobMessageView<'_>) -> MessageEnvelope {
+fn message_from_proto(message: &v1::JobMessage) -> MessageEnvelope {
     MessageEnvelope {
-        content: MessageContent::new(message.content().to_string()),
+        content: MessageContent::new(message.content.clone()),
         headers: MessageHeaders::from_pairs(
             message
-                .headers()
+                .headers
                 .iter()
-                .map(|header| (header.name().to_string(), header.value().to_string())),
+                .map(|header| (header.name.clone(), header.value.clone())),
         ),
     }
 }
@@ -442,11 +459,17 @@ impl StreamAppend<str> for MockCronStore {
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
-            match event.event() {
-                v1::job_event::EventOneof::JobAdded(inner) => {
-                    projected_job = Some(cron_job_from_proto(stream_id.as_str(), inner.job()));
+            match &event.event {
+                Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => {
+                    let details = inner.job.as_option().ok_or_else(|| {
+                        CronError::event_source(
+                            "failed to project mocked job add without job details",
+                            std::io::Error::other(stream_id.to_string()),
+                        )
+                    })?;
+                    projected_job = Some(cron_job_from_proto(stream_id.as_str(), details));
                 }
-                v1::job_event::EventOneof::JobPaused(_) => {
+                Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => {
                     let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job pause without current read model",
@@ -456,7 +479,7 @@ impl StreamAppend<str> for MockCronStore {
                     job.status = crate::JobEventStatus::Disabled;
                     projected_job = Some(job);
                 }
-                v1::job_event::EventOneof::JobResumed(_) => {
+                Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => {
                     let mut job = projected_job.take().ok_or_else(|| {
                         CronError::event_source(
                             "failed to project mocked job resume without current read model",
@@ -466,10 +489,10 @@ impl StreamAppend<str> for MockCronStore {
                     job.status = crate::JobEventStatus::Enabled;
                     projected_job = Some(job);
                 }
-                v1::job_event::EventOneof::JobRemoved(_) => {
+                Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => {
                     projected_job = None;
                 }
-                _ => {
+                None => {
                     return Err(CronError::event_source(
                         "failed to project mocked job event without supported case",
                         std::io::Error::other("missing event case"),
@@ -587,7 +610,7 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("orphan");
         let details = cron_job_to_proto_details(&expected_job("alpha"));
-        let resolved = ResolvedJob::from_event("alpha", details.as_view()).unwrap();
+        let resolved = ResolvedJob::from_event("alpha", &details).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
         assert!(active.contains("orphan"));

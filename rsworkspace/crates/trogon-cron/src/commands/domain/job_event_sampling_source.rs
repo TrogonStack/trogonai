@@ -7,14 +7,15 @@ pub enum JobEventSamplingSource {
 
 impl From<&JobEventSamplingSource> for v1::JobSamplingSource {
     fn from(value: &JobEventSamplingSource) -> Self {
-        let mut source = v1::JobSamplingSource::new();
         match value {
-            JobEventSamplingSource::LatestFromSubject { subject } => {
-                let mut inner = v1::LatestFromSubjectSampling::new();
-                inner.set_subject(subject.as_str());
-                source.set_latest_from_subject(inner);
-            }
+            JobEventSamplingSource::LatestFromSubject { subject } => v1::JobSamplingSource {
+                kind: Some(
+                    v1::LatestFromSubjectSampling {
+                        subject: subject.clone(),
+                    }
+                    .into(),
+                ),
+            },
         }
-        source
     }
 }

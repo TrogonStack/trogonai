@@ -63,9 +63,9 @@ struct DesiredJobsRollback {
 }
 
 impl SchedulerJob {
-    fn from_event(id: &str, details: v1::JobDetailsView<'_>) -> Self {
-        let details = details.to_owned();
-        let enabled = details.status() != v1::JobStatus::Disabled;
+    fn from_event(id: &str, details: &v1::JobDetails) -> Self {
+        let details = details.clone();
+        let enabled = details.status != v1::JobStatus::JOB_STATUS_DISABLED;
         Self {
             id: id.to_string(),
             details,
@@ -75,16 +75,16 @@ impl SchedulerJob {
 
     fn pause(&mut self) {
         self.enabled = false;
-        self.details.set_status(v1::JobStatus::Disabled);
+        self.details.status = v1::JobStatus::JOB_STATUS_DISABLED;
     }
 
     fn resume(&mut self) {
         self.enabled = true;
-        self.details.set_status(v1::JobStatus::Enabled);
+        self.details.status = v1::JobStatus::JOB_STATUS_ENABLED;
     }
 
     fn resolve(&self) -> Result<ResolvedJob, CronError> {
-        ResolvedJob::from_event(&self.id, protobuf::AsView::as_view(&self.details))
+        ResolvedJob::from_event(&self.id, &self.details)
     }
 }
 
@@ -388,19 +388,25 @@ fn apply_scheduler_event(
         })
     })?;
 
-    match event.event() {
-        v1::job_event::EventOneof::JobAdded(inner) => {
+    match &event.event {
+        Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner)) => {
             if matches!(desired_jobs.get(stream_id), Some(DesiredJobState::Deleted)) {
                 return Err(CronError::event_source(
                     "scheduler received an add event for a deleted job stream",
                     std::io::Error::other(stream_id.to_string()),
                 ));
             }
-            let job = SchedulerJob::from_event(stream_id, inner.job());
+            let details = inner.job.as_option().ok_or_else(|| {
+                CronError::event_source(
+                    "scheduler received a job add without job details",
+                    std::io::Error::other(stream_id.to_string()),
+                )
+            })?;
+            let job = SchedulerJob::from_event(stream_id, details);
             desired_jobs.insert(job.id.clone(), DesiredJobState::Present(Box::new(job.clone())));
             Ok(SchedulerChange::Upsert(job))
         }
-        v1::job_event::EventOneof::JobPaused(_) => {
+        Some(v1::__buffa::oneof::job_event::Event::JobPaused(_)) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a pause without current job state",
@@ -418,7 +424,7 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        v1::job_event::EventOneof::JobResumed(_) => {
+        Some(v1::__buffa::oneof::job_event::Event::JobResumed(_)) => {
             let job = desired_jobs.get_mut(stream_id).ok_or_else(|| {
                 CronError::event_source(
                     "scheduler received a resume without current job state",
@@ -436,11 +442,11 @@ fn apply_scheduler_event(
                 )),
             }
         }
-        v1::job_event::EventOneof::JobRemoved(_) => {
+        Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_)) => {
             desired_jobs.insert(stream_id.to_string(), DesiredJobState::Deleted);
             Ok(SchedulerChange::Delete(stream_id.to_string()))
         }
-        _ => Err(CronError::event_source(
+        None => Err(CronError::event_source(
             "scheduler received an event without a supported case",
             std::io::Error::other("missing event case"),
         )),
@@ -691,6 +697,7 @@ mod tests {
     use std::collections::HashMap;
 
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
+    use buffa::MessageField;
 
     use super::{
         CronController, DesiredJobState, DesiredJobsRollback, SchedulerChange, SchedulerJob, apply_scheduler_change,
@@ -701,98 +708,112 @@ mod tests {
     use crate::proto::v1;
 
     fn base_job_details() -> v1::JobDetails {
-        let mut details = v1::JobDetails::new();
-        details.set_status(v1::JobStatus::Enabled);
-        details.set_schedule(every_schedule(30));
-        details.set_delivery(nats_delivery(None));
-        details.set_message(message(r#"{"kind":"heartbeat"}"#, []));
-        details
+        v1::JobDetails {
+            status: v1::JobStatus::JOB_STATUS_ENABLED,
+            schedule: MessageField::some(every_schedule(30)),
+            delivery: MessageField::some(nats_delivery(None)),
+            message: MessageField::some(message(r#"{"kind":"heartbeat"}"#, [])),
+        }
     }
 
     fn expected_job(id: &str) -> SchedulerJob {
         let details = base_job_details();
-        SchedulerJob::from_event(id, details.as_view())
+        SchedulerJob::from_event(id, &details)
     }
 
     fn disabled_job(id: &str) -> SchedulerJob {
         let mut details = base_job_details();
-        details.set_status(v1::JobStatus::Disabled);
-        SchedulerJob::from_event(id, details.as_view())
+        details.status = v1::JobStatus::JOB_STATUS_DISABLED;
+        SchedulerJob::from_event(id, &details)
     }
 
     fn added_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(base_job_details());
-        event.set_job_added(inner);
-        event
+        v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(base_job_details()),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn every_schedule(every_sec: u64) -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut every = v1::EverySchedule::new();
-        every.set_every_sec(every_sec);
-        schedule.set_every(every);
-        schedule
+        v1::JobSchedule {
+            kind: Some(v1::EverySchedule { every_sec }.into()),
+        }
     }
 
     fn cron_schedule(expr: &str) -> v1::JobSchedule {
-        let mut schedule = v1::JobSchedule::new();
-        let mut cron = v1::CronSchedule::new();
-        cron.set_expr(expr);
-        schedule.set_cron(cron);
-        schedule
+        v1::JobSchedule {
+            kind: Some(
+                v1::CronSchedule {
+                    expr: expr.to_string(),
+                    timezone: String::new(),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn nats_delivery(source: Option<&str>) -> v1::JobDelivery {
-        let mut delivery = v1::JobDelivery::new();
-        let mut nats = v1::NatsEventDelivery::new();
-        nats.set_route("agent.run");
-        if let Some(subject) = source {
-            let mut source = v1::JobSamplingSource::new();
-            let mut latest = v1::LatestFromSubjectSampling::new();
-            latest.set_subject(subject);
-            source.set_latest_from_subject(latest);
-            nats.set_source(source);
+        v1::JobDelivery {
+            kind: Some(
+                v1::NatsEventDelivery {
+                    route: "agent.run".to_string(),
+                    ttl_sec: None,
+                    source: source
+                        .map(|subject| v1::JobSamplingSource {
+                            kind: Some(
+                                v1::LatestFromSubjectSampling {
+                                    subject: subject.to_string(),
+                                }
+                                .into(),
+                            ),
+                        })
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
+                }
+                .into(),
+            ),
         }
-        delivery.set_nats_event(nats);
-        delivery
     }
 
     fn message<const N: usize>(content: &str, headers: [(&str, &str); N]) -> v1::JobMessage {
-        let mut message = v1::JobMessage::new();
-        message.set_content(content);
-        for (name, value) in headers {
-            let mut header = v1::Header::new();
-            header.set_name(name);
-            header.set_value(value);
-            message.headers_mut().push(header);
+        v1::JobMessage {
+            content: content.to_string(),
+            headers: headers
+                .into_iter()
+                .map(|(name, value)| v1::Header {
+                    name: name.to_string(),
+                    value: value.to_string(),
+                })
+                .collect(),
         }
-        message
     }
 
     fn paused_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_paused(v1::JobPaused::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobPaused {}.into()),
+        }
     }
 
     fn resumed_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_resumed(v1::JobResumed::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobResumed {}.into()),
+        }
     }
 
     fn removed_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_removed(v1::JobRemoved::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        }
     }
 
     fn invalid_enabled_job(id: &str) -> SchedulerJob {
         let mut details = base_job_details();
-        details.set_schedule(cron_schedule("not-a-cron"));
-        SchedulerJob::from_event(id, details.as_view())
+        details.schedule = MessageField::some(cron_schedule("not-a-cron"));
+        SchedulerJob::from_event(id, &details)
     }
 
     #[tokio::test]

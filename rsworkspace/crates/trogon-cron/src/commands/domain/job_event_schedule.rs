@@ -9,27 +9,15 @@ pub enum JobEventSchedule {
 
 impl From<&JobEventSchedule> for v1::JobSchedule {
     fn from(value: &JobEventSchedule) -> Self {
-        let mut schedule = v1::JobSchedule::new();
-        match value {
-            JobEventSchedule::At { at } => {
-                let mut inner = v1::AtSchedule::new();
-                inner.set_at(at.to_rfc3339());
-                schedule.set_at(inner);
+        let kind = match value {
+            JobEventSchedule::At { at } => v1::AtSchedule { at: at.to_rfc3339() }.into(),
+            JobEventSchedule::Every { every_sec } => v1::EverySchedule { every_sec: *every_sec }.into(),
+            JobEventSchedule::Cron { expr, timezone } => v1::CronSchedule {
+                expr: expr.clone(),
+                timezone: timezone.clone().unwrap_or_default(),
             }
-            JobEventSchedule::Every { every_sec } => {
-                let mut inner = v1::EverySchedule::new();
-                inner.set_every_sec(*every_sec);
-                schedule.set_every(inner);
-            }
-            JobEventSchedule::Cron { expr, timezone } => {
-                let mut inner = v1::CronSchedule::new();
-                inner.set_expr(expr.as_str());
-                if let Some(timezone) = timezone {
-                    inner.set_timezone(timezone.as_str());
-                }
-                schedule.set_cron(inner);
-            }
-        }
-        schedule
+            .into(),
+        };
+        v1::JobSchedule { kind: Some(kind) }
     }
 }

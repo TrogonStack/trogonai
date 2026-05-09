@@ -1,3 +1,4 @@
+use buffa::MessageField;
 use trogon_cron_jobs_proto::v1;
 
 use super::JobEventSamplingSource;
@@ -13,20 +14,21 @@ pub enum JobEventDelivery {
 
 impl From<&JobEventDelivery> for v1::JobDelivery {
     fn from(value: &JobEventDelivery) -> Self {
-        let mut delivery = v1::JobDelivery::new();
         match value {
-            JobEventDelivery::NatsEvent { route, ttl_sec, source } => {
-                let mut inner = v1::NatsEventDelivery::new();
-                inner.set_route(route.as_str());
-                if let Some(ttl_sec) = ttl_sec {
-                    inner.set_ttl_sec(*ttl_sec);
-                }
-                if let Some(source) = source {
-                    inner.set_source(v1::JobSamplingSource::from(source));
-                }
-                delivery.set_nats_event(inner);
-            }
+            JobEventDelivery::NatsEvent { route, ttl_sec, source } => v1::JobDelivery {
+                kind: Some(
+                    v1::NatsEventDelivery {
+                        route: route.clone(),
+                        ttl_sec: *ttl_sec,
+                        source: source
+                            .as_ref()
+                            .map(v1::JobSamplingSource::from)
+                            .map(MessageField::some)
+                            .unwrap_or_else(MessageField::none),
+                    }
+                    .into(),
+                ),
+            },
         }
-        delivery
     }
 }

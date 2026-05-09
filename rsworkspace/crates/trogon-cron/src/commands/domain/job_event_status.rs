@@ -10,8 +10,8 @@ pub enum JobEventStatus {
 impl From<JobEventStatus> for v1::JobStatus {
     fn from(value: JobEventStatus) -> Self {
         match value {
-            JobEventStatus::Enabled => Self::Enabled,
-            JobEventStatus::Disabled => Self::Disabled,
+            JobEventStatus::Enabled => Self::JOB_STATUS_ENABLED,
+            JobEventStatus::Disabled => Self::JOB_STATUS_DISABLED,
         }
     }
 }

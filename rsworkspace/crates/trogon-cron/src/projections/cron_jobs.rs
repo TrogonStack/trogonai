@@ -78,126 +78,135 @@ pub fn apply(
         source,
     })?;
 
-    match (state, event.event()) {
-        (JobStreamState::Initial, v1::job_event::EventOneof::JobAdded(inner)) => {
-            Ok(JobStreamState::Present(project_job(stream_id, inner.job())?))
+    match (state, &event.event) {
+        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobAdded(inner))) => {
+            let job = inner.job.as_option().ok_or(JobTransitionError::MalformedEvent {
+                context: "job added event has no job details",
+            })?;
+            Ok(JobStreamState::Present(project_job(stream_id, job)?))
         }
-        (JobStreamState::Initial, v1::job_event::EventOneof::JobPaused(_)) => {
+        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: stream_id.to_string(),
             })
         }
-        (JobStreamState::Initial, v1::job_event::EventOneof::JobResumed(_)) => {
+        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
             Err(JobTransitionError::MissingJobForStateChange {
                 id: stream_id.to_string(),
             })
         }
-        (JobStreamState::Initial, v1::job_event::EventOneof::JobRemoved(_)) => {
+        (JobStreamState::Initial, Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
             Ok(JobStreamState::Deleted(stream_id.to_string()))
         }
-        (JobStreamState::Present(job), v1::job_event::EventOneof::JobAdded(_)) => {
+        (JobStreamState::Present(job), Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))) => {
             Err(JobTransitionError::CannotAddExistingJob { id: job.id })
         }
-        (JobStreamState::Present(mut job), v1::job_event::EventOneof::JobPaused(_)) => {
+        (JobStreamState::Present(mut job), Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
             job.status = JobEventStatus::Disabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(mut job), v1::job_event::EventOneof::JobResumed(_)) => {
+        (JobStreamState::Present(mut job), Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
             job.status = JobEventStatus::Enabled;
             Ok(JobStreamState::Present(job))
         }
-        (JobStreamState::Present(job), v1::job_event::EventOneof::JobRemoved(_)) => Ok(JobStreamState::Deleted(job.id)),
-        (JobStreamState::Deleted(id), v1::job_event::EventOneof::JobAdded(_)) => {
+        (JobStreamState::Present(job), Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
+            Ok(JobStreamState::Deleted(job.id))
+        }
+        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobAdded(_))) => {
             Err(JobTransitionError::CannotAddDeletedJob { id })
         }
-        (JobStreamState::Deleted(id), v1::job_event::EventOneof::JobPaused(_)) => {
+        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobPaused(_))) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), v1::job_event::EventOneof::JobResumed(_)) => {
+        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobResumed(_))) => {
             Err(JobTransitionError::DeletedJobForStateChange { id })
         }
-        (JobStreamState::Deleted(id), v1::job_event::EventOneof::JobRemoved(_)) => {
+        (JobStreamState::Deleted(id), Some(v1::__buffa::oneof::job_event::Event::JobRemoved(_))) => {
             Err(JobTransitionError::DeletedJobForRemoval { id })
         }
-        (_, _) => Err(JobTransitionError::MalformedEvent {
+        (_, None) => Err(JobTransitionError::MalformedEvent {
             context: "job event has no supported case",
         }),
     }
 }
 
-fn project_job(stream_id: &str, job: v1::JobDetailsView<'_>) -> Result<CronJob, JobTransitionError> {
+fn project_job(stream_id: &str, job: &v1::JobDetails) -> Result<CronJob, JobTransitionError> {
+    let schedule = job.schedule.as_option().ok_or(JobTransitionError::MalformedEvent {
+        context: "job details has no schedule",
+    })?;
+    let delivery = job.delivery.as_option().ok_or(JobTransitionError::MalformedEvent {
+        context: "job details has no delivery",
+    })?;
+    let message = job.message.as_option().ok_or(JobTransitionError::MalformedEvent {
+        context: "job details has no message",
+    })?;
     Ok(CronJob {
         id: stream_id.to_string(),
-        status: project_status(job.status()),
-        schedule: project_schedule(job.schedule())?,
-        delivery: project_delivery(job.delivery())?,
-        message: project_message(job.message()),
+        status: project_status(job.status),
+        schedule: project_schedule(schedule)?,
+        delivery: project_delivery(delivery)?,
+        message: project_message(message),
     })
 }
 
 fn project_status(status: v1::JobStatus) -> JobEventStatus {
-    if status == v1::JobStatus::Disabled {
+    if status == v1::JobStatus::JOB_STATUS_DISABLED {
         JobEventStatus::Disabled
     } else {
         JobEventStatus::Enabled
     }
 }
 
-fn project_schedule(schedule: v1::JobScheduleView<'_>) -> Result<JobEventSchedule, JobTransitionError> {
-    match schedule.kind() {
-        v1::job_schedule::KindOneof::At(inner) => Ok(JobEventSchedule::At {
-            at: inner.at().to_string(),
+fn project_schedule(schedule: &v1::JobSchedule) -> Result<JobEventSchedule, JobTransitionError> {
+    match schedule.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => Ok(JobEventSchedule::At { at: inner.at.clone() }),
+        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => Ok(JobEventSchedule::Every {
+            every_sec: inner.every_sec,
         }),
-        v1::job_schedule::KindOneof::Every(inner) => Ok(JobEventSchedule::Every {
-            every_sec: inner.every_sec(),
+        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => Ok(JobEventSchedule::Cron {
+            expr: inner.expr.clone(),
+            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
         }),
-        v1::job_schedule::KindOneof::Cron(inner) => Ok(JobEventSchedule::Cron {
-            expr: inner.expr().to_string(),
-            timezone: inner.has_timezone().then(|| inner.timezone().to_string()),
-        }),
-        _ => Err(JobTransitionError::MalformedEvent {
+        None => Err(JobTransitionError::MalformedEvent {
             context: "job schedule has no supported case",
         }),
     }
 }
 
-fn project_delivery(delivery: v1::JobDeliveryView<'_>) -> Result<JobEventDelivery, JobTransitionError> {
-    match delivery.kind() {
-        v1::job_delivery::KindOneof::NatsEvent(inner) => Ok(JobEventDelivery::NatsEvent {
-            route: inner.route().to_string(),
-            ttl_sec: inner.has_ttl_sec().then(|| inner.ttl_sec()),
-            source: inner
-                .has_source()
-                .then(|| project_sampling_source(inner.source()))
-                .transpose()?,
+fn project_delivery(delivery: &v1::JobDelivery) -> Result<JobEventDelivery, JobTransitionError> {
+    match delivery.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => Ok(JobEventDelivery::NatsEvent {
+            route: inner.route.clone(),
+            ttl_sec: inner.ttl_sec,
+            source: inner.source.as_option().map(project_sampling_source).transpose()?,
         }),
-        _ => Err(JobTransitionError::MalformedEvent {
+        None => Err(JobTransitionError::MalformedEvent {
             context: "job delivery has no supported case",
         }),
     }
 }
 
-fn project_sampling_source(
-    source: v1::JobSamplingSourceView<'_>,
-) -> Result<JobEventSamplingSource, JobTransitionError> {
-    match source.kind() {
-        v1::job_sampling_source::KindOneof::LatestFromSubject(inner) => Ok(JobEventSamplingSource::LatestFromSubject {
-            subject: inner.subject().to_string(),
-        }),
-        _ => Err(JobTransitionError::MalformedEvent {
+fn project_sampling_source(source: &v1::JobSamplingSource) -> Result<JobEventSamplingSource, JobTransitionError> {
+    match source.kind.as_ref() {
+        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => {
+            Ok(JobEventSamplingSource::LatestFromSubject {
+                subject: inner.subject.clone(),
+            })
+        }
+        None => Err(JobTransitionError::MalformedEvent {
             context: "job sampling source has no supported case",
         }),
     }
 }
 
-fn project_message(message: v1::JobMessageView<'_>) -> MessageEnvelope {
+fn project_message(message: &v1::JobMessage) -> MessageEnvelope {
     MessageEnvelope {
-        content: MessageContent::new(message.content().to_string()),
+        content: MessageContent::new(message.content.clone()),
         headers: MessageHeaders::from_pairs(
             message
-                .headers()
+                .headers
                 .iter()
-                .map(|header| (header.name().to_string(), header.value().to_string())),
+                .map(|header| (header.name.clone(), header.value.clone())),
         ),
     }
 }
@@ -780,6 +789,8 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 
 #[cfg(test)]
 mod tests {
+    use buffa::MessageField;
+
     use super::*;
     use crate::proto::v1;
     use crate::{
@@ -804,46 +815,49 @@ mod tests {
     }
 
     fn added_event(id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        let mut inner = v1::JobAdded::new();
-        inner.set_job(proto_job_details(id));
-        event.set_job_added(inner);
-        event
+        v1::JobEvent {
+            event: Some(
+                v1::JobAdded {
+                    job: MessageField::some(proto_job_details(id)),
+                }
+                .into(),
+            ),
+        }
     }
 
     fn proto_job_details(_id: &str) -> v1::JobDetails {
-        let mut details = v1::JobDetails::new();
-        details.set_status(v1::JobStatus::Enabled);
-
-        let mut schedule = v1::JobSchedule::new();
-        let mut every = v1::EverySchedule::new();
-        every.set_every_sec(30);
-        schedule.set_every(every);
-        details.set_schedule(schedule);
-
-        let mut delivery = v1::JobDelivery::new();
-        let mut nats = v1::NatsEventDelivery::new();
-        nats.set_route("agent.run");
-        delivery.set_nats_event(nats);
-        details.set_delivery(delivery);
-
-        let mut message = v1::JobMessage::new();
-        message.set_content(r#"{"kind":"heartbeat"}"#);
-        details.set_message(message);
-
-        details
+        v1::JobDetails {
+            status: v1::JobStatus::JOB_STATUS_ENABLED,
+            schedule: MessageField::some(v1::JobSchedule {
+                kind: Some(v1::EverySchedule { every_sec: 30 }.into()),
+            }),
+            delivery: MessageField::some(v1::JobDelivery {
+                kind: Some(
+                    v1::NatsEventDelivery {
+                        route: "agent.run".to_string(),
+                        ttl_sec: None,
+                        source: MessageField::none(),
+                    }
+                    .into(),
+                ),
+            }),
+            message: MessageField::some(v1::JobMessage {
+                content: r#"{"kind":"heartbeat"}"#.to_string(),
+                headers: Vec::new(),
+            }),
+        }
     }
 
     fn paused_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_paused(v1::JobPaused::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobPaused {}.into()),
+        }
     }
 
     fn removed_event(_id: &str) -> v1::JobEvent {
-        let mut event = v1::JobEvent::new();
-        event.set_job_removed(v1::JobRemoved::new());
-        event
+        v1::JobEvent {
+            event: Some(v1::JobRemoved {}.into()),
+        }
     }
 
     #[test]

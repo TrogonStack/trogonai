@@ -9,7 +9,7 @@ message JobDelivery {
 }
 
 message NatsEventDelivery {
-  string route = 1;
+  string route = 1 [features.field_presence = LEGACY_REQUIRED];
   uint64 ttl_sec = 2;
   JobSamplingSource source = 3;
 }
@@ -21,5 +21,5 @@ message JobSamplingSource {
 }
 
 message LatestFromSubjectSampling {
-  string subject = 1;
+  string subject = 1 [features.field_presence = LEGACY_REQUIRED];
 }
