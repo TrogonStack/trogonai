@@ -1,12 +1,16 @@
-mod append;
-mod position;
-mod read;
-mod state;
+mod append_stream_request;
+mod append_stream_response;
+mod read_stream_request;
+mod read_stream_response;
+mod stream_position;
+mod stream_state;
 
-pub use append::{AppendStreamRequest, AppendStreamResponse};
-pub use position::{InvalidStreamPosition, StreamPosition};
-pub use read::{ReadStreamRequest, ReadStreamResponse};
-pub use state::StreamState;
+pub use append_stream_request::AppendStreamRequest;
+pub use append_stream_response::AppendStreamResponse;
+pub use read_stream_request::ReadStreamRequest;
+pub use read_stream_response::ReadStreamResponse;
+pub use stream_position::{InvalidStreamPosition, StreamPosition};
+pub use stream_state::StreamState;
 
 pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
     type Error;

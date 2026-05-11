@@ -1,4 +1,4 @@
-use super::position::StreamPosition;
+use super::stream_position::StreamPosition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
