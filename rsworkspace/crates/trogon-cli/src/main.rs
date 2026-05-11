@@ -1,7 +1,6 @@
 use clap::Parser;
-use std::process::{Child, Command};
-use std::time::{Duration, Instant};
-use trogon_cli::{session::TrogonSession, OutputFormat, RealFs};
+use std::time::Duration;
+use trogon_cli::{connect_or_start_nats, session::TrogonSession, OutputFormat, RealFs};
 
 #[derive(Parser)]
 #[command(name = "trogon", about = "Trogon AI CLI")]
@@ -32,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let cwd = std::env::current_dir()?;
 
-    let (nats, _child) = connect_or_start_nats(&args.nats_url).await?;
+    let (nats, _child) = connect_or_start_nats(&args.nats_url, Duration::from_secs(3)).await?;
 
     if let Some(prompt_arg) = &args.print {
         let prompt = if prompt_arg == "-" {
@@ -61,33 +60,3 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Connect to NATS. If the first attempt fails and `nats-server` is in PATH,
-/// start it as a child process and retry for up to 3 seconds.
-async fn connect_or_start_nats(url: &str) -> anyhow::Result<(async_nats::Client, Option<Child>)> {
-    if let Ok(client) = async_nats::connect(url).await {
-        return Ok((client, None));
-    }
-
-    let child = match Command::new("nats-server").args(["-p", "4222"]).spawn() {
-        Ok(c) => c,
-        Err(_) => {
-            return Err(anyhow::anyhow!(
-                "Could not connect to NATS at {url} and nats-server is not in PATH.\n\
-                 Install it: https://docs.nats.io/running-a-nats-service/introduction/installation"
-            ));
-        }
-    };
-
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        if Instant::now() >= deadline {
-            return Err(anyhow::anyhow!(
-                "nats-server started but not accepting connections after 3s"
-            ));
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        if let Ok(client) = async_nats::connect(url).await {
-            return Ok((client, Some(child)));
-        }
-    }
-}
