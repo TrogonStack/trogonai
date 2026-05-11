@@ -24,6 +24,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 testcontainers-modules = { workspace = true }
 futures = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
