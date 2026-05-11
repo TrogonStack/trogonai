@@ -677,6 +677,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         }
 
         if let Some(updated) = final_messages {
+            // Reload to pick up any concurrent writes (e.g., allow_always updating
+            // allowed_tools in the permission bridge) before saving back.
+            if let Ok(fresh) = self.store.load(&session_id).await {
+                state = fresh;
+            }
             state.messages = updated;
             state.updated_at = now_iso8601();
             let new_entries = audit_buf

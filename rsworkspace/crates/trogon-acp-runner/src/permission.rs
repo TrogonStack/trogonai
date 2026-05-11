@@ -183,8 +183,14 @@ impl PermissionChecker for RulesPermissionChecker {
         }
 
         match eval_tool_policies(&self.tool_policies, tool_name, tool_input) {
-            Some(PolicyAction::Deny) => Box::pin(async move { false }),
-            Some(PolicyAction::Allow) => Box::pin(async move { true }),
+            Some(PolicyAction::Deny) => {
+                push_audit(&self.inner.audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                Box::pin(async move { false })
+            }
+            Some(PolicyAction::Allow) => {
+                push_audit(&self.inner.audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                Box::pin(async move { true })
+            }
             Some(PolicyAction::RequireApproval) | None => {
                 self.inner.check(tool_call_id, tool_name, tool_input)
             }
@@ -531,5 +537,108 @@ mod tests {
             .await;
         let entries = buf.lock().unwrap();
         assert!(entries.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser));
+    }
+
+    // ── RulesPermissionChecker: static rules audit ────────────────────────────
+
+    #[tokio::test]
+    async fn rules_checker_static_deny_returns_false_and_records_denied() {
+        use crate::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: /etc/**\n");
+        let (tx, _rx) = mpsc::channel(1);
+        let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
+        let inner = make_checker_with_buf(tx, vec![], buf.clone());
+        let checker = RulesPermissionChecker {
+            rules: Arc::new(rules),
+            tool_policies: vec![],
+            inner,
+        };
+        let result = checker
+            .check("tc-sd", "write_file", &serde_json::json!({"path": "/etc/passwd"}))
+            .await;
+        assert!(!result, "static Deny must return false");
+        let entries = buf.lock().unwrap();
+        assert_eq!(entries.len(), 1, "must record one audit entry");
+        assert_eq!(entries[0].outcome, AuditOutcome::Denied);
+        assert_eq!(entries[0].input_summary, "/etc/passwd");
+        assert_eq!(entries[0].tool, "write_file");
+    }
+
+    #[tokio::test]
+    async fn rules_checker_static_allow_returns_true_and_records_allowed() {
+        use crate::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\nallow_paths: /workspace/**\n");
+        let (tx, _rx) = mpsc::channel(1);
+        let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
+        let inner = make_checker_with_buf(tx, vec![], buf.clone());
+        let checker = RulesPermissionChecker {
+            rules: Arc::new(rules),
+            tool_policies: vec![],
+            inner,
+        };
+        let result = checker
+            .check("tc-sa", "read_file", &serde_json::json!({"path": "/workspace/main.rs"}))
+            .await;
+        assert!(result, "static Allow must return true");
+        let entries = buf.lock().unwrap();
+        assert_eq!(entries.len(), 1, "must record one audit entry");
+        assert_eq!(entries[0].outcome, AuditOutcome::Allowed);
+        assert_eq!(entries[0].input_summary, "/workspace/main.rs");
+        assert_eq!(entries[0].tool, "read_file");
+    }
+
+    // ── eval_tool_policies: RequireApproval-only case ─────────────────────────
+
+    #[test]
+    fn eval_tool_policies_require_approval_only_returns_some() {
+        let policies = vec![make_policy("write_file", "/tmp/**", PolicyAction::RequireApproval)];
+        let result = eval_tool_policies(
+            &policies,
+            "write_file",
+            &serde_json::json!({"path": "/tmp/foo.txt"}),
+        );
+        assert_eq!(result, Some(PolicyAction::RequireApproval));
+    }
+
+    // ── tool-policy audit gap (known) ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rules_checker_tool_policy_deny_records_denied_audit() {
+        let (tx, _rx) = mpsc::channel(1);
+        let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
+        let inner = make_checker_with_buf(tx, vec![], buf.clone());
+        let checker = RulesPermissionChecker {
+            rules: Arc::new(crate::permission_rules::PermissionRules::default()),
+            tool_policies: vec![make_policy("write_file", "/etc/**", PolicyAction::Deny)],
+            inner,
+        };
+        checker
+            .check("tc-tpd", "write_file", &serde_json::json!({"path": "/etc/passwd"}))
+            .await;
+        let entries = buf.lock().unwrap();
+        assert_eq!(entries.len(), 1, "tool-policy Deny must record one audit entry");
+        assert_eq!(entries[0].outcome, AuditOutcome::Denied);
+        assert_eq!(entries[0].tool, "write_file");
+        assert_eq!(entries[0].input_summary, "/etc/passwd");
+    }
+
+    #[tokio::test]
+    async fn rules_checker_tool_policy_allow_records_allowed_audit() {
+        let (tx, _rx) = mpsc::channel(1);
+        let buf: AuditBuf = Arc::new(Mutex::new(vec![]));
+        let inner = make_checker_with_buf(tx, vec![], buf.clone());
+        let checker = RulesPermissionChecker {
+            rules: Arc::new(crate::permission_rules::PermissionRules::default()),
+            tool_policies: vec![make_policy("read_file", "/workspace/**", PolicyAction::Allow)],
+            inner,
+        };
+        checker
+            .check("tc-tpa", "read_file", &serde_json::json!({"path": "/workspace/main.rs"}))
+            .await;
+        let entries = buf.lock().unwrap();
+        assert_eq!(entries.len(), 1, "tool-policy Allow must record one audit entry");
+        assert_eq!(entries[0].outcome, AuditOutcome::Allowed);
+        assert_eq!(entries[0].tool, "read_file");
+        assert_eq!(entries[0].input_summary, "/workspace/main.rs");
     }
 }
