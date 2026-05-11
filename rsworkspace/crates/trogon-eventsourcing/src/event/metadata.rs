@@ -124,6 +124,7 @@ impl std::fmt::Display for EventMetadataError {
 
 impl std::error::Error for EventMetadataError {}
 
+#[inline]
 fn validate_key(value: &str) -> Result<(), EventMetadataError> {
     if value.is_empty() {
         return Err(EventMetadataError::EmptyName);
