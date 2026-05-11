@@ -169,6 +169,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("");
                     if cmd == "/clear" {
+                        session.close().await;
                         match TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await {
                             Ok(s) => {
                                 session = s;
