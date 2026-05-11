@@ -12,12 +12,21 @@ pub use session::Session;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+/// Wraps a child process and kills it when dropped.
+pub struct KillOnDrop(pub Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+    }
+}
+
 /// Connect to NATS at `url`. If the first attempt fails and `nats-server` is
 /// in PATH, spawn it and retry until `timeout` elapses.
 pub async fn connect_or_start_nats(
     url: &str,
     timeout: Duration,
-) -> anyhow::Result<(async_nats::Client, Option<Child>)> {
+) -> anyhow::Result<(async_nats::Client, Option<KillOnDrop>)> {
     if let Ok(client) = async_nats::connect(url).await {
         return Ok((client, None));
     }
@@ -42,7 +51,7 @@ pub async fn connect_or_start_nats(
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
         if let Ok(client) = async_nats::connect(url).await {
-            return Ok((client, Some(child)));
+            return Ok((client, Some(KillOnDrop(child))));
         }
     }
 }

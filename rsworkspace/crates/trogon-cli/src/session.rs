@@ -27,6 +27,8 @@ pub trait Session: Send + Sync + 'static {
         &self,
         model_id: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
+    fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
 
 // ── TrogonSession ─────────────────────────────────────────────────────────────
@@ -213,6 +215,16 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             Ok(())
         }
     }
+
+    fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+        let subject = format!(
+            "{}.session.{}.agent.close",
+            self.prefix, self.session_id
+        );
+        async move {
+            let _ = self.nats.publish_bytes(subject, Bytes::new()).await;
+        }
+    }
 }
 
 // ── StreamEvent ───────────────────────────────────────────────────────────────
@@ -379,6 +391,10 @@ pub mod mock {
                 *self.model.lock().unwrap() = Some(model_id);
                 Ok(())
             }
+        }
+
+        fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+            async move {}
         }
     }
 }
