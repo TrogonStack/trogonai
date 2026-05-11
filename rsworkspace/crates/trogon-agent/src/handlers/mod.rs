@@ -71,6 +71,7 @@ pub async fn fetch_memory(
 pub fn make_tool_context(
     http_client: reqwest::Client,
     proxy_url: String,
+    cwd: String,
     github_token: String,
     linear_token: String,
     slack_token: String,
@@ -78,6 +79,7 @@ pub fn make_tool_context(
     Arc::new(ToolContext::new(
         http_client,
         proxy_url,
+        cwd,
         github_token,
         linear_token,
         slack_token,
