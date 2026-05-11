@@ -941,6 +941,184 @@ async fn runner_tool_call_denied_via_permission_channel() {
         .await;
 }
 
+// ── Static permission rules (RulesPermissionChecker) ─────────────────────────
+
+/// When a session has `permission_rules_text` with a `deny_paths` rule, the
+/// `RulesPermissionChecker` short-circuits to Deny without consulting the
+/// interactive permission channel.  The agent still completes (end_turn) via
+/// the "Permission denied" tool result.
+#[tokio::test]
+async fn runner_static_deny_rule_blocks_tool_without_consulting_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call: tool_result carrying the Permission-denied message → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Understood, .env access was blocked"));
+    });
+    // First call: write_file targeting .env → triggers deny rule.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_deny_001",
+                        "name": "write_file",
+                        "input": {"path": ".env", "content": "SECRET=x"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let prefix = "test-rules-deny";
+    let session_id = "sess-rules-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Pre-populate the session with a deny rule for .env paths.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\ndeny_paths: .env\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "write to .env").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after static deny; got: {resp}"
+            );
+
+            // ToolCallFinished notification must carry the Permission-denied message.
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in tool-call notifications; got: {notifs:?}"
+            );
+
+            // The interactive channel must NOT have been consulted.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "static deny rule must not forward to the permission channel"
+            );
+        })
+        .await;
+}
+
+/// When a session has `permission_rules_text` with an `allow_paths` rule that
+/// matches the requested path, the `RulesPermissionChecker` short-circuits to
+/// Allow — the tool executes without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_static_allow_rule_auto_approves_tool_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call: tool_result that must NOT contain "Permission denied" → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Got the file"));
+    });
+    // First call: read_file → triggers allow rule.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tu_allow_001",
+                        "name": "read_file",
+                        "input": {"path": "Cargo.toml"}
+                    }]
+                })
+                .to_string(),
+            );
+    });
+
+    let prefix = "test-rules-allow";
+    let session_id = "sess-rules-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Pre-populate the session with an allow rule for all paths.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\nallow_paths: **\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "read a file").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after static allow; got: {resp}"
+            );
+
+            // Tool output must NOT be a Permission-denied message.
+            assert!(
+                !notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "static allow rule must not produce 'Permission denied'; notifs: {notifs:?}"
+            );
+
+            // The interactive channel must NOT have been consulted.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "static allow rule must not forward to the permission channel"
+            );
+        })
+        .await;
+}
+
 // ── MCP dispatch ──────────────────────────────────────────────────────────────
 
 /// When a session has `mcp_servers` configured, the agent calls `build_session_mcp`

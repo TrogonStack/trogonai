@@ -5567,6 +5567,7 @@ dependencies = [
  "globset",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
  "trogon-mcp",

@@ -228,6 +228,28 @@ mod tests {
         }
     }
 
+    /// The `other` branch (line 129) is reachable by calling `call_tool` directly
+    /// with a name that is neither "todo_write" nor "todo_read".
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn call_tool_unknown_operation_returns_error() {
+        use crate::session_store::mock::MemorySessionStore;
+        let tool = NatsTodoTool::new("s1", MemorySessionStore::new());
+        let result = tool
+            .call_tool("unknown_op", &serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("unknown operation"),
+            "error must mention 'unknown operation', got: {err}"
+        );
+        assert!(
+            err.contains("unknown_op"),
+            "error must include the operation name, got: {err}"
+        );
+    }
+
     #[test]
     fn todo_write_def_name() {
         let def = NatsTodoTool::<crate::session_store::NatsSessionStore>::todo_write_def();
@@ -238,5 +260,83 @@ mod tests {
     fn todo_read_def_name() {
         let def = NatsTodoTool::<crate::session_store::NatsSessionStore>::todo_read_def();
         assert_eq!(def.name, "todo_read");
+    }
+
+    // ── into_dispatches ───────────────────────────────────────────────────────
+
+    #[cfg(feature = "test-helpers")]
+    mod into_dispatches_tests {
+        use super::*;
+        use crate::session_store::mock::MemorySessionStore;
+
+        fn tool() -> NatsTodoTool<MemorySessionStore> {
+            NatsTodoTool::new("s1", MemorySessionStore::new())
+        }
+
+        #[test]
+        fn into_dispatches_returns_exactly_two_entries() {
+            let dispatches = tool().into_dispatches();
+            assert_eq!(dispatches.len(), 2);
+        }
+
+        #[test]
+        fn into_dispatches_first_entry_is_todo_write() {
+            let dispatches = tool().into_dispatches();
+            let (server_name, tool_name, _) = &dispatches[0];
+            assert_eq!(server_name, "todo_write");
+            assert_eq!(tool_name, "todo_write");
+        }
+
+        #[test]
+        fn into_dispatches_second_entry_is_todo_read() {
+            let dispatches = tool().into_dispatches();
+            let (server_name, tool_name, _) = &dispatches[1];
+            assert_eq!(server_name, "todo_read");
+            assert_eq!(tool_name, "todo_read");
+        }
+
+        #[test]
+        fn into_dispatches_handlers_share_the_same_arc() {
+            let dispatches = tool().into_dispatches();
+            let (_, _, h0) = &dispatches[0];
+            let (_, _, h1) = &dispatches[1];
+            // Both Arc pointers must point to the same allocation.
+            assert!(Arc::ptr_eq(h0, h1), "both dispatches must share the same Arc");
+        }
+
+        #[tokio::test]
+        async fn into_dispatches_write_handler_creates_item() {
+            let dispatches = tool().into_dispatches();
+            let (_, _, handler) = &dispatches[0];
+            let result = handler
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"id":"t1","content":"task","status":"pending"}),
+                )
+                .await;
+            assert_eq!(result.unwrap(), "OK");
+        }
+
+        #[tokio::test]
+        async fn into_dispatches_read_handler_returns_todos() {
+            let dispatches = tool().into_dispatches();
+            let (_, _, write_handler) = &dispatches[0];
+            let (_, _, read_handler) = &dispatches[1];
+
+            write_handler
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"id":"t1","content":"task","status":"pending"}),
+                )
+                .await
+                .unwrap();
+
+            let result = read_handler
+                .call_tool("todo_read", &serde_json::json!({}))
+                .await
+                .unwrap();
+
+            assert!(result.contains("t1"), "read must return written todo, got: {result}");
+        }
     }
 }
