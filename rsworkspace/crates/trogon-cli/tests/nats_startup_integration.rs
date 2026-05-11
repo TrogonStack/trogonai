@@ -80,7 +80,7 @@ async fn fake_nats_server_that_never_listens_returns_timeout_error() {
 async fn connect_or_start_nats_with_empty_path(
     url: &str,
     timeout: Duration,
-) -> anyhow::Result<(async_nats::Client, Option<std::process::Child>)> {
+) -> anyhow::Result<(async_nats::Client, Option<trogon_cli::KillOnDrop>)> {
     connect_or_start_nats_with_path(url, timeout, std::path::Path::new("")).await
 }
 
@@ -88,7 +88,7 @@ async fn connect_or_start_nats_with_path(
     url: &str,
     timeout: Duration,
     path_dir: &std::path::Path,
-) -> anyhow::Result<(async_nats::Client, Option<std::process::Child>)> {
+) -> anyhow::Result<(async_nats::Client, Option<trogon_cli::KillOnDrop>)> {
     // Temporarily replace PATH so Command::new("nats-server") resolves (or not)
     // as we control. Restore it afterward even if we panic.
     let old_path = std::env::var_os("PATH").unwrap_or_default();

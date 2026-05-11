@@ -273,6 +273,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                 eprintln!("(Ctrl+C)");
             }
             Err(ReadlineError::Eof) => {
+                session.close().await;
                 eprintln!("bye");
                 break;
             }
