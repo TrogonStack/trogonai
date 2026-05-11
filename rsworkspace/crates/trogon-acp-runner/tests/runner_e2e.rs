@@ -193,35 +193,53 @@ async fn send_text(
     .await
 }
 
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
-    })
-    .to_string()
-}
-
-fn max_tokens_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [{"type": "text", "text": "partial"}],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
+fn sse_body(events: &[(&str, serde_json::Value)]) -> String {
+    events
+        .iter()
+        .map(|(ev, data)| format!("event: {ev}\ndata: {data}\n\n"))
+        .collect()
 }
 
 fn end_turn_body(text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [{"type": "text", "text": text}],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn tool_use_body() -> String {
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn max_tokens_body() -> String {
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": "partial"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 4096}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// Collect `SessionNotification` messages from `notif_sub` until a message
@@ -343,7 +361,7 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Great response!"));
     });
 
@@ -394,7 +412,7 @@ async fn runner_persists_session_after_end_turn() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Saved reply"));
     });
 
@@ -445,7 +463,7 @@ async fn runner_skips_invalid_prompt_payload() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("After skip"));
     });
 
@@ -502,7 +520,7 @@ async fn runner_publishes_done_max_tokens() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(max_tokens_body());
     });
 
@@ -547,7 +565,7 @@ async fn runner_publishes_done_max_turn_requests() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -598,14 +616,14 @@ async fn runner_publishes_tool_call_events() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -668,14 +686,14 @@ async fn runner_tool_call_allowed_via_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after approved tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -738,14 +756,14 @@ async fn runner_tool_call_denied_via_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -832,26 +850,25 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done with MCP result"));
     });
     // First call → tool_use with the prefixed name "my_srv__my_tool"
     anthropic.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_mcp_1",
-                        "name": "my_srv__my_tool",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+            .header("Content-Type", "text/event-stream")
+            .body(sse_body(&[
+                ("message_start", serde_json::json!({
+                    "type": "message_start",
+                    "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+                })),
+                ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_mcp_1", "name": "my_srv__my_tool"}})),
+                ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+                ("content_block_stop", serde_json::json!({"index": 0})),
+                ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+                ("message_stop", serde_json::json!({"type": "message_stop"})),
+            ]));
     });
 
     let prefix = "test-mcp";
@@ -918,7 +935,7 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .delay(Duration::from_secs(2))
             .body(end_turn_body("never reached"));
     });
@@ -975,7 +992,7 @@ async fn runner_uses_gateway_config_base_url_and_token() {
     gateway.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("via gateway"));
     });
 
@@ -1035,7 +1052,7 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("queued reply"));
     });
 
@@ -1103,7 +1120,7 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("concurrent reply"));
     });
 
@@ -1160,7 +1177,7 @@ async fn runner_processes_prompt_with_context_content_block() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("handled context block"));
     });
 
@@ -1212,7 +1229,7 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("handled image"));
     });
 
@@ -1269,14 +1286,14 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             .path("/messages")
             .body_contains("Second question");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Answer to second question"));
     });
     // First call → end_turn with specific text we can check for later
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Answer to first question"));
     });
 
@@ -1341,25 +1358,25 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done"));
     });
     // First call → tool_use with parent_tool_use_id set.
-    let nested_tool_body = serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "tu_child_001",
-            "name": "unknown_tool",
-            "input": {},
-            "parent_tool_use_id": "tu_parent_001"
-        }]
-    })
-    .to_string();
+    let nested_tool_body = sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_child_001", "name": "unknown_tool", "parent_tool_use_id": "tu_parent_001"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]);
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(nested_tool_body);
     });
 
@@ -1431,7 +1448,7 @@ async fn runner_cancel_during_tool_execution_completes() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"))
             .delay(Duration::from_millis(100));
     });
@@ -1439,7 +1456,7 @@ async fn runner_cancel_during_tool_execution_completes() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -1491,7 +1508,7 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("completed without cancel"));
     });
 
@@ -1582,7 +1599,7 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("reply after compaction"));
     });
 
@@ -1695,22 +1712,18 @@ async fn start_agent_with_elicitation(
 }
 
 fn ask_user_tool_use_body(question: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "tu_ask_001",
-            "name": "ask_user",
-            "input": { "question": question }
-        }],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+    let partial_json = serde_json::to_string(&serde_json::json!({"question": question})).unwrap();
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_ask_001", "name": "ask_user"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// When the agent calls `ask_user` and the elicitation channel returns an
@@ -1733,14 +1746,14 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
             .path("/messages")
             .body_contains("the-user-answer");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Got the answer."));
     });
     // First call → ask_user tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(ask_user_tool_use_body("What is your name?"));
     });
 
@@ -1791,11 +1804,17 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
 // ── RBAC / tool-policy gate ───────────────────────────────────────────────────
 
 fn workspace_tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool", "input": {"path": "/workspace/foo.rs"}}]
-    })
-    .to_string()
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"/workspace/foo.rs\"}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// When `tool_policies` has an Allow rule matching the tool call, the agent
@@ -1813,14 +1832,14 @@ async fn runner_tool_policy_allow_bypasses_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after policy-allowed tool"));
     });
     // First call → tool_use with /workspace path
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(workspace_tool_use_body());
     });
 
@@ -1890,14 +1909,14 @@ async fn runner_tool_policy_deny_bypasses_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after policy-denied tool"));
     });
     // First call → tool_use with /workspace path
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(workspace_tool_use_body());
     });
 
@@ -1976,7 +1995,7 @@ async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
     anthropic.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("done without mcp"));
     });
 
@@ -2051,14 +2070,14 @@ async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"));
     });
     // First call → tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -2135,13 +2154,13 @@ async fn runner_audit_log_records_allowed_for_allow_policy() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after allowed tool"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(workspace_tool_use_body());
     });
 
@@ -2208,13 +2227,13 @@ async fn runner_audit_log_records_denied_for_deny_policy() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(workspace_tool_use_body());
     });
 
@@ -2282,13 +2301,13 @@ async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -2360,14 +2379,14 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Understood, question was declined."));
     });
     // First call → ask_user tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(ask_user_tool_use_body("Continue?"));
     });
 

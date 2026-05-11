@@ -754,7 +754,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                                 Some("tool_use") => {
                                     let id = cb["id"].as_str().unwrap_or("").to_string();
                                     let name = cb["name"].as_str().unwrap_or("").to_string();
-                                    Some(ContentBlockBuilder::ToolUse { id, name, input_buf: String::new() })
+                                    let parent_tool_use_id = cb["parent_tool_use_id"].as_str().map(String::from);
+                                    Some(ContentBlockBuilder::ToolUse { id, name, input_buf: String::new(), parent_tool_use_id })
                                 }
                                 _ => None,
                             };
@@ -807,10 +808,10 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 .filter_map(|opt| match opt? {
                     ContentBlockBuilder::Text(t) => Some(ContentBlock::Text { text: t }),
                     ContentBlockBuilder::Thinking(t) => Some(ContentBlock::Thinking { thinking: t }),
-                    ContentBlockBuilder::ToolUse { id, name, input_buf } => {
+                    ContentBlockBuilder::ToolUse { id, name, input_buf, parent_tool_use_id } => {
                         let input = serde_json::from_str(&input_buf)
                             .unwrap_or(serde_json::Value::Object(Default::default()));
-                        Some(ContentBlock::ToolUse { id, name, input, parent_tool_use_id: None })
+                        Some(ContentBlock::ToolUse { id, name, input, parent_tool_use_id })
                     }
                 })
                 .collect();
@@ -1023,6 +1024,7 @@ enum ContentBlockBuilder {
         id: String,
         name: String,
         input_buf: String,
+        parent_tool_use_id: Option<String>,
     },
 }
 
