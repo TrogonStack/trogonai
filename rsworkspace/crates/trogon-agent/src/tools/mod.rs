@@ -559,6 +559,7 @@ pub async fn dispatch_tool<H: HttpClient>(
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
+        "spawn_agent" => Err("spawn_agent requires a NATS client — dispatch via trogon-acp-runner".to_string()),
         _ => {
             let core_ctx = trogon_agent_core::tools::ToolContext {
                 proxy_url: ctx.proxy_url.clone(),
