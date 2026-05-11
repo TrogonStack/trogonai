@@ -679,8 +679,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         if let Some(updated) = final_messages {
             // Reload to pick up any concurrent writes (e.g., allow_always updating
             // allowed_tools in the permission bridge) before saving back.
+            let in_memory_title = state.title.clone();
             if let Ok(fresh) = self.store.load(&session_id).await {
                 state = fresh;
+            }
+            // Title is set in-memory before the first save; preserve it across the reload.
+            if state.title.is_empty() && !in_memory_title.is_empty() {
+                state.title = in_memory_title;
             }
             state.messages = updated;
             state.updated_at = now_iso8601();
