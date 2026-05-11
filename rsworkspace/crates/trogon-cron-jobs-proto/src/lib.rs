@@ -9,6 +9,9 @@ pub use generated::trogon::cron::jobs::state::v1 as state_v1;
 pub use generated::trogon::cron::jobs::v1;
 pub use generated::trogon::cron::jobs::v1::__buffa::oneof::job_event::Event as JobEventCase;
 
+// TODO: Replace these manual names with generated full names once Buffa exposes
+// them without `ExtensionSet`/unknown-fields coupling.
+// https://github.com/anthropics/buffa/pull/108
 pub const JOB_ADDED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobAdded";
 pub const JOB_PAUSED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobPaused";
 pub const JOB_RESUMED_EVENT_TYPE: &str = "trogon.cron.jobs.v1.JobResumed";
