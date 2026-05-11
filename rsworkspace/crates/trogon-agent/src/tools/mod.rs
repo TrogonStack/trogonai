@@ -378,6 +378,7 @@ pub mod mock {
             Self {
                 http_client: MockHttpClient::new(),
                 proxy_url: proxy_url.into(),
+                cwd: String::new(),
                 github_token: github_token.into(),
                 linear_token: linear_token.into(),
                 slack_token: slack_token.into(),
@@ -404,6 +405,8 @@ pub struct ToolContext<H = reqwest::Client> {
     pub http_client: H,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
+    /// Working directory for the session — filesystem tools resolve paths relative to this.
+    pub cwd: String,
     /// Opaque proxy token for the GitHub API.
     pub github_token: String,
     /// Opaque proxy token for the Linear API.
@@ -418,6 +421,7 @@ impl ToolContext<reqwest::Client> {
     pub fn new(
         http_client: reqwest::Client,
         proxy_url: String,
+        cwd: String,
         github_token: String,
         linear_token: String,
         slack_token: String,
@@ -426,6 +430,7 @@ impl ToolContext<reqwest::Client> {
         Self {
             http_client,
             proxy_url,
+            cwd,
             github_token,
             linear_token,
             slack_token,
@@ -554,7 +559,14 @@ pub async fn dispatch_tool<H: HttpClient>(
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
-        unknown => Err(format!("Unknown tool: {unknown}")),
+        _ => {
+            let core_ctx = trogon_agent_core::tools::ToolContext {
+                proxy_url: ctx.proxy_url.clone(),
+                cwd: ctx.cwd.clone(),
+                http_client: reqwest::Client::new(),
+            };
+            return trogon_agent_core::tools::dispatch_tool(&core_ctx, name, input).await;
+        }
     };
     result.unwrap_or_else(|e| format!("Tool error: {e}"))
 }
