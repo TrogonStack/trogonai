@@ -27,6 +27,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                 StreamEvent::Text(t) => text.push_str(&t),
                 StreamEvent::Done(reason) => {
                     if reason == "error" {
+                        session.close().await;
                         return Err(anyhow::anyhow!("agent stopped with error"));
                     }
                     stop_reason = reason;
@@ -70,6 +71,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
         let _ = stdout.flush();
     }
 
+    session.close().await;
     Ok(())
 }
 
