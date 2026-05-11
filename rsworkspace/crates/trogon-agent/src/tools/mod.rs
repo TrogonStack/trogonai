@@ -736,6 +736,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_spawn_agent_returns_helpful_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.contains("trogon-acp-runner"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_read_file_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "read_file", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "read_file should delegate to agent-core, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_git_status_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "git_status should delegate to agent-core, got: {result}");
+    }
+
+    #[tokio::test]
     async fn dispatch_post_linear_comment_routes_correctly() {
         let ctx = ToolContext::for_test("http://localhost:8080", "", "tok_linear_prod_test01", "");
         let result = dispatch_tool(&ctx, "post_linear_comment", &json!({})).await;

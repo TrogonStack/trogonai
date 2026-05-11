@@ -54,6 +54,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                 }
                 StreamEvent::Done(reason) => {
                     if reason == "error" {
+                        session.close().await;
                         return Err(anyhow::anyhow!("agent stopped with error"));
                     }
                     break;
@@ -142,9 +143,35 @@ mod tests {
     #[tokio::test]
     async fn empty_event_stream_completes_without_panic() {
         let session = MockSession::new("s");
-        // queue_turn with only Done — channel closes after Done is consumed
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
         let result = run(session, "test", OutputFormat::Text).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn text_mode_closes_session_on_completion() {
+        use std::sync::Arc;
+        let session = Arc::new(MockSession::new("s"));
+        session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
+        run(Arc::clone(&session), "test", OutputFormat::Text).await.unwrap();
+        assert_eq!(session.close_count(), 1, "close() must be called exactly once");
+    }
+
+    #[tokio::test]
+    async fn text_mode_closes_session_on_error_stop_reason() {
+        use std::sync::Arc;
+        let session = Arc::new(MockSession::new("s"));
+        session.queue_turn(vec![StreamEvent::Done("error".into())]);
+        let _ = run(Arc::clone(&session), "test", OutputFormat::Text).await;
+        assert_eq!(session.close_count(), 1, "close() must be called even on error stop reason");
+    }
+
+    #[tokio::test]
+    async fn json_mode_closes_session_on_completion() {
+        use std::sync::Arc;
+        let session = Arc::new(MockSession::new("s"));
+        session.queue_turn(vec![StreamEvent::Text("hi".into()), StreamEvent::Done("end_turn".into())]);
+        run(Arc::clone(&session), "test", OutputFormat::Json).await.unwrap();
+        assert_eq!(session.close_count(), 1, "close() must be called exactly once");
     }
 }

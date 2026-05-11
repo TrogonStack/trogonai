@@ -313,6 +313,7 @@ pub mod mock {
         session_id: String,
         turns: Mutex<VecDeque<Vec<StreamEvent>>>,
         cancelled: Mutex<Vec<String>>,
+        closed: Mutex<u32>,
         model: Mutex<Option<String>>,
         set_model_error: Mutex<Option<String>>,
     }
@@ -323,6 +324,7 @@ pub mod mock {
                 session_id: session_id.into(),
                 turns: Mutex::new(VecDeque::new()),
                 cancelled: Mutex::new(Vec::new()),
+                closed: Mutex::new(0),
                 model: Mutex::new(None),
                 set_model_error: Mutex::new(None),
             }
@@ -335,6 +337,10 @@ pub mod mock {
 
         pub fn cancel_count(&self) -> usize {
             self.cancelled.lock().unwrap().len()
+        }
+
+        pub fn close_count(&self) -> u32 {
+            *self.closed.lock().unwrap()
         }
 
         pub fn last_model(&self) -> Option<String> {
@@ -394,7 +400,39 @@ pub mod mock {
         }
 
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
-            async move {}
+            async move {
+                *self.closed.lock().unwrap() += 1;
+            }
+        }
+    }
+
+    impl Session for std::sync::Arc<MockSession> {
+        fn session_id(&self) -> &str {
+            (**self).session_id()
+        }
+
+        fn prompt(
+            &self,
+            text: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
+        {
+            (**self).prompt(text)
+        }
+
+        fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+            (**self).cancel()
+        }
+
+        fn set_model(
+            &self,
+            model_id: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+        {
+            (**self).set_model(model_id)
+        }
+
+        fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+            (**self).close()
         }
     }
 }
