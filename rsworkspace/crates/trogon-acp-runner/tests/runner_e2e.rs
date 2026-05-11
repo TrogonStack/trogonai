@@ -1788,6 +1788,559 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
         .await;
 }
 
+// ── RBAC / tool-policy gate ───────────────────────────────────────────────────
+
+fn workspace_tool_use_body() -> String {
+    serde_json::json!({
+        "stop_reason": "tool_use",
+        "content": [{"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool", "input": {"path": "/workspace/foo.rs"}}]
+    })
+    .to_string()
+}
+
+/// When `tool_policies` has an Allow rule matching the tool call, the agent
+/// executes the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_allow_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after policy-allowed tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-allow";
+    let session_id = "sess-policy-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Allow policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Allow policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Allow policy matches"
+            );
+        })
+        .await;
+}
+
+/// When `tool_policies` has a Deny rule matching the tool call, the agent
+/// rejects the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_deny_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, the tool result is sent back; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after policy-denied tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-deny";
+    let session_id = "sess-policy-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Deny policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Deny policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Deny policy matches"
+            );
+        })
+        .await;
+}
+
+// ── Egress policy ─────────────────────────────────────────────────────────────
+
+/// When a session's egress policy denies the MCP server URL, `build_session_mcp`
+/// must skip that server entirely — the MCP server receives no requests.
+#[tokio::test]
+async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
+    use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    // MCP mock — must receive 0 hits.
+    let mcp_server = MockServer::start();
+    let mcp_init_mock = mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp"}}}"#);
+    });
+
+    // Anthropic: return end_turn immediately (no tool_use, just verify MCP skipped).
+    let anthropic = MockServer::start();
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("done without mcp"));
+    });
+
+    let prefix = "test-egress-deny";
+    let session_id = "sess-egress-deny-1";
+
+    // Pre-seed session: MCP server configured but egress policy denies all.
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        mcp_servers: vec![StoredMcpServer {
+            name: "blocked_srv".to_string(),
+            url: mcp_server.base_url(),
+            headers: vec![],
+        }],
+        egress_policy: Some(EgressPolicy {
+            default_action: EgressAction::Deny,
+            rules: vec![],
+        }),
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&anthropic.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // MCP server must not have been contacted — egress policy denied it.
+            assert_eq!(
+                mcp_init_mock.hits(),
+                0,
+                "MCP server must receive 0 requests when egress policy denies"
+            );
+        })
+        .await;
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+/// After a prompt turn where the permission channel is consulted and approves,
+/// the session audit log persisted in NATS KV must contain RequiredApproval
+/// and ApprovedByUser entries for the tool call.
+#[tokio::test]
+async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (with tool_result) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after tool"));
+    });
+    // First call → tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit";
+    let session_id = "sess-audit-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Auto-approve every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            // Give the agent a moment to persist the session state.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                !state.audit_log.is_empty(),
+                "audit_log must be non-empty after a tool call"
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::ApprovedByUser),
+                "expected ApprovedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-approved by an Allow `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain an `Allowed` entry.
+#[tokio::test]
+async fn runner_audit_log_records_allowed_for_allow_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after allowed tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-allow";
+    let session_id = "sess-audit-allow-1";
+
+    // permission_tx required to install the RulesPermissionChecker that writes audit_buf.
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Allowed),
+                "expected Allowed entry in audit_log after Allow-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-denied by a Deny `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain a `Denied` entry.
+#[tokio::test]
+async fn runner_audit_log_records_denied_for_deny_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-deny";
+    let session_id = "sess-audit-deny-1";
+
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Denied),
+                "expected Denied entry in audit_log after Deny-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When the permission channel denies a tool call, the session audit log
+/// persisted in NATS KV must contain `RequiredApproval` followed by
+/// `DeniedByUser` entries.
+#[tokio::test]
+async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, agent sends a tool_result error; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit-deny-user";
+    let session_id = "sess-audit-deny-user-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Deny every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(false);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser),
+                "expected DeniedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
 /// When the agent calls `ask_user` and the elicitation channel returns Cancel
 /// (user declined), the agent receives the declined message and continues to
 /// the next LLM turn.

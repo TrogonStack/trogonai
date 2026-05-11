@@ -1542,3 +1542,334 @@ async fn prompt_does_not_inject_elicitation_provider_when_elicitation_tx_is_none
         "set_elicitation_provider must NOT be called when elicitation_tx is None"
     );
 }
+
+// ── Feature 2: egress policy enforcement in build_session_mcp ────────────────
+
+/// When the session `egress_policy` denies a server URL, `build_session_mcp`
+/// must skip it entirely — no TCP connection should be made.
+#[tokio::test]
+async fn prompt_egress_deny_policy_does_not_contact_mcp_server() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+    use trogon_acp_runner::session_store::StoredMcpServer;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_url = format!("http://{}/mcp", addr);
+
+    let connection_count = Arc::new(AtomicU32::new(0));
+    let count = connection_count.clone();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            count.fetch_add(1, Ordering::SeqCst);
+            drop(stream); // close immediately so reqwest fails fast
+        }
+    });
+
+    let store = MemorySessionStore::new();
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        MockAgentRunner::new("claude-test"),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let mut state = store.load(&session_id).await.unwrap();
+            state.mcp_servers = vec![StoredMcpServer {
+                name: "blocked-server".to_string(),
+                url: server_url,
+                headers: vec![],
+            }];
+            state.egress_policy = Some(EgressPolicy {
+                default_action: EgressAction::Deny,
+                rules: vec![],
+            });
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert_eq!(
+        connection_count.load(Ordering::SeqCst),
+        0,
+        "egress-denied MCP server must never be contacted"
+    );
+}
+
+/// When the session `egress_policy` allows a server URL, `build_session_mcp`
+/// must attempt to contact it (even if initialization fails — no valid MCP
+/// response is sent by the test listener).
+#[tokio::test]
+async fn prompt_egress_allow_policy_contacts_mcp_server() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+    use trogon_acp_runner::session_store::StoredMcpServer;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server_url = format!("http://{}/mcp", addr);
+
+    let connection_count = Arc::new(AtomicU32::new(0));
+    let count = connection_count.clone();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            count.fetch_add(1, Ordering::SeqCst);
+            drop(stream); // close immediately so reqwest fails fast
+        }
+    });
+
+    let store = MemorySessionStore::new();
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        MockAgentRunner::new("claude-test"),
+        "acp",
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let mut state = store.load(&session_id).await.unwrap();
+            state.mcp_servers = vec![StoredMcpServer {
+                name: "allowed-server".to_string(),
+                url: server_url,
+                headers: vec![],
+            }];
+            state.egress_policy = Some(EgressPolicy {
+                default_action: EgressAction::Allow,
+                rules: vec![],
+            });
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        connection_count.load(Ordering::SeqCst) > 0,
+        "egress-allowed MCP server must be contacted (even though init fails)"
+    );
+}
+
+// ── Feature 1/2/3: permission checker wiring and audit drain ─────────────────
+
+/// When `TrogonAgent` is constructed with a `permission_tx` and the session
+/// mode is not "bypassPermissions", `set_permission_checker` must be called on
+/// the cloned runner before the prompt runs.
+#[tokio::test]
+async fn prompt_sets_permission_checker_when_permission_tx_is_some() {
+    let (perm_tx, _perm_rx) = mpsc::channel::<trogon_acp_runner::permission::PermissionReq>(4);
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        MemorySessionStore::new(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        Some(perm_tx),
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        *runner.permission_checker_set.lock().unwrap(),
+        "set_permission_checker must be called when permission_tx is Some"
+    );
+}
+
+/// When the session mode is "bypassPermissions", the permission checker must
+/// NOT be installed even if `permission_tx` is set.
+#[tokio::test]
+async fn prompt_skips_permission_checker_in_bypass_mode() {
+    let (perm_tx, _perm_rx) = mpsc::channel::<trogon_acp_runner::permission::PermissionReq>(4);
+    let store = MemorySessionStore::new();
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        Some(perm_tx),
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let mut state = store.load(&session_id).await.unwrap();
+            state.mode = "bypassPermissions".to_string();
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        !*runner.permission_checker_set.lock().unwrap(),
+        "set_permission_checker must NOT be called in bypassPermissions mode"
+    );
+}
+
+/// When `session.tool_policies` is non-empty, `set_permission_checker` is still
+/// called (the policies are wired through `RulesPermissionChecker`).
+#[tokio::test]
+async fn prompt_wires_tool_policies_from_session_state() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (perm_tx, _perm_rx) = mpsc::channel::<trogon_acp_runner::permission::PermissionReq>(4);
+    let store = MemorySessionStore::new();
+    let runner = MockAgentRunner::new("claude-test");
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        runner.clone(),
+        "acp",
+        "claude-test",
+        Some(perm_tx),
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let mut state = store.load(&session_id).await.unwrap();
+            state.tool_policies = vec![ToolPolicy {
+                tool: "write_file".to_string(),
+                path_pattern: "/workspace/**".to_string(),
+                action: PolicyAction::Allow,
+            }];
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id, vec![]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        *runner.permission_checker_set.lock().unwrap(),
+        "set_permission_checker must be called when tool_policies are present"
+    );
+}
+
+/// After a prompt turn where the permission checker is invoked for an
+/// allowed tool, the audit entry must be persisted in `state.audit_log`.
+#[tokio::test]
+async fn prompt_audit_drain_populates_session_audit_log() {
+    let (perm_tx, _perm_rx) = mpsc::channel::<trogon_acp_runner::permission::PermissionReq>(4);
+    let store = MemorySessionStore::new();
+    // Configure the mock to call the checker with "allowed_tool".
+    // The session will have "allowed_tool" in allowed_tools so the checker
+    // short-circuits immediately (no channel round-trip) and records Allowed.
+    let runner = MockAgentRunner::new("claude-test").with_permission_check(
+        "allowed_tool",
+        serde_json::json!({"path": "/workspace/foo.rs"}),
+    );
+    let agent = TrogonAgent::new(
+        MockSessionNotifier::new(),
+        store.clone(),
+        runner,
+        "acp",
+        "claude-test",
+        Some(perm_tx),
+        None,
+        Arc::new(RwLock::new(None::<GatewayConfig>)),
+    );
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/cwd"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // Pre-allow "allowed_tool" so the checker auto-approves it.
+            let mut state = store.load(&session_id).await.unwrap();
+            state.allowed_tools = vec!["allowed_tool".to_string()];
+            store.save(&session_id, &state).await.unwrap();
+
+            agent
+                .prompt(PromptRequest::new(session_id.clone(), vec![]))
+                .await
+                .unwrap();
+
+            let final_state = store.load(&session_id).await.unwrap();
+            assert_eq!(
+                final_state.audit_log.len(),
+                1,
+                "one audit entry must be persisted after the prompt turn"
+            );
+            assert_eq!(final_state.audit_log[0].tool, "allowed_tool");
+            assert_eq!(
+                final_state.audit_log[0].outcome,
+                trogon_acp_runner::session_store::AuditOutcome::Allowed
+            );
+        })
+        .await;
+}

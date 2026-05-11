@@ -5149,12 +5149,19 @@ dependencies = [
 name = "trogon-e2e"
 version = "0.0.1"
 dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
  "async-nats",
  "bytes",
  "futures-util",
+ "httpmock",
  "reqwest",
  "serde_json",
  "tokio",
+ "trogon-acp-runner",
+ "trogon-agent-core",
+ "trogon-nats",
  "uuid",
 ]
 
