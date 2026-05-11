@@ -1,30 +1,11 @@
-use crate::EventId;
+mod canonical_event_codec;
+mod encode_event_error;
+mod event_codec;
+mod event_identity;
+mod event_type;
 
-mod error;
-
-pub use error::{EncodeEventError, EventDataEncodeError};
-
-pub trait EventCodec<T> {
-    type Error;
-
-    fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error>;
-    fn decode(&self, event_type: &str, stream_id: &str, payload: &[u8]) -> Result<T, Self::Error>;
-}
-
-pub trait CanonicalEventCodec: Sized {
-    type Codec: EventCodec<Self>;
-
-    fn canonical_codec() -> Self::Codec;
-}
-
-pub trait EventIdentity {
-    fn event_id(&self) -> Option<EventId> {
-        None
-    }
-}
-
-pub trait EventType {
-    type Error;
-
-    fn event_type(&self) -> Result<&'static str, Self::Error>;
-}
+pub use canonical_event_codec::CanonicalEventCodec;
+pub use encode_event_error::{EncodeEventError, EventDataEncodeError};
+pub use event_codec::EventCodec;
+pub use event_identity::EventIdentity;
+pub use event_type::EventType;

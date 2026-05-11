@@ -1,10 +1,14 @@
-mod data;
-mod metadata;
-mod recorded;
+mod event_data;
+mod event_metadata;
+mod event_metadata_error;
+mod metadata_key;
+mod recorded_event;
 
-pub use data::EventData;
-pub use metadata::{EventMetadata, EventMetadataError, MetadataKey};
-pub use recorded::RecordedEvent;
+pub use event_data::EventData;
+pub use event_metadata::EventMetadata;
+pub use event_metadata_error::EventMetadataError;
+pub use metadata_key::MetadataKey;
+pub use recorded_event::RecordedEvent;
 
 #[cfg(test)]
 mod tests {
