@@ -35,8 +35,11 @@ mod client_subjects {
     }
 }
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ImageContent, PromptRequest, TextContent, TerminalId};
+use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
+use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
+use trogon_runner_tools::session_store::TodoItem;
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -268,6 +271,90 @@ async fn start_agent_with_bash_tool(
         prefix,
         "claude-test",
         None,
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Start a `TrogonAgent` wired with a `NatsTodoTool` backed by the same
+/// `NatsSessionStore` used for session persistence.
+async fn start_agent_with_todo_tool(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let todo_tool = NatsTodoTool::new(session_id, store.clone());
+    let dispatches = todo_tool.into_dispatches();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![
+        NatsTodoTool::<NatsSessionStore>::todo_write_def(),
+        NatsTodoTool::<NatsSessionStore>::todo_read_def(),
+    ];
+    agent.mcp_dispatch = dispatches;
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Start a `TrogonAgent` with a `WasmRuntimeBashTool` and a permission channel.
+async fn start_agent_with_bash_and_permission(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+    permission_tx: trogon_acp_runner::PermissionTx,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let bash_tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        Duration::from_secs(10),
+        store.clone(),
+    );
+    let (dispatch_name, orig_name, client) = bash_tool.into_dispatch();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![WasmRuntimeBashTool::<NatsSessionStore>::tool_def()];
+    agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        Some(permission_tx),
         None,
         Arc::new(RwLock::new(None)),
     );
@@ -959,26 +1046,19 @@ async fn runner_static_deny_rule_blocks_tool_without_consulting_permission_chann
             .body_contains("tool_result")
             .body_contains("Permission denied");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Understood, .env access was blocked"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Understood, .env access was blocked"));
     });
     // First call: write_file targeting .env → triggers deny rule.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_deny_001",
-                        "name": "write_file",
-                        "input": {"path": ".env", "content": "SECRET=x"}
-                    }]
-                })
-                .to_string(),
-            );
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_deny_001",
+                "write_file",
+                serde_json::json!({"path": ".env", "content": "SECRET=x"}),
+            ));
     });
 
     let prefix = "test-rules-deny";
@@ -1046,26 +1126,19 @@ async fn runner_static_allow_rule_auto_approves_tool_without_permission_channel(
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(end_turn_body("Got the file"));
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got the file"));
     });
     // First call: read_file → triggers allow rule.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_allow_001",
-                        "name": "read_file",
-                        "input": {"path": "Cargo.toml"}
-                    }]
-                })
-                .to_string(),
-            );
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_allow_001",
+                "read_file",
+                serde_json::json!({"path": "Cargo.toml"}),
+            ));
     });
 
     let prefix = "test-rules-allow";
@@ -2341,6 +2414,814 @@ async fn runner_bash_tool_persists_terminal_id_in_nats_kv() {
                 state.terminal_id.as_deref(),
                 Some(terminal_id),
                 "terminal_id must be persisted in NatsKvSessionStore after bash tool runs"
+            );
+        })
+        .await;
+}
+
+// ── Todo tools ────────────────────────────────────────────────────────────────
+
+/// Agent calls `todo_write` → NatsTodoTool saves the item → tool returns "OK"
+/// → second LLM call → end_turn.  The ToolCallFinished notification must carry
+/// "OK" confirming the write succeeded.
+#[tokio::test]
+async fn runner_todo_write_tool_returns_ok_and_completes() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-todo-write";
+    let session_id = "sess-todo-w-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Todo saved."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_todo_w_001",
+                "todo_write",
+                serde_json::json!({"id": "t1", "content": "Write integration tests", "status": "pending"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "add a todo").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after todo_write; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("\"OK\"")),
+                "ToolCallFinished notification must contain 'OK' from todo_write; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+/// Pre-populate a todo in the session store, then have the agent call
+/// `todo_read`.  The tool result must contain the todo text, which is then
+/// forwarded to the LLM and triggers end_turn.
+#[tokio::test]
+async fn runner_todo_read_returns_pre_populated_active_todos() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-todo-read";
+    let session_id = "sess-todo-r-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("pending");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got your todos."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream("tu_todo_r_001", "todo_read", serde_json::json!({})));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store =
+                start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url())
+                    .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.todos.push(TodoItem {
+                id: "t-pre".to_string(),
+                content: "Pre-existing task".to_string(),
+                status: "pending".to_string(),
+            });
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "list todos").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after todo_read; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Pre-existing task")),
+                "tool result must surface the pre-existing todo; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── Spawn agent ───────────────────────────────────────────────────────────────
+
+/// Agent calls `spawn_agent` → `SpawnAgentTool` sends a NATS request on
+/// `{prefix}.agent.spawn` → a mock responder replies → the response lands in
+/// the second Anthropic call as a tool result → end_turn.
+#[tokio::test]
+async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-spawn";
+    let session_id = "sess-spawn-1";
+
+    let spawn_nats = nats.clone();
+    let spawn_prefix = prefix.to_string();
+    tokio::spawn(async move {
+        let subject = format!("{spawn_prefix}.agent.spawn");
+        let mut sub = spawn_nats.subscribe(subject).await.unwrap();
+        if let Some(msg) = sub.next().await {
+            spawn_nats
+                .publish(msg.reply.unwrap(), r#"{"session_id":"spawned-abc"}"#.into())
+                .await
+                .unwrap();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("spawned-abc");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Agent spawned."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_spawn_001",
+                "spawn_agent",
+                serde_json::json!({"capability": "coding", "prompt": "Fix the bug"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let spawn_tool = SpawnAgentTool::new(nats.clone(), prefix);
+            let (dispatch_name, orig_name, client) = spawn_tool.into_dispatch();
+
+            let mut agent = make_agent(&server.base_url());
+            agent.mcp_tool_defs = vec![SpawnAgentTool::tool_def()];
+            agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+            let notifier = NatsSessionNotifier::new(nats.clone());
+            let ta = TrogonAgent::new(
+                notifier,
+                store,
+                agent,
+                prefix,
+                "claude-test",
+                None,
+                None,
+                Arc::new(RwLock::new(None)),
+            );
+            let acp_prefix = AcpPrefix::new(prefix).unwrap();
+            let (_, io_task) = AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(io_task);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "spawn an agent").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after spawn_agent; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("spawned-abc")),
+                "tool result must contain the spawned session ID; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── TROGON.md permission rules ────────────────────────────────────────────────
+
+/// When the session cwd contains a TROGON.md with `deny_paths`, the runner
+/// loads the file and rejects the matching tool call without consulting the
+/// interactive permission channel.
+#[tokio::test]
+async fn runner_trogon_md_deny_path_blocks_tool_without_permission_channel() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(
+        dir.path().join("TROGON.md"),
+        "## Permissions\ndeny_paths: secrets.txt\n",
+    )
+    .await
+    .unwrap();
+
+    let prefix = "test-trogon-md-deny";
+    let session_id = "sess-tmd-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Access denied."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_tmd_001",
+                "write_file",
+                serde_json::json!({"path": "secrets.txt", "content": "top-secret"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // state.cwd must point to the temp dir so the agent loads TROGON.md from it.
+            let mut state = store.load(session_id).await.unwrap();
+            state.cwd = dir.path().to_string_lossy().into_owned();
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "write secrets").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after TROGON.md deny; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "TROGON.md deny must not consult the interactive permission channel"
+            );
+        })
+        .await;
+}
+
+// ── Command-based permission rules ────────────────────────────────────────────
+
+/// `deny_commands: rm` in `permission_rules_text` blocks a bash call matching
+/// the prefix without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_deny_commands_rule_blocks_bash_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-deny-cmd";
+    let session_id = "sess-deny-cmd-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Understood, rm is blocked."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_deny_cmd_001",
+                "bash",
+                serde_json::json!({"command": "rm -rf /tmp/test-deny"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\ndeny_commands: rm\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "run rm").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after deny_commands; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "deny_commands must not forward to the interactive channel"
+            );
+        })
+        .await;
+}
+
+/// `allow_commands: echo` in `permission_rules_text` auto-approves a matching
+/// bash call without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_allow_commands_rule_auto_approves_bash_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-allow-cmd";
+    let session_id = "sess-allow-cmd-1";
+    let terminal_id = "term-allow-cmd-001";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+    spawn_terminal_responders(
+        nats.clone(),
+        base,
+        ext_base,
+        terminal_id,
+        "hello-from-allow\n",
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Echo completed."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_allow_cmd_001",
+                "bash",
+                serde_json::json!({"command": "echo hello-from-allow"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_and_permission(
+                nats.clone(),
+                &js,
+                prefix,
+                session_id,
+                &server.base_url(),
+                permission_tx,
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\nallow_commands: echo\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "echo something").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after allow_commands auto-approve; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("hello-from-allow")),
+                "tool result must contain bash output; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "allow_commands must not consult the interactive permission channel"
+            );
+        })
+        .await;
+}
+
+// ── Rule merge: TROGON.md + session rules ─────────────────────────────────────
+
+/// TROGON.md grants `allow_paths: src/**`; a session rule adds
+/// `deny_paths: src/secret.rs`.  Deny takes precedence over Allow, so the
+/// tool call is blocked without consulting the interactive channel.
+#[tokio::test]
+async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(
+        dir.path().join("TROGON.md"),
+        "## Permissions\nallow_paths: src/**\n",
+    )
+    .await
+    .unwrap();
+
+    let prefix = "test-merge-rules";
+    let session_id = "sess-merge-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Access denied by session rule."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_merge_001",
+                "write_file",
+                serde_json::json!({"path": "src/secret.rs", "content": "sensitive"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\ndeny_paths: src/secret.rs\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "write the secret file").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after merged deny; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "merged deny must not consult the interactive channel"
+            );
+        })
+        .await;
+}
+
+// ── Fallback to interactive permission channel ─────────────────────────────────
+
+/// When static rules return `Ask` (no matching allow or deny), the request
+/// falls through to the interactive channel.  The channel approves and the
+/// tool executes, resulting in end_turn.
+#[tokio::test]
+async fn runner_no_matching_rule_falls_through_to_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-rule-ask";
+    let session_id = "sess-rule-ask-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got it."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_ask_001",
+                "write_file",
+                serde_json::json!({"path": "unmatched_file.txt", "content": "hello"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Rules only cover src/** — unmatched_file.txt falls through to the channel.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text =
+                Some("## Permissions\nallow_paths: src/**\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            // Approve the interactive permission request from a background task.
+            tokio::task::spawn_local(async move {
+                if let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "write the file").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after interactive approval; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── /config permissions command ───────────────────────────────────────────────
+
+/// Sending a `set_config_option` ACP message with `config_id="permissions"` and
+/// a rules payload persists `permission_rules_text` in the session store.  On the
+/// next prompt the rules are active: a `deny_commands: rm` rule blocks the bash
+/// call without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_config_permissions_persists_and_enforces_on_next_prompt() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-cfg-perm";
+    let session_id = "sess-cfg-perm-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got it, rm is blocked."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_cfg_perm_001",
+                "bash",
+                serde_json::json!({"command": "rm -rf /tmp/test-cfg"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Send the /config permissions ACP message via NATS request-reply.
+            let config_subject =
+                format!("{prefix}.session.{session_id}.agent.set_config_option");
+            let config_req = SetSessionConfigOptionRequest::new(
+                session_id,
+                "permissions",
+                SessionConfigOptionValue::ValueId {
+                    value: "## Permissions\ndeny_commands: rm\n".into(),
+                },
+            );
+            let resp_msg = nats
+                .request(
+                    config_subject,
+                    Bytes::from(serde_json::to_vec(&config_req).unwrap()),
+                )
+                .await
+                .expect("set_config_option request must succeed");
+            let _: SetSessionConfigOptionResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as SetSessionConfigOptionResponse");
+
+            // Verify the store reflects the updated rules.
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state
+                    .permission_rules_text
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("deny_commands: rm"),
+                "permission_rules_text must be persisted after /config permissions"
+            );
+
+            // Now send a prompt — the LLM will call bash with "rm".
+            // The deny rule must block it without consulting the channel.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "run rm").await;
+
+            let (notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after deny via /config permissions; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "deny_commands from /config must not consult the interactive channel"
+            );
+        })
+        .await;
+}
+
+// ── fork_session ──────────────────────────────────────────────────────────────
+
+/// A forked session must inherit `todos` and `permission_rules_text` from the
+/// source session.  Both fields were added to the `fork_session` initializer as
+/// part of this branch; without them they would default to empty/None in the
+/// child, silently losing data that the user set in the parent.
+#[tokio::test]
+async fn runner_fork_session_inherits_todos_and_permission_rules() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-fork";
+    let source_id = "sess-fork-src-1";
+    let rules_text = "## Permissions\ndeny_commands: rm\n";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent("http://127.0.0.1:1"),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Seed the source session with a todo and permission rules.
+            let mut state = store.load(source_id).await.unwrap();
+            state.todos.push(TodoItem {
+                id: "todo-fork-1".to_string(),
+                content: "Inherited task".to_string(),
+                status: "pending".to_string(),
+            });
+            state.permission_rules_text = Some(rules_text.to_string());
+            store.save(source_id, &state).await.unwrap();
+
+            // Send fork request via NATS request-reply.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
+            let resp_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&fork_req).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ForkSessionResponse");
+
+            let forked_id = fork_resp.session_id.to_string();
+
+            // Verify the forked session inherited both fields.
+            let forked = store.load(&forked_id).await.unwrap();
+
+            assert_eq!(
+                forked.todos.len(),
+                1,
+                "forked session must inherit todos from source; got: {:?}",
+                forked.todos
+            );
+            assert_eq!(
+                forked.todos[0].content, "Inherited task",
+                "forked todo content must match source"
+            );
+
+            assert_eq!(
+                forked.permission_rules_text.as_deref(),
+                Some(rules_text),
+                "forked session must inherit permission_rules_text from source"
             );
         })
         .await;
