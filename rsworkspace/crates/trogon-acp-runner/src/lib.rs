@@ -16,3 +16,6 @@ pub use trogon_runner_tools::{
     ChannelPermissionChecker, NatsSessionStore, PermissionReq, PermissionTx, SessionState,
     SessionStore, StoredMcpServer,
 };
+
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::session_store;

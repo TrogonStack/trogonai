@@ -26,5 +26,5 @@ trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true }
 testcontainers-modules = { version = "0.8", features = ["nats"] }
 futures-util = { workspace = true }
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"

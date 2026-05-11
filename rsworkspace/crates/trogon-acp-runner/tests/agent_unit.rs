@@ -771,6 +771,76 @@ async fn fork_session_inherits_parent_mode_and_model() {
         .await;
 }
 
+#[tokio::test]
+async fn fork_session_inherits_todos_from_parent() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let mut state = store.load(&parent_id).await.unwrap();
+            state.todos.push(trogon_runner_tools::session_store::TodoItem {
+                id: "t1".to_string(),
+                content: "Inherited task".to_string(),
+                status: "pending".to_string(),
+            });
+            store.save(&parent_id, &state).await.unwrap();
+
+            let fork_id = agent
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(fork_state.todos.len(), 1, "fork must inherit parent todos");
+            assert_eq!(fork_state.todos[0].content, "Inherited task");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_session_inherits_permission_rules_text_from_parent() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let parent_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let parent_id = parent_resp.session_id.to_string();
+
+            let rules = "## Permissions\ndeny_commands: rm\n";
+            let mut state = store.load(&parent_id).await.unwrap();
+            state.permission_rules_text = Some(rules.to_string());
+            store.save(&parent_id, &state).await.unwrap();
+
+            let fork_id = agent
+                .fork_session(ForkSessionRequest::new(parent_id, "/fork"))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(
+                fork_state.permission_rules_text.as_deref(),
+                Some(rules),
+                "fork must inherit parent permission_rules_text"
+            );
+        })
+        .await;
+}
+
 // ── fork_session: edge cases ──────────────────────────────────────────────────
 
 #[tokio::test]
@@ -1667,6 +1737,68 @@ async fn set_session_config_option_unknown_id_is_silently_ignored() {
                 result.is_ok(),
                 "unknown config_id must return Ok (silently ignored), got: {:?}",
                 result
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn set_session_config_option_permissions_persists_to_store() {
+    let (store, _, agent) = make_agent_parts();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let sid = resp.session_id.to_string();
+            let rules = "## Permissions\ndeny_commands: rm\n";
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "permissions",
+                    SessionConfigOptionValue::ValueId { value: rules.into() },
+                ))
+                .await
+                .unwrap();
+            let state = store.load(&sid).await.unwrap();
+            assert_eq!(
+                state.permission_rules_text.as_deref(),
+                Some(rules),
+                "permission_rules_text must be persisted after config update"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn set_session_config_option_permissions_empty_clears_rules() {
+    let (store, _, agent) = make_agent_parts();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent.new_session(NewSessionRequest::new("/cwd")).await.unwrap();
+            let sid = resp.session_id.to_string();
+
+            // Set rules first, then clear with empty value.
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "permissions",
+                    SessionConfigOptionValue::ValueId { value: "deny_commands: rm".into() },
+                ))
+                .await
+                .unwrap();
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "permissions",
+                    SessionConfigOptionValue::ValueId { value: "".into() },
+                ))
+                .await
+                .unwrap();
+            let state = store.load(&sid).await.unwrap();
+            assert!(
+                state.permission_rules_text.is_none(),
+                "empty value must clear permission_rules_text"
             );
         })
         .await;

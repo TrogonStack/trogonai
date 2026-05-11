@@ -1168,6 +1168,8 @@ where
             branched_at_index: branch_at,
             terminal_id: None,
             token_budget: src_state.token_budget,
+            todos: src_state.todos.clone(),
+            permission_rules_text: src_state.permission_rules_text.clone(),
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
