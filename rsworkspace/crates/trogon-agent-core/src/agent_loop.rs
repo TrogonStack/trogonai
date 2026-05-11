@@ -1770,4 +1770,152 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let result = handle.await.expect("task panicked");
         assert!(result.is_ok(), "run_chat_streaming failed: {result:?}");
     }
+
+    // ── AgentEvent ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn agent_event_text_delta_is_constructible_and_cloneable() {
+        let ev = AgentEvent::TextDelta { text: "hello".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::TextDelta { text } if text == "hello"));
+    }
+
+    #[test]
+    fn agent_event_thinking_delta_is_constructible_and_cloneable() {
+        let ev = AgentEvent::ThinkingDelta { text: "reasoning...".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::ThinkingDelta { text } if text == "reasoning..."));
+    }
+
+    #[test]
+    fn agent_event_tool_call_started_fields_are_accessible() {
+        let input = serde_json::json!({"key": "val"});
+        let ev = AgentEvent::ToolCallStarted {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            input: input.clone(),
+            parent_tool_use_id: Some("parent-42".to_string()),
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::ToolCallStarted { id, name, input: inp, parent_tool_use_id } => {
+                assert_eq!(id, "call-1");
+                assert_eq!(name, "bash");
+                assert_eq!(inp, input);
+                assert_eq!(parent_tool_use_id.as_deref(), Some("parent-42"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_tool_call_started_without_parent() {
+        let ev = AgentEvent::ToolCallStarted {
+            id: "c".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        };
+        assert!(matches!(
+            ev,
+            AgentEvent::ToolCallStarted { parent_tool_use_id: None, .. }
+        ));
+    }
+
+    #[test]
+    fn agent_event_tool_call_finished_fields_are_accessible() {
+        let ev = AgentEvent::ToolCallFinished {
+            id: "call-2".to_string(),
+            output: "result text".to_string(),
+            exit_code: Some(0),
+            signal: None,
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                assert_eq!(id, "call-2");
+                assert_eq!(output, "result text");
+                assert_eq!(exit_code, Some(0));
+                assert!(signal.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_tool_call_finished_with_signal() {
+        let ev = AgentEvent::ToolCallFinished {
+            id: "c".to_string(),
+            output: String::new(),
+            exit_code: None,
+            signal: Some("SIGKILL".to_string()),
+        };
+        assert!(matches!(
+            ev,
+            AgentEvent::ToolCallFinished { signal: Some(s), .. } if s == "SIGKILL"
+        ));
+    }
+
+    #[test]
+    fn agent_event_system_status_is_constructible_and_cloneable() {
+        let ev = AgentEvent::SystemStatus { message: "overloaded".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::SystemStatus { message } if message == "overloaded"));
+    }
+
+    #[test]
+    fn agent_event_usage_summary_fields_are_accessible() {
+        let ev = AgentEvent::UsageSummary {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 10,
+            cache_read_tokens: 5,
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::UsageSummary {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            } => {
+                assert_eq!(input_tokens, 100);
+                assert_eq!(output_tokens, 50);
+                assert_eq!(cache_creation_tokens, 10);
+                assert_eq!(cache_read_tokens, 5);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_debug_format_is_non_empty() {
+        let events = vec![
+            AgentEvent::TextDelta { text: "t".to_string() },
+            AgentEvent::ThinkingDelta { text: "th".to_string() },
+            AgentEvent::ToolCallStarted {
+                id: "i".to_string(),
+                name: "n".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            AgentEvent::ToolCallFinished {
+                id: "i".to_string(),
+                output: "o".to_string(),
+                exit_code: None,
+                signal: None,
+            },
+            AgentEvent::SystemStatus { message: "m".to_string() },
+            AgentEvent::UsageSummary {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            },
+        ];
+        for ev in events {
+            let dbg = format!("{ev:?}");
+            assert!(!dbg.is_empty(), "Debug output must be non-empty");
+        }
+    }
 }

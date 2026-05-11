@@ -460,6 +460,97 @@ mod tests {
         assert_eq!(&ts[16..17], ":", "colon after minute: {ts}");
     }
 
+    // ── StoredMcpServer serde ─────────────────────────────────────────────────
+
+    #[test]
+    fn stored_mcp_server_roundtrip_with_headers() {
+        let server = StoredMcpServer {
+            name: "my-server".to_string(),
+            url: "https://mcp.example.com/sse".to_string(),
+            headers: vec![
+                ("Authorization".to_string(), "Bearer tok".to_string()),
+                ("X-Tenant".to_string(), "acme".to_string()),
+            ],
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "my-server");
+        assert_eq!(back.url, "https://mcp.example.com/sse");
+        assert_eq!(back.headers.len(), 2);
+        assert_eq!(back.headers[0], ("Authorization".to_string(), "Bearer tok".to_string()));
+    }
+
+    #[test]
+    fn stored_mcp_server_empty_headers_roundtrip() {
+        let server = StoredMcpServer {
+            name: "bare".to_string(),
+            url: "http://localhost:8080".to_string(),
+            headers: vec![],
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert!(back.headers.is_empty());
+    }
+
+    #[test]
+    fn stored_mcp_server_missing_headers_field_defaults_to_empty() {
+        let json = r#"{"name":"s","url":"http://x"}"#;
+        let server: StoredMcpServer = serde_json::from_str(json).unwrap();
+        assert!(server.headers.is_empty(), "headers must default to empty vec");
+    }
+
+    // ── TodoItem serde ────────────────────────────────────────────────────────
+
+    #[test]
+    fn todo_item_roundtrip() {
+        let item = TodoItem {
+            id: "task-1".to_string(),
+            content: "Write tests".to_string(),
+            status: "in_progress".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, "task-1");
+        assert_eq!(back.content, "Write tests");
+        assert_eq!(back.status, "in_progress");
+    }
+
+    #[test]
+    fn todo_item_pending_status_roundtrip() {
+        let item = TodoItem {
+            id: "t".to_string(),
+            content: "c".to_string(),
+            status: "pending".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "pending");
+    }
+
+    #[test]
+    fn todo_item_completed_status_roundtrip() {
+        let item = TodoItem {
+            id: "t".to_string(),
+            content: "c".to_string(),
+            status: "completed".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "completed");
+    }
+
+    #[test]
+    fn todo_item_clone_is_independent() {
+        let item = TodoItem {
+            id: "orig".to_string(),
+            content: "c".to_string(),
+            status: "pending".to_string(),
+        };
+        let mut cloned = item.clone();
+        cloned.id = "copy".to_string();
+        assert_eq!(item.id, "orig", "clone must not mutate original");
+    }
+
     #[test]
     fn now_iso8601_year_is_plausible() {
         let ts = now_iso8601();

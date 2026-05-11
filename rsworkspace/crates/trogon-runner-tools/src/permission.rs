@@ -223,4 +223,107 @@ mod tests {
             .await;
         assert!(!result, "dropped response_tx should return false");
     }
+
+    // ── RulesPermissionChecker ────────────────────────────────────────────────
+
+    fn make_rules_checker(rules_text: &str, tx: PermissionTx) -> RulesPermissionChecker {
+        RulesPermissionChecker {
+            rules: Arc::new(PermissionRules::parse(rules_text)),
+            inner: ChannelPermissionChecker {
+                session_id: "sess-rules".to_string(),
+                tx,
+                allowed_tools: vec![],
+            },
+        }
+    }
+
+    /// `Deny` rule → returns false immediately, without consulting the inner checker.
+    #[tokio::test]
+    async fn rules_deny_returns_false_without_inner() {
+        // Deny all bash commands.
+        let (tx, rx) = mpsc::channel(1);
+        // Drop rx so any inner channel send would return an error — but it should
+        // never be reached for a Deny decision.
+        drop(rx);
+        let checker = make_rules_checker(
+            "## Permissions\ndeny_commands: bash\n",
+            tx,
+        );
+        let result = checker
+            .check("tc-d1", "bash", &serde_json::json!({"command": "rm -rf /"}))
+            .await;
+        assert!(!result, "Deny rule must return false");
+    }
+
+    /// `Allow` rule → returns true immediately, without consulting the inner checker.
+    #[tokio::test]
+    async fn rules_allow_returns_true_without_inner() {
+        // Allow all read_file calls.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx); // inner channel closed — would deny if reached
+        let checker = make_rules_checker(
+            "## Permissions\nallow_paths: **\n",
+            tx,
+        );
+        let result = checker
+            .check(
+                "tc-a1",
+                "read_file",
+                &serde_json::json!({"path": "/home/user/file.txt"}),
+            )
+            .await;
+        assert!(result, "Allow rule must return true");
+    }
+
+    /// `Ask` rule → delegates to the inner `ChannelPermissionChecker`.
+    #[tokio::test]
+    async fn rules_ask_delegates_to_inner_checker_allow() {
+        // Empty rules → all decisions are Ask.
+        let (tx, mut rx) = mpsc::channel::<PermissionReq>(1);
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(true);
+            }
+        });
+        let checker = make_rules_checker("", tx);
+        let result = checker
+            .check("tc-q1", "write_file", &serde_json::json!({"path": "/tmp/x"}))
+            .await;
+        assert!(result, "Ask must forward to inner and return its allow decision");
+    }
+
+    /// `Ask` rule → inner returns deny.
+    #[tokio::test]
+    async fn rules_ask_delegates_to_inner_checker_deny() {
+        let (tx, mut rx) = mpsc::channel::<PermissionReq>(1);
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(false);
+            }
+        });
+        let checker = make_rules_checker("", tx);
+        let result = checker
+            .check("tc-q2", "write_file", &serde_json::json!({"path": "/tmp/x"}))
+            .await;
+        assert!(!result, "Ask must forward to inner and return its deny decision");
+    }
+
+    /// Deny takes precedence even when an allow rule also matches.
+    #[tokio::test]
+    async fn rules_deny_beats_allow() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = make_rules_checker(
+            "## Permissions\nallow_paths: **\ndeny_paths: /etc/**\n",
+            tx,
+        );
+        let result = checker
+            .check(
+                "tc-db",
+                "read_file",
+                &serde_json::json!({"path": "/etc/passwd"}),
+            )
+            .await;
+        assert!(!result, "Deny must beat Allow");
+    }
 }
