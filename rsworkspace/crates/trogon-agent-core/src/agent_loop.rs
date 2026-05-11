@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt, future::join_all};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -169,18 +169,6 @@ struct AnthropicRequest<'a> {
 pub(crate) struct AnthropicResponse {
     pub(crate) stop_reason: String,
     pub(crate) content: Vec<ContentBlock>,
-    #[serde(default)]
-    pub(crate) usage: Option<AnthropicUsage>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct AnthropicUsage {
-    input_tokens: u32,
-    output_tokens: u32,
-    #[serde(default)]
-    cache_creation_input_tokens: u32,
-    #[serde(default)]
-    cache_read_input_tokens: u32,
 }
 
 // ── AnthropicHttpClient ───────────────────────────────────────────────────────
@@ -722,7 +710,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 Some(c) => c.as_ref(),
                 None => {
                     built_client = Arc::new(ReqwestAnthropicStreamingClient {
-                        http: self.http_client.clone(),
+                        http: reqwest::Client::new(),
                         proxy_url: self.proxy_url.clone(),
                         anthropic_token: self.anthropic_token.clone(),
                         anthropic_base_url: self.anthropic_base_url.clone(),
@@ -744,7 +732,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
             let mut turn_cache_read = 0u32;
 
             while let Some(chunk_result) = byte_stream.next().await {
-                let bytes = chunk_result.map_err(AgentError::Http)?;
+                let bytes = chunk_result.map_err(AgentError::from)?;
 
                 for (event_type, data) in sse.feed(&bytes) {
                     match event_type.as_str() {
@@ -894,134 +882,92 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         content: &[ContentBlock],
         event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
     ) -> Vec<ToolResult> {
-        let mut results = Vec::new();
-
-        for block in content {
-            if let ContentBlock::ToolUse {
-                id,
-                name,
-                input,
-                parent_tool_use_id,
-            } = block
-            {
-                debug!(tool = %name, "Executing tool (streaming)");
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallStarted {
-                        id: id.clone(),
-                        name: name.clone(),
-                        input: input.clone(),
-                        parent_tool_use_id: parent_tool_use_id.clone(),
-                    })
-                    .await;
-
-                let output = if name == "ask_user" {
-                    let question = input
-                        .get("question")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    // Ask permission before executing (if a checker is installed)
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(id, name, input).await,
-                        None => true,
-                    };
-                    if !allowed {
-                        format!("Permission denied: user refused to run tool `{name}`")
-                    } else if let Some((_, original, client)) = self
-                        .mcp_dispatch
-                        .iter()
-                        .find(|(prefixed, _, _)| prefixed == name)
-                    {
-                        match client.call_tool(original, input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
-                        }
-                    } else {
-                        dispatch_tool(&self.tool_context, name, input).await
-                    }
-                };
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolCallFinished {
-                        id: id.clone(),
-                        output: output.clone(),
-                        exit_code: None,
-                        signal: None,
-                    })
-                    .await;
-
-                results.push(ToolResult {
-                    tool_use_id: id.clone(),
-                    content: output,
-                });
-            }
-        }
-
-        results
+        join_all(content.iter().filter_map(|block| {
+            let ContentBlock::ToolUse { id, name, input, parent_tool_use_id } = block else {
+                return None;
+            };
+            Some(self.run_tool_streaming(id, name, input, parent_tool_use_id.as_deref(), event_tx))
+        }))
+        .await
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
-        let mut results = Vec::new();
+        join_all(content.iter().filter_map(|block| {
+            let ContentBlock::ToolUse { id, name, input, .. } = block else {
+                return None;
+            };
+            Some(self.run_tool(id, name, input))
+        }))
+        .await
+    }
 
-        for block in content {
-            if let ContentBlock::ToolUse {
-                id, name, input, ..
-            } = block
+    #[cfg_attr(coverage, coverage(off))]
+    async fn run_tool_streaming(
+        &self,
+        id: &str,
+        name: &str,
+        input: &Value,
+        parent_tool_use_id: Option<&str>,
+        event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
+    ) -> ToolResult {
+        debug!(tool = %name, "Executing tool (streaming)");
+        let _ = event_tx
+            .send(AgentEvent::ToolCallStarted {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                input: input.clone(),
+                parent_tool_use_id: parent_tool_use_id.map(String::from),
+            })
+            .await;
+        let output = self.tool_output(id, name, input).await;
+        let _ = event_tx
+            .send(AgentEvent::ToolCallFinished {
+                id: id.to_owned(),
+                output: output.clone(),
+                exit_code: None,
+                signal: None,
+            })
+            .await;
+        ToolResult { tool_use_id: id.to_owned(), content: output }
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn run_tool(&self, id: &str, name: &str, input: &Value) -> ToolResult {
+        debug!(tool = %name, "Executing tool");
+        let output = self.tool_output(id, name, input).await;
+        ToolResult { tool_use_id: id.to_owned(), content: output }
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn tool_output(&self, id: &str, name: &str, input: &Value) -> String {
+        if name == "ask_user" {
+            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+            match &self.elicitation_provider {
+                Some(provider) => match provider.elicit(question).await {
+                    Some(answer) => answer,
+                    None => "The user declined or cancelled the request.".to_string(),
+                },
+                None => "ask_user tool is not available in this context.".to_string(),
+            }
+        } else {
+            let allowed = match &self.permission_checker {
+                Some(checker) => checker.check(id, name, input).await,
+                None => true,
+            };
+            if !allowed {
+                format!("Permission denied: user refused to run tool `{name}`")
+            } else if let Some((_, original, client)) =
+                self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
             {
-                debug!(tool = %name, "Executing tool");
-
-                let output = if name == "ask_user" {
-                    let question = input
-                        .get("question")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    match &self.elicitation_provider {
-                        Some(provider) => match provider.elicit(question).await {
-                            Some(answer) => answer,
-                            None => "The user declined or cancelled the request.".to_string(),
-                        },
-                        None => "ask_user tool is not available in this context.".to_string(),
-                    }
-                } else {
-                    // Ask permission before executing (if a checker is installed).
-                    let allowed = match &self.permission_checker {
-                        Some(checker) => checker.check(id, name, input).await,
-                        None => true,
-                    };
-                    // Check MCP dispatch first, then fall back to built-in tools.
-                    if !allowed {
-                        format!("Permission denied: user refused to run tool `{name}`")
-                    } else if let Some((_, original, client)) = self
-                        .mcp_dispatch
-                        .iter()
-                        .find(|(prefixed, _, _)| prefixed == name)
-                    {
-                        match client.call_tool(original, input).await {
-                            Ok(out) => out,
-                            Err(e) => format!("Tool error: {e}"),
-                        }
-                    } else {
-                        dispatch_tool(&self.tool_context, name, input).await
-                    }
-                };
-
-                results.push(ToolResult {
-                    tool_use_id: id.clone(),
-                    content: output,
-                });
+                match client.call_tool(original, input).await {
+                    Ok(out) => out,
+                    Err(e) => format!("Tool error: {e}"),
+                }
+            } else {
+                dispatch_tool(&self.tool_context, name, input).await
             }
         }
-
-        results
     }
 }
 
@@ -1181,12 +1127,13 @@ mod tests {
         });
         AgentLoop {
             http_client: MockAnthropicClient::with_response(
-                r#"{"stop_reason":"end_turn","content":[],"usage":null}"#,
+                r#"{"stop_reason":"end_turn","content":[]}"#,
             ),
             proxy_url: "http://unused:9999".to_string(),
             anthropic_token: "test".to_string(),
             anthropic_base_url: None,
             anthropic_extra_headers: vec![],
+            streaming_client: None,
             model: "claude-opus-4-6".to_string(),
             max_iterations: 1,
             thinking_budget: None,
@@ -1346,34 +1293,6 @@ mod tests {
         assert!(cached_tools.is_empty());
     }
 
-    fn make_test_agent() -> AgentLoop {
-        use crate::tools::ToolContext;
-        let http_client = reqwest::Client::new();
-        let tool_context = Arc::new(ToolContext {
-            http_client: http_client.clone(),
-            proxy_url: "http://unused:9999".to_string(),
-        });
-        AgentLoop {
-            http_client,
-            proxy_url: "http://unused:9999".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            streaming_client: None,
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
-        }
-    }
-
 
     /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
     /// when content contains a ToolUse block with no matching MCP dispatch entry.
@@ -1497,30 +1416,29 @@ mod tests {
     /// Covers: TextDelta emitted in the max_tokens path when text is non-empty.
     #[tokio::test]
     async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
+        const SSE: &[u8] = b"\
+event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":5}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+        struct MaxTokensMock;
+        impl AnthropicStreamingClient for MaxTokensMock {
+            fn complete_streaming(
+                &self,
+                _body: serde_json::Value,
+            ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(
+                    Bytes::from_static(SSE),
+                ))))
+            }
+        }
+
         let (tx, mut rx) = tokio::sync::mpsc::channel(32);
-        let agent = AgentLoop {
-            http_client: MockAnthropicClient::with_response(
-                r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":10,"output_tokens":5}}"#,
-            ),
-            proxy_url: "http://unused".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            streaming_client: None,
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context: Arc::new(crate::tools::ToolContext {
-                proxy_url: "http://unused".to_string(),
-            }),
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
-        };
+        let mut agent = make_test_agent();
+        agent.streaming_client = Some(Arc::new(MaxTokensMock));
         let result = agent
             .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
             .await;
