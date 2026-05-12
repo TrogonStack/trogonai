@@ -196,7 +196,6 @@ mod tests {
         TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
     };
     use super::*;
-    use reqwest::header::CONTENT_TYPE;
     use serde_json::{Value, json};
     use std::error::Error;
     #[cfg(coverage)]

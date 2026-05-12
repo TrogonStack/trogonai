@@ -12,7 +12,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::StreamExt as _;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
@@ -21,8 +21,8 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge,
 };
-use trogon_source_linear::config::{LinearConfig, LinearWebhookSecret};
-use trogon_source_linear::{provision, router};
+use trogon_gateway::source::linear::config::{LinearConfig, LinearWebhookSecret};
+use trogon_gateway::source::linear::{provision, router};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;

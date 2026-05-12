@@ -6,6 +6,10 @@ edition = "2024"
 [lints]
 workspace = true
 
+[lib]
+name = "trogon_gateway"
+path = "src/lib.rs"
+
 [[bin]]
 name = "trogon-gateway"
 path = "src/main.rs"

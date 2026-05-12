@@ -15,7 +15,7 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::StreamExt as _;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
@@ -24,8 +24,8 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore, StreamMaxAge,
 };
-use trogon_source_github::config::{GitHubWebhookSecret, GithubConfig};
-use trogon_source_linear::config::{LinearConfig, LinearWebhookSecret};
+use trogon_gateway::source::github::config::{GitHubWebhookSecret, GithubConfig};
+use trogon_gateway::source::linear::config::{LinearConfig, LinearWebhookSecret};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -119,10 +119,10 @@ async fn setup() -> TestFixture {
     let gh_cfg = github_config();
     let lin_cfg = linear_config();
 
-    trogon_source_github::provision(&js_client, &gh_cfg)
+    trogon_gateway::source::github::provision(&js_client, &gh_cfg)
         .await
         .expect("github stream provision failed");
-    trogon_source_linear::provision(&js_client, &lin_cfg)
+    trogon_gateway::source::linear::provision(&js_client, &lin_cfg)
         .await
         .expect("linear stream provision failed");
 
@@ -146,11 +146,11 @@ async fn setup() -> TestFixture {
         )
         .nest(
             "/github",
-            trogon_source_github::router(publisher.clone(), &gh_cfg),
+            trogon_gateway::source::github::router(publisher.clone(), &gh_cfg),
         )
         .nest(
             "/linear",
-            trogon_source_linear::router(publisher.clone(), &lin_cfg),
+            trogon_gateway::source::linear::router(publisher.clone(), &lin_cfg),
         );
 
     TestFixture {

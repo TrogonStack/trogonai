@@ -316,6 +316,7 @@ mod tests {
                 mcp_dispatch: vec![],
                 permission_checker: None,
                 elicitation_provider: None,
+                streaming_client: None,
             };
             let store = rt.block_on(async {
                 let js = async_nats::jetstream::new(nats_for_server.clone());
