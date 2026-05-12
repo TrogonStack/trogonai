@@ -98,12 +98,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .telegram
         .iter()
         .filter(|integration| integration.config.registration.is_some())
-        .map(|integration| &integration.config)
+        .map(|integration| (&integration.id, &integration.config))
         .collect();
     if !telegram_registration_configs.is_empty() {
-        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
-        for config in telegram_registration_configs {
-            crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await?;
+        match crate::source::telegram::registration::registration_http_client() {
+            Ok(telegram_http_client) => {
+                for (integration_id, config) in telegram_registration_configs {
+                    if let Err(error) =
+                        crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await
+                    {
+                        error!(
+                            source = "telegram",
+                            integration = %integration_id,
+                            error = %error,
+                            "Telegram webhook registration failed"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                error!(
+                    source = "telegram",
+                    error = %error,
+                    "Telegram webhook registration HTTP client initialization failed"
+                );
+            }
         }
     }
 
