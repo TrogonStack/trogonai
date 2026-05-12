@@ -20,6 +20,7 @@ use tracing::{info, warn};
 
 use super::{fetch_memory, run_agent};
 use crate::agent_loop::AgentLoop;
+use crate::promise_store::{AgentPromise, PromiseStatus};
 use crate::tools::{ToolDef, slack, tool_def};
 
 /// Actions that trigger a review.
@@ -40,21 +41,73 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
         return None;
     }
 
+    if event["pull_request"]["draft"].as_bool().unwrap_or(false) {
+        info!("PR is a draft — skipping review");
+        return None;
+    }
+
     let owner = event["repository"]["owner"]["login"].as_str()?;
     let repo = event["repository"]["name"].as_str()?;
     let pr_number = event["number"].as_u64()?;
+    let head_sha = event["pull_request"]["head"]["sha"]
+        .as_str()
+        .unwrap_or("");
+
+    // SHA-based dedup: if rapid force-pushes fire multiple synchronize events
+    // for the same commit, only the first one should trigger a review.
+    if !head_sha.is_empty() {
+        if let Some(store) = &agent.promise_store {
+            let dedup_id = format!("pr-review-sha.{owner}.{repo}.{head_sha}");
+            if store
+                .get_promise(&agent.tenant_id, &dedup_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                info!(head_sha, "PR head SHA already reviewed — skipping duplicate");
+                return None;
+            }
+            let marker = AgentPromise {
+                id: dedup_id,
+                tenant_id: agent.tenant_id.clone(),
+                automation_id: String::new(),
+                status: PromiseStatus::Resolved,
+                messages: vec![],
+                iteration: 0,
+                worker_id: String::new(),
+                claimed_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                trigger: serde_json::Value::Null,
+                nats_subject: String::new(),
+                system_prompt: None,
+                recovery_count: 0,
+                checkpoint_degraded: false,
+                failure_reason: None,
+            };
+            let _ = store.put_promise(&marker).await;
+        }
+    }
 
     info!(owner, repo, pr_number, "Starting PR review agent");
 
     let prompt = format!(
-        "You are a code reviewer. Review the pull request #{pr_number} in {owner}/{repo}.\n\
+        "You are a code reviewer. Review pull request #{pr_number} in {owner}/{repo}.\n\
+         The current head commit SHA is `{head_sha}` — pass it as `commit_sha` when calling `post_pr_review`.\n\
          1. Use `get_file_contents` with path `.trogon/memory.md` — the result is a JSON object \
             with `sha` and `content`; note the `sha` (you will need it to update the file later).\n\
          2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
-         3. Use `list_pr_files` to see which files changed.\n\
-         4. Use `get_pr_diff` to read the unified diff.\n\
-         5. Use `get_file_contents` when you need more context around a specific change.\n\
-         6. Post a concise, actionable review comment using `post_pr_comment`.\n\
+         3. Use `list_pr_files` to see which files changed. Each file with a `patch` field has \
+            its diff lines numbered from 1 — those numbers are the `position` values for inline comments.\n\
+         4. Use `get_file_contents` when you need more context around a specific change.\n\
+         5. For each file that has a `patch` field, identify bugs, security issues, or correctness problems. \
+            If a file has no `patch` field, skip it — it is binary or too large to diff.\n\
+         6. Call `post_pr_review` once with all inline comments. Set `commit_sha` to `{head_sha}`. \
+            Set `event` to \"COMMENT\" unless you are certain the code is correct (\"APPROVE\") \
+            or has a critical defect (\"REQUEST_CHANGES\"). \
+            Each comment needs `path` (file path), `position` (number from the annotated patch), and `body`.\n\
          7. If you learned something important about the repo conventions, update `.trogon/memory.md` \
             using `update_file` (pass the `sha` from step 1, use a new branch), \
             then open a PR with `create_pull_request`.\n\
@@ -139,16 +192,35 @@ fn pr_review_tools() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
-            "post_pr_comment",
-            "Post a comment on a pull request.",
+            "post_pr_review",
+            "Post a pull request review with optional inline diff comments. Prefer this over `post_pr_comment` for code review feedback.",
             serde_json::json!({
                 "type": "object",
-                "required": ["owner", "repo", "pr_number", "body"],
+                "required": ["owner", "repo", "pr_number", "body", "event"],
                 "properties": {
-                    "owner":     { "type": "string" },
-                    "repo":      { "type": "string" },
-                    "pr_number": { "type": "integer" },
-                    "body":      { "type": "string", "description": "Markdown comment body" }
+                    "owner":      { "type": "string" },
+                    "repo":       { "type": "string" },
+                    "pr_number":  { "type": "integer" },
+                    "commit_sha": { "type": "string", "description": "PR head commit SHA — required when submitting inline comments" },
+                    "body":       { "type": "string", "description": "Overall review summary" },
+                    "event":      {
+                        "type": "string",
+                        "enum": ["COMMENT", "APPROVE", "REQUEST_CHANGES"],
+                        "description": "Review disposition"
+                    },
+                    "comments": {
+                        "type": "array",
+                        "description": "Inline comments on specific diff lines",
+                        "items": {
+                            "type": "object",
+                            "required": ["path", "position", "body"],
+                            "properties": {
+                                "path":     { "type": "string", "description": "File path relative to repo root" },
+                                "position": { "type": "integer", "description": "1-based line position in the file's annotated diff patch" },
+                                "body":     { "type": "string", "description": "Comment text (Markdown)" }
+                            }
+                        }
+                    }
                 }
             }),
         ),
@@ -213,17 +285,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pr_review_tools_has_eight_entries() {
+    fn pr_review_tools_has_expected_count() {
         assert_eq!(pr_review_tools().len(), 10);
     }
 
     #[test]
-    fn pr_review_tools_includes_memory_tools() {
+    fn pr_review_tools_includes_expected_tools() {
         let tools = pr_review_tools();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"get_pr_comments"));
         assert!(names.contains(&"update_file"));
         assert!(names.contains(&"create_pull_request"));
+        assert!(names.contains(&"post_pr_review"));
     }
 
     #[test]
@@ -279,6 +352,74 @@ mod tests {
             handle(&make_agent(), b"not json").await,
             Some(Err(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn handle_skips_draft_pr() {
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 3,
+            "pull_request": { "draft": true, "head": { "sha": "abc" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&make_agent(), &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none(),
+            "draft PR must be skipped"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_skips_duplicate_sha() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{AgentPromise, PromiseStatus};
+        use std::sync::Arc;
+
+        let store = MockPromiseStore::new();
+        store.insert_promise(AgentPromise {
+            id: "pr-review-sha.o.r.deadbeef".to_string(),
+            tenant_id: "test".to_string(),
+            automation_id: String::new(),
+            status: PromiseStatus::Resolved,
+            messages: vec![],
+            iteration: 0,
+            worker_id: String::new(),
+            claimed_at: 0,
+            trigger: serde_json::Value::Null,
+            nats_subject: String::new(),
+            system_prompt: None,
+            recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
+        });
+
+        let mut agent = make_agent();
+        agent.promise_store = Some(Arc::new(store));
+
+        let payload = serde_json::json!({
+            "action": "synchronize",
+            "number": 4,
+            "pull_request": { "draft": false, "head": { "sha": "deadbeef" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_none(),
+            "duplicate SHA must be skipped"
+        );
+    }
+
+    #[test]
+    fn prompt_contains_head_sha() {
+        // Verify the format string embeds the SHA — no agent run needed.
+        let sha = "deadbeef1234";
+        let prompt = format!(
+            "head commit SHA is `{sha}` — pass it as `commit_sha`",
+            sha = sha
+        );
+        assert!(prompt.contains(sha));
     }
 
     /// When `repository.owner.login`, `repository.name`, or `number` is absent

@@ -547,6 +547,7 @@ pub async fn dispatch_tool<H: HttpClient>(
         "update_file" => github::update_file(ctx, input).await,
         "create_pull_request" => github::create_pull_request(ctx, input).await,
         "post_pr_comment" => github::post_pr_comment(ctx, input).await,
+        "post_pr_review" => github::post_pr_review(ctx, input).await,
         "request_reviewers" => github::request_reviewers(ctx, input).await,
         "get_linear_issue" => linear::get_issue(ctx, input).await,
         "update_linear_issue" => linear::update_issue(ctx, input).await,
@@ -702,6 +703,14 @@ mod tests {
     async fn dispatch_post_pr_comment_routes_correctly() {
         let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
         let result = dispatch_tool(&ctx, "post_pr_comment", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_post_pr_review_routes_correctly() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "tok_github_prod_test01", "", "");
+        let result = dispatch_tool(&ctx, "post_pr_review", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
     }
