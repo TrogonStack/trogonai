@@ -548,4 +548,153 @@ mod tests {
             "empty sha must not trigger dedup skip"
         );
     }
+
+    #[tokio::test]
+    async fn handle_get_promise_error_does_not_block_review() {
+        // If get_promise returns Err the handler must treat it as a cache miss
+        // and proceed, not abort. The `.ok().flatten()` in the dedup guard
+        // converts Err → None.
+        use crate::promise_store::{AgentPromise, PromiseEntry, PromiseStoreError};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Arc;
+
+        struct FailingGetStore;
+        impl crate::promise_store::PromiseRepository for FailingGetStore {
+            fn get_promise<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
+            {
+                Box::pin(async { Err(PromiseStoreError("simulated get failure".into())) })
+            }
+            fn put_promise<'a>(
+                &'a self,
+                _: &'a AgentPromise,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(1) })
+            }
+            fn update_promise<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a AgentPromise, _: u64,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(1) })
+            }
+            fn get_tool_result<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(None) })
+            }
+            fn put_tool_result<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a str, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list_running<'a>(
+                &'a self, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(vec![]) })
+            }
+        }
+
+        let mut agent = make_agent_with_responses(vec![end_turn()]);
+        agent.promise_store = Some(Arc::new(FailingGetStore));
+
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 11,
+            "pull_request": { "draft": false, "head": { "sha": "sha-get-err" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_some(),
+            "get_promise error must not block review"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_put_promise_error_does_not_block_review() {
+        // If put_promise returns Err the dedup marker is lost but the handler
+        // must still proceed. The `let _ =` in the dedup write ignores errors.
+        use crate::promise_store::{AgentPromise, PromiseEntry, PromiseStoreError};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::Arc;
+
+        struct FailingPutStore;
+        impl crate::promise_store::PromiseRepository for FailingPutStore {
+            fn get_promise<'a>(
+                &'a self,
+                _: &'a str,
+                _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<PromiseEntry>, PromiseStoreError>> + Send + 'a>>
+            {
+                Box::pin(async { Ok(None) })
+            }
+            fn put_promise<'a>(
+                &'a self,
+                _: &'a AgentPromise,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Err(PromiseStoreError("simulated put failure".into())) })
+            }
+            fn update_promise<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a AgentPromise, _: u64,
+            ) -> Pin<Box<dyn Future<Output = Result<u64, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(1) })
+            }
+            fn get_tool_result<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Option<String>, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(None) })
+            }
+            fn put_tool_result<'a>(
+                &'a self, _: &'a str, _: &'a str, _: &'a str, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<(), PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+            fn list_running<'a>(
+                &'a self, _: &'a str,
+            ) -> Pin<Box<dyn Future<Output = Result<Vec<AgentPromise>, PromiseStoreError>> + Send + 'a>> {
+                Box::pin(async { Ok(vec![]) })
+            }
+        }
+
+        let mut agent = make_agent_with_responses(vec![end_turn()]);
+        agent.promise_store = Some(Arc::new(FailingPutStore));
+
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 12,
+            "pull_request": { "draft": false, "head": { "sha": "sha-put-err" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_some(),
+            "put_promise error must not block review"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_run_agent_success_returns_some_ok() {
+        // The happy path: agent completes successfully → Some(Ok(text)).
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 13,
+            "pull_request": { "draft": false, "head": { "sha": "happysha" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        let result = handle(
+            &make_agent_with_responses(vec![end_turn()]),
+            &serde_json::to_vec(&payload).unwrap(),
+        )
+        .await;
+        assert!(
+            matches!(result, Some(Ok(_))),
+            "successful agent run must return Some(Ok(...)): {result:?}"
+        );
+    }
 }

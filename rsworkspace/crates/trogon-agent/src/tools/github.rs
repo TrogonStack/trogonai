@@ -1565,4 +1565,94 @@ mod tests {
         let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r"})).await;
         assert!(result.is_err(), "missing pr_number must return Err: {result:?}");
     }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_owner_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err(), "missing owner must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_repo_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "pr_number": 1})).await;
+        assert!(result.is_err(), "missing repo must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_http_error_propagates() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_err("connection refused");
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err(), "HTTP error must propagate: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_empty_string_patch_annotated_as_empty() {
+        // A file with patch: "" (present but empty) must not crash.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{"filename": "f.rs", "status": "modified", "patch": ""}]).to_string(),
+        );
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 3})).await;
+        assert!(result.is_ok(), "empty patch must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(parsed[0]["patch"].as_str().unwrap(), "");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_repo_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing repo must return Err: {result:?}");
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_pr_number_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing pr_number must return Err: {result:?}");
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_absent_event_defaults_to_comment() {
+        // When `event` is absent the implementation defaults to "COMMENT".
+        // The GitHub API accepts this, so the call must succeed.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 1, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-1"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "looks good"}),
+        )
+        .await;
+        assert!(result.is_ok(), "absent event must succeed with COMMENT default: {result:?}");
+    }
+
+    #[test]
+    fn annotate_diff_no_newline_at_eof_marker_is_numbered() {
+        // Git emits `\ No newline at end of file` as a real diff line.
+        // It must receive a position number like any other line.
+        let patch =
+            "@@ -1,2 +1,2 @@\n-old\n+new\n\\ No newline at end of file";
+        let annotated = annotate_diff(patch);
+        let lines: Vec<&str> = annotated.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[3], r"4 \ No newline at end of file");
+    }
 }
