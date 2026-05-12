@@ -306,14 +306,14 @@ mod tests {
         assert!(!REVIEW_ACTIONS.contains(&"closed"));
     }
 
-    fn make_agent() -> AgentLoop {
+    fn make_agent_with_responses(responses: Vec<serde_json::Value>) -> AgentLoop {
         use crate::agent_loop::mock::SequencedMockAnthropicClient;
         use crate::flag_client::AlwaysOnFlagClient;
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
         AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(responses)),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),
@@ -330,6 +330,14 @@ mod tests {
             permission_checker: None,
             elicitation_provider: None,
         }
+    }
+
+    fn make_agent() -> AgentLoop {
+        make_agent_with_responses(vec![])
+    }
+
+    fn end_turn() -> serde_json::Value {
+        serde_json::json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": "ok"}]})
     }
 
     #[tokio::test]
@@ -450,6 +458,94 @@ mod tests {
                 .await
                 .is_none(),
             "missing number field must return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_reopened_action_is_not_skipped() {
+        // `reopened` is in REVIEW_ACTIONS — handle must return Some, not None.
+        let payload = serde_json::json!({
+            "action": "reopened",
+            "number": 8,
+            "pull_request": { "draft": false, "head": { "sha": "aabbcc" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(
+                &make_agent_with_responses(vec![end_turn()]),
+                &serde_json::to_vec(&payload).unwrap()
+            )
+            .await
+            .is_some(),
+            "reopened must not be skipped"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_new_sha_writes_dedup_marker() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use std::sync::Arc;
+
+        let store = Arc::new(MockPromiseStore::new());
+        let mut agent = make_agent_with_responses(vec![end_turn()]);
+        agent.promise_store = Some(Arc::clone(&store) as Arc<dyn crate::promise_store::PromiseRepository>);
+
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 9,
+            "pull_request": { "draft": false, "head": { "sha": "newsha123" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        let _ = handle(&agent, &serde_json::to_vec(&payload).unwrap()).await;
+
+        let snapshot = store.snapshot_promises();
+        let dedup_key = "test.pr-review-sha.o.r.newsha123";
+        assert!(
+            snapshot.contains_key(dedup_key),
+            "dedup marker must be written for new SHA; keys: {snapshot:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_empty_sha_does_not_skip_via_dedup() {
+        use crate::promise_store::mock::MockPromiseStore;
+        use crate::promise_store::{AgentPromise, PromiseStatus};
+        use std::sync::Arc;
+
+        // Pre-populate a marker for the empty-sha key to prove it is never consulted.
+        let store = MockPromiseStore::new();
+        store.insert_promise(AgentPromise {
+            id: "pr-review-sha.o.r.".to_string(), // empty sha suffix
+            tenant_id: "test".to_string(),
+            automation_id: String::new(),
+            status: PromiseStatus::Resolved,
+            messages: vec![],
+            iteration: 0,
+            worker_id: String::new(),
+            claimed_at: 0,
+            trigger: serde_json::Value::Null,
+            nats_subject: String::new(),
+            system_prompt: None,
+            recovery_count: 0,
+            checkpoint_degraded: false,
+            failure_reason: None,
+        });
+        let mut agent = make_agent_with_responses(vec![end_turn()]);
+        agent.promise_store = Some(Arc::new(store));
+
+        // Payload deliberately omits pull_request.head.sha → head_sha = ""
+        let payload = serde_json::json!({
+            "action": "opened",
+            "number": 10,
+            "pull_request": { "draft": false, "head": {} },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        // With empty sha the dedup guard is bypassed → handler reaches the agent.
+        assert!(
+            handle(&agent, &serde_json::to_vec(&payload).unwrap())
+                .await
+                .is_some(),
+            "empty sha must not trigger dedup skip"
         );
     }
 }

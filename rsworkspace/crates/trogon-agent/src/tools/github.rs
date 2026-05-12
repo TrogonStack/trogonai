@@ -1424,4 +1424,132 @@ mod tests {
         .await;
         assert!(result.is_err(), "HTTP error must propagate: {result:?}");
     }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_owner_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing owner must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("missing owner"),
+            "error must name the missing field"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_non_json_response_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(200, "this is not json {{");
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "non-JSON response must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_response_missing_id_and_url_uses_fallback() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(200, json!({}).to_string());
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_ok(), "empty-body response must succeed: {result:?}");
+        let msg = result.unwrap();
+        assert!(msg.contains("#0"), "fallback id must be 0: {msg}");
+        assert!(msg.contains("(no url)"), "fallback url must appear: {msg}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_empty_comments_array_succeeds() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 5, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-5"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "LGTM", "event": "APPROVE",
+                "comments": []
+            }),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "empty comments array must succeed: {result:?}"
+        );
+    }
+
+    // ── annotate_diff edge cases ──────────────────────────────────────────────
+
+    #[test]
+    fn annotate_diff_multi_hunk_positions_are_continuous() {
+        // Positions must count continuously across hunk boundaries —
+        // the first line of the second hunk is NOT reset to 1.
+        let patch = "@@ -1,2 +1,2 @@\n context\n-old\n+new\n@@ -10,2 +10,2 @@\n other\n-foo\n+bar";
+        let annotated = annotate_diff(patch);
+        let lines: Vec<&str> = annotated.lines().collect();
+        assert_eq!(lines[0], "1 @@ -1,2 +1,2 @@");
+        assert_eq!(lines[3], "4 +new");
+        // Second hunk header continues from position 5, not 1.
+        assert_eq!(lines[4], "5 @@ -10,2 +10,2 @@");
+        assert_eq!(lines[7], "8 +bar");
+    }
+
+    #[test]
+    fn annotate_diff_trailing_newline_does_not_produce_extra_line() {
+        let patch = "@@ -1 +1 @@\n+line\n";
+        let annotated = annotate_diff(patch);
+        // `str::lines()` strips the trailing newline — result must have 2 lines.
+        assert_eq!(annotated.lines().count(), 2);
+        assert_eq!(annotated.lines().last().unwrap(), "2 +line");
+    }
+
+    // ── list_pr_files edge cases ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_pr_files_multiple_files_annotates_each_patch_independently() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([
+                {"filename": "a.rs", "status": "modified", "patch": "@@ -1 +1 @@\n+added"},
+                {"filename": "b.png", "status": "added"},
+                {"filename": "c.rs", "status": "modified", "patch": "@@ -2 +2 @@\n-old\n+new"}
+            ])
+            .to_string(),
+        );
+        let result =
+            list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
+        assert!(result.is_ok(), "must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+
+        // a.rs — annotated from position 1
+        let patch_a = parsed[0]["patch"].as_str().unwrap();
+        assert!(patch_a.starts_with("1 "), "a.rs patch must start at position 1: {patch_a}");
+
+        // b.png — no patch (binary), field absent
+        assert!(parsed[1]["patch"].is_null(), "binary file must have no patch");
+
+        // c.rs — annotated independently from position 1 (not continuing from a.rs)
+        let patch_c = parsed[2]["patch"].as_str().unwrap();
+        assert!(patch_c.starts_with("1 "), "c.rs patch must start at position 1: {patch_c}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_pr_number_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r"})).await;
+        assert!(result.is_err(), "missing pr_number must return Err: {result:?}");
+    }
 }
