@@ -3,6 +3,8 @@ mod cli;
 #[cfg_attr(coverage, allow(dead_code))]
 mod config;
 #[cfg_attr(coverage, allow(dead_code))]
+mod constants;
+#[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source;

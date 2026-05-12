@@ -27,13 +27,11 @@ use trogon_nats::{NatsToken, SubjectTokenViolation};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
+use crate::constants::{
+    DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS, DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS,
+    DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS, DEFAULT_STREAM_MAX_AGE_SECS,
+};
 use crate::source_status::SourceStatus;
-
-const DEFAULT_STREAM_MAX_AGE_SECS: u64 = 604_800;
-const DEFAULT_NATS_ACK_TIMEOUT_SECS: u64 = 10;
-const DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS: u64 = 300;
-const DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS: u64 = 60;
-const DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS: u64 = 300;
 
 #[derive(Debug)]
 struct ZeroNotAllowed;
