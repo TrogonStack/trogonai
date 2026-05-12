@@ -101,12 +101,14 @@ pub async fn list_pr_files(
         .await?;
     let mut files: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
 
-    if let Some(arr) = files.as_array_mut() {
-        for file in arr.iter_mut() {
-            if let Some(patch) = file["patch"].as_str() {
-                let annotated = annotate_diff(patch);
-                file["patch"] = serde_json::json!(annotated);
-            }
+    let arr = files
+        .as_array_mut()
+        .ok_or_else(|| format!("unexpected response from GitHub: {}", resp.body))?;
+
+    for file in arr.iter_mut() {
+        if let Some(patch) = file["patch"].as_str() {
+            let annotated = annotate_diff(patch);
+            file["patch"] = serde_json::json!(annotated);
         }
     }
 
@@ -674,6 +676,17 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not-valid-json{{");
         let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
         assert!(result.is_err(), "invalid JSON must propagate as Err");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_non_array_json_returns_err() {
+        // GitHub error responses are JSON objects, not arrays.
+        // The function must return Err rather than forwarding the object to the LLM.
+        let ctx = make_ctx();
+        ctx.http_client
+            .enqueue_ok(200, json!({"message": "Not Found"}).to_string());
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 9})).await;
+        assert!(result.is_err(), "non-array JSON must return Err: {result:?}");
     }
 
     // ── get_file_contents ─────────────────────────────────────────────────────
