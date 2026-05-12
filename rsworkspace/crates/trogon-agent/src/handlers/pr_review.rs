@@ -297,6 +297,11 @@ mod tests {
         assert!(names.contains(&"update_file"));
         assert!(names.contains(&"create_pull_request"));
         assert!(names.contains(&"post_pr_review"));
+        // post_pr_comment was replaced by post_pr_review — must not be present.
+        assert!(
+            !names.contains(&"post_pr_comment"),
+            "post_pr_comment must not be in pr_review tools"
+        );
     }
 
     #[test]
@@ -304,6 +309,60 @@ mod tests {
         assert!(REVIEW_ACTIONS.contains(&"opened"));
         assert!(REVIEW_ACTIONS.contains(&"synchronize"));
         assert!(!REVIEW_ACTIONS.contains(&"closed"));
+    }
+
+    #[tokio::test]
+    async fn handle_synchronize_action_is_not_skipped() {
+        let payload = serde_json::json!({
+            "action": "synchronize",
+            "number": 20,
+            "pull_request": { "draft": false, "head": { "sha": "syncsha" } },
+            "repository": {"owner": {"login": "o"}, "name": "r"}
+        });
+        assert!(
+            handle(
+                &make_agent_with_responses(vec![end_turn()]),
+                &serde_json::to_vec(&payload).unwrap(),
+            )
+            .await
+            .is_some(),
+            "synchronize must not be skipped"
+        );
+    }
+
+    #[test]
+    fn prompt_mentions_post_pr_review() {
+        let owner = "o";
+        let repo = "r";
+        let pr_number = 1u64;
+        let head_sha = "abc";
+        let prompt = format!(
+            "You are a code reviewer. Review pull request #{pr_number} in {owner}/{repo}.\n\
+             The current head commit SHA is `{head_sha}` — pass it as `commit_sha` when calling `post_pr_review`.\n\
+             1. Use `get_file_contents` with path `.trogon/memory.md` — the result is a JSON object \
+                with `sha` and `content`; note the `sha` (you will need it to update the file later).\n\
+             2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
+             3. Use `list_pr_files` to see which files changed. Each file with a `patch` field has \
+                its diff lines numbered from 1 — those numbers are the `position` values for inline comments.\n\
+             4. Use `get_file_contents` when you need more context around a specific change.\n\
+             5. For each file that has a `patch` field, identify bugs, security issues, or correctness problems. \
+                If a file has no `patch` field, skip it — it is binary or too large to diff.\n\
+             6. Call `post_pr_review` once with all inline comments. Set `commit_sha` to `{head_sha}`. \
+                Set `event` to \"COMMENT\" unless you are certain the code is correct (\"APPROVE\") \
+                or has a critical defect (\"REQUEST_CHANGES\"). \
+                Each comment needs `path` (file path), `position` (number from the annotated patch), and `body`.\n\
+             7. If you learned something important about the repo conventions, update `.trogon/memory.md` \
+                using `update_file` (pass the `sha` from step 1, use a new branch), \
+                then open a PR with `create_pull_request`.\n\
+             Focus on correctness, security, and clarity. Be constructive."
+        );
+        assert!(prompt.contains("post_pr_review"), "prompt must mention post_pr_review");
+        assert!(prompt.contains("position"), "prompt must mention position for inline comments");
+        assert!(
+            prompt.contains("no `patch` field, skip it"),
+            "prompt must instruct agent to skip binary/large files"
+        );
+        assert!(prompt.contains(head_sha), "prompt must embed head SHA");
     }
 
     fn make_agent_with_responses(responses: Vec<serde_json::Value>) -> AgentLoop {

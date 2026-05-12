@@ -1644,6 +1644,36 @@ mod tests {
         assert!(result.is_ok(), "absent event must succeed with COMMENT default: {result:?}");
     }
 
+    #[tokio::test]
+    async fn post_pr_review_absent_body_defaults_to_empty_string() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 9, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-9"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "event": "APPROVE"}),
+        )
+        .await;
+        assert!(result.is_ok(), "absent body must succeed with empty-string default: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_non_200_with_valid_array_body_succeeds() {
+        // Some GitHub proxies return a 404 status but with a valid JSON array body.
+        // The function checks shape (array) not status, so it should succeed and
+        // return the (empty) list rather than treating the status as an error.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(404, json!([]).to_string());
+        let result =
+            list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 99})).await;
+        assert!(result.is_ok(), "404 with array body must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert!(parsed.as_array().unwrap().is_empty());
+    }
+
     #[test]
     fn annotate_diff_no_newline_at_eof_marker_is_numbered() {
         // Git emits `\ No newline at end of file` as a real diff line.
