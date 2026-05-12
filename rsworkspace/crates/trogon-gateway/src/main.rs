@@ -3,9 +3,13 @@ mod cli;
 #[cfg_attr(coverage, allow(dead_code))]
 mod config;
 #[cfg_attr(coverage, allow(dead_code))]
+mod constants;
+#[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source;
+#[cfg_attr(coverage, allow(dead_code))]
+mod source_integration_id;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
 #[cfg_attr(coverage, allow(dead_code))]
@@ -46,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
     if !resolved.has_any_source() {
-        return Err("no sources configured — provide a config file or set source env vars".into());
+        return Err("no sources configured — provide a config file with at least one source".into());
     }
 
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
@@ -90,11 +94,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
-    if let Some(ref cfg) = resolved.telegram
-        && cfg.registration.is_some()
-    {
-        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
-        crate::source::telegram::registration::register_webhook(cfg, &telegram_http_client).await?;
+    let telegram_registration_configs: Vec<_> = resolved
+        .telegram
+        .iter()
+        .filter(|integration| integration.config.registration.is_some())
+        .map(|integration| (&integration.id, &integration.config))
+        .collect();
+    if !telegram_registration_configs.is_empty() {
+        match crate::source::telegram::registration::registration_http_client() {
+            Ok(telegram_http_client) => {
+                for (integration_id, config) in telegram_registration_configs {
+                    if let Err(error) =
+                        crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await
+                    {
+                        error!(
+                            source = "telegram",
+                            integration = %integration_id,
+                            error = %error,
+                            "Telegram webhook registration failed"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                error!(
+                    source = "telegram",
+                    error = %error,
+                    "Telegram webhook registration HTTP client initialization failed"
+                );
+            }
+        }
     }
 
     let port = resolved.http_server.port;

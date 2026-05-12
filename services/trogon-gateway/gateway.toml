@@ -1,0 +1,120 @@
+[http_server]
+port = 8080
+
+[sources.github.integrations.local.webhook]
+webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
+
+# Source configuration lives in this TOML file. Put secrets in
+# devops/docker/compose/.env and reference them with `{ env = "..." }`.
+#
+# [nats]
+# url = "nats://nats:4222"
+# creds = "/path/to/nats.creds"
+# nkey = "SU..."
+# user = "my-user"
+# password = "my-pass"
+# token = "my-token"
+#
+# [sources.github.integrations.primary]
+# subject_prefix = "github-primary"
+# stream_name = "GITHUB_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.github.integrations.primary.webhook]
+# webhook_secret = { env = "GITHUB_PRIMARY_WEBHOOK_SECRET" }
+#
+# [sources.gitlab.integrations.primary]
+# subject_prefix = "gitlab-primary"
+# stream_name = "GITLAB_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.gitlab.integrations.primary.webhook]
+# webhook_secret = { env = "GITLAB_PRIMARY_WEBHOOK_SECRET" }
+#
+# [sources.incidentio.integrations.primary]
+# subject_prefix = "incidentio-primary"
+# stream_name = "INCIDENTIO_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.incidentio.integrations.primary.webhook]
+# signing_secret = { env = "INCIDENTIO_PRIMARY_SIGNING_SECRET" }
+# timestamp_tolerance_secs = 300
+#
+# [sources.linear.integrations.primary]
+# subject_prefix = "linear-primary"
+# stream_name = "LINEAR_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.linear.integrations.primary.webhook]
+# webhook_secret = { env = "LINEAR_PRIMARY_WEBHOOK_SECRET" }
+# timestamp_tolerance_secs = 60
+#
+# [sources.microsoft_graph.integrations.primary]
+# subject_prefix = "microsoft-graph-primary"
+# stream_name = "MICROSOFT_GRAPH_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.microsoft_graph.integrations.primary.webhook]
+# client_state = { env = "MICROSOFT_GRAPH_PRIMARY_CLIENT_STATE" }
+#
+# [sources.notion.integrations.primary]
+# subject_prefix = "notion-primary"
+# stream_name = "NOTION_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.notion.integrations.primary.webhook]
+# verification_token = { env = "NOTION_PRIMARY_VERIFICATION_TOKEN" }
+#
+# [sources.sentry.integrations.primary]
+# subject_prefix = "sentry-primary"
+# stream_name = "SENTRY_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 1
+#
+# [sources.sentry.integrations.primary.webhook]
+# client_secret = { env = "SENTRY_PRIMARY_CLIENT_SECRET" }
+#
+# [sources.discord]
+# bot_token = { env = "DISCORD_BOT_TOKEN" }
+# gateway_intents = "guilds,guild_members,guild_messages,guild_message_reactions,direct_messages,message_content,guild_voice_states"
+# subject_prefix = "discord"
+# stream_name = "DISCORD"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.telegram.integrations.primary]
+# subject_prefix = "telegram-primary"
+# stream_name = "TELEGRAM_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.telegram.integrations.primary.webhook]
+# webhook_secret = { env = "TELEGRAM_PRIMARY_WEBHOOK_SECRET" }
+# webhook_registration_mode = "manual"
+# bot_token = { env = "TELEGRAM_PRIMARY_BOT_TOKEN" }
+# public_webhook_url = "https://<public-host>/sources/telegram/primary/webhook"
+#
+# [sources.twitter.integrations.primary]
+# subject_prefix = "twitter-primary"
+# stream_name = "TWITTER_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.twitter.integrations.primary.webhook]
+# consumer_secret = { env = "TWITTER_PRIMARY_CONSUMER_SECRET" }
+#
+# [sources.slack.integrations.primary]
+# subject_prefix = "slack-primary"
+# stream_name = "SLACK_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.slack.integrations.primary.webhook]
+# signing_secret = { env = "SLACK_PRIMARY_SIGNING_SECRET" }
+# timestamp_max_drift_secs = 300
