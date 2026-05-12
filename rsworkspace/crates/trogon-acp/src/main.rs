@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         permission_checker: None,
         elicitation_provider: None,
         thinking_budget: None,
+        streaming_client: None,
     };
 
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")

@@ -78,6 +78,7 @@ fn make_agent(base_url: &str) -> AgentLoop {
         mcp_dispatch: vec![],
         permission_checker: None,
         elicitation_provider: None,
+        streaming_client: None,
     }
 }
 
