@@ -1,0 +1,5 @@
+[http_server]
+port = 8080
+
+[sources.github.integrations.local.webhook]
+webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }

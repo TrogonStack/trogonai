@@ -7,6 +7,8 @@ mod http;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source;
 #[cfg_attr(coverage, allow(dead_code))]
+mod source_integration_id;
+#[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
 #[cfg_attr(coverage, allow(dead_code))]
 mod streams;
@@ -90,11 +92,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
-    if let Some(ref cfg) = resolved.telegram
-        && cfg.registration.is_some()
+    let telegram_http_client = if resolved
+        .telegram
+        .iter()
+        .any(|integration| integration.config.registration.is_some())
     {
-        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
-        crate::source::telegram::registration::register_webhook(cfg, &telegram_http_client).await?;
+        Some(crate::source::telegram::registration::registration_http_client()?)
+    } else {
+        None
+    };
+    if let Some(ref client) = telegram_http_client {
+        for integration in &resolved.telegram {
+            if integration.config.registration.is_some() {
+                crate::source::telegram::registration::register_webhook(&integration.config, client).await?;
+            }
+        }
     }
 
     let port = resolved.http_server.port;
