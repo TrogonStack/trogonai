@@ -73,6 +73,7 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
         mcp_dispatch: vec![(dispatch_name, orig_name, client)],
         permission_checker: None,
         elicitation_provider: None,
+        streaming_client: None,
     }
 }
 
