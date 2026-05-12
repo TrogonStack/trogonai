@@ -16,4 +16,4 @@ pub mod gateway;
 pub mod gateway_runner;
 
 pub use config::DiscordConfig;
-pub use gateway::{GatewayBridge, provision};
+pub use gateway::provision;
