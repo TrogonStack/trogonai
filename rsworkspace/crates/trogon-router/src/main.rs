@@ -2,7 +2,7 @@ mod config;
 
 use std::time::Duration;
 
-use acp_telemetry::ServiceName;
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 use clap::Parser;
 use tracing::info;
 use trogon_nats::connect;
@@ -33,7 +33,7 @@ struct Cli {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    acp_telemetry::init_logger(ServiceName::TrogonRouter, "router", &SystemEnv, &SystemFs);
+    trogon_telemetry::init_logger(ServiceName::TrogonRouter, [ResourceAttribute::acp_prefix("router")], &SystemEnv, &SystemFs);
 
     info!("trogon-router starting");
 
@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result = router.run(&subjects) => {
             result?;
         }
-        _ = acp_telemetry::signal::shutdown_signal() => {
+        _ = trogon_std::signal::shutdown_signal() => {
             info!("shutdown signal received");
         }
     }

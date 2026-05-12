@@ -1,6 +1,17 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = [
+    "crates/trogon-source-discord",
+    "crates/trogon-source-github",
+    "crates/trogon-source-gitlab",
+    "crates/trogon-source-incidentio",
+    "crates/trogon-source-notion",
+    "crates/trogon-source-sentry",
+    "crates/trogon-source-slack",
+    "crates/trogon-source-telegram",
+    "crates/trogon-source-twitter",
+]
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -12,20 +23,12 @@ all = "deny"
 [workspace.dependencies]
 # Internal crates
 acp-nats = { path = "crates/acp-nats" }
-acp-telemetry = { path = "crates/acp-telemetry" }
+trogon-telemetry = { path = "crates/trogon-telemetry" }
+mcp-nats = { path = "crates/mcp-nats" }
+mcp-nats-server = { path = "crates/mcp-nats-server" }
+mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
-trogon-source-discord = { path = "crates/trogon-source-discord" }
-trogon-source-github = { path = "crates/trogon-source-github" }
-trogon-source-gitlab = { path = "crates/trogon-source-gitlab" }
-trogon-source-incidentio = { path = "crates/trogon-source-incidentio" }
-trogon-source-linear = { path = "crates/trogon-source-linear" }
-trogon-source-microsoft-graph = { path = "crates/trogon-source-microsoft-graph" }
-trogon-source-notion = { path = "crates/trogon-source-notion" }
-trogon-source-sentry = { path = "crates/trogon-source-sentry" }
-trogon-source-slack = { path = "crates/trogon-source-slack" }
-trogon-source-telegram = { path = "crates/trogon-source-telegram" }
-trogon-source-twitter = { path = "crates/trogon-source-twitter" }
 trogon-std = { path = "crates/trogon-std" }
 trogon-actor = { path = "crates/trogon-actor" }
 trogon-router = { path = "crates/trogon-router" }
@@ -34,6 +37,9 @@ trogon-transcript = { path = "crates/trogon-transcript" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
+
+# MCP
+rmcp = { version = "=1.6.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
 
 # Async runtime & networking
 async-compat = "=0.2.5"

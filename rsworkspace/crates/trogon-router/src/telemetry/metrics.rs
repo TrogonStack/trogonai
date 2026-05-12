@@ -1,7 +1,7 @@
 //! OpenTelemetry metrics for the Router Agent.
 //!
 //! Instruments are created lazily on first use via [`std::sync::OnceLock`] and
-//! record to whichever meter provider was installed by `acp_telemetry::init_logger`.
+//! record to whichever meter provider was installed by `trogon_telemetry::init_logger`.
 //! In binaries that call `init_logger` the metrics are exported to the OTLP
 //! endpoint.  In tests (where no provider is installed) the calls are no-ops.
 

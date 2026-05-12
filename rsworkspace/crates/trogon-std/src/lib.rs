@@ -39,13 +39,15 @@ pub mod fs;
 pub mod http;
 pub mod json;
 pub mod secret_string;
+#[cfg(feature = "signal")]
+pub mod signal;
 #[cfg(feature = "telemetry-http")]
 pub mod telemetry;
 pub mod time;
 #[cfg(feature = "uuid")]
 pub mod uuid;
 
-#[cfg(all(feature = "clap", not(coverage)))]
+#[cfg(feature = "clap")]
 pub use args::CliArgs;
 #[cfg(any(test, feature = "test-support"))]
 pub use args::FixedArgs;

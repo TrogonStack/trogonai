@@ -1,0 +1,25 @@
+[package]
+name = "mcp-nats-server"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+clap = { workspace = true }
+mcp-nats = { workspace = true }
+rmcp = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
+trogon-telemetry = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
