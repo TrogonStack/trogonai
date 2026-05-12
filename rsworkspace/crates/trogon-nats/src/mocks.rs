@@ -79,6 +79,7 @@ pub struct AdvancedMockNatsClient {
     request_responses: Arc<Mutex<std::collections::HashMap<String, bytes::Bytes>>>,
     should_fail_request: Arc<Mutex<bool>>,
     should_hang_request: Arc<Mutex<bool>>,
+    should_hang_publish: Arc<Mutex<bool>>,
     publish_fail_count: Arc<Mutex<u32>>,
     flush_fail_count: Arc<Mutex<u32>>,
 }
@@ -93,6 +94,7 @@ impl std::fmt::Debug for AdvancedMockNatsClient {
             )
             .field("should_fail_request", &self.should_fail_request)
             .field("should_hang_request", &self.should_hang_request)
+            .field("should_hang_publish", &self.should_hang_publish)
             .field("publish_fail_count", &self.publish_fail_count)
             .field("flush_fail_count", &self.flush_fail_count)
             .finish()
@@ -106,6 +108,7 @@ impl AdvancedMockNatsClient {
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
             should_hang_request: Arc::new(Mutex::new(false)),
+            should_hang_publish: Arc::new(Mutex::new(false)),
             publish_fail_count: Arc::new(Mutex::new(0)),
             flush_fail_count: Arc::new(Mutex::new(0)),
         }
@@ -137,6 +140,10 @@ impl AdvancedMockNatsClient {
 
     pub fn hang_next_request(&self) {
         *self.should_hang_request.lock().unwrap() = true;
+    }
+
+    pub fn hang_next_publish(&self) {
+        *self.should_hang_publish.lock().unwrap() = true;
     }
 
     pub fn published_messages(&self) -> Vec<String> {
@@ -276,6 +283,18 @@ impl PublishClient for AdvancedMockNatsClient {
         headers: async_nats::HeaderMap,
         payload: bytes::Bytes,
     ) -> Result<(), MockError> {
+        let should_hang = {
+            let mut should_hang = self.should_hang_publish.lock().unwrap();
+            if *should_hang {
+                *should_hang = false;
+                true
+            } else {
+                false
+            }
+        };
+        if should_hang {
+            std::future::pending::<()>().await;
+        }
         let should_fail = {
             let mut count = self.publish_fail_count.lock().unwrap();
             if *count > 0 {
@@ -373,6 +392,26 @@ mod tests {
         let first = mock
             .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("x"))
             .await;
+        assert!(first.is_err());
+
+        let second = mock
+            .publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("y"))
+            .await;
+        assert!(second.is_ok());
+        assert_eq!(mock.published_messages(), vec!["foo"]);
+        assert_eq!(mock.published_payloads(), vec![bytes::Bytes::from("y")]);
+    }
+
+    #[tokio::test]
+    async fn advanced_mock_hang_next_publish_hangs_once_then_succeeds() {
+        let mock = AdvancedMockNatsClient::new();
+        mock.hang_next_publish();
+
+        let first = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            mock.publish_with_headers("foo", async_nats::HeaderMap::new(), bytes::Bytes::from("x")),
+        )
+        .await;
         assert!(first.is_err());
 
         let second = mock

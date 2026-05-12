@@ -5,47 +5,47 @@ use crate::config::ResolvedConfig;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
     if let Some(ref cfg) = config.github {
-        trogon_source_github::provision(client, cfg).await?;
+        crate::source::github::provision(client, cfg).await?;
         info!(source = "github", "stream provisioned");
     }
     if let Some(ref cfg) = config.discord {
-        trogon_source_discord::provision(client, cfg).await?;
+        crate::source::discord::provision(client, cfg).await?;
         info!(source = "discord", "stream provisioned");
     }
     if let Some(ref cfg) = config.slack {
-        trogon_source_slack::provision(client, cfg).await?;
+        crate::source::slack::provision(client, cfg).await?;
         info!(source = "slack", "stream provisioned");
     }
     if let Some(ref cfg) = config.telegram {
-        trogon_source_telegram::provision(client, cfg).await?;
+        crate::source::telegram::provision(client, cfg).await?;
         info!(source = "telegram", "stream provisioned");
     }
     if let Some(ref cfg) = config.twitter {
-        trogon_source_twitter::provision(client, cfg).await?;
+        crate::source::twitter::provision(client, cfg).await?;
         info!(source = "twitter", "stream provisioned");
     }
     if let Some(ref cfg) = config.gitlab {
-        trogon_source_gitlab::provision(client, cfg).await?;
+        crate::source::gitlab::provision(client, cfg).await?;
         info!(source = "gitlab", "stream provisioned");
     }
     if let Some(ref cfg) = config.incidentio {
-        trogon_source_incidentio::provision(client, cfg).await?;
+        crate::source::incidentio::provision(client, cfg).await?;
         info!(source = "incidentio", "stream provisioned");
     }
     if let Some(ref cfg) = config.linear {
-        trogon_source_linear::provision(client, cfg).await?;
+        crate::source::linear::provision(client, cfg).await?;
         info!(source = "linear", "stream provisioned");
     }
     if let Some(ref cfg) = config.microsoft_graph {
-        trogon_source_microsoft_graph::provision(client, cfg).await?;
+        crate::source::microsoft_graph::provision(client, cfg).await?;
         info!(source = "microsoft-graph", "stream provisioned");
     }
     if let Some(ref cfg) = config.notion {
-        trogon_source_notion::provision(client, cfg).await?;
+        crate::source::notion::provision(client, cfg).await?;
         info!(source = "notion", "stream provisioned");
     }
     if let Some(ref cfg) = config.sentry {
-        trogon_source_sentry::provision(client, cfg).await?;
+        crate::source::sentry::provision(client, cfg).await?;
         info!(source = "sentry", "stream provisioned");
     }
     Ok(())

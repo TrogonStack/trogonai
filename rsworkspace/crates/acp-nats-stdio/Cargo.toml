@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 acp-nats = { workspace = true }
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 agent-client-protocol = { workspace = true }
 async-compat = { workspace = true }
 async-nats = { workspace = true }
@@ -18,7 +18,7 @@ opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true, features = ["clap"] }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
 
 [dev-dependencies]
 acp-nats-agent = { path = "../acp-nats-agent" }

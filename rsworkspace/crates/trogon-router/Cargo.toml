@@ -11,7 +11,7 @@ name = "trogon-router"
 path = "src/main.rs"
 
 [dependencies]
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 bytes = { workspace = true }
 clap = { workspace = true }
@@ -28,7 +28,7 @@ trogon-actor = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-registry = { workspace = true }
 trogon-service-config = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
 trogon-transcript = { workspace = true }
 
 [dev-dependencies]

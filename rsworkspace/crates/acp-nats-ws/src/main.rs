@@ -11,8 +11,9 @@ use upgrade::{ConnectionRequest, UpgradeState};
 
 #[cfg(not(coverage))]
 use {
-    acp_nats::nats, acp_telemetry::ServiceName, clap::Parser, std::net::SocketAddr,
+    acp_nats::nats, clap::Parser, std::net::SocketAddr,
     std::sync::Arc, tracing::error, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs,
+    trogon_telemetry::{ResourceAttribute, ServiceName},
     upgrade::RegistryExtension,
 };
 
@@ -21,9 +22,9 @@ use {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = config::Args::parse();
     let ws_config = config::config_from_args(args, &SystemEnv)?;
-    acp_telemetry::init_logger(
+    trogon_telemetry::init_logger(
         ServiceName::AcpNatsWs,
-        ws_config.acp.acp_prefix(),
+        [ResourceAttribute::acp_prefix(ws_config.acp.acp_prefix())],
         &SystemEnv,
         &SystemFs,
     );
@@ -81,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            acp_telemetry::signal::shutdown_signal().await;
+            trogon_std::signal::shutdown_signal().await;
             info!("Shutdown signal received, stopping server");
             let _ = shutdown_tx.send(true);
         })
@@ -100,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         error!("Connection thread panicked: {e:?}");
     }
 
-    if let Err(e) = acp_telemetry::shutdown_otel() {
+    if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 

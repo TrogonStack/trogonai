@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let shutdown_signal = acp_telemetry::signal::shutdown_signal();
+            let shutdown_signal = trogon_std::signal::shutdown_signal();
             // Subscribe to client-op subjects for this runtime's ACP prefix
             // (e.g. acp.wasm.session.*.client.*) so tool calls from wasm sessions
             // are handled by this instance.
