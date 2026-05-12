@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resolved = config::load_with_overrides(cli.runtime.config.as_deref(), &cli.runtime.nats)?;
 
     if !resolved.has_any_source() {
-        return Err("no sources configured — provide a config file or set source env vars".into());
+        return Err("no sources configured — provide a config file with at least one source".into());
     }
 
     trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
@@ -94,20 +94,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
-    let telegram_http_client = if resolved
+    let telegram_registration_configs: Vec<_> = resolved
         .telegram
         .iter()
-        .any(|integration| integration.config.registration.is_some())
-    {
-        Some(crate::source::telegram::registration::registration_http_client()?)
-    } else {
-        None
-    };
-    if let Some(ref client) = telegram_http_client {
-        for integration in &resolved.telegram {
-            if integration.config.registration.is_some() {
-                crate::source::telegram::registration::register_webhook(&integration.config, client).await?;
-            }
+        .filter(|integration| integration.config.registration.is_some())
+        .map(|integration| &integration.config)
+        .collect();
+    if !telegram_registration_configs.is_empty() {
+        let telegram_http_client = crate::source::telegram::registration::registration_http_client()?;
+        for config in telegram_registration_configs {
+            crate::source::telegram::registration::register_webhook(config, &telegram_http_client).await?;
         }
     }
 
