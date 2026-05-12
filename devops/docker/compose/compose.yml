@@ -33,7 +33,7 @@ services:
       RUST_LOG: "${RUST_LOG:-info}"
       TROGON_GATEWAY_PORT: "${TROGON_GATEWAY_PORT:-8080}"
     volumes:
-      - ./services/trogon-gateway/gateway.toml:/etc/trogon-gateway/gateway.toml:ro
+      - ../../../services/trogon-gateway/gateway.toml:/etc/trogon-gateway/gateway.toml:ro
     depends_on:
       nats:
         condition: service_healthy

@@ -41,7 +41,7 @@ cp .env.example .env
 docker compose up --build --remove-orphans
 ```
 
-The compose stack mounts `services/trogon-gateway/gateway.toml` into the
+The compose stack mounts `../../../services/trogon-gateway/gateway.toml` into the
 gateway container. The default file enables a local GitHub receiver at
 `/sources/github/local/webhook` using `TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET`
 from `.env`.
@@ -50,7 +50,7 @@ need the environment variables referenced by their deployed gateway TOML.
 
 ## Webhook integrations
 
-Edit or replace `services/trogon-gateway/gateway.toml` to configure webhook
+Edit or replace `services/trogon-gateway/gateway.toml` from the repository root to configure webhook
 sources:
 
 ```toml
@@ -72,7 +72,7 @@ environment. With Docker Compose, put those variables in `.env`; the
 
 ## Discord gateway
 
-Configure `[sources.discord]` in `services/trogon-gateway/gateway.toml`. For
+Configure `[sources.discord]` in `services/trogon-gateway/gateway.toml` from the repository root. For
 local secrets, point `bot_token` at an explicit env var and put that variable in
 `.env`:
 
