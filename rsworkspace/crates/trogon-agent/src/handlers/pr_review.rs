@@ -14,6 +14,14 @@
 //! }
 //! ```
 //! This is the standard GitHub `pull_request` webhook payload shape.
+//!
+//! # Token requirements
+//!
+//! The GitHub proxy token must have **`pull_requests: write`** scope so that
+//! `post_pr_review` can submit inline review comments via
+//! `POST /repos/{owner}/{repo}/pulls/{number}/reviews`.
+//! The existing `issues: write` scope (used by `post_pr_comment`) is not
+//! sufficient for the reviews endpoint.
 
 use serde_json::Value;
 use tracing::{info, warn};
