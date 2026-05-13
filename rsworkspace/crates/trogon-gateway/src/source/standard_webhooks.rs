@@ -36,35 +36,64 @@ pub(crate) struct HeaderNames {
     pub(crate) webhook_signature: &'static str,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum SignatureError {
-    #[error("missing required signature headers")]
     MissingHeaders,
-    #[error("invalid value for header {name}")]
     InvalidHeaderValue {
         name: &'static str,
-        #[source]
         source: axum::http::header::ToStrError,
     },
-    #[error("invalid webhook id")]
-    InvalidWebhookId(#[source] WebhookIdError),
-    #[error("invalid webhook timestamp")]
-    InvalidTimestamp(#[source] WebhookTimestampError),
-    #[error("webhook timestamp outside tolerance")]
+    InvalidWebhookId(WebhookIdError),
+    InvalidTimestamp(WebhookTimestampError),
     StaleTimestamp,
-    #[error("invalid signature encoding")]
-    InvalidSignatureEncoding(#[source] base64::DecodeError),
-    #[error("missing v1 signature")]
+    InvalidSignatureEncoding(base64::DecodeError),
     MissingV1Signature,
-    #[error("signature mismatch")]
     Mismatch,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+impl fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingHeaders => f.write_str("missing required signature headers"),
+            Self::InvalidHeaderValue { name, .. } => {
+                write!(f, "invalid value for header {name}")
+            }
+            Self::InvalidWebhookId(_) => f.write_str("invalid webhook id"),
+            Self::InvalidTimestamp(_) => f.write_str("invalid webhook timestamp"),
+            Self::StaleTimestamp => f.write_str("webhook timestamp outside tolerance"),
+            Self::InvalidSignatureEncoding(_) => f.write_str("invalid signature encoding"),
+            Self::MissingV1Signature => f.write_str("missing v1 signature"),
+            Self::Mismatch => f.write_str("signature mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for SignatureError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidHeaderValue { source, .. } => Some(source),
+            Self::InvalidWebhookId(error) => Some(error),
+            Self::InvalidTimestamp(error) => Some(error),
+            Self::InvalidSignatureEncoding(error) => Some(error),
+            Self::MissingHeaders | Self::StaleTimestamp | Self::MissingV1Signature | Self::Mismatch => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebhookIdError {
-    #[error("webhook id must not be empty")]
     Empty,
 }
+
+impl fmt::Display for WebhookIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("webhook id must not be empty"),
+        }
+    }
+}
+
+impl std::error::Error for WebhookIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebhookId(Arc<str>);
@@ -95,12 +124,28 @@ impl AsRef<str> for WebhookId {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum WebhookTimestampError {
-    #[error("webhook timestamp must not be empty")]
     Empty,
-    #[error("webhook timestamp must be an integer")]
-    Invalid(#[source] ParseIntError),
+    Invalid(ParseIntError),
+}
+
+impl fmt::Display for WebhookTimestampError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("webhook timestamp must not be empty"),
+            Self::Invalid(_) => f.write_str("webhook timestamp must be an integer"),
+        }
+    }
+}
+
+impl std::error::Error for WebhookTimestampError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid(error) => Some(error),
+            Self::Empty => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

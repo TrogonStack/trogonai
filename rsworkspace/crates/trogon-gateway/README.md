@@ -52,7 +52,7 @@ separators, or exceed 64 characters.
 
 Webhook sources require TOML entries under `[sources.<source>.integrations.<integration>.webhook]`. Source-level
 webhook secrets and implicit source-specific environment variables are not supported.
-Webhook secret fields accept either a literal string or an explicit environment reference such as
+Webhook credential fields accept either a literal string or an explicit environment reference such as
 `webhook_secret = { env = "GITHUB_ACME_MAIN_WEBHOOK_SECRET" }`.
 Discord is also configured in TOML under `[sources.discord]`; its `bot_token` field accepts the same literal
 or explicit environment reference shape.
@@ -64,7 +64,7 @@ or explicit environment reference shape.
 | Slack | `signing_secret` |
 | Telegram | `webhook_secret` |
 | Twitter/X | `consumer_secret` |
-| GitLab | `webhook_secret` |
+| GitLab | `signing_token` |
 | incident.io | `signing_secret` |
 | Linear | `webhook_secret` |
 | Microsoft Graph change notifications | `client_state` |
@@ -146,7 +146,8 @@ webhook_secret = "telegram-secret"
 consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gitlab-secret"
+signing_token = "whsec_<base64-encoded-32-byte-secret>"
+timestamp_tolerance_secs = 300
 
 [sources.incidentio.integrations.primary.webhook]
 signing_secret = "whsec_dGVzdC1zZWNyZXQ="
