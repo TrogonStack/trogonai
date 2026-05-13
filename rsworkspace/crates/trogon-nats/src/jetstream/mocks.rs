@@ -4,10 +4,13 @@ use std::time::Duration;
 
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
-use async_nats::jetstream::context::{self, CreateKeyValueError, CreateKeyValueErrorKind};
+use async_nats::jetstream::context::{
+    self, CreateKeyValueError, CreateKeyValueErrorKind, GetStreamError, GetStreamErrorKind,
+};
 use async_nats::jetstream::kv;
+use async_nats::jetstream::message::StreamMessage;
 use async_nats::jetstream::publish::PublishAck;
-use async_nats::jetstream::stream;
+use async_nats::jetstream::stream::{self, LastRawMessageError, LastRawMessageErrorKind};
 use async_nats::jetstream::{self, AckKind};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
@@ -19,7 +22,7 @@ use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
-    JetStreamKeyValueUpdate, JetStreamPublisher,
+    JetStreamKeyValueUpdate, JetStreamLastRawMessageBySubject, JetStreamPublisher,
 };
 use crate::mocks::MockError;
 
@@ -572,6 +575,9 @@ pub struct MockJetStreamConsumerFactory {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
     get_stream_fail_at: Arc<Mutex<Option<u32>>>,
     get_stream_call_count: Arc<Mutex<u32>>,
+    get_stream_calls: Arc<Mutex<Vec<String>>>,
+    last_raw_messages: Arc<Mutex<VecDeque<Result<StreamMessage, LastRawMessageError>>>>,
+    last_raw_message_subjects: Arc<Mutex<Vec<String>>>,
 }
 
 impl Clone for MockJetStreamConsumerFactory {
@@ -580,6 +586,9 @@ impl Clone for MockJetStreamConsumerFactory {
             consumers: self.consumers.clone(),
             get_stream_fail_at: self.get_stream_fail_at.clone(),
             get_stream_call_count: self.get_stream_call_count.clone(),
+            get_stream_calls: self.get_stream_calls.clone(),
+            last_raw_messages: self.last_raw_messages.clone(),
+            last_raw_message_subjects: self.last_raw_message_subjects.clone(),
         }
     }
 }
@@ -590,6 +599,9 @@ impl MockJetStreamConsumerFactory {
             consumers: Arc::new(Mutex::new(VecDeque::new())),
             get_stream_fail_at: Arc::new(Mutex::new(None)),
             get_stream_call_count: Arc::new(Mutex::new(0)),
+            get_stream_calls: Arc::new(Mutex::new(Vec::new())),
+            last_raw_messages: Arc::new(Mutex::new(VecDeque::new())),
+            last_raw_message_subjects: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -599,6 +611,22 @@ impl MockJetStreamConsumerFactory {
 
     pub fn fail_get_stream_at(&self, call_number: u32) {
         *self.get_stream_fail_at.lock().unwrap() = Some(call_number);
+    }
+
+    pub fn add_last_raw_message(&self, message: StreamMessage) {
+        self.last_raw_messages.lock().unwrap().push_back(Ok(message));
+    }
+
+    pub fn add_last_raw_message_error(&self, error: LastRawMessageError) {
+        self.last_raw_messages.lock().unwrap().push_back(Err(error));
+    }
+
+    pub fn get_stream_calls(&self) -> Vec<String> {
+        self.get_stream_calls.lock().unwrap().clone()
+    }
+
+    pub fn last_raw_message_subjects(&self) -> Vec<String> {
+        self.last_raw_message_subjects.lock().unwrap().clone()
     }
 }
 
@@ -610,13 +638,20 @@ impl Default for MockJetStreamConsumerFactory {
 
 pub struct MockJetStreamStream {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
+    last_raw_messages: Arc<Mutex<VecDeque<Result<StreamMessage, LastRawMessageError>>>>,
+    last_raw_message_subjects: Arc<Mutex<Vec<String>>>,
 }
 
 impl JetStreamGetStream for MockJetStreamConsumerFactory {
-    type Error = MockError;
+    type Error = GetStreamError;
     type Stream = MockJetStreamStream;
 
-    async fn get_stream<T: AsRef<str> + Send>(&self, _stream_name: T) -> Result<MockJetStreamStream, MockError> {
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<MockJetStreamStream, GetStreamError> {
+        self.get_stream_calls
+            .lock()
+            .unwrap()
+            .push(stream_name.as_ref().to_string());
+
         let mut count = self.get_stream_call_count.lock().unwrap();
         *count += 1;
         let current = *count;
@@ -625,10 +660,15 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
         if let Some(fail_at) = *self.get_stream_fail_at.lock().unwrap()
             && current == fail_at
         {
-            return Err(MockError("simulated get_stream failure".to_string()));
+            return Err(GetStreamError::with_source(
+                GetStreamErrorKind::Request,
+                MockError("simulated get_stream failure".to_string()),
+            ));
         }
         Ok(MockJetStreamStream {
             consumers: self.consumers.clone(),
+            last_raw_messages: self.last_raw_messages.clone(),
+            last_raw_message_subjects: self.last_raw_message_subjects.clone(),
         })
     }
 }
@@ -643,6 +683,18 @@ impl JetStreamCreateConsumer for MockJetStreamStream {
             .unwrap()
             .pop_front()
             .ok_or_else(|| MockError("no mock consumer available".to_string()))
+    }
+}
+
+impl JetStreamLastRawMessageBySubject for MockJetStreamStream {
+    async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
+        self.last_raw_message_subjects.lock().unwrap().push(subject.to_string());
+
+        self.last_raw_messages
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(Err(LastRawMessageError::new(LastRawMessageErrorKind::NoMessageFound)))
     }
 }
 
@@ -780,6 +832,7 @@ impl ObjectStoreGet for MockObjectStore {
 mod tests {
     use super::*;
     use futures::StreamExt;
+    use time::OffsetDateTime;
 
     fn make_nats_msg(subject: &str, payload: &[u8]) -> async_nats::Message {
         async_nats::Message {
@@ -920,6 +973,65 @@ mod tests {
 
         let result = stream.create_consumer(pull::Config::default()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn mock_consumer_factory_records_get_stream_calls() {
+        let factory = MockJetStreamConsumerFactory::new();
+
+        JetStreamGetStream::get_stream(&factory, "STREAM_A").await.unwrap();
+        JetStreamGetStream::get_stream(&factory, "STREAM_B").await.unwrap();
+
+        assert_eq!(factory.get_stream_calls(), vec!["STREAM_A", "STREAM_B"]);
+    }
+
+    #[tokio::test]
+    async fn mock_stream_returns_last_raw_messages_by_subject() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message(StreamMessage {
+            subject: "stored.subject".into(),
+            sequence: 42,
+            headers: HeaderMap::new(),
+            payload: Bytes::from_static(br#"{"ok":true}"#),
+            time: OffsetDateTime::UNIX_EPOCH,
+        });
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+
+        let message = stream
+            .get_last_raw_message_by_subject("notion.subscription.verification")
+            .await
+            .unwrap();
+
+        assert_eq!(message.subject.as_str(), "stored.subject");
+        assert_eq!(message.sequence, 42);
+        assert_eq!(message.payload, Bytes::from_static(br#"{"ok":true}"#));
+        assert_eq!(
+            factory.last_raw_message_subjects(),
+            vec!["notion.subscription.verification"]
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_stream_defaults_to_no_message_found() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+
+        let error = stream.get_last_raw_message_by_subject("subject").await.unwrap_err();
+
+        assert_eq!(error.kind(), LastRawMessageErrorKind::NoMessageFound);
+        assert_eq!(error.to_string(), "no message found");
+    }
+
+    #[tokio::test]
+    async fn mock_stream_returns_configured_last_raw_message_error() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message_error(LastRawMessageError::new(LastRawMessageErrorKind::Other));
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+
+        let error = stream.get_last_raw_message_by_subject("subject").await.unwrap_err();
+
+        assert_eq!(error.kind(), LastRawMessageErrorKind::Other);
+        assert_eq!(error.to_string(), "failed to get last raw message");
     }
 
     #[tokio::test]
