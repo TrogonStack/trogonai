@@ -31,7 +31,8 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # nats_ack_timeout_secs = 10
 #
 # [sources.gitlab.integrations.primary.webhook]
-# webhook_secret = { env = "GITLAB_PRIMARY_WEBHOOK_SECRET" }
+# signing_token = { env = "GITLAB_PRIMARY_SIGNING_TOKEN" }
+# timestamp_tolerance_secs = 300
 #
 # [sources.incidentio.integrations.primary]
 # subject_prefix = "incidentio-primary"

@@ -13,7 +13,7 @@ named TOML integrations, each with its own literal or env-backed secret.
 | Slack | `/sources/slack/{integration}/webhook` | `signing_secret` |
 | Telegram | `/sources/telegram/{integration}/webhook` | `webhook_secret` |
 | Twitter/X | `/sources/twitter/{integration}/webhook` | `consumer_secret` |
-| GitLab | `/sources/gitlab/{integration}/webhook` | `webhook_secret` |
+| GitLab | `/sources/gitlab/{integration}/webhook` | `signing_token` |
 | incident.io | `/sources/incidentio/{integration}/webhook` | `signing_secret` |
 | Linear | `/sources/linear/{integration}/webhook` | `webhook_secret` |
 | Microsoft Graph change notifications | `/sources/microsoft-graph/{integration}/webhook` | `client_state` |
