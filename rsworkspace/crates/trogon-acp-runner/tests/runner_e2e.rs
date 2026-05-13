@@ -193,35 +193,53 @@ async fn send_text(
     .await
 }
 
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
-    })
-    .to_string()
-}
-
-fn max_tokens_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [{"type": "text", "text": "partial"}],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
+fn sse_body(events: &[(&str, serde_json::Value)]) -> String {
+    events
+        .iter()
+        .map(|(ev, data)| format!("event: {ev}\ndata: {data}\n\n"))
+        .collect()
 }
 
 fn end_turn_body(text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [{"type": "text", "text": text}],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn tool_use_body() -> String {
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn max_tokens_body() -> String {
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": "partial"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 4096}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// Collect `SessionNotification` messages from `notif_sub` until a message
@@ -343,7 +361,7 @@ async fn runner_publishes_done_end_turn_with_mock_anthropic() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Great response!"));
     });
 
@@ -394,7 +412,7 @@ async fn runner_persists_session_after_end_turn() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Saved reply"));
     });
 
@@ -445,7 +463,7 @@ async fn runner_skips_invalid_prompt_payload() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("After skip"));
     });
 
@@ -502,7 +520,7 @@ async fn runner_publishes_done_max_tokens() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(max_tokens_body());
     });
 
@@ -547,7 +565,7 @@ async fn runner_publishes_done_max_turn_requests() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -598,14 +616,14 @@ async fn runner_publishes_tool_call_events() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -668,14 +686,14 @@ async fn runner_tool_call_allowed_via_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after approved tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -738,14 +756,14 @@ async fn runner_tool_call_denied_via_permission_channel() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after denied tool"));
     });
     // First call → tool_use
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -832,26 +850,25 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done with MCP result"));
     });
     // First call → tool_use with the prefixed name "my_srv__my_tool"
     anthropic.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "stop_reason": "tool_use",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "tu_mcp_1",
-                        "name": "my_srv__my_tool",
-                        "input": {}
-                    }]
-                })
-                .to_string(),
-            );
+            .header("Content-Type", "text/event-stream")
+            .body(sse_body(&[
+                ("message_start", serde_json::json!({
+                    "type": "message_start",
+                    "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+                })),
+                ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_mcp_1", "name": "my_srv__my_tool"}})),
+                ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+                ("content_block_stop", serde_json::json!({"index": 0})),
+                ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+                ("message_stop", serde_json::json!({"type": "message_stop"})),
+            ]));
     });
 
     let prefix = "test-mcp";
@@ -918,7 +935,7 @@ async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .delay(Duration::from_secs(2))
             .body(end_turn_body("never reached"));
     });
@@ -975,7 +992,7 @@ async fn runner_uses_gateway_config_base_url_and_token() {
     gateway.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("via gateway"));
     });
 
@@ -1035,7 +1052,7 @@ async fn concurrent_prompts_same_session_are_queued_in_order() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("queued reply"));
     });
 
@@ -1103,7 +1120,7 @@ async fn concurrent_prompts_different_sessions_run_concurrently() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("concurrent reply"));
     });
 
@@ -1160,7 +1177,7 @@ async fn runner_processes_prompt_with_context_content_block() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("handled context block"));
     });
 
@@ -1212,7 +1229,7 @@ async fn runner_image_content_block_in_prompt_does_not_crash() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("handled image"));
     });
 
@@ -1269,14 +1286,14 @@ async fn runner_second_prompt_loads_history_from_first_prompt() {
             .path("/messages")
             .body_contains("Second question");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Answer to second question"));
     });
     // First call → end_turn with specific text we can check for later
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Answer to first question"));
     });
 
@@ -1341,25 +1358,25 @@ async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done"));
     });
     // First call → tool_use with parent_tool_use_id set.
-    let nested_tool_body = serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "tu_child_001",
-            "name": "unknown_tool",
-            "input": {},
-            "parent_tool_use_id": "tu_parent_001"
-        }]
-    })
-    .to_string();
+    let nested_tool_body = sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_child_001", "name": "unknown_tool", "parent_tool_use_id": "tu_parent_001"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]);
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(nested_tool_body);
     });
 
@@ -1431,7 +1448,7 @@ async fn runner_cancel_during_tool_execution_completes() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Done after tool"))
             .delay(Duration::from_millis(100));
     });
@@ -1439,7 +1456,7 @@ async fn runner_cancel_during_tool_execution_completes() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(tool_use_body());
     });
 
@@ -1491,7 +1508,7 @@ async fn runner_completes_prompt_without_any_cancel_signal() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("completed without cancel"));
     });
 
@@ -1582,7 +1599,7 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("reply after compaction"));
     });
 
@@ -1695,22 +1712,18 @@ async fn start_agent_with_elicitation(
 }
 
 fn ask_user_tool_use_body(question: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "tu_ask_001",
-            "name": "ask_user",
-            "input": { "question": question }
-        }],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+    let partial_json = serde_json::to_string(&serde_json::json!({"question": question})).unwrap();
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_ask_001", "name": "ask_user"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// When the agent calls `ask_user` and the elicitation channel returns an
@@ -1733,14 +1746,14 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
             .path("/messages")
             .body_contains("the-user-answer");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Got the answer."));
     });
     // First call → ask_user tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(ask_user_tool_use_body("What is your name?"));
     });
 
@@ -1788,6 +1801,565 @@ async fn runner_ask_user_accept_answer_forwarded_to_llm() {
         .await;
 }
 
+// ── RBAC / tool-policy gate ───────────────────────────────────────────────────
+
+fn workspace_tool_use_body() -> String {
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool"}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"/workspace/foo.rs\"}"}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+/// When `tool_policies` has an Allow rule matching the tool call, the agent
+/// executes the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_allow_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after policy-allowed tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-allow";
+    let session_id = "sess-policy-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Allow policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Allow policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Allow policy matches"
+            );
+        })
+        .await;
+}
+
+/// When `tool_policies` has a Deny rule matching the tool call, the agent
+/// rejects the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_deny_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, the tool result is sent back; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after policy-denied tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-deny";
+    let session_id = "sess-policy-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Deny policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Deny policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Deny policy matches"
+            );
+        })
+        .await;
+}
+
+// ── Egress policy ─────────────────────────────────────────────────────────────
+
+/// When a session's egress policy denies the MCP server URL, `build_session_mcp`
+/// must skip that server entirely — the MCP server receives no requests.
+#[tokio::test]
+async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
+    use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    // MCP mock — must receive 0 hits.
+    let mcp_server = MockServer::start();
+    let mcp_init_mock = mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp"}}}"#);
+    });
+
+    // Anthropic: return end_turn immediately (no tool_use, just verify MCP skipped).
+    let anthropic = MockServer::start();
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("done without mcp"));
+    });
+
+    let prefix = "test-egress-deny";
+    let session_id = "sess-egress-deny-1";
+
+    // Pre-seed session: MCP server configured but egress policy denies all.
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        mcp_servers: vec![StoredMcpServer {
+            name: "blocked_srv".to_string(),
+            url: mcp_server.base_url(),
+            headers: vec![],
+        }],
+        egress_policy: Some(EgressPolicy {
+            default_action: EgressAction::Deny,
+            rules: vec![],
+        }),
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&anthropic.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "hello").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // MCP server must not have been contacted — egress policy denied it.
+            assert_eq!(
+                mcp_init_mock.hits(),
+                0,
+                "MCP server must receive 0 requests when egress policy denies"
+            );
+        })
+        .await;
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+/// After a prompt turn where the permission channel is consulted and approves,
+/// the session audit log persisted in NATS KV must contain RequiredApproval
+/// and ApprovedByUser entries for the tool call.
+#[tokio::test]
+async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (with tool_result) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after tool"));
+    });
+    // First call → tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit";
+    let session_id = "sess-audit-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Auto-approve every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            // Give the agent a moment to persist the session state.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                !state.audit_log.is_empty(),
+                "audit_log must be non-empty after a tool call"
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::ApprovedByUser),
+                "expected ApprovedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-approved by an Allow `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain an `Allowed` entry.
+#[tokio::test]
+async fn runner_audit_log_records_allowed_for_allow_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after allowed tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-allow";
+    let session_id = "sess-audit-allow-1";
+
+    // permission_tx required to install the RulesPermissionChecker that writes audit_buf.
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Allowed),
+                "expected Allowed entry in audit_log after Allow-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-denied by a Deny `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain a `Denied` entry.
+#[tokio::test]
+async fn runner_audit_log_records_denied_for_deny_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-deny";
+    let session_id = "sess-audit-deny-1";
+
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Denied),
+                "expected Denied entry in audit_log after Deny-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When the permission channel denies a tool call, the session audit log
+/// persisted in NATS KV must contain `RequiredApproval` followed by
+/// `DeniedByUser` entries.
+#[tokio::test]
+async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, agent sends a tool_result error; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit-deny-user";
+    let session_id = "sess-audit-deny-user-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Deny every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(false);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(resp["stopReason"].as_str(), Some("end_turn"), "expected end_turn; got: {resp}");
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser),
+                "expected DeniedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
 /// When the agent calls `ask_user` and the elicitation channel returns Cancel
 /// (user declined), the agent receives the declined message and continues to
 /// the next LLM turn.
@@ -1807,14 +2379,14 @@ async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Understood, question was declined."));
     });
     // First call → ask_user tool_use.
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(ask_user_tool_use_body("Continue?"));
     });
 

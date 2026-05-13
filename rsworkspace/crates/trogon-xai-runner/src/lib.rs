@@ -8,7 +8,7 @@ pub mod skill_loader;
 
 pub use agent::XaiAgent;
 pub use agent_loader::{AgentConfig, AgentLoader, AgentLoading};
-pub use client::{FinishReason, InputItem, Message, XaiClient, XaiEvent};
+pub use client::{FinishReason, InputItem, Message, ToolSpec, XaiClient, XaiEvent};
 pub use http_client::XaiHttpClient;
 pub use session_notifier::{NatsSessionNotifier, SessionNotifier};
 pub use session_store::{NatsSessionStore, SessionStoring};

@@ -25,6 +25,8 @@ use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClien
 #[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
 #[cfg(not(coverage))]
+use trogon_gateway::source;
+#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
 #[cfg(not(coverage))]
 use trogon_std::fs::SystemFs;
@@ -47,12 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("no sources configured — provide a config file or set source env vars".into());
     }
 
-    acp_telemetry::init_logger(
-        acp_telemetry::ServiceName::TrogonGateway,
-        "gateway",
-        &SystemEnv,
-        &SystemFs,
-    );
+    trogon_telemetry::init_logger(trogon_telemetry::ServiceName::TrogonGateway, [], &SystemEnv, &SystemFs);
 
     info!("trogon-gateway starting");
 
@@ -96,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref cfg) = resolved.telegram
         && cfg.registration.is_some()
     {
-        let telegram_http_client = trogon_source_telegram::registration_http_client()?;
-        trogon_source_telegram::register_webhook(cfg, &telegram_http_client).await?;
+        let telegram_http_client = source::telegram::registration::registration_http_client()?;
+        source::telegram::registration::register_webhook(cfg, &telegram_http_client).await?;
     }
 
     let port = resolved.http_server.port;
@@ -115,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let p = publisher.clone();
             let discord_cfg = cfg.clone();
             join_set.spawn(async move {
-                trogon_source_discord::gateway_runner::run(p, &discord_cfg).await;
+                source::discord::gateway_runner::run(p, &discord_cfg).await;
                 ("discord-gateway", Ok(()))
             });
             info!(source = "discord", "gateway runner spawned");
@@ -130,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     join_set.spawn(async move {
         let result = axum::serve(listener, app)
-            .with_graceful_shutdown(acp_telemetry::signal::shutdown_signal())
+            .with_graceful_shutdown(trogon_std::signal::shutdown_signal())
             .await;
         ("http", result.map_err(|e| format!("http server: {e}")))
     });
@@ -154,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("all tasks stopped, shutting down");
-    if let Err(e) = acp_telemetry::shutdown_otel() {
+    if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 

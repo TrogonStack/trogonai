@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 acp-nats = { workspace = true }
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 agent-client-protocol = { workspace = true }
 async-compat = { workspace = true }
 async-nats = { workspace = true }
@@ -18,7 +18,7 @@ opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true, features = ["clap"] }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
 
 [dev-dependencies]
 acp-nats-agent = { path = "../acp-nats-agent" }
@@ -26,7 +26,7 @@ async-nats = { workspace = true, features = ["jetstream"] }
 bytes = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde_json = { workspace = true }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 trogon-acp-runner = { path = "../trogon-acp-runner" }
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-nats = { workspace = true, features = ["test-support"] }

@@ -2,7 +2,7 @@ mod config;
 
 use std::time::Duration;
 
-use acp_telemetry::ServiceName;
+use trogon_telemetry::{ResourceAttribute, ServiceName};
 use clap::Parser;
 use tracing::info;
 use trogon_actor::{ActorRuntime, host::ActorHost, inbox::provision_actor_inbox, provision_state};
@@ -28,9 +28,9 @@ struct Cli {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    acp_telemetry::init_logger(
+    trogon_telemetry::init_logger(
         ServiceName::TrogonPrActor,
-        "pr-actor",
+        [ResourceAttribute::acp_prefix("pr-actor")],
         &SystemEnv,
         &SystemFs,
     );
@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result = host.run_durable(&js_client) => {
             result?;
         }
-        _ = acp_telemetry::signal::shutdown_signal() => {
+        _ = trogon_std::signal::shutdown_signal() => {
             info!("shutdown signal received");
         }
     }

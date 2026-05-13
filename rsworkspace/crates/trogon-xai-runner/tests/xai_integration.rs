@@ -797,7 +797,7 @@ async fn prompt_retry_after_incomplete_turn_does_not_duplicate_user_message() {
 
     // The mock must have been called with exactly one user message (no duplicate).
     let calls = mock.calls.lock().unwrap();
-    let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role == "user").collect();
+    let user_msgs: Vec<_> = calls[0].input.iter().filter(|i| i.role() == Some("user")).collect();
     assert_eq!(
         user_msgs.len(),
         1,
@@ -1110,8 +1110,8 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
         1,
         "turn 1 should have exactly one input item"
     );
-    assert_eq!(calls[0].input[0].role, "user");
-    assert_eq!(calls[0].input[0].content, "first question");
+    assert_eq!(calls[0].input[0].role().unwrap(), "user");
+    assert_eq!(calls[0].input[0].content().unwrap(), "first question");
     assert!(
         calls[0].previous_response_id.is_none(),
         "turn 1 must not send previous_response_id"
@@ -1123,8 +1123,8 @@ async fn prompt_includes_history_as_context_on_subsequent_turns() {
         1,
         "turn 2 should send only the new user message"
     );
-    assert_eq!(calls[1].input[0].role, "user");
-    assert_eq!(calls[1].input[0].content, "second question");
+    assert_eq!(calls[1].input[0].role().unwrap(), "user");
+    assert_eq!(calls[1].input[0].content().unwrap(), "second question");
     assert_eq!(
         calls[1].previous_response_id.as_deref(),
         Some("resp_0"),
@@ -1626,8 +1626,8 @@ async fn prompt_multi_block_content_is_joined_with_newline() {
 
     let calls = mock.calls.lock().unwrap();
     let user_msg = calls[0].input.last().expect("at least one input item");
-    assert_eq!(user_msg.role, "user");
-    assert_eq!(user_msg.content, "line one\nline two");
+    assert_eq!(user_msg.role().unwrap(), "user");
+    assert_eq!(user_msg.content().unwrap(), "line one\nline two");
 }
 
 // ── set_session_model affects HTTP request ────────────────────────────────────
@@ -1926,10 +1926,10 @@ async fn system_prompt_injected_as_first_message_in_request() {
     let input = &calls[0].input;
 
     assert_eq!(input.len(), 2, "system + user");
-    assert_eq!(input[0].role, "system");
-    assert_eq!(input[0].content, "You are a helpful assistant.");
-    assert_eq!(input[1].role, "user");
-    assert_eq!(input[1].content, "hello");
+    assert_eq!(input[0].role().unwrap(), "system");
+    assert_eq!(input[0].content().unwrap(), "You are a helpful assistant.");
+    assert_eq!(input[1].role().unwrap(), "user");
+    assert_eq!(input[1].content().unwrap(), "hello");
 }
 
 #[tokio::test]
@@ -1955,7 +1955,7 @@ async fn system_prompt_absent_when_env_var_not_set() {
     let input = &calls[0].input;
 
     assert_eq!(input.len(), 1, "only user message — no system message");
-    assert_eq!(input[0].role, "user");
+    assert_eq!(input[0].role().unwrap(), "user");
 }
 
 #[tokio::test]
@@ -1991,14 +1991,14 @@ async fn system_prompt_present_in_subsequent_turns() {
     // Turn 1: system + user
     let input1 = &calls[0].input;
     assert_eq!(input1.len(), 2, "system + user");
-    assert_eq!(input1[0].role, "system");
-    assert_eq!(input1[0].content, "Be concise.");
+    assert_eq!(input1[0].role().unwrap(), "system");
+    assert_eq!(input1[0].content().unwrap(), "Be concise.");
 
     // Turn 2: stateful — only the new user message (system already in xAI context).
     let input2 = &calls[1].input;
     assert_eq!(input2.len(), 1, "only new user message on turn 2");
-    assert_eq!(input2[0].role, "user");
-    assert_eq!(input2[0].content, "turn 2");
+    assert_eq!(input2[0].role().unwrap(), "user");
+    assert_eq!(input2[0].content().unwrap(), "turn 2");
     assert!(
         calls[1].previous_response_id.is_some(),
         "turn 2 must have previous_response_id"
@@ -2205,9 +2205,9 @@ async fn enabled_tools_are_sent_in_request_tools_array() {
 
     let calls = mock.calls.lock().unwrap();
     assert!(
-        calls[0].tools.iter().any(|t| t == "web_search"),
+        calls[0].tools.iter().any(|t| t.name() == "web_search"),
         "web_search must be in tools: {:?}",
-        calls[0].tools
+        calls[0].tools.iter().map(|t| t.name()).collect::<Vec<_>>()
     );
 }
 
@@ -2462,9 +2462,9 @@ async fn x_search_tool_enabled_is_included_in_tools_array() {
 
     let calls = mock.calls.lock().unwrap();
     assert!(
-        calls[0].tools.iter().any(|t| t == "x_search"),
+        calls[0].tools.iter().any(|t| t.name() == "x_search"),
         "x_search must be in tools: {:?}",
-        calls[0].tools
+        calls[0].tools.iter().map(|t| t.name()).collect::<Vec<_>>()
     );
 }
 
@@ -2847,10 +2847,10 @@ async fn fork_session_inherits_system_prompt() {
     let calls = mock.calls.lock().unwrap();
     let fork_input = &calls[1].input;
     assert_eq!(
-        fork_input[0].role, "system",
+        fork_input[0].role().unwrap(), "system",
         "first input item of fork must be system: {fork_input:?}"
     );
-    assert_eq!(fork_input[0].content, "Be concise.");
+    assert_eq!(fork_input[0].content().unwrap(), "Be concise.");
 }
 
 // ── ContentBlock::ResourceLink and ContentBlock::Resource ─────────────────────
@@ -2878,7 +2878,7 @@ async fn resource_link_is_included_as_text_in_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert!(
         content.contains("README") && content.contains("file:///project/README.md"),
         "ResourceLink must be forwarded as text: {content:?}"
@@ -2910,7 +2910,7 @@ async fn embedded_text_resource_is_included_as_text_in_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert_eq!(content, "fn main() {}");
 }
 
@@ -2937,7 +2937,7 @@ async fn mixed_text_and_resource_link_blocks_are_joined() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
-    let content = calls[0].input.last().unwrap().content.as_str();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
     assert!(
         content.starts_with("Please review:"),
         "text block must come first: {content:?}"
@@ -3082,7 +3082,7 @@ async fn incomplete_max_output_tokens_continues_and_assembles_text() {
 
     // First request: user message, no previous_response_id.
     assert!(
-        calls[0].input.iter().any(|i| i.role == "user"),
+        calls[0].input.iter().any(|i| i.role() == Some("user")),
         "first request must carry the user message"
     );
     assert!(
@@ -3362,7 +3362,7 @@ async fn stale_id_retry_on_non_4xx_error_succeeds_transparently() {
     assert!(
         calls[2].input.len() >= 2,
         "retry must include full history, got {:?}",
-        calls[2].input.iter().map(|i| &i.role).collect::<Vec<_>>()
+        calls[2].input.iter().map(|i| i.role().unwrap_or("")).collect::<Vec<_>>()
     );
 
     drop(calls);
@@ -3463,10 +3463,1746 @@ async fn incomplete_max_turns_continuation_resends_user_input() {
         Some("resp_mt"),
         "continuation must reference the incomplete response's ID"
     );
-    let user_msg = calls[1].input.iter().find(|i| i.role == "user");
+    let user_msg = calls[1].input.iter().find(|i| i.role() == Some("user"));
     assert!(
         user_msg.is_some(),
         "max_turns continuation must include the user question"
     );
-    assert_eq!(user_msg.unwrap().content, "ask with tools");
+    assert_eq!(user_msg.unwrap().content().unwrap(), "ask with tools");
+}
+
+// ── Bash tool round-trip via wasm-runtime ─────────────────────────────────────
+
+/// Verifies the full bash tool execution path:
+/// 1. Mock HTTP returns a `FunctionCall { name: "bash" }` in round 1.
+/// 2. Agent routes the call through NATS to a fake wasm-runtime terminal responder.
+/// 3. Agent sends a second HTTP request with the `function_call_output` and the
+///    correct `previous_response_id`.
+#[tokio::test]
+async fn bash_tool_call_round_trips_through_wasm_runtime() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    // ── Start NATS JetStream ──────────────────────────────────────────────
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+
+    // ── Register fake wasm-runtime in the registry ────────────────────────
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    // ── Spawn terminal responder ──────────────────────────────────────────
+    // Handles the four sequential NATS requests the agent issues per bash call.
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                let resp = CreateTerminalResponse::new(TerminalId::new("tid-1"));
+                serde_json::to_vec(&resp).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                let resp = WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                );
+                serde_json::to_vec(&resp).unwrap()
+            } else if subject.ends_with(".output") {
+                let resp = TerminalOutputResponse::new("hello\n".to_string(), false);
+                serde_json::to_vec(&resp).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ── Build agent with execution backend ───────────────────────────────
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _env_guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Round 1: model requests a bash call
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hello"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Round 2: model produces the final answer after seeing the tool output
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "All done!".to_string() },
+        XaiEvent::ResponseId { id: "resp_2".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    // ── Run prompt ────────────────────────────────────────────────────────
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run a command"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected 2 HTTP calls: bash round + final answer");
+
+    // Second call must carry the first response's id as context
+    assert_eq!(
+        calls[1].previous_response_id.as_deref(),
+        Some("resp_bash"),
+        "round 2 must reference resp_bash as previous_response_id"
+    );
+
+    // Second call's input must contain the bash function_call_output
+    let fo = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"));
+    assert!(fo.is_some(), "round 2 input must contain function_call_output for cid1");
+    if let Some(InputItem::FunctionCallOutput { output, .. }) = fo {
+        assert!(
+            output.contains("hello"),
+            "bash output must be forwarded to model; got {output:?}"
+        );
+    }
+}
+
+// ── bash feature: no execution backend ───────────────────────────────────────
+
+/// Without an execution backend, the agent must not advertise `bash` in the
+/// tools array sent to xAI.
+#[tokio::test]
+async fn no_execution_backend_means_bash_not_in_tools() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await; // no with_execution_backend
+
+    mock.push_response(text_response_with_id("ok", "resp_1"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert!(
+        !calls[0].tools.iter().any(|t| t.name() == "bash"),
+        "bash must not appear in tools without an execution backend"
+    );
+}
+
+// ── bash feature: non-bash function call ─────────────────────────────────────
+
+/// When the model returns a function call for a non-bash tool, the agent must
+/// send a `ToolCallUpdate(Completed)` notification and exit cleanly.
+#[tokio::test]
+async fn non_bash_function_call_gets_completed_notification() {
+    use agent_client_protocol::{SessionUpdate, ToolCallStatus};
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_1".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "unknown_tool".to_string(),
+            arguments: "{}".to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("do something"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let notifs = agent.test_notifier().notifications.lock().unwrap();
+    let completed = notifs.iter().find(|n| {
+        if let SessionUpdate::ToolCallUpdate(u) = &n.update {
+            u.tool_call_id.to_string() == "cid1"
+                && u.fields.status == Some(ToolCallStatus::Completed)
+        } else {
+            false
+        }
+    });
+    assert!(
+        completed.is_some(),
+        "expected ToolCallUpdate(Completed) for cid1; got: {notifs:?}"
+    );
+}
+
+// ── bash feature: pending calls cleared on Incomplete ────────────────────────
+
+/// If the stream contains both a function call and `FinishReason::Incomplete`
+/// in the same response, the agent must clear pending tool calls and issue a
+/// plain continuation — no `function_call_output` in the follow-up request.
+#[tokio::test]
+async fn pending_tool_calls_cleared_when_incomplete_response_contains_function_call() {
+    use trogon_xai_runner::InputItem;
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_part".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid_discard".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hi"}"#.to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::Incomplete,
+            incomplete_reason: Some("max_turns".to_string()),
+        },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(continuation_response("done", "resp_cont"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected a continuation HTTP call");
+
+    let has_fco = calls[1]
+        .input
+        .iter()
+        .any(|i| matches!(i, InputItem::FunctionCallOutput { .. }));
+    assert!(
+        !has_fco,
+        "continuation round must not forward pending function_call_outputs; input: {:?}",
+        calls[1].input
+    );
+}
+
+// ── bash feature: NATS-backed tests ──────────────────────────────────────────
+
+/// The agent must send `ToolCall(Pending)` → `ToolCall(InProgress)` →
+/// `ToolCallUpdate(Completed, raw_output=<bash output>)` for each bash call.
+#[tokio::test]
+async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, SessionUpdate, TerminalExitStatus, TerminalId,
+        TerminalOutputResponse, ToolCallStatus, ToolKind, WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("hello\n".to_string(), false)).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hello"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response_with_id("All done!", "resp_2"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run echo"))],
+        ))
+        .await
+        .unwrap();
+
+    let notifs = agent.test_notifier().notifications.lock().unwrap();
+
+    // 1. Pending: emitted when FunctionCall SSE event is received
+    let pending = notifs.iter().find(|n| {
+        if let SessionUpdate::ToolCall(tc) = &n.update {
+            tc.tool_call_id.to_string() == "cid1"
+                && tc.status == ToolCallStatus::Pending
+                && tc.kind == ToolKind::Execute
+        } else {
+            false
+        }
+    });
+    assert!(pending.is_some(), "expected ToolCall(Pending, Execute) for cid1; got: {notifs:?}");
+
+    // 2. InProgress: emitted just before NATS execution
+    let in_progress = notifs.iter().find(|n| {
+        if let SessionUpdate::ToolCall(tc) = &n.update {
+            tc.tool_call_id.to_string() == "cid1" && tc.status == ToolCallStatus::InProgress
+        } else {
+            false
+        }
+    });
+    assert!(
+        in_progress.is_some(),
+        "expected ToolCall(InProgress) for cid1; got: {notifs:?}"
+    );
+
+    // 3. Completed: emitted after NATS returns the output, with raw_output set
+    let completed = notifs.iter().find(|n| {
+        if let SessionUpdate::ToolCallUpdate(u) = &n.update {
+            u.tool_call_id.to_string() == "cid1"
+                && u.fields.status == Some(ToolCallStatus::Completed)
+                && u.fields.raw_output.is_some()
+        } else {
+            false
+        }
+    });
+    assert!(
+        completed.is_some(),
+        "expected ToolCallUpdate(Completed, raw_output) for cid1; got: {notifs:?}"
+    );
+
+    // raw_output must contain the bash output string
+    if let Some(n) = completed {
+        if let SessionUpdate::ToolCallUpdate(u) = &n.update {
+            let raw = u.fields.raw_output.as_ref().unwrap();
+            assert!(
+                raw.as_str().unwrap_or("").contains("hello"),
+                "raw_output must contain bash stdout; got: {raw:?}"
+            );
+        }
+    }
+}
+
+/// After `MAX_TOOL_ROUNDS` (10) bash executions, the next bash call must cause
+/// the agent to return `StopReason::Cancelled` without executing the tool.
+#[tokio::test]
+async fn max_tool_rounds_cap_returns_cancelled() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // 11 bash responses: rounds 1-10 execute successfully, round 11 hits the cap.
+    for _ in 0..11 {
+        mock.push_response(vec![
+            XaiEvent::ResponseId { id: "resp_bash".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid".to_string(),
+                name: "bash".to_string(),
+                arguments: r#"{"command":"echo ok"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+    }
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("loop bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.stop_reason,
+        StopReason::Cancelled,
+        "hitting MAX_TOOL_ROUNDS must return Cancelled"
+    );
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 11, "expected exactly 11 HTTP calls (10 bash + 1 cap hit)");
+}
+
+/// When the NATS terminal create handler returns invalid JSON, `execute_bash_via_nats`
+/// must return an error string that the agent forwards as the tool result so the
+/// model can react to the failure.
+#[tokio::test]
+async fn bash_nats_error_forwarded_as_tool_result_to_model() {
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    // Responder returns invalid JSON for `create` — triggers a parse error.
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply.clone() {
+                let subject: &str = msg.subject.as_ref();
+                if subject.ends_with(".create") {
+                    let _ = nats_srv.publish(reply, b"not-valid-json".as_ref().into()).await;
+                }
+                // Other subjects receive no reply (never reached since create fails first).
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hi"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response_with_id("noted", "resp_2"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("try bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected bash round + follow-up");
+
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"));
+    assert!(fco.is_some(), "round 2 must contain function_call_output for cid1");
+    if let Some(InputItem::FunctionCallOutput { output, .. }) = fco {
+        assert!(
+            output.starts_with("error:"),
+            "bash NATS parse error must be forwarded as 'error: ...' string; got: {output:?}"
+        );
+    }
+}
+
+/// After bash rounds complete, if the final model response carries no ResponseId
+/// the stored `last_response_id` must be cleared to prevent a stale ID from
+/// being sent as `previous_response_id` on the next prompt.
+#[tokio::test]
+async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_id() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    };
+    registry.register(&cap).await.unwrap();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Seed a pre-existing response ID so we can confirm it gets cleared.
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+    agent
+        .test_insert_session_with_response_id(&session_id, "/tmp", None, Some("old_id".to_string()))
+        .await;
+
+    // Round 1: bash call with a response ID.
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo ok"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Round 2: final text reply — no ResponseId event.
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "done".to_string() },
+        XaiEvent::Done,
+    ]);
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("run it"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        agent.test_last_response_id(&session_id).await,
+        None,
+        "last_response_id must be cleared when bash ran but the final round returned no ID"
+    );
+}
+
+// ── bash feature: remaining gap coverage ─────────────────────────────────────
+
+/// When `execute_bash_via_nats` receives arguments without a `command` field it
+/// returns an error string immediately (no NATS calls made). The agent must
+/// forward that error string as the `function_call_output` so the model can react.
+#[tokio::test]
+async fn bash_missing_command_field_returns_error_string_to_model() {
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+    // No terminal responder — execute_bash_via_nats must return before touching NATS.
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"arg": "not_command"}"#.to_string(), // missing "command"
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response_with_id("noted", "resp_2"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("try bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "missing-command error must still yield a second HTTP call");
+
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"));
+    assert!(fco.is_some(), "round 2 must contain function_call_output for cid1");
+    if let Some(InputItem::FunctionCallOutput { output, .. }) = fco {
+        assert!(
+            output.contains("error"),
+            "missing 'command' must produce an error string; got: {output:?}"
+        );
+    }
+}
+
+/// When the model emits `FunctionCall+ToolCalls` but no `ResponseId` in the same
+/// stream, the agent cannot safely submit the tool result (it needs a
+/// `previous_response_id`). It must skip execution and return normally.
+#[tokio::test]
+async fn bash_skipped_when_stream_has_no_response_id() {
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Stream: bash call + ToolCalls but NO ResponseId event.
+    mock.push_response(vec![
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hi"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        1,
+        "bash must be silently skipped when ResponseId is absent — no second HTTP call"
+    );
+}
+
+/// Multiple bash calls in the same round must all be executed sequentially and
+/// each must produce its own `function_call_output` in the follow-up request.
+#[tokio::test]
+async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    // Terminal responder: reply "out-<create-count>" so each call returns distinct output.
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        let mut n: u32 = 0;
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                n += 1;
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new(
+                    format!("tid-{n}"),
+                ))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new(
+                    format!("out-{n}"),
+                    false,
+                )).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Round 1: two bash calls in the same response.
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo first"}"#.to_string(),
+        },
+        XaiEvent::FunctionCall {
+            call_id: "cid2".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo second"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response_with_id("all done", "resp_2"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run two commands"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected bash round + final answer");
+
+    let fcos: Vec<_> = calls[1]
+        .input
+        .iter()
+        .filter(|i| matches!(i, InputItem::FunctionCallOutput { .. }))
+        .collect();
+    assert_eq!(fcos.len(), 2, "both bash calls must produce function_call_output items; got: {:?}", fcos);
+
+    let ids: Vec<&str> = fcos
+        .iter()
+        .filter_map(|i| {
+            if let InputItem::FunctionCallOutput { call_id, .. } = i {
+                Some(call_id.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(ids.contains(&"cid1"), "cid1 must be in function_call_outputs");
+    assert!(ids.contains(&"cid2"), "cid2 must be in function_call_outputs");
+}
+
+/// When an execution backend is configured and a wasm-runtime is registered,
+/// `bash` must appear in the tools array sent to xAI.
+#[tokio::test]
+async fn execution_backend_registered_adds_bash_to_tools_array() {
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(text_response_with_id("ok", "resp_1"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert!(
+        calls[0].tools.iter().any(|t| t.name() == "bash"),
+        "bash must appear in tools when execution backend is registered"
+    );
+}
+
+// ── bash feature: final gap coverage ─────────────────────────────────────────
+
+/// `continuation_in_progress = true` is set after executing bash. If the
+/// follow-up HTTP call fails with a 5xx error the agent must NOT retry with
+/// full history — doing so would discard the `function_call_output` items.
+/// Assert: `prompt` returns an error and only 2 HTTP calls were made (no retry).
+#[tokio::test]
+async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+            } else { vec![] };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Round 1: bash call — sets continuation_in_progress = true.
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo ok"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Round 2: 5xx error — retry guard must be blocked by continuation_in_progress.
+    mock.push_response(error_response());
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let result = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run bash"))],
+        ))
+        .await;
+
+    assert!(result.is_err(), "5xx after bash round must surface as an error");
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "no stale-ID retry must occur when continuation_in_progress; got {} calls",
+        calls.len()
+    );
+}
+
+/// After bash rounds complete and the final model response carries a ResponseId,
+/// `last_response_id` must be updated to that ID so subsequent prompts can use
+/// stateful multi-turn via `previous_response_id`.
+#[tokio::test]
+async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+            } else { vec![] };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    // Round 1: bash call.
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo ok"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Round 2: final response WITH a ResponseId — must be persisted.
+    mock.push_response(text_response_with_id("done", "resp_final"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("run it"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        agent.test_last_response_id(&session_id).await,
+        Some("resp_final".to_string()),
+        "last_response_id must be updated to the final round's ResponseId after bash"
+    );
+}
+
+/// When `execution_nats` is set but no wasm-runtime capability is registered
+/// in the registry, `reg.discover(\"execution\")` returns empty and `bash` must
+/// not appear in the tools array.
+#[tokio::test]
+async fn execution_backend_set_but_no_wasm_runtime_registered_means_no_bash_in_tools() {
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    // Registry provisioned but no capability registered.
+    let registry = trogon_registry::Registry::new(reg_store);
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(text_response_with_id("ok", "resp_1"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert!(
+        !calls[0].tools.iter().any(|t| t.name() == "bash"),
+        "bash must not appear in tools when no wasm-runtime is registered in the registry"
+    );
+}
+
+/// When the wasm-runtime registry entry has no `acp_prefix` field in its
+/// metadata, the agent must fall back to `"acp.wasm"` as the NATS subject
+/// prefix and successfully route terminal requests there.
+#[tokio::test]
+async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
+    use agent_client_protocol::{
+        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
+        WaitForTerminalExitResponse,
+    };
+    use async_nats::jetstream;
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::InputItem;
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    // Register without acp_prefix — forces the fallback path.
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "acp.wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({}), // no acp_prefix field
+    }).await.unwrap();
+
+    // Terminal responder on the fallback prefix "acp.wasm".
+    let nats_srv = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("acp.wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() { Some(r) => r, None => continue };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.ends_with(".wait_for_exit") {
+                serde_json::to_vec(&WaitForTerminalExitResponse::new(
+                    TerminalExitStatus::new().exit_code(Some(0)),
+                )).unwrap()
+            } else if subject.ends_with(".output") {
+                serde_json::to_vec(&TerminalOutputResponse::new("fallback\n".to_string(), false)).unwrap()
+            } else { vec![] };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp_bash".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo fallback"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response_with_id("ok", "resp_2"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("run fallback"))],
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    // The bash output from the fallback prefix responder must reach the model.
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    let fco = calls[1].input.iter().find(
+        |i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid1"),
+    );
+    assert!(fco.is_some(), "function_call_output must be present — fallback prefix must have been used");
+    if let Some(InputItem::FunctionCallOutput { output, .. }) = fco {
+        assert!(
+            output.contains("fallback"),
+            "bash output via fallback prefix must be forwarded; got: {output:?}"
+        );
+    }
+}
+
+// ── ext_method ────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn ext_method_list_children_returns_forked_sessions() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    let parent = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
+    let parent_id = parent.session_id.to_string();
+
+    let fork1 = agent.fork_session(ForkSessionRequest::new(parent_id.clone(), "/f1")).await.unwrap();
+    let fork2 = agent.fork_session(ForkSessionRequest::new(parent_id.clone(), "/f2")).await.unwrap();
+    let fork1_id = fork1.session_id.to_string();
+    let fork2_id = fork2.session_id.to_string();
+
+    let raw = serde_json::value::RawValue::from_string(
+        serde_json::json!({"sessionId": parent_id}).to_string(),
+    ).unwrap();
+    let resp = agent.ext_method(ExtRequest::new("session/list_children", std::sync::Arc::from(raw))).await.unwrap();
+
+    let result: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+    let mut children: Vec<String> = serde_json::from_value(result["children"].clone()).unwrap();
+    children.sort();
+
+    let mut expected = vec![fork1_id, fork2_id];
+    expected.sort();
+
+    assert_eq!(children, expected, "both forked sessions must be listed as children");
+}
+
+#[tokio::test]
+async fn ext_method_unknown_method_returns_method_not_found() {
+    use agent_client_protocol::{ErrorCode, ExtRequest};
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+    let err = agent
+        .ext_method(ExtRequest::new("no.such/method", std::sync::Arc::from(raw)))
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        err.code,
+        ErrorCode::MethodNotFound.into(),
+        "unknown ext method must return MethodNotFound: {err:?}"
+    );
+}
+
+// ── set_session_model side-effects ────────────────────────────────────────────
+
+#[tokio::test]
+async fn set_session_model_clears_last_response_id() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response_with_id("hello", "resp_abc"));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hi"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(agent.test_last_response_id(&session_id).await, Some("resp_abc".to_string()));
+
+    agent
+        .set_session_model(SetSessionModelRequest::new(session_id.clone(), "grok-3-mini"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        agent.test_last_response_id(&session_id).await,
+        None,
+        "set_session_model must clear last_response_id to prevent stale ID on next prompt"
+    );
+}
+
+// ── fork_session with branchAtIndex ──────────────────────────────────────────
+
+#[tokio::test]
+async fn fork_session_with_branch_at_index_truncates_history() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["r1"]));
+    mock.push_response(text_response(&["r2"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let src_id = src.session_id.to_string();
+
+    agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::Text(TextContent::new("a"))])).await.unwrap();
+    agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::Text(TextContent::new("b"))])).await.unwrap();
+
+    let src_history = agent.test_session_history(&src_id).await;
+    assert_eq!(src_history.len(), 4, "source: 4 messages");
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("branchAtIndex".to_string(), serde_json::json!(2));
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(src_id.clone(), "/fork").meta(meta))
+        .await
+        .unwrap();
+    let fork_id = fork.session_id.to_string();
+
+    let fork_history = agent.test_session_history(&fork_id).await;
+    assert_eq!(fork_history.len(), 2, "fork at index 2 must have only first 2 messages; got: {fork_history:?}");
+    assert_eq!(fork_history[0].content_str(), "a");
+    assert_eq!(fork_history[1].content_str(), "r1");
+}
+
+#[tokio::test]
+async fn fork_session_parent_and_branch_info_visible_in_list_sessions() {
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    let parent = agent.new_session(NewSessionRequest::new("/parent")).await.unwrap();
+    let parent_id = parent.session_id.to_string();
+
+    let plain_fork = agent
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/plain"))
+        .await
+        .unwrap();
+    let plain_fork_id = plain_fork.session_id.to_string();
+
+    let mut branch_meta = serde_json::Map::new();
+    branch_meta.insert("branchAtIndex".to_string(), serde_json::json!(2));
+    let branch_fork = agent
+        .fork_session(ForkSessionRequest::new(parent_id.clone(), "/branch").meta(branch_meta))
+        .await
+        .unwrap();
+    let branch_fork_id = branch_fork.session_id.to_string();
+
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+
+    let session_meta = |target_id: &str| {
+        list.sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == target_id)
+            .and_then(|s| s.meta.clone())
+    };
+
+    let plain_meta = session_meta(&plain_fork_id).expect("plain fork must have session meta");
+    assert_eq!(
+        plain_meta.get("parentSessionId").and_then(|v| v.as_str()),
+        Some(parent_id.as_str()),
+        "plain fork must report parentSessionId"
+    );
+    assert!(
+        plain_meta.get("branchedAtIndex").is_none(),
+        "plain fork must not report branchedAtIndex"
+    );
+
+    let branch_meta = session_meta(&branch_fork_id).expect("branch fork must have session meta");
+    assert_eq!(
+        branch_meta.get("parentSessionId").and_then(|v| v.as_str()),
+        Some(parent_id.as_str()),
+        "branch fork must report parentSessionId"
+    );
+    assert_eq!(
+        branch_meta.get("branchedAtIndex").and_then(|v| v.as_u64()),
+        Some(2),
+        "branch fork must report branchedAtIndex"
+    );
+
+    assert!(
+        session_meta(&parent_id).is_none(),
+        "root session must not have fork meta in list_sessions"
+    );
+}
+
+// ── token usage notification ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn usage_update_notification_sent_when_xai_reports_token_usage() {
+    use agent_client_protocol::SessionUpdate;
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_with_usage("Hello"));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hi"))],
+        ))
+        .await
+        .unwrap();
+
+    let notifs = agent.test_notifier().notifications.lock().unwrap();
+    let has_usage = notifs
+        .iter()
+        .any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
+    assert!(has_usage, "a UsageUpdate notification must be sent when xAI reports token usage; got: {notifs:?}");
+}
+
+// ── FinishReason::Other ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn finish_reason_other_treated_as_end_turn_no_error() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::TextDelta { text: "hello".to_string() },
+        XaiEvent::Finished {
+            reason: FinishReason::Other("some_future_status".to_string()),
+            incomplete_reason: None,
+        },
+        XaiEvent::Done,
+    ]);
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("hi"))],
+        ))
+        .await
+        .expect("unknown finish reason must not cause an error");
+
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2, "user + assistant must be in history: {history:?}");
+    assert_eq!(history[1].content_str(), "hello");
+}
+
+// ── binary blob resource ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn binary_blob_resource_in_prompt_is_included_as_text() {
+    use agent_client_protocol::BlobResourceContents;
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::BlobResourceContents(
+                    BlobResourceContents::new("aGVsbG8=", "file:///data.bin")
+                        .mime_type("application/octet-stream"),
+                ),
+            ))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let content = calls[0].input.last().unwrap().content().unwrap_or("");
+    assert_eq!(
+        content,
+        "[Binary resource: file:///data.bin (application/octet-stream)]",
+        "binary blob must be forwarded as a text placeholder"
+    );
+}
+
+// ── trim_history orphaned user ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn trim_history_drops_orphaned_user_message_individually() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["reply"]));
+    let agent = make_agent(Arc::clone(&mock)).await.with_max_history(2);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let session_id = sess.session_id.to_string();
+
+    // Plant [orphan-user, second-user, second-assistant] — starts with two user
+    // messages to trigger the orphaned-user trim path in trim_history.
+    agent
+        .test_set_session_history(
+            &session_id,
+            vec![
+                trogon_xai_runner::Message::user("orphan"),
+                trogon_xai_runner::Message::user("second"),
+                trogon_xai_runner::Message::assistant_text("second-reply"),
+            ],
+        )
+        .await;
+
+    agent
+        .prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::Text(TextContent::new("new"))],
+        ))
+        .await
+        .unwrap();
+
+    // History before trim: [orphan, second, second-reply, new, reply] (5 items)
+    // trim_history(5, max=2):
+    //   (user "orphan", user "second") → orphaned user, drain 1 → 4 items
+    //   (user "second", assistant "second-reply") → normal pair, drain 2 → 2 items
+    let history = agent.test_session_history(&session_id).await;
+    assert_eq!(
+        history.len(),
+        2,
+        "orphaned user must be dropped individually; expected [new, reply]; got: {history:?}"
+    );
+    assert_eq!(history[0].content_str(), "new");
+    assert_eq!(history[1].content_str(), "reply");
+}
+
+/// The `bash` tool spec sent to xAI must have a `parameters` schema with a
+/// required `command` string property — this is the contract the model uses
+/// to call the tool.
+#[tokio::test]
+async fn bash_tool_spec_has_correct_parameters_schema() {
+    use async_nats::jetstream;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+    use trogon_xai_runner::ToolSpec;
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry.register(&trogon_registry::AgentCapability {
+        agent_type: "wasm-runtime".to_string(),
+        capabilities: vec!["execution".to_string()],
+        nats_subject: "wasm.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+    }).await.unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone())
+        .await
+        .with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(text_response_with_id("ok", "resp_1"));
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let bash = calls[0]
+        .tools
+        .iter()
+        .find(|t| t.name() == "bash")
+        .expect("bash must be in tools");
+
+    if let ToolSpec::Function { parameters, .. } = bash {
+        assert_eq!(
+            parameters["type"], "object",
+            "bash parameters root must be type:object"
+        );
+        assert_eq!(
+            parameters["properties"]["command"]["type"], "string",
+            "command property must be type:string"
+        );
+        assert_eq!(
+            parameters["required"][0], "command",
+            "command must be listed as required"
+        );
+    } else {
+        panic!("bash tool must be ToolSpec::Function, not ServerSide");
+    }
 }

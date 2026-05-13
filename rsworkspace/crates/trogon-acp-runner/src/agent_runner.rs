@@ -145,6 +145,13 @@ pub mod mock {
         recorded_tool_names: Arc<Mutex<Vec<String>>>,
         /// Set to true when `set_elicitation_provider` is called.
         pub elicitation_provider_set: Arc<Mutex<bool>>,
+        /// Set to true when `set_permission_checker` is called.
+        pub permission_checker_set: Arc<Mutex<bool>>,
+        /// Captured permission checker for calling during `run_chat_streaming`.
+        captured_permission_checker: Arc<Mutex<Option<Arc<dyn PermissionChecker>>>>,
+        /// When `Some`, `run_chat_streaming` calls the captured permission checker
+        /// with this (tool_name, tool_input) before returning, simulating a tool call.
+        invoke_checker_for_tool: Arc<Mutex<Option<(String, serde_json::Value)>>>,
     }
 
     impl MockAgentRunner {
@@ -159,7 +166,21 @@ pub mod mock {
                 wait_for_steer: false,
                 recorded_tool_names: Arc::new(Mutex::new(Vec::new())),
                 elicitation_provider_set: Arc::new(Mutex::new(false)),
+                permission_checker_set: Arc::new(Mutex::new(false)),
+                captured_permission_checker: Arc::new(Mutex::new(None)),
+                invoke_checker_for_tool: Arc::new(Mutex::new(None)),
             }
+        }
+
+        /// Configure the mock to call the permission checker with `(tool, input)`
+        /// during `run_chat_streaming`, simulating a tool-use permission gate.
+        ///
+        /// Only takes effect if a permission checker has been injected via
+        /// `set_permission_checker`. The tool should be in `allowed_tools` to
+        /// avoid blocking on the interactive channel.
+        pub fn with_permission_check(self, tool: impl Into<String>, input: serde_json::Value) -> Self {
+            *self.invoke_checker_for_tool.lock().unwrap() = Some((tool.into(), input));
+            self
         }
 
         /// Return the names of all tool defs injected via `add_mcp_tools`.
@@ -231,7 +252,10 @@ pub mod mock {
             }
         }
 
-        fn set_permission_checker(&mut self, _checker: Arc<dyn PermissionChecker>) {}
+        fn set_permission_checker(&mut self, checker: Arc<dyn PermissionChecker>) {
+            *self.permission_checker_set.lock().unwrap() = true;
+            *self.captured_permission_checker.lock().unwrap() = Some(checker);
+        }
 
         fn set_elicitation_provider(&mut self, _provider: Arc<dyn ElicitationProvider>) {
             *self.elicitation_provider_set.lock().unwrap() = true;
@@ -247,6 +271,14 @@ pub mod mock {
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
+            // If configured, invoke the captured permission checker with a fake tool
+            // call to exercise the audit recording path.
+            if let Some((tool, input)) = self.invoke_checker_for_tool.lock().unwrap().clone() {
+                if let Some(checker) = self.captured_permission_checker.lock().unwrap().clone() {
+                    let _ = checker.check("mock-tc-1", &tool, &input).await;
+                }
+            }
+
             // Signal that the runner has started and the steer subscription is live.
             self.started_notify.notify_one();
 

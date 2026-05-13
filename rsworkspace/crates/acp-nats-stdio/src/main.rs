@@ -9,13 +9,22 @@ use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
 #[cfg(not(coverage))]
-use {acp_nats::nats, acp_telemetry::ServiceName, trogon_std::env::SystemEnv, trogon_std::fs::SystemFs};
+use {
+    acp_nats::nats,
+    trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
+    trogon_telemetry::{ResourceAttribute, ServiceName},
+};
 
 #[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
-    acp_telemetry::init_logger(ServiceName::AcpNatsStdio, config.acp_prefix(), &SystemEnv, &SystemFs);
+    trogon_telemetry::init_logger(
+        ServiceName::AcpNatsStdio,
+        [ResourceAttribute::acp_prefix(config.acp_prefix())],
+        &SystemEnv,
+        &SystemFs,
+    );
     let config = acp_nats::apply_timeout_overrides(config, &SystemEnv);
 
     info!("ACP bridge starting");
@@ -37,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config,
             stdout,
             stdin,
-            acp_telemetry::signal::shutdown_signal(),
+            shutdown_signal(),
         ))
         .await;
 
@@ -47,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("ACP bridge stopped");
     }
 
-    if let Err(e) = acp_telemetry::shutdown_otel() {
+    if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
     }
 
@@ -73,7 +82,7 @@ where
     W: futures::AsyncWrite + Unpin + 'static,
     R: futures::AsyncRead + Unpin + 'static,
 {
-    let meter = acp_telemetry::meter("acp-io-bridge-nats");
+    let meter = trogon_telemetry::meter("acp-io-bridge-nats");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Rc::new(Bridge::new(
         nats_client.clone(),
@@ -307,6 +316,7 @@ mod tests {
                 mcp_dispatch: vec![],
                 permission_checker: None,
                 elicitation_provider: None,
+                streaming_client: None,
             };
             let store = rt.block_on(async {
                 let js = async_nats::jetstream::new(nats_for_server.clone());

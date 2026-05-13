@@ -26,12 +26,14 @@ use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBloc
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent_runner::AgentRunner;
+use crate::egress::EgressPolicy;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
-use crate::permission::{ChannelPermissionChecker, PermissionTx};
+use crate::permission::{AuditBuf, ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
+use crate::permission_rules::PermissionRules;
 use crate::wasm_bash_tool::WasmRuntimeBashTool;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
-use crate::session_store::{NatsSessionStore, SessionStore, StoredMcpServer, now_iso8601};
+use crate::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -118,6 +120,7 @@ fn user_message_from_request(req: &PromptRequest) -> Message {
 async fn build_session_mcp(
     http: &reqwest::Client,
     servers: &[StoredMcpServer],
+    policy: &EgressPolicy,
 ) -> (
     Vec<ToolDef>,
     Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
@@ -126,6 +129,11 @@ async fn build_session_mcp(
     let mut dispatch = Vec::new();
 
     for server in servers {
+        if !policy.is_allowed(&server.url) {
+            warn!(name = %server.name, url = %server.url, "MCP server URL denied by egress policy — skipping");
+            continue;
+        }
+
         let client = Arc::new(trogon_mcp::McpClient::new(http.clone(), &server.url));
 
         if let Err(e) = client.initialize().await {
@@ -429,6 +437,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
 
         let needs_elic = self.elicitation_tx.is_some();
 
+        let audit_buf: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<AuditEntry>::new()));
+
         let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
                 || !state.mcp_servers.is_empty()
@@ -442,7 +452,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                     a.set_model(model.clone());
                 }
                 if !state.mcp_servers.is_empty() {
-                    let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers).await;
+                    let policy = state
+                        .egress_policy
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(EgressPolicy::default_safe);
+                    let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers, &policy).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
                 if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats) {
@@ -467,10 +482,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                 }
                 if needs_perm {
                     if let Some(ref perm_tx) = self.permission_tx {
-                        a.set_permission_checker(Arc::new(ChannelPermissionChecker {
+                        let inner = ChannelPermissionChecker {
                             session_id: session_id.clone(),
                             tx: perm_tx.clone(),
                             allowed_tools: state.allowed_tools.clone(),
+                            audit_buf: audit_buf.clone(),
+                        };
+                        let rules = PermissionRules::default();
+                        a.set_permission_checker(Arc::new(RulesPermissionChecker {
+                            rules: Arc::new(rules),
+                            tool_policies: state.tool_policies.clone(),
+                            inner,
                         }));
                     }
                 }
@@ -655,8 +677,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         }
 
         if let Some(updated) = final_messages {
+            // Reload to pick up any concurrent writes (e.g., allow_always updating
+            // allowed_tools in the permission bridge) before saving back.
+            let in_memory_title = state.title.clone();
+            if let Ok(fresh) = self.store.load(&session_id).await {
+                state = fresh;
+            }
+            // Title is set in-memory before the first save; preserve it across the reload.
+            if state.title.is_empty() && !in_memory_title.is_empty() {
+                state.title = in_memory_title;
+            }
             state.messages = updated;
             state.updated_at = now_iso8601();
+            let new_entries = audit_buf
+                .lock()
+                .map(|mut g| g.drain(..).collect::<Vec<_>>())
+                .unwrap_or_default();
+            append_audit_entries(&mut state.audit_log, new_entries);
             if let Err(e) = self.store.save(&session_id, &state).await {
                 warn!(session_id, error = %e, "agent: failed to save session");
             }

@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use trogon_agent_core::agent_loop::Message;
 
+use crate::egress::EgressPolicy;
+
 /// A URL-based MCP server configuration stored per session.
 /// Stdio servers are not supported in the NATS model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +17,45 @@ pub struct StoredMcpServer {
     #[serde(default)]
     pub headers: Vec<(String, String)>,
 }
+
+// ── Feature 1: Path-scoped RBAC ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyAction {
+    Allow,
+    RequireApproval,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolPolicy {
+    pub tool: String,
+    pub path_pattern: String,
+    pub action: PolicyAction,
+}
+
+// ── Feature 3: Audit trail ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditOutcome {
+    Allowed,
+    Denied,
+    RequiredApproval,
+    ApprovedByUser,
+    DeniedByUser,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuditEntry {
+    pub timestamp: String,
+    pub tool: String,
+    pub input_summary: String,
+    pub outcome: AuditOutcome,
+}
+
+const AUDIT_LOG_CAP: usize = 500;
 
 const BUCKET: &str = "ACP_SESSIONS";
 
@@ -63,6 +104,24 @@ pub struct SessionState {
     /// None means the entire source history was copied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// Structured per-tool path policies evaluated before the interactive gate.
+    #[serde(default)]
+    pub tool_policies: Vec<ToolPolicy>,
+    /// Egress policy for outbound MCP server connections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_policy: Option<EgressPolicy>,
+    /// Audit log of permission decisions for this session.
+    #[serde(default)]
+    pub audit_log: Vec<AuditEntry>,
+}
+
+/// Append new audit entries to the log, trimming oldest entries if over cap.
+pub fn append_audit_entries(audit_log: &mut Vec<AuditEntry>, mut new_entries: Vec<AuditEntry>) {
+    audit_log.append(&mut new_entries);
+    if audit_log.len() > AUDIT_LOG_CAP {
+        let excess = audit_log.len() - AUDIT_LOG_CAP;
+        audit_log.drain(..excess);
+    }
 }
 
 // ── SessionStore trait ────────────────────────────────────────────────────────
@@ -475,6 +534,155 @@ mod tests {
         let back: SessionState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.parent_session_id.as_deref(), Some("root-session"));
         assert_eq!(back.branched_at_index, Some(5));
+    }
+
+    // ── append_audit_entries ──────────────────────────────────────────────────
+
+    fn make_entry(tool: &str, outcome: AuditOutcome) -> AuditEntry {
+        AuditEntry {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            tool: tool.to_string(),
+            input_summary: tool.to_string(),
+            outcome,
+        }
+    }
+
+    #[test]
+    fn append_audit_entries_to_empty_log() {
+        let mut log = vec![];
+        let new = vec![make_entry("Read", AuditOutcome::Allowed)];
+        append_audit_entries(&mut log, new);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].tool, "Read");
+    }
+
+    #[test]
+    fn append_audit_entries_to_existing_log() {
+        let mut log = vec![make_entry("Read", AuditOutcome::Allowed)];
+        let new = vec![make_entry("Write", AuditOutcome::ApprovedByUser)];
+        append_audit_entries(&mut log, new);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[1].tool, "Write");
+    }
+
+    #[test]
+    fn append_audit_entries_empty_new_is_noop() {
+        let mut log = vec![make_entry("Read", AuditOutcome::Allowed)];
+        append_audit_entries(&mut log, vec![]);
+        assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn append_audit_entries_exactly_at_cap_does_not_drop() {
+        let mut log: Vec<AuditEntry> = (0..490)
+            .map(|i| make_entry(&format!("tool-{i}"), AuditOutcome::Allowed))
+            .collect();
+        let new: Vec<AuditEntry> = (0..10)
+            .map(|i| make_entry(&format!("new-{i}"), AuditOutcome::Allowed))
+            .collect();
+        append_audit_entries(&mut log, new);
+        assert_eq!(log.len(), 500);
+        assert_eq!(log[0].tool, "tool-0");
+    }
+
+    #[test]
+    fn append_audit_entries_over_cap_drops_oldest() {
+        let mut log: Vec<AuditEntry> = (0..495)
+            .map(|i| make_entry(&format!("old-{i}"), AuditOutcome::Allowed))
+            .collect();
+        let new: Vec<AuditEntry> = (0..10)
+            .map(|i| make_entry(&format!("new-{i}"), AuditOutcome::Allowed))
+            .collect();
+        append_audit_entries(&mut log, new);
+        assert_eq!(log.len(), 500);
+        assert_eq!(log[0].tool, "old-5", "oldest 5 entries must be dropped");
+        assert_eq!(log[499].tool, "new-9");
+    }
+
+    // ── new SessionState fields serde ─────────────────────────────────────────
+
+    #[test]
+    fn tool_policies_default_empty_and_roundtrip() {
+        let state = SessionState::default();
+        assert!(state.tool_policies.is_empty());
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert!(back.tool_policies.is_empty());
+    }
+
+    #[test]
+    fn tool_policies_roundtrip_with_entries() {
+        use crate::session_store::PolicyAction;
+        let state = SessionState {
+            tool_policies: vec![ToolPolicy {
+                tool: "write_file".to_string(),
+                path_pattern: "/workspace/**".to_string(),
+                action: PolicyAction::Allow,
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tool_policies.len(), 1);
+        assert_eq!(back.tool_policies[0].tool, "write_file");
+        assert_eq!(back.tool_policies[0].path_pattern, "/workspace/**");
+        assert!(matches!(back.tool_policies[0].action, PolicyAction::Allow));
+    }
+
+    #[test]
+    fn egress_policy_omitted_when_none() {
+        let state = SessionState::default();
+        assert!(state.egress_policy.is_none());
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(!json.contains("egress_policy"), "must be omitted when None: {json}");
+    }
+
+    #[test]
+    fn egress_policy_roundtrip_when_set() {
+        use crate::egress::{EgressAction, EgressRule};
+        let state = SessionState {
+            egress_policy: Some(EgressPolicy {
+                default_action: EgressAction::Deny,
+                rules: vec![EgressRule {
+                    host_pattern: "api.anthropic.com".to_string(),
+                    action: EgressAction::Allow,
+                }],
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        let policy = back.egress_policy.unwrap();
+        assert!(matches!(policy.default_action, EgressAction::Deny));
+        assert_eq!(policy.rules.len(), 1);
+        assert_eq!(policy.rules[0].host_pattern, "api.anthropic.com");
+    }
+
+    #[test]
+    fn audit_log_default_empty_and_roundtrip() {
+        let state = SessionState::default();
+        assert!(state.audit_log.is_empty());
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert!(back.audit_log.is_empty());
+    }
+
+    #[test]
+    fn audit_log_roundtrip_with_entries() {
+        let state = SessionState {
+            audit_log: vec![AuditEntry {
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+                tool: "Read".to_string(),
+                input_summary: "/etc/hosts".to_string(),
+                outcome: AuditOutcome::Allowed,
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.audit_log.len(), 1);
+        assert_eq!(back.audit_log[0].tool, "Read");
+        assert_eq!(back.audit_log[0].outcome, AuditOutcome::Allowed);
     }
 
     // ── MemorySessionStore::list_children ─────────────────────────────────────

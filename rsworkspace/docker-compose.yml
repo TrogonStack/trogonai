@@ -259,6 +259,25 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── OpenRouter agent runner ──────────────────────────────────────────────
+  trogon-openrouter-runner:
+    build:
+      context: .
+      target: trogon-openrouter-runner
+    environment:
+      NATS_URL: nats://nats:4222
+      ACP_PREFIX: acp.openrouter
+      AGENT_TYPE: openrouter
+      OPENROUTER_DEFAULT_MODEL: "${OPENROUTER_DEFAULT_MODEL:-anthropic/claude-sonnet-4-6}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      RUST_LOG: info
+      # Console integration (reads CONSOLE_AGENTS KV, writes SESSIONS KV):
+      # AGENT_ID: ""
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ── Codex agent runner ───────────────────────────────────────────────────
   trogon-codex-runner:
     build:

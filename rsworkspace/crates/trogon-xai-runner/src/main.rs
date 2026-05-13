@@ -86,6 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     registry.register(&cap).await
         .map_err(|e| format!("initial registry registration failed: {e}"))?;
     info!(agent_type, prefix, "registered in agent registry");
+    let registry_for_agent = registry.clone();
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -100,7 +101,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
-    let mut agent = XaiAgent::new(notifier, default_model, api_key);
+    let mut agent = XaiAgent::new(notifier, default_model, api_key)
+        .with_execution_backend(nats.clone(), registry_for_agent);
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.

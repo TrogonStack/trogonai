@@ -203,6 +203,83 @@ async fn skill_loader_skips_skill_with_missing_version_entry() {
 }
 
 #[tokio::test]
+async fn skill_loader_skips_skill_with_empty_content() {
+    let (js, _c) = make_js().await;
+
+    kv_put(
+        &js,
+        "CONSOLE_SKILLS",
+        "sk-empty",
+        r#"{"name":"Ghost","latest_version":"v1"}"#,
+    )
+    .await;
+    kv_put(
+        &js,
+        "CONSOLE_SKILL_VERSIONS",
+        "sk-empty.v1",
+        r#"{"content":""}"#,
+    )
+    .await;
+
+    let loader = SkillLoader::open(&js).await.expect("open");
+    let result = loader.load(&["sk-empty".to_string()]).await;
+    assert!(
+        result.is_none(),
+        "skill with empty content must be filtered out; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn skill_loader_skips_version_with_malformed_json() {
+    let (js, _c) = make_js().await;
+
+    kv_put(
+        &js,
+        "CONSOLE_SKILLS",
+        "sk-badver",
+        r#"{"name":"BadVer","latest_version":"v1"}"#,
+    )
+    .await;
+    // Version entry exists but is not valid JSON.
+    kv_put(&js, "CONSOLE_SKILL_VERSIONS", "sk-badver.v1", "not-json").await;
+
+    let loader = SkillLoader::open(&js).await.expect("open");
+    let result = loader.load(&["sk-badver".to_string()]).await;
+    assert!(
+        result.is_none(),
+        "skill with malformed version JSON must be skipped; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn skill_loader_skips_version_with_missing_content_field() {
+    let (js, _c) = make_js().await;
+
+    kv_put(
+        &js,
+        "CONSOLE_SKILLS",
+        "sk-nocontent",
+        r#"{"name":"NoContent","latest_version":"v1"}"#,
+    )
+    .await;
+    // Version entry is valid JSON but has no "content" key.
+    kv_put(
+        &js,
+        "CONSOLE_SKILL_VERSIONS",
+        "sk-nocontent.v1",
+        r#"{"other":"data"}"#,
+    )
+    .await;
+
+    let loader = SkillLoader::open(&js).await.expect("open");
+    let result = loader.load(&["sk-nocontent".to_string()]).await;
+    assert!(
+        result.is_none(),
+        "skill with missing content field must be skipped; got: {result:?}"
+    );
+}
+
+#[tokio::test]
 async fn skill_loader_uses_skill_id_as_name_when_name_missing() {
     let (js, _c) = make_js().await;
 
@@ -319,6 +396,26 @@ async fn session_store_remove_nonexistent_does_not_panic() {
     let store = Store::open(&js, 0).await.expect("open");
     // Should not panic or return an error.
     store.remove("acme", "never-existed").await;
+}
+
+#[tokio::test]
+async fn agent_loader_skips_non_string_skill_ids() {
+    let (js, _c) = make_js().await;
+    kv_put(
+        &js,
+        "CONSOLE_AGENTS",
+        "agent-mixed",
+        r#"{"skill_ids":["ok", 42, null, "also-ok"]}"#,
+    )
+    .await;
+    let loader = AgentLoader::open(&js).await.expect("open");
+    let cfg = loader.load_config("agent-mixed").await;
+    assert_eq!(
+        cfg.skill_ids,
+        vec!["ok", "also-ok"],
+        "non-string skill_ids must be filtered out; got: {:?}",
+        cfg.skill_ids
+    );
 }
 
 #[tokio::test]

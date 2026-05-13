@@ -15,10 +15,10 @@ test = false
 
 [dependencies]
 acp-nats = { workspace = true }
-acp-telemetry = { workspace = true }
+trogon-telemetry = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-registry = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
 agent-client-protocol = { workspace = true }
 async-nats = { workspace = true }
 tokio = { workspace = true, features = ["process", "fs"] }
@@ -36,7 +36,7 @@ wasmtime-wasi = { version = "=30.0.2" }
 [dev-dependencies]
 tempfile = { workspace = true }
 wat = "=1.224.1"
-testcontainers-modules = { version = "=0.8", features = ["nats"] }
+testcontainers-modules = { version = "0.15", features = ["nats"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]
