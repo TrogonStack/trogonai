@@ -2,9 +2,9 @@ use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::context;
 use async_nats::jetstream::kv;
-use async_nats::jetstream::message::OutboundMessage;
+use async_nats::jetstream::message::{OutboundMessage, StreamMessage};
 use async_nats::jetstream::publish::PublishAck;
-use async_nats::jetstream::stream;
+use async_nats::jetstream::stream::{self, LastRawMessageError};
 use async_nats::jetstream::{self};
 use async_nats::subject::ToSubject;
 use bytes::Bytes;
@@ -115,6 +115,13 @@ pub trait JetStreamGetStream: Send + Sync + Clone + 'static {
         &self,
         stream_name: T,
     ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
+}
+
+pub trait JetStreamLastRawMessageBySubject: Send + 'static {
+    fn get_last_raw_message_by_subject(
+        &self,
+        subject: &str,
+    ) -> impl Future<Output = Result<StreamMessage, LastRawMessageError>> + Send;
 }
 
 pub trait JetStreamCreateConsumer: Send + 'static {
@@ -234,6 +241,13 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
 
     async fn create_consumer(&self, config: pull::Config) -> Result<Self::Consumer, Self::Error> {
         self.create_consumer(config).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
+    async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
+        jetstream::stream::Stream::get_last_raw_message_by_subject(self, subject).await
     }
 }
 

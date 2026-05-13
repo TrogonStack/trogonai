@@ -182,7 +182,7 @@ mod tests {
     }
 
     impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
-        type Error = trogon_nats::mocks::MockError;
+        type Error = async_nats::jetstream::context::GetStreamError;
         type Stream = trogon_nats::jetstream::MockJetStreamStream;
 
         async fn get_stream<T: AsRef<str> + Send>(
