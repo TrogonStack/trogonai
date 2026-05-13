@@ -1,4 +1,5 @@
 use crate::client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+use async_nats::client::{SubscribeError, SubscribeErrorKind};
 use async_nats::subject::ToSubject;
 use futures::StreamExt;
 use futures::channel::mpsc;
@@ -174,10 +175,10 @@ impl Default for AdvancedMockNatsClient {
 }
 
 impl SubscribeClient for MockNatsClient {
-    type SubscribeError = MockError;
+    type SubscribeError = SubscribeError;
     type Subscription = BoxStream<'static, async_nats::Message>;
 
-    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, MockError> {
+    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, SubscribeError> {
         self.subscribed_subjects
             .lock()
             .unwrap()
@@ -185,7 +186,10 @@ impl SubscribeClient for MockNatsClient {
 
         match self.subscribe_streams.lock().unwrap().pop_front() {
             Some(rx) => Ok(rx.boxed()),
-            None => Err(MockError("mock: subscribe not implemented".to_string())),
+            None => Err(SubscribeError::with_source(
+                SubscribeErrorKind::Other,
+                MockError("mock: subscribe not implemented".to_string()),
+            )),
         }
     }
 }
@@ -229,10 +233,10 @@ impl FlushClient for MockNatsClient {
 }
 
 impl SubscribeClient for AdvancedMockNatsClient {
-    type SubscribeError = MockError;
+    type SubscribeError = SubscribeError;
     type Subscription = BoxStream<'static, async_nats::Message>;
 
-    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, MockError> {
+    async fn subscribe<S: ToSubject + Send>(&self, subject: S) -> Result<Self::Subscription, SubscribeError> {
         self.base.subscribe(subject).await
     }
 }
