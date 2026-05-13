@@ -126,7 +126,7 @@ webhook_secret = "tg-secret"
 consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 
 [sources.incidentio.integrations.primary.webhook]
 signing_secret = "whsec_dGVzdC1zZWNyZXQ="
@@ -212,7 +212,7 @@ webhook_secret = "tg-secret"
 consumer_secret = "twitter-consumer-secret"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 
 [sources.incidentio.integrations.primary.webhook]
 signing_secret = "whsec_dGVzdC1zZWNyZXQ="
