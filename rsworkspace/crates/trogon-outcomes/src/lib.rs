@@ -2,6 +2,7 @@ pub mod config;
 pub mod evaluator;
 pub mod provider;
 pub mod provision;
+pub mod ralph_loop;
 pub mod server;
 pub mod service;
 pub mod store;
@@ -16,6 +17,7 @@ pub use provision::{
     EVALUATIONS_STREAM, RESULTS_BUCKET, RUBRICS_BUCKET,
     provision_results_kv, provision_rubrics_kv, provision_stream,
 };
+pub use ralph_loop::{LoopIteration, RalphLoop, RalphLoopError, RalphLoopResult, TaskExecutor};
 pub use service::{EvaluationService, trigger_evaluation};
 pub use store::{OutcomesStore, ResultClient, RubricClient};
 pub use types::{

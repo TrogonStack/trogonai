@@ -45,7 +45,8 @@ impl EntityMemory {
 }
 
 /// Fact as returned by the LLM before session/timestamp are applied.
-#[derive(Debug, Clone, Deserialize)]
+/// Also used as the wire type for in-session memory writes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawFact {
     pub category: String,
     pub content: String,

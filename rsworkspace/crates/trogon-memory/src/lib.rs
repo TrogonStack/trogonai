@@ -5,6 +5,7 @@ pub mod provision;
 pub mod service;
 pub mod store;
 pub mod types;
+pub mod writer;
 
 pub use config::DreamingConfig;
 pub use dreamer::Dreamer;
@@ -12,4 +13,5 @@ pub use provider::{AnthropicMemoryProvider, MemoryAuthStyle, MemoryLlmConfig, Me
 pub use provision::{DREAMS_STREAM, MEMORIES_BUCKET, provision_kv, provision_stream};
 pub use service::{DreamingService, trigger_dreaming};
 pub use store::{MemoryClient, MemoryStore, memory_key};
-pub use types::{DreamTrigger, DreamerError, EntityMemory, MemoryFact};
+pub use types::{DreamTrigger, DreamerError, EntityMemory, MemoryFact, RawFact};
+pub use writer::{MemoryWriteHandler, MemoryWriter, WriteRequest, WriteResponse, write_memory};
