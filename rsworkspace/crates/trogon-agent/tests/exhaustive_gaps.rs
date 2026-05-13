@@ -217,7 +217,7 @@ fn pr_review_tools_has_correct_names() {
         "list_pr_files",
         "get_pr_diff",
         "get_file_contents",
-        "post_pr_comment",
+        "post_pr_review",
     ];
     assert_eq!(expected.len(), 4);
 }
@@ -246,8 +246,9 @@ async fn pr_review_prompt_contains_expected_keywords() {
             .path("/anthropic/v1/messages")
             .body_contains("code reviewer")
             .body_contains("list_pr_files")
-            .body_contains("get_pr_diff")
-            .body_contains("post_pr_comment");
+            .body_contains("post_pr_review")
+            .body_contains("position")
+            .body_contains("commit_sha");
         then.status(200)
             .header("content-type", "application/json")
             .json_body(json!({
@@ -259,6 +260,7 @@ async fn pr_review_prompt_contains_expected_keywords() {
     let payload = serde_json::to_vec(&json!({
         "action": "opened",
         "number": 42,
+        "pull_request": { "draft": false, "head": { "sha": "abc123" } },
         "repository": { "owner": { "login": "org" }, "name": "repo" }
     }))
     .unwrap();
