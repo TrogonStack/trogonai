@@ -22,6 +22,8 @@ tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 trogon-nats = { path = "../trogon-nats" }
+trogon-orchestrator = { path = "../trogon-orchestrator" }
+trogon-registry = { path = "../trogon-registry" }
 trogon-std = { path = "../trogon-std" }
 trogon-transcript = { path = "../trogon-transcript" }
 uuid = { workspace = true }
@@ -32,6 +34,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = "0.5"
 testcontainers-modules = { workspace = true }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
+trogon-orchestrator = { path = "../trogon-orchestrator", features = ["test-support"] }
 trogon-std = { path = "../trogon-std", features = ["test-support"] }
 trogon-transcript = { path = "../trogon-transcript" }
 
