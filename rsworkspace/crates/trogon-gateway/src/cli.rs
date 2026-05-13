@@ -13,4 +13,26 @@ pub struct Cli {
 #[derive(clap::Subcommand, Clone)]
 pub enum Command {
     Serve,
+    Source {
+        #[command(subcommand)]
+        source: SourceCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Clone)]
+pub enum SourceCommand {
+    Notion {
+        #[command(subcommand)]
+        command: NotionCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Clone)]
+pub enum NotionCommand {
+    VerificationToken {
+        #[arg(long, default_value = "primary")]
+        integration: String,
+        #[arg(long)]
+        watch: bool,
+    },
 }
