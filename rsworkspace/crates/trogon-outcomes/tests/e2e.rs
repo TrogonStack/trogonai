@@ -7,7 +7,7 @@ use futures_util::StreamExt as _;
 use trogon_orchestrator::caller::NatsAgentCaller;
 use trogon_outcomes::{
     AnthropicEvaluationProvider, Criterion, EvalAuthStyle, EvalLlmConfig,
-    EvaluationService, Evaluator, GraderResponse, RalphLoop, ResultClient, RubricClient, Rubric,
+    EvaluationService, Evaluator, RalphLoop, ResultClient, RubricClient, Rubric,
     SequencedTaskExecutor, SubAgentEvaluationProvider,
     provision_rubrics_kv, provision_results_kv, provision_stream, trigger_evaluation,
 };
@@ -364,14 +364,10 @@ async fn sub_agent_evaluation_provider_dispatches_via_nats() {
         let mut sub = grader_nats.subscribe("agents.grader.dispatch").await.unwrap();
         while let Some(msg) = sub.next().await {
             if let Some(reply) = msg.reply {
-                let response = serde_json::to_vec(&GraderResponse {
-                    scores: vec![trogon_outcomes::CriterionScore {
-                        criterion: "clarity".into(),
-                        score: 0.92,
-                        reasoning: "very clear output".into(),
-                    }],
-                    reasoning: "grader found output satisfactory".into(),
-                })
+                let response = serde_json::to_vec(&serde_json::json!({
+                    "scores": [{"criterion": "clarity", "score": 0.92, "reasoning": "very clear output"}],
+                    "reasoning": "grader found output satisfactory"
+                }))
                 .unwrap();
                 grader_nats.publish(reply, response.into()).await.ok();
             }
