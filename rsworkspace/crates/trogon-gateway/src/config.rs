@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
-use crate::source::gitlab::config::GitLabWebhookSecret;
+use crate::source::gitlab::GitLabSigningToken;
 use crate::source::incidentio::config::IncidentioConfig as IncidentioSourceConfig;
 use crate::source::incidentio::incidentio_signing_secret::IncidentioSigningSecret;
 use crate::source::linear::config::LinearWebhookSecret;
@@ -28,8 +28,9 @@ use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_na
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
 use crate::constants::{
-    DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS, DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS,
-    DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS, DEFAULT_STREAM_MAX_AGE_SECS,
+    DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
+    DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
+    DEFAULT_STREAM_MAX_AGE_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -542,7 +543,8 @@ struct TwitterWebhookConfig {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GitlabWebhookConfig {
-    webhook_secret: Option<SecretInput>,
+    signing_token: Option<SecretInput>,
+    timestamp_tolerance_secs: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1210,17 +1212,17 @@ fn resolve_gitlab_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("gitlab", &id, "webhook_secret", webhook.webhook_secret, errors)
+        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, errors)
         else {
             continue;
         };
-        let webhook_secret = match GitLabWebhookSecret::new(secret) {
-            Ok(secret) => secret,
+        let signing_token = match GitLabSigningToken::new(token) {
+            Ok(token) => token,
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(
                     "gitlab",
                     &id,
-                    "webhook_secret",
+                    "signing_token",
                     error,
                 ));
                 continue;
@@ -1242,14 +1244,31 @@ fn resolve_gitlab_integrations(
         ) else {
             continue;
         };
+        let timestamp_tolerance = match NonZeroDuration::from_secs(
+            webhook
+                .timestamp_tolerance_secs
+                .unwrap_or(DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS),
+        ) {
+            Ok(duration) => duration,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "gitlab",
+                    &id,
+                    "timestamp_tolerance_secs",
+                    error,
+                ));
+                continue;
+            }
+        };
         integrations.push(SourceIntegration::new(
             id,
             crate::source::gitlab::GitlabConfig {
-                webhook_secret,
+                signing_token,
                 subject_prefix,
                 stream_name,
                 stream_max_age,
                 nats_ack_timeout,
+                timestamp_tolerance,
             },
         ));
     }
@@ -1819,6 +1838,10 @@ mod tests {
         String::new()
     }
 
+    fn gitlab_signing_token() -> &'static str {
+        "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
+    }
+
     fn github_toml(secret: &str) -> String {
         format!(
             r#"
@@ -1864,11 +1887,11 @@ consumer_secret = "{secret}"
         )
     }
 
-    fn gitlab_toml(secret: &str) -> String {
+    fn gitlab_toml(signing_token: &str) -> String {
         format!(
             r#"
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "{secret}"
+signing_token = "{signing_token}"
 "#
         )
     }
@@ -2460,8 +2483,8 @@ consumer_secret = ""
     }
 
     #[test]
-    fn gitlab_resolves_with_valid_secret() {
-        let f = write_toml(&gitlab_toml("gitlab-webhook-secret"));
+    fn gitlab_resolves_with_valid_signing_token() {
+        let f = write_toml(&gitlab_toml(gitlab_signing_token()));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(!cfg.gitlab.is_empty());
     }
@@ -2473,7 +2496,7 @@ consumer_secret = ""
 status = "disabled"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gitlab-webhook-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 "#;
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
@@ -2796,7 +2819,7 @@ webhook_secret = "tg-secret"
 nats_ack_timeout_secs = 0
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 "#;
         let f = write_toml(toml);
         let result = load(Some(f.path()));
@@ -2812,7 +2835,7 @@ webhook_secret = "gl-secret"
 stream_max_age_secs = 0
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 "#;
         let f = write_toml(toml);
         let result = load(Some(f.path()));
@@ -3237,11 +3260,37 @@ port = 9090
     }
 
     #[test]
-    fn gitlab_empty_secret_is_invalid() {
+    fn gitlab_empty_signing_token_is_invalid() {
         let f = write_toml(&gitlab_toml(""));
         let result = load(Some(f.path()));
         assert!(
-            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("gitlab/primary: invalid webhook_secret")))
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("gitlab/primary: invalid signing_token")))
+        );
+    }
+
+    #[test]
+    fn gitlab_missing_signing_token_is_invalid() {
+        let toml = r#"
+[sources.gitlab.integrations.primary.webhook]
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("gitlab/primary: missing signing_token")))
+        );
+    }
+
+    #[test]
+    fn gitlab_zero_timestamp_tolerance_is_error() {
+        let toml = r#"
+[sources.gitlab.integrations.primary.webhook]
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
+timestamp_tolerance_secs = 0
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("gitlab/primary: timestamp_tolerance_secs must not be zero")))
         );
     }
 
@@ -3375,7 +3424,7 @@ webhook_secret = "tg-secret"
 subject_prefix = "has.dots"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 "#;
         let f = write_toml(toml);
         let result = load(Some(f.path()));
@@ -3522,7 +3571,7 @@ webhook_secret = "tg-secret"
 stream_name = "has.dots"
 
 [sources.gitlab.integrations.primary.webhook]
-webhook_secret = "gl-secret"
+signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 "#;
         let f = write_toml(toml);
         let result = load(Some(f.path()));
