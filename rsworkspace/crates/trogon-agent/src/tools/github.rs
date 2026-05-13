@@ -1814,6 +1814,78 @@ mod tests {
         );
     }
 
+    // ── post_pr_comment — dedup loop break paths ─────────────────────────────
+
+    /// When the dedup scan GET fails with a network error, the loop must break
+    /// and proceed with the POST rather than aborting (line: `Err(_) => break 'dedup`).
+    #[tokio::test]
+    async fn post_pr_comment_dedup_get_error_breaks_loop_and_posts() {
+        let ctx = make_ctx();
+
+        // GET fails during dedup scan.
+        ctx.http_client.enqueue_err("connection refused");
+
+        // POST — the function must still proceed.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 88, "html_url": "https://github.com/o/r/issues/1#issuecomment-88"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "Recovery comment",
+                "_idempotency_key": "get-error-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "GET error during dedup must not abort — must proceed to POST: {result:?}"
+        );
+        assert!(result.unwrap().contains("Comment posted"));
+        assert!(ctx.http_client.is_empty(), "both GET (failed) and POST must have been consumed");
+    }
+
+    /// When the dedup scan GET returns 200 but the body is not a JSON array
+    /// (e.g. an error object), the loop must break and proceed with the POST
+    /// (line: `_ => break 'dedup`).
+    #[tokio::test]
+    async fn post_pr_comment_dedup_non_array_json_breaks_loop_and_posts() {
+        let ctx = make_ctx();
+
+        // GET returns a JSON object instead of an array — unexpected shape.
+        ctx.http_client
+            .enqueue_ok(200, json!({"message": "Not Found"}).to_string());
+
+        // POST — the function must still proceed.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 77, "html_url": "https://github.com/o/r/issues/1#issuecomment-77"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "Recovery comment",
+                "_idempotency_key": "non-array-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "non-array dedup response must not abort — must proceed to POST: {result:?}"
+        );
+        assert!(result.unwrap().contains("Comment posted"));
+        assert!(ctx.http_client.is_empty(), "both GET and POST must have been consumed");
+    }
+
     // ── get_file_contents — missing path field ────────────────────────────────
 
     #[tokio::test]
