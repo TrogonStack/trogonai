@@ -26,6 +26,7 @@ pub fn memory_key(actor_type: &str, actor_key: &str) -> String {
 pub trait MemoryStore: Send + Sync + Clone + 'static {
     type PutError: std::error::Error + Send + Sync + 'static;
     type GetError: std::error::Error + Send + Sync + 'static;
+    type DeleteError: std::error::Error + Send + Sync + 'static;
 
     fn put(
         &self,
@@ -37,6 +38,11 @@ pub trait MemoryStore: Send + Sync + Clone + 'static {
         &self,
         key: &str,
     ) -> impl Future<Output = Result<Option<Bytes>, Self::GetError>> + Send;
+
+    fn delete(
+        &self,
+        key: &str,
+    ) -> impl Future<Output = Result<(), Self::DeleteError>> + Send;
 }
 
 // ── Production implementation ─────────────────────────────────────────────────
@@ -44,6 +50,7 @@ pub trait MemoryStore: Send + Sync + Clone + 'static {
 impl MemoryStore for kv::Store {
     type PutError = kv::PutError;
     type GetError = kv::EntryError;
+    type DeleteError = kv::DeleteError;
 
     async fn put(&self, key: &str, value: Bytes) -> Result<u64, Self::PutError> {
         kv::Store::put(self, key, value).await
@@ -51,6 +58,10 @@ impl MemoryStore for kv::Store {
 
     async fn get(&self, key: &str) -> Result<Option<Bytes>, Self::GetError> {
         kv::Store::get(self, key).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), Self::DeleteError> {
+        kv::Store::delete(self, key).await
     }
 }
 
@@ -104,6 +115,19 @@ impl<S: MemoryStore> MemoryClient<S> {
             .map_err(|e| DreamerError::Store(e.to_string()))
     }
 
+    /// Delete all memory for an entity (e.g. for privacy or reset).
+    pub async fn delete(
+        &self,
+        actor_type: &str,
+        actor_key: &str,
+    ) -> Result<(), DreamerError> {
+        let key = memory_key(actor_type, actor_key);
+        self.store
+            .delete(&key)
+            .await
+            .map_err(|e| DreamerError::Store(e.to_string()))
+    }
+
     /// Format the accumulated memory as a system prompt prefix.
     ///
     /// Returns `None` when the entity has no memory yet (caller can skip injection).
@@ -148,6 +172,7 @@ pub mod mock {
     impl MemoryStore for MockMemoryStore {
         type PutError = std::convert::Infallible;
         type GetError = std::convert::Infallible;
+        type DeleteError = std::convert::Infallible;
 
         async fn put(&self, key: &str, value: Bytes) -> Result<u64, Self::PutError> {
             self.data.lock().unwrap().insert(key.to_string(), value);
@@ -156,6 +181,11 @@ pub mod mock {
 
         async fn get(&self, key: &str) -> Result<Option<Bytes>, Self::GetError> {
             Ok(self.data.lock().unwrap().get(key).cloned())
+        }
+
+        async fn delete(&self, key: &str) -> Result<(), Self::DeleteError> {
+            self.data.lock().unwrap().remove(key);
+            Ok(())
         }
     }
 }

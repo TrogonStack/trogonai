@@ -2,6 +2,7 @@ pub mod config;
 pub mod dreamer;
 pub mod provider;
 pub mod provision;
+pub mod server;
 pub mod service;
 pub mod store;
 pub mod types;
@@ -15,3 +16,6 @@ pub use service::{DreamingService, trigger_dreaming};
 pub use store::{MemoryClient, MemoryStore, memory_key};
 pub use types::{DreamTrigger, DreamerError, EntityMemory, MemoryFact, RawFact};
 pub use writer::{MemoryWriteHandler, MemoryWriter, WriteRequest, WriteResponse, write_memory};
+
+#[cfg(not(coverage))]
+pub use server::serve;

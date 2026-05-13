@@ -241,6 +241,7 @@ mod tests {
         impl MemoryStore for FailingPutStore {
             type PutError = PutErr;
             type GetError = std::convert::Infallible;
+            type DeleteError = std::convert::Infallible;
 
             async fn put(&self, _key: &str, _value: bytes::Bytes) -> Result<u64, PutErr> {
                 Err(PutErr)
@@ -250,6 +251,9 @@ mod tests {
                 _key: &str,
             ) -> Result<Option<bytes::Bytes>, std::convert::Infallible> {
                 Ok(None)
+            }
+            async fn delete(&self, _key: &str) -> Result<(), std::convert::Infallible> {
+                Ok(())
             }
         }
 

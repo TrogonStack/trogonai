@@ -4,7 +4,7 @@ use trogon_nats::connect;
 use trogon_std::env::SystemEnv;
 use trogon_memory::{
     AnthropicMemoryProvider, DreamingConfig, DreamingService, Dreamer,
-    provision_kv, provision_stream,
+    MemoryWriter, provision_kv, provision_stream, serve,
 };
 
 #[tokio::main]
@@ -21,14 +21,19 @@ async fn main() {
         .await
         .expect("Failed to connect to NATS");
 
-    let js = async_nats::jetstream::new(nats);
+    let js = async_nats::jetstream::new(nats.clone());
 
     provision_stream(&js).await.expect("Failed to provision SESSION_DREAMS stream");
     let kv = provision_kv(&js).await.expect("Failed to provision SESSION_MEMORIES bucket");
 
     let provider = AnthropicMemoryProvider::new(config.llm);
-    let dreamer = Dreamer::new(provider, kv);
-    let service = DreamingService::new(js, config.consumer_name, dreamer);
+    let dreamer = Dreamer::new(provider, kv.clone());
+    let dreaming_service = DreamingService::new(js, config.consumer_name, dreamer);
+    let writer = MemoryWriter::new(nats, kv.clone());
 
-    service.run().await.expect("Dreaming service failed");
+    tokio::join!(
+        async move { dreaming_service.run().await.ok(); },
+        async move { writer.run().await.ok(); },
+        async move { serve(config.port, kv).await.expect("Memory management API failed"); },
+    );
 }
