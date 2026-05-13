@@ -1902,4 +1902,215 @@ mod tests {
             "error must name the missing field"
         );
     }
+
+    // ── get_pr_comments — missing required fields ─────────────────────────────
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_owner_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_repo_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"owner": "o", "pr_number": 1})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_pr_number_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"owner": "o", "repo": "r"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    // ── update_file — missing required fields ─────────────────────────────────
+
+    #[tokio::test]
+    async fn update_file_missing_owner_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"repo": "r", "path": "f.txt", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_repo_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "path": "f.txt", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_path_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing path"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_message_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "path": "f.txt", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing message"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_content_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "path": "f.txt", "message": "m"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing content"));
+    }
+
+    // ── create_pull_request — missing required fields ─────────────────────────
+
+    #[tokio::test]
+    async fn create_pull_request_missing_owner_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"repo": "r", "title": "t", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_repo_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "title": "t", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_title_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing title"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_head_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "title": "t"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing head"));
+    }
+
+    // ── request_reviewers — missing required fields ───────────────────────────
+
+    #[tokio::test]
+    async fn request_reviewers_missing_owner_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"repo": "r", "pr_number": 1, "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_repo_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"owner": "o", "pr_number": 1, "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_pr_number_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_reviewers_returns_err() {
+        let result =
+            request_reviewers(&make_ctx(), &json!({"owner": "o", "repo": "r", "pr_number": 1}))
+                .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing reviewers array"));
+    }
+
+    // ── post_pr_comment — missing required fields ─────────────────────────────
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_owner_returns_err() {
+        let result = post_pr_comment(
+            &make_ctx(),
+            &json!({"repo": "r", "pr_number": 1, "body": "hi"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_repo_returns_err() {
+        let result = post_pr_comment(
+            &make_ctx(),
+            &json!({"owner": "o", "pr_number": 1, "body": "hi"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_pr_number_returns_err() {
+        let result =
+            post_pr_comment(&make_ctx(), &json!({"owner": "o", "repo": "r", "body": "hi"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_body_returns_err() {
+        let result =
+            post_pr_comment(&make_ctx(), &json!({"owner": "o", "repo": "r", "pr_number": 1}))
+                .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing body"));
+    }
 }
