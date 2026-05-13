@@ -1685,4 +1685,149 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert_eq!(lines[3], r"4 \ No newline at end of file");
     }
+
+    // ── create_pull_request — existing PR found in pre-check ─────────────────
+
+    /// When the pre-check GET returns a non-empty array, the function must
+    /// return early with the existing PR — skipping the POST entirely.
+    /// This is the core idempotency path for `create_pull_request`.
+    #[tokio::test]
+    async fn create_pull_request_precheck_finds_existing_pr_returns_early() {
+        let ctx = make_ctx();
+
+        // Pre-check: existing PR found.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{
+                "number": 55,
+                "html_url": "https://github.com/o/r/pull/55"
+            }])
+            .to_string(),
+        );
+        // No POST enqueued — the function must return before creating a new PR.
+
+        let result = create_pull_request(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r",
+                "title": "feat", "head": "feat/branch",
+                "_idempotency_key": "pr-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(result.is_ok(), "must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("Pull request #55"),
+            "must return the existing PR, not create a new one"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "no POST must be made when an existing PR is found"
+        );
+    }
+
+    // ── request_reviewers — GET connection error ──────────────────────────────
+
+    /// When the pre-check GET fails with a network error, `request_reviewers`
+    /// must degrade gracefully and request all reviewers (line: `Err(_) => reviewers.clone()`).
+    #[tokio::test]
+    async fn request_reviewers_get_connection_error_falls_back_to_all_reviewers() {
+        let ctx = make_ctx();
+
+        // GET fails — connection refused.
+        ctx.http_client.enqueue_err("connection refused");
+
+        // POST with all reviewers must follow.
+        ctx.http_client
+            .enqueue_ok(201, json!({"number": 12}).to_string());
+
+        let result = request_reviewers(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 12,
+                "reviewers": ["alice", "bob"],
+                "_idempotency_key": "get-error-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "must succeed after GET connection error: {result:?}"
+        );
+        assert!(result.unwrap().contains("Reviewers requested on PR #12"));
+        assert!(
+            ctx.http_client.is_empty(),
+            "both GET (failed) and POST must have been consumed"
+        );
+    }
+
+    // ── post_pr_comment — idempotency key, partial page, no marker → POST ────
+
+    /// When an idempotency key is present and the first (and only) page returns
+    /// fewer than 100 items without the marker, the dedup loop must break early
+    /// and proceed with the POST — the normal recovery scenario.
+    #[tokio::test]
+    async fn post_pr_comment_idempotency_key_partial_page_no_marker_posts() {
+        let ctx = make_ctx();
+
+        // One page with 3 comments — none containing the marker.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([
+                {"id": 1, "body": "First comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-1"},
+                {"id": 2, "body": "Second comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-2"},
+                {"id": 3, "body": "Third comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-3"}
+            ])
+            .to_string(),
+        );
+
+        // POST — the actual comment creation.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 99, "html_url": "https://github.com/o/r/issues/1#issuecomment-99"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "New review comment",
+                "_idempotency_key": "partial-page-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "must succeed after partial-page dedup scan: {result:?}"
+        );
+        assert!(
+            result.unwrap().contains("Comment posted"),
+            "must return a 'Comment posted' message"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "both GET and POST must have been consumed"
+        );
+    }
+
+    // ── get_file_contents — missing path field ────────────────────────────────
+
+    #[tokio::test]
+    async fn get_file_contents_missing_path_returns_err() {
+        let ctx = make_ctx();
+        let result = get_file_contents(
+            &ctx,
+            &json!({"owner": "o", "repo": "r"}), // "path" intentionally absent
+        )
+        .await;
+        assert!(result.is_err(), "missing path must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("missing path"),
+            "error must name the missing field"
+        );
+    }
 }
