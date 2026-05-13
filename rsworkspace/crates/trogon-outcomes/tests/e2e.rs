@@ -1,11 +1,13 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_nats::jetstream;
 use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use trogon_outcomes::{
     AnthropicEvaluationProvider, Criterion, EvalAuthStyle, EvalLlmConfig,
-    EvaluationService, Evaluator, ResultClient, RubricClient, Rubric,
-    provision_rubrics_kv, provision_results_kv, provision_stream, trigger_evaluation,
+    EvaluationService, Evaluator, RalphLoop, ResultClient, RubricClient, Rubric,
+    SequencedTaskExecutor, provision_rubrics_kv, provision_results_kv, provision_stream,
+    trigger_evaluation,
 };
 use trogon_transcript::{NatsTranscriptPublisher, Session, store::TranscriptStore};
 
@@ -25,6 +27,44 @@ async fn spawn_mock_llm(evaluation_json: &'static str) -> String {
                     "content": [{ "type": "text", "text": evaluation_json }]
                 })),
             )
+        }),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://127.0.0.1:{}/v1/messages", addr.port())
+}
+
+async fn spawn_sequenced_mock_llm(responses: Vec<&'static str>) -> String {
+    use axum::{Router, http::StatusCode, routing::post};
+    use tokio::net::TcpListener;
+
+    let queue = Arc::new(Mutex::new(responses));
+    let app = Router::new().route(
+        "/v1/messages",
+        post({
+            let queue = Arc::clone(&queue);
+            move || {
+                let queue = Arc::clone(&queue);
+                async move {
+                    let resp = {
+                        let mut guard = queue.lock().unwrap();
+                        if guard.is_empty() {
+                            r#"{"scores":[{"criterion":"quality","score":1.0,"reasoning":"default pass"}],"overall_reasoning":"default"}"#
+                        } else {
+                            guard.remove(0)
+                        }
+                    };
+                    (
+                        StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "stop_reason": "end_turn",
+                            "content": [{ "type": "text", "text": resp }]
+                        })),
+                    )
+                }
+            }
         }),
     );
 
@@ -223,4 +263,67 @@ async fn malformed_trigger_is_skipped_and_service_continues() {
     let results = ResultClient::new(result_kv).list_for_session(&session_id).await.unwrap();
     assert_eq!(results.len(), 1, "service should have processed the valid trigger after the bad one");
     assert!(results[0].passed);
+}
+
+#[tokio::test]
+#[ignore = "requires Docker"]
+async fn ralph_loop_retries_until_rubric_passes() {
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
+    let nats_url = format!(
+        "nats://127.0.0.1:{}",
+        nats_container.get_host_port_ipv4(4222).await.unwrap()
+    );
+
+    let nats = async_nats::connect(&nats_url).await.unwrap();
+    let js = jetstream::new(nats.clone());
+
+    provision_stream(&js).await.unwrap();
+    let rubric_kv = provision_rubrics_kv(&js).await.unwrap();
+    let result_kv = provision_results_kv(&js).await.unwrap();
+
+    // Create a rubric with a 0.7 passing threshold
+    let rubric = Rubric::new(
+        "ralph-rubric",
+        "Quality Gate",
+        "Checks output quality",
+        vec![Criterion { name: "quality".into(), description: "Is the output good?".into(), weight: 1.0 }],
+    )
+    .with_passing_score(0.7);
+    RubricClient::new(rubric_kv.clone()).put(&rubric).await.unwrap();
+
+    // Sequenced mock LLM: first call returns failing score, second returns passing score
+    let llm_url = spawn_sequenced_mock_llm(vec![
+        r#"{"scores":[{"criterion":"quality","score":0.4,"reasoning":"needs improvement"}],"overall_reasoning":"poor"}"#,
+        r#"{"scores":[{"criterion":"quality","score":0.9,"reasoning":"excellent"}],"overall_reasoning":"good"}"#,
+    ])
+    .await;
+
+    // Executor returns two responses corresponding to attempt 0 and attempt 1
+    let executor = SequencedTaskExecutor::with_responses(["first attempt", "second attempt"]);
+
+    let provider = AnthropicEvaluationProvider::with_client(
+        llm_config(llm_url),
+        reqwest::Client::new(),
+    );
+    let evaluator = Evaluator::new(provider, rubric_kv.clone(), result_kv.clone());
+    let ralph = RalphLoop::new(executor, evaluator, 3);
+
+    let result = ralph.run("write a summary", "pr", "owner/repo/7", Some("ralph-rubric")).await.unwrap();
+
+    // Loop should have passed on the second attempt
+    assert!(result.passed, "loop should pass on second attempt");
+    assert_eq!(result.iterations.len(), 2, "two iterations: one failing, one passing");
+    assert_eq!(result.final_output, "second attempt");
+    assert!(!result.iterations[0].result.passed, "attempt 0 should have failed");
+    assert!(result.iterations[1].result.passed, "attempt 1 should have passed");
+
+    // Results for both iterations should be stored in KV
+    let session_0 = "ralph-pr-0";
+    let session_1 = "ralph-pr-1";
+    let results_0 = ResultClient::new(result_kv.clone()).list_for_session(session_0).await.unwrap();
+    let results_1 = ResultClient::new(result_kv).list_for_session(session_1).await.unwrap();
+    assert_eq!(results_0.len(), 1, "failing iteration result should be in KV");
+    assert_eq!(results_1.len(), 1, "passing iteration result should be in KV");
+    assert!(!results_0[0].passed);
+    assert!(results_1[0].passed);
 }

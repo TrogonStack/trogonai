@@ -184,6 +184,36 @@ fn format_feedback(attempt: usize, result: &EvaluationResult) -> String {
     out
 }
 
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
+/// A `TaskExecutor` driven by a pre-built list of responses.
+///
+/// Useful for testing `RalphLoop` without a real agent process.
+pub mod mock {
+    use std::sync::{Arc, Mutex};
+
+    use super::{RalphLoopError, TaskExecutor};
+
+    pub struct SequencedTaskExecutor(pub Arc<Mutex<Vec<String>>>);
+
+    impl SequencedTaskExecutor {
+        pub fn with_responses(responses: impl IntoIterator<Item = impl Into<String>>) -> Self {
+            Self(Arc::new(Mutex::new(responses.into_iter().map(Into::into).collect())))
+        }
+    }
+
+    impl TaskExecutor for SequencedTaskExecutor {
+        async fn execute(
+            &self,
+            _task: &str,
+            _feedback: Option<&str>,
+        ) -> Result<String, RalphLoopError> {
+            let mut guard = self.0.lock().unwrap();
+            Ok(if guard.is_empty() { "default output".to_string() } else { guard.remove(0) })
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

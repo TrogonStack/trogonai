@@ -20,6 +20,7 @@ pub use provision::{
 };
 pub use grader_agent::{GraderRequest, GraderResponse, SubAgentEvaluationProvider};
 pub use ralph_loop::{LoopIteration, RalphLoop, RalphLoopError, RalphLoopResult, TaskExecutor};
+pub use ralph_loop::mock::SequencedTaskExecutor;
 pub use service::{EvaluationService, trigger_evaluation};
 pub use store::{OutcomesStore, ResultClient, RubricClient};
 pub use types::{

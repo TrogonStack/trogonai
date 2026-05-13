@@ -3,8 +3,8 @@ use std::time::Duration;
 use async_nats::jetstream;
 use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
 use trogon_memory::{
-    AnthropicMemoryProvider, Dreamer, DreamingService, MemoryClient, MemoryLlmConfig,
-    provision_kv, provision_stream, trigger_dreaming,
+    AnthropicMemoryProvider, Dreamer, DreamingService, EntityMemory, MemoryClient, MemoryLlmConfig,
+    MemoryWriter, RawFact, provision_kv, provision_stream, trigger_dreaming, write_memory,
 };
 use trogon_transcript::{NatsTranscriptPublisher, Session, store::TranscriptStore};
 
@@ -240,4 +240,126 @@ async fn malformed_trigger_payload_is_skipped_gracefully() {
     let memory = client.get("test", "key").await.unwrap();
     assert!(memory.is_some());
     assert_eq!(memory.unwrap().facts[0].content, "still alive");
+}
+
+#[tokio::test]
+#[ignore = "requires Docker"]
+async fn write_memory_persists_facts_via_nats() {
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
+    let nats_url = format!(
+        "nats://127.0.0.1:{}",
+        nats_container.get_host_port_ipv4(4222).await.unwrap()
+    );
+
+    let nats = async_nats::connect(&nats_url).await.unwrap();
+    let js = jetstream::new(nats.clone());
+    let kv = provision_kv(&js).await.unwrap();
+
+    // Start the MemoryWriter in the background
+    let writer = MemoryWriter::new(nats.clone(), kv.clone());
+    tokio::spawn(async move { writer.run().await.ok() });
+
+    // Give the writer time to subscribe
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Use the write_memory helper to write a fact mid-session
+    let total = write_memory(
+        &nats,
+        "pr",
+        "owner/repo/42",
+        "sess-1",
+        vec![RawFact { category: "preference".into(), content: "uses Rust".into(), confidence: 0.95 }],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(total, 1, "one fact should have been stored");
+
+    // A second write to the same entity should accumulate
+    let total2 = write_memory(
+        &nats,
+        "pr",
+        "owner/repo/42",
+        "sess-1",
+        vec![RawFact { category: "goal".into(), content: "ship by Friday".into(), confidence: 0.8 }],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(total2, 2, "second write should accumulate to two facts");
+
+    // Verify KV contains both facts
+    let client = MemoryClient::new(kv);
+    let memory = client.get("pr", "owner/repo/42").await.unwrap().unwrap();
+    assert_eq!(memory.facts.len(), 2);
+    assert_eq!(memory.facts[0].content, "uses Rust");
+    assert_eq!(memory.facts[0].source_session, "sess-1");
+    assert_eq!(memory.facts[1].content, "ship by Friday");
+}
+
+#[cfg(not(coverage))]
+#[tokio::test]
+#[ignore = "requires Docker"]
+async fn memory_http_server_serves_and_deletes_memories() {
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
+    let nats_url = format!(
+        "nats://127.0.0.1:{}",
+        nats_container.get_host_port_ipv4(4222).await.unwrap()
+    );
+
+    let nats = async_nats::connect(&nats_url).await.unwrap();
+    let js = jetstream::new(nats);
+    let kv = provision_kv(&js).await.unwrap();
+
+    // Seed memory directly via MemoryClient
+    let client = MemoryClient::new(kv.clone());
+    let mut memory = EntityMemory::default();
+    memory.merge(
+        vec![RawFact { category: "fact".into(), content: "prefers Rust".into(), confidence: 0.9 }],
+        "sess-seed",
+    );
+    client.put("pr", "owner/repo/99", &memory).await.unwrap();
+
+    // Reserve a free port then release it for the server to bind
+    let port = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let p = listener.local_addr().unwrap().port();
+        drop(listener);
+        p
+    };
+
+    // Start the HTTP server in the background
+    tokio::spawn(async move {
+        trogon_memory::serve(port, kv).await.ok();
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let base = format!("http://127.0.0.1:{port}");
+    let http = reqwest::Client::new();
+
+    // /health → 200
+    let resp = http.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    // GET existing memory → 200 with facts
+    let resp = http.get(format!("{base}/memory/pr/owner/repo/99")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["facts"][0]["content"], "prefers Rust");
+
+    // GET missing entity → 404
+    let resp = http.get(format!("{base}/memory/pr/does/not/exist")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 404);
+
+    // DELETE existing memory → 204
+    let resp = http
+        .delete(format!("{base}/memory/pr/owner/repo/99"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 204);
+
+    // GET after delete → 404
+    let resp = http.get(format!("{base}/memory/pr/owner/repo/99")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 404);
 }
