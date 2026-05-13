@@ -1793,9 +1793,9 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "filetime"
-version = "0.2.28"
+version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d5b2eef6fafbf69f877e55509ce5b11a760690ac9700a2921be067aa6afaef6"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
 dependencies = [
  "cfg-if",
  "libc",
@@ -5366,6 +5366,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-memory"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-transcript",
+]
+
+[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
@@ -5408,6 +5429,53 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-registry",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-std",
+ "trogon-transcript",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-outcomes"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-orchestrator",
+ "trogon-registry",
+ "trogon-std",
+ "trogon-transcript",
  "uuid",
 ]
 
@@ -5657,6 +5725,31 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wat",
+]
+
+[[package]]
+name = "trogon-webhook-dispatcher"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures",
+ "futures-util",
+ "hex",
+ "hmac 0.12.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]
