@@ -3,13 +3,17 @@ use std::time::Duration;
 
 use async_nats::jetstream;
 use testcontainers_modules::{nats::Nats, testcontainers::{ImageExt, runners::AsyncRunner as _}};
+use futures_util::StreamExt as _;
+use trogon_orchestrator::caller::NatsAgentCaller;
 use trogon_outcomes::{
     AnthropicEvaluationProvider, Criterion, EvalAuthStyle, EvalLlmConfig,
-    EvaluationService, Evaluator, RalphLoop, ResultClient, RubricClient, Rubric,
-    SequencedTaskExecutor, provision_rubrics_kv, provision_results_kv, provision_stream,
-    trigger_evaluation,
+    EvaluationService, Evaluator, GraderResponse, RalphLoop, ResultClient, RubricClient, Rubric,
+    SequencedTaskExecutor, SubAgentEvaluationProvider,
+    provision_rubrics_kv, provision_results_kv, provision_stream, trigger_evaluation,
 };
-use trogon_transcript::{NatsTranscriptPublisher, Session, store::TranscriptStore};
+use trogon_registry::AgentCapability;
+use trogon_transcript::{NatsTranscriptPublisher, Session, TranscriptEntry, store::TranscriptStore};
+use trogon_transcript::entry::Role;
 
 // ── Helper: mock LLM server ───────────────────────────────────────────────────
 
@@ -326,4 +330,96 @@ async fn ralph_loop_retries_until_rubric_passes() {
     assert_eq!(results_1.len(), 1, "passing iteration result should be in KV");
     assert!(!results_0[0].passed);
     assert!(results_1[0].passed);
+}
+
+#[tokio::test]
+#[ignore = "requires Docker"]
+async fn sub_agent_evaluation_provider_dispatches_via_nats() {
+    let nats_container = Nats::default().with_cmd(["--jetstream"]).start().await.unwrap();
+    let nats_url = format!(
+        "nats://127.0.0.1:{}",
+        nats_container.get_host_port_ipv4(4222).await.unwrap()
+    );
+
+    let nats = async_nats::connect(&nats_url).await.unwrap();
+    let js = jetstream::new(nats.clone());
+
+    provision_stream(&js).await.unwrap();
+    let rubric_kv = provision_rubrics_kv(&js).await.unwrap();
+    let result_kv = provision_results_kv(&js).await.unwrap();
+
+    // Store a rubric with a 0.7 passing threshold
+    let rubric = Rubric::new(
+        "sub-agent-rubric",
+        "Quality",
+        "Tests sub-agent dispatch",
+        vec![Criterion { name: "clarity".into(), description: "Is it clear?".into(), weight: 1.0 }],
+    )
+    .with_passing_score(0.7);
+    RubricClient::new(rubric_kv.clone()).put(&rubric).await.unwrap();
+
+    // Spawn the mock grader: subscribes on the dispatch subject and replies with passing scores
+    let grader_nats = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = grader_nats.subscribe("agents.grader.dispatch").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let response = serde_json::to_vec(&GraderResponse {
+                    scores: vec![trogon_outcomes::CriterionScore {
+                        criterion: "clarity".into(),
+                        score: 0.92,
+                        reasoning: "very clear output".into(),
+                    }],
+                    reasoning: "grader found output satisfactory".into(),
+                })
+                .unwrap();
+                grader_nats.publish(reply, response.into()).await.ok();
+            }
+        }
+    });
+
+    // Give the subscriber time to register
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Build a minimal transcript directly (no need to hit the transcript store)
+    let now = trogon_transcript::entry::now_ms();
+    let transcript = vec![
+        TranscriptEntry::Message {
+            role: Role::User,
+            content: "Please review this PR.".into(),
+            timestamp: now,
+            tokens: None,
+        },
+        TranscriptEntry::Message {
+            role: Role::Assistant,
+            content: "LGTM, the changes look clean and well-tested.".into(),
+            timestamp: now,
+            tokens: None,
+        },
+    ];
+
+    // Wire up SubAgentEvaluationProvider with the real NatsAgentCaller
+    let caller = NatsAgentCaller::new(nats.clone()).with_timeout(Duration::from_secs(5));
+    let capability = AgentCapability::new("GraderAgent", ["grade"], "agents.grader.>");
+    let provider = SubAgentEvaluationProvider::new(caller, capability);
+
+    let evaluator = Evaluator::new(provider, rubric_kv.clone(), result_kv.clone());
+
+    let results = evaluator
+        .evaluate_session("pr", "owner/repo/50", "sess-grader-e2e", &transcript, &[])
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].rubric_id, "sub-agent-rubric");
+    assert!(results[0].passed, "score 0.92 should pass the 0.7 threshold");
+    assert!((results[0].overall_score - 0.92).abs() < 1e-4);
+
+    // Verify the result was persisted to KV
+    let stored = ResultClient::new(result_kv)
+        .list_for_session("sess-grader-e2e")
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].passed);
 }
