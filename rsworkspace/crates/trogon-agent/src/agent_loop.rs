@@ -319,7 +319,9 @@ pub struct Usage {
 pub struct Message {
     pub role: String,
     pub content: Vec<ContentBlock>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // usage is tracked internally for checkpointing; never sent to Anthropic
+    // (the API returns 400 "extra inputs are not permitted" if present).
+    #[serde(default, skip_serializing)]
     pub usage: Option<Usage>,
 }
 
@@ -7157,6 +7159,19 @@ mod tests {
             matches!(back, ContentBlock::ToolResult { ref tool_use_id, ref content }
                 if tool_use_id == "tu1" && content == "output text"),
             "ToolResult must survive a serde round-trip"
+        );
+    }
+
+    /// Anthropic rejects messages that contain a `usage` field with
+    /// "extra inputs are not permitted" (400). Verify it is never serialized.
+    #[test]
+    fn message_usage_is_not_serialized() {
+        let mut msg = Message::assistant(vec![ContentBlock::Text { text: "hi".into() }]);
+        msg.usage = Some(Usage { input_tokens: 10, output_tokens: 5, ..Default::default() });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(
+            !json.contains("usage"),
+            "Message must not serialize `usage` — Anthropic returns 400 for extra fields; got: {json}"
         );
     }
 
