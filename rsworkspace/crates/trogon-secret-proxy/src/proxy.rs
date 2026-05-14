@@ -89,6 +89,7 @@ where
     // hop and must be stripped by any intermediary (proxy).
     const HOP_BY_HOP: &[&str] = &[
         "connection",
+        "host",
         "keep-alive",
         "proxy-authenticate",
         "proxy-authorization",
@@ -222,6 +223,9 @@ where
 
         let mut response_headers = HeaderMap::new();
         for (k, v) in &start_headers {
+            if HOP_BY_HOP.contains(&k.as_str()) {
+                continue;
+            }
             if let (Ok(name), Ok(value)) = (
                 k.parse::<axum::http::HeaderName>(),
                 v.parse::<axum::http::HeaderValue>(),
@@ -272,8 +276,15 @@ where
             .unwrap());
     }
 
+    const RESP_HOP_BY_HOP: &[&str] = &[
+        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+        "te", "trailers", "transfer-encoding", "upgrade",
+    ];
     let mut response_headers = HeaderMap::new();
     for (k, v) in &proxy_response.headers {
+        if RESP_HOP_BY_HOP.contains(&k.as_str()) {
+            continue;
+        }
         if let (Ok(name), Ok(value)) = (
             k.parse::<axum::http::HeaderName>(),
             v.parse::<axum::http::HeaderValue>(),

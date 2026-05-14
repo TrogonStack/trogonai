@@ -174,6 +174,9 @@ async fn process_request_streaming<V, H, N>(
         .collect();
     forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
+    if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+        forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
+    }
 
     // ── Streaming upstream call ───────────────────────────────────────────────
     let streaming_resp = match http_client
@@ -274,6 +277,9 @@ where
         .collect();
     forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
+    if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
+        forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
+    }
 
     let resp = match forward_request_with_retry(http_client, request, &forwarded_headers).await {
         Ok(resp) => resp,
