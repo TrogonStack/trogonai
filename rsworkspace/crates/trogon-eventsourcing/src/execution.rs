@@ -6,8 +6,8 @@ use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead, StreamState,
 };
 use crate::{
-    CanonicalEventCodec, Decide, Decision, EventCodec, EventData, EventDataEncodeError, EventIdentity, EventType,
-    NonEmpty, RecordedEvent,
+    CanonicalEventCodec, Decide, Decision, Event, EventCodec, EventEncodeError, EventIdentity, EventType, NonEmpty,
+    StreamEvent,
 };
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
@@ -351,7 +351,7 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     {
         let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let state = evolve_events::<C, SErr>(state, &events)?;
-        let encoded_events = encode_events(stream_id.as_ref(), &self.event_codec, &events)
+        let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
         let stream_state = resolve_stream_state::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -435,7 +435,7 @@ where
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_position = stream_read.current_position;
-        let state = replay_recorded_events::<C, EC, SErr>(C::initial_state(), stream_read.events, &self.event_codec)?;
+        let state = replay_stream_events::<C, EC, SErr>(C::initial_state(), stream_read.events, &self.event_codec)?;
         let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
 
         Ok(ExecutionResult {
@@ -537,7 +537,7 @@ where
         }
 
         let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_recorded_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
+        let state = replay_stream_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
         let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
         let events_since_snapshot = replayed_event_count + events.len() as u64;
 
@@ -613,9 +613,9 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     }));
 }
 
-fn replay_recorded_events<C, EC, SErr>(
+fn replay_stream_events<C, EC, SErr>(
     mut state: C::State,
-    recorded_events: Vec<RecordedEvent>,
+    stream_events: Vec<StreamEvent>,
     event_codec: &EC,
 ) -> ExecutionStep<C, SErr, C::State>
 where
@@ -623,9 +623,9 @@ where
     EC: EventCodec<C::Event>,
     EC::Error: std::error::Error + Send + Sync + 'static,
 {
-    for recorded_event in recorded_events {
-        let event = recorded_event
-            .decode_data_with(event_codec)
+    for stream_event in stream_events {
+        let event = stream_event
+            .decode_with(event_codec)
             .map_err(|source| CommandFailure::DecodeEvent(box_error(source)))?;
         state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
     }
@@ -644,20 +644,16 @@ where
     Ok(state)
 }
 
-fn encode_events<E, C>(
-    stream_id: &str,
-    codec: &C,
-    events: &NonEmpty<E>,
-) -> Result<NonEmpty<EventData>, EventDataEncodeError<E, C>>
+fn encode_events<E, C>(codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<Event>, EventEncodeError<E, C>>
 where
     E: EventType + EventIdentity,
     C: EventCodec<E>,
 {
-    let first = EventData::from_event(stream_id, codec, events.first())?;
+    let first = Event::from_domain_event(codec, events.first())?;
     let rest = events
         .iter()
         .skip(1)
-        .map(|event| EventData::from_event(stream_id, codec, event))
+        .map(|event| Event::from_domain_event(codec, event))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(NonEmpty::from_first(first, rest))
 }
@@ -675,8 +671,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, RecordedEvent,
-        SnapshotSchema, WriteSnapshotResponse,
+        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, SnapshotSchema,
+        StreamEvent, WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -775,7 +771,7 @@ mod tests {
     struct FakeRuntime {
         snapshot: Option<Snapshot<TestState>>,
         current_position: Option<StreamPosition>,
-        recorded_events: Vec<RecordedEvent>,
+        stream_events: Vec<StreamEvent>,
         stream_position: StreamPosition,
         fail_read_snapshot: bool,
         fail_write_snapshot: bool,
@@ -784,7 +780,7 @@ mod tests {
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
         stream_states: Arc<Mutex<Vec<StreamState>>>,
-        appended_events: Arc<Mutex<Vec<EventData>>>,
+        appended_events: Arc<Mutex<Vec<Event>>>,
         written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
 
@@ -793,7 +789,7 @@ mod tests {
             Self {
                 snapshot: None,
                 current_position: None,
-                recorded_events: Vec::new(),
+                stream_events: Vec::new(),
                 stream_position: position(1),
                 fail_read_snapshot: false,
                 fail_write_snapshot: false,
@@ -992,11 +988,9 @@ mod tests {
             Ok(ReadStreamResponse {
                 current_position: self.current_position,
                 events: self
-                    .recorded_events
+                    .stream_events
                     .iter()
-                    .filter(|event| {
-                        event.stream_position.map(StreamPosition::get).unwrap_or(0) >= request.from_sequence
-                    })
+                    .filter(|event| event.stream_position.get() >= request.from_sequence)
                     .cloned()
                     .collect(),
             })
@@ -1054,19 +1048,18 @@ mod tests {
         }
     }
 
-    fn recorded_event(sequence: u64, event: TestEvent) -> RecordedEvent {
+    fn stream_event(sequence: u64, event: TestEvent) -> StreamEvent {
         let stream_id = match &event {
             TestEvent::Registered { id }
             | TestEvent::StateChanged { id, .. }
             | TestEvent::Removed { id }
             | TestEvent::Broken { id } => id.clone(),
         };
-        EventData::from_event(stream_id, &TestEventCodec, &event)
-            .unwrap()
-            .record(
-                Some(position(sequence)),
-                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
-            )
+        Event::from_domain_event(&TestEventCodec, &event).unwrap().record(
+            stream_id,
+            position(sequence),
+            DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
+        )
     }
 
     #[test]
@@ -1099,14 +1092,14 @@ mod tests {
         let runtime = FakeRuntime {
             snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
             current_position: Some(position(2)),
-            recorded_events: vec![
-                recorded_event(
+            stream_events: vec![
+                stream_event(
                     1,
                     TestEvent::Registered {
                         id: "alpha".to_string(),
                     },
                 ),
-                recorded_event(
+                stream_event(
                     2,
                     TestEvent::StateChanged {
                         id: "alpha".to_string(),
@@ -1192,7 +1185,7 @@ mod tests {
     fn propagates_replay_evolve_failures() {
         let runtime = FakeRuntime {
             current_position: Some(position(1)),
-            recorded_events: vec![recorded_event(
+            stream_events: vec![stream_event(
                 1,
                 TestEvent::Broken {
                     id: "alpha".to_string(),
@@ -1268,8 +1261,7 @@ mod tests {
             &[StreamState::At(position(1))]
         );
         assert_eq!(appended_events.len(), 1);
-        assert_eq!(appended_events[0].event_type, "state_changed");
-        assert_eq!(appended_events[0].stream_id, "alpha");
+        assert_eq!(appended_events[0].r#type, "state_changed");
         assert_eq!(result.state, TestState::Present { enabled: false });
     }
 
@@ -1277,9 +1269,8 @@ mod tests {
     fn supports_custom_event_codecs() {
         let runtime = FakeRuntime {
             current_position: Some(position(1)),
-            recorded_events: vec![
-                EventData::from_event(
-                    "alpha",
+            stream_events: vec![
+                Event::from_domain_event(
                     &WrappedJsonCodec,
                     &TestEvent::Registered {
                         id: "alpha".to_string(),
@@ -1287,7 +1278,8 @@ mod tests {
                 )
                 .unwrap()
                 .record(
-                    Some(position(1)),
+                    "alpha",
+                    position(1),
                     DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
                 ),
             ],
@@ -1306,14 +1298,14 @@ mod tests {
 
         assert_eq!(result.state, TestState::Present { enabled: false });
         assert_eq!(appended_events.len(), 1);
-        assert!(appended_events[0].payload.starts_with(b"wrapped:"));
+        assert!(appended_events[0].content.starts_with(b"wrapped:"));
     }
 
     #[test]
     fn falls_back_to_exact_current_position_when_command_has_no_required_rule() {
         let runtime = FakeRuntime {
             current_position: Some(position(7)),
-            recorded_events: vec![recorded_event(
+            stream_events: vec![stream_event(
                 7,
                 TestEvent::Registered {
                     id: "alpha".to_string(),
@@ -1398,7 +1390,7 @@ mod tests {
         const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             current_position: Some(position(1)),
-            recorded_events: vec![recorded_event(
+            stream_events: vec![stream_event(
                 1,
                 TestEvent::Registered {
                     id: "alpha".to_string(),

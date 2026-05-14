@@ -1,5 +1,5 @@
 use super::stream_position::StreamPosition;
-use crate::RecordedEvent;
+use crate::StreamEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadStreamResponse {
@@ -10,5 +10,5 @@ pub struct ReadStreamResponse {
     /// same stream to answer freshness questions. Callers must not treat it as
     /// a gapless revision or event count.
     pub current_position: Option<StreamPosition>,
-    pub events: Vec<RecordedEvent>,
+    pub events: Vec<StreamEvent>,
 }

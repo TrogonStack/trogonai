@@ -27,7 +27,7 @@ where
             .map_err(JetStreamStoreError::ReadStream)?
             .into_iter()
             .map(|mut event| {
-                event.event_stream_id = stream_id.as_ref().to_string();
+                event.stream_id = stream_id.as_ref().to_string();
                 event
             })
             .collect();
@@ -58,12 +58,6 @@ where
             .resolve_subject_state(self.events_stream(), stream_id)
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
-        if events.iter().any(|event| event.stream_id() != stream_id.as_ref()) {
-            return Err(JetStreamStoreError::AppendStream(StreamStoreError::publish_source(
-                "failed to publish stream event batch",
-                std::io::Error::other(format!("batch contains events outside stream '{}'", stream_id.as_ref())),
-            )));
-        }
         let current_position = subject_state.current_position;
         let expected_last_subject_sequence =
             resolve_expected_last_subject_sequence(stream_id, expected_state, current_position)?;

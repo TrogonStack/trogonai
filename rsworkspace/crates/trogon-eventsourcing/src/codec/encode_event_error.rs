@@ -8,7 +8,7 @@ pub enum EncodeEventError<EventTypeError, EventCodecError> {
     EventCodec(EventCodecError),
 }
 
-pub type EventDataEncodeError<E, C> = EncodeEventError<<E as EventType>::Error, <C as EventCodec<E>>::Error>;
+pub type EventEncodeError<E, C> = EncodeEventError<<E as EventType>::Error, <C as EventCodec<E>>::Error>;
 
 impl<EventTypeError, EventCodecError> fmt::Display for EncodeEventError<EventTypeError, EventCodecError>
 where

@@ -1,12 +1,11 @@
 mod act;
 mod decide;
-#[path = "decision/decision.rs"]
-mod decision_type;
+mod decision;
 mod non_empty;
 
 pub use act::Act;
 pub use decide::Decide;
-pub use decision_type::Decision;
+pub use decision::Decision;
 pub use non_empty::NonEmpty;
 
 #[cfg(test)]
