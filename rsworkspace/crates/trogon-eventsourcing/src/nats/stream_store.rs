@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
 
-use crate::{EventData, EventId, EventMetadata, NonEmpty, RecordedEvent};
+use crate::{Event, EventHeaders, EventId, NonEmpty, StreamEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
@@ -15,7 +15,7 @@ type StreamMessage = async_nats::jetstream::message::StreamMessage;
 const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
 const NATS_BATCH_ID: &str = "Nats-Batch-Id";
 const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
-pub const TROGON_EVENT_METADATA_HEADER_PREFIX: &str = "Trogon-Metadata-";
+pub const TROGON_EVENT_HEADER_PREFIX: &str = "Trogon-Header-";
 pub const TROGON_EVENT_TYPE: &str = "Trogon-Event-Type";
 
 #[derive(Debug)]
@@ -74,25 +74,18 @@ pub async fn append_stream<J>(
     js: &J,
     subject: String,
     expected_last_subject_sequence: Option<u64>,
-    events: &NonEmpty<EventData>,
+    events: &NonEmpty<Event>,
 ) -> Result<crate::StreamPosition, StreamStoreError>
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
 {
-    let first_stream_id = events.first().stream_id().to_string();
-    if events.iter().any(|event| event.stream_id() != first_stream_id) {
-        return Err(StreamStoreError::publish_source(
-            "failed to publish stream event batch",
-            std::io::Error::other("batch contains events across multiple streams"),
-        ));
-    }
     let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
 
     for (index, event) in events.iter().enumerate() {
         let publish = build_publish_message(
             event,
-            event.payload.clone(),
+            event.content.clone(),
             expected_last_subject_sequence,
             batch_id.as_str(),
             index,
@@ -143,7 +136,7 @@ where
 }
 
 fn build_publish_message(
-    event: &EventData,
+    event: &Event,
     payload: Vec<u8>,
     expected_last_subject_sequence: Option<u64>,
     batch_id: &str,
@@ -152,12 +145,12 @@ fn build_publish_message(
 ) -> PublishMessage {
     let mut publish = PublishMessage::build()
         .payload(payload.into())
-        .message_id(event.event_id.to_string())
-        .header(TROGON_EVENT_TYPE, event.event_type.as_str())
+        .message_id(event.id.to_string())
+        .header(TROGON_EVENT_TYPE, event.r#type.as_str())
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
-    for (name, value) in event.metadata.iter() {
-        publish = publish.header(metadata_header_name(name.as_str()), value);
+    for (name, value) in event.headers.iter() {
+        publish = publish.header(event_header_name(name.as_str()), value);
     }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
         publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);
@@ -171,7 +164,7 @@ fn build_publish_message(
 pub async fn read_stream(
     stream: &jetstream::stream::Stream,
     from_sequence: u64,
-) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     let info = stream
         .get_info()
         .await
@@ -183,7 +176,7 @@ pub(crate) async fn read_subject_stream(
     stream: &jetstream::stream::Stream,
     subject: &str,
     from_sequence: u64,
-) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     let info = stream
         .get_info()
         .await
@@ -195,7 +188,7 @@ pub async fn read_stream_range(
     stream: &jetstream::stream::Stream,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     read_message_range(stream, from_sequence, to_sequence, |_| true).await
 }
 
@@ -204,7 +197,7 @@ async fn read_subject_range(
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     read_message_range(stream, from_sequence, to_sequence, |message| {
         message.subject.as_str() == subject
     })
@@ -216,7 +209,7 @@ async fn read_message_range(
     from_sequence: u64,
     to_sequence: u64,
     mut include: impl FnMut(&StreamMessage) -> bool,
-) -> Result<Vec<RecordedEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
         return Ok(Vec::new());
     }
@@ -253,7 +246,7 @@ async fn read_raw_message(
     }
 }
 
-pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, StreamStoreError> {
+pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, StreamStoreError> {
     let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
         .ok_or_else(|| {
             StreamStoreError::read_source(
@@ -270,40 +263,42 @@ pub fn record_stream_message(message: StreamMessage) -> Result<RecordedEvent, St
     let subject = message.subject.to_string();
     let stream_position = crate::StreamPosition::try_new(message.sequence)
         .map_err(|source| StreamStoreError::read_source("failed to read stream message position", source))?;
-    let metadata = metadata_from_headers(headers)?;
+    let event_headers = event_headers_from_headers(headers)?;
 
-    Ok(RecordedEvent {
-        event_id,
-        event_type,
-        event_stream_id: subject.clone(),
-        payload: message.payload.to_vec(),
-        metadata,
-        stream_position: Some(stream_position),
+    Ok(StreamEvent {
+        stream_id: subject,
+        event: Event {
+            id: event_id,
+            r#type: event_type,
+            content: message.payload.to_vec(),
+            headers: event_headers,
+        },
+        stream_position,
         recorded_at,
     })
 }
 
-fn metadata_header_name(name: &str) -> String {
-    format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}{name}")
+fn event_header_name(name: &str) -> String {
+    format!("{TROGON_EVENT_HEADER_PREFIX}{name}")
 }
 
-fn metadata_from_headers(headers: &HeaderMap) -> Result<EventMetadata, StreamStoreError> {
+fn event_headers_from_headers(headers: &HeaderMap) -> Result<EventHeaders, StreamStoreError> {
     let mut entries = Vec::new();
     for (name, values) in headers.iter() {
         let header_name = name.to_string();
-        let Some(metadata_name) = header_name.strip_prefix(TROGON_EVENT_METADATA_HEADER_PREFIX) else {
+        let Some(event_header_name) = header_name.strip_prefix(TROGON_EVENT_HEADER_PREFIX) else {
             continue;
         };
         let [value] = values.as_slice() else {
             return Err(StreamStoreError::read_source(
-                "failed to read stream message metadata",
-                std::io::Error::other(format!("metadata header '{header_name}' must have exactly one value")),
+                "failed to read stream message event headers",
+                std::io::Error::other(format!("event header '{header_name}' must have exactly one value")),
             ));
         };
-        entries.push((metadata_name.to_string(), value.as_str().to_string()));
+        entries.push((event_header_name.to_string(), value.as_str().to_string()));
     }
-    EventMetadata::from_entries(entries)
-        .map_err(|source| StreamStoreError::read_source("failed to read stream message metadata", source))
+    EventHeaders::from_entries(entries)
+        .map_err(|source| StreamStoreError::read_source("failed to read stream message event headers", source))
 }
 
 fn required_header<'a>(
@@ -327,21 +322,20 @@ mod tests {
     };
     use uuid::Uuid;
 
-    use crate::{EventData, EventId, EventMetadata};
+    use crate::{Event, EventHeaders, EventId};
 
     use super::{
-        NATS_BATCH_COMMIT, TROGON_EVENT_METADATA_HEADER_PREFIX, TROGON_EVENT_TYPE, build_publish_message,
-        metadata_from_headers,
+        NATS_BATCH_COMMIT, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, build_publish_message,
+        event_headers_from_headers,
     };
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
-        let event = EventData {
-            event_id: EventId::from(Uuid::from_u128(1)),
-            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
-            stream_id: "backup".to_string(),
-            payload: Vec::new(),
-            metadata: EventMetadata::empty(),
+        let event = Event {
+            id: EventId::from(Uuid::from_u128(1)),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            content: Vec::new(),
+            headers: EventHeaders::empty(),
         };
 
         let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
@@ -359,13 +353,12 @@ mod tests {
     }
 
     #[test]
-    fn build_publish_message_maps_event_metadata_to_trogon_headers() {
-        let event = EventData {
-            event_id: EventId::from(Uuid::from_u128(1)),
-            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
-            stream_id: "backup".to_string(),
-            payload: Vec::new(),
-            metadata: EventMetadata::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
+    fn build_publish_message_maps_event_headers_to_trogon_headers() {
+        let event = Event {
+            id: EventId::from(Uuid::from_u128(1)),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            content: Vec::new(),
+            headers: EventHeaders::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
@@ -375,39 +368,38 @@ mod tests {
 
         assert_eq!(
             headers
-                .get(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}trace-id").as_str())
+                .get(format!("{TROGON_EVENT_HEADER_PREFIX}trace-id").as_str())
                 .map(|value| value.as_str()),
             Some("trace-1")
         );
         assert_eq!(
             headers
-                .get(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}tenant").as_str())
+                .get(format!("{TROGON_EVENT_HEADER_PREFIX}tenant").as_str())
                 .map(|value| value.as_str()),
             Some("trogon")
         );
     }
 
     #[test]
-    fn metadata_from_headers_reads_trogon_metadata_headers() {
+    fn event_headers_from_headers_reads_trogon_event_headers() {
         let mut headers = HeaderMap::new();
-        headers.insert(format!("{TROGON_EVENT_METADATA_HEADER_PREFIX}trace-id"), "trace-1");
+        headers.insert(format!("{TROGON_EVENT_HEADER_PREFIX}trace-id"), "trace-1");
         headers.insert("Trogon-Event-Type", "test.event");
         headers.insert("Nats-Msg-Id", "00000000-0000-0000-0000-000000000001");
 
-        let metadata = metadata_from_headers(&headers).unwrap();
+        let event_headers = event_headers_from_headers(&headers).unwrap();
 
-        assert_eq!(metadata.get("trace-id"), Some("trace-1"));
-        assert_eq!(metadata.len(), 1);
+        assert_eq!(event_headers.get("trace-id"), Some("trace-1"));
+        assert_eq!(event_headers.len(), 1);
     }
 
     #[test]
     fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
-        let event = EventData {
-            event_id: EventId::from(Uuid::from_u128(1)),
-            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
-            stream_id: "backup".to_string(),
-            payload: Vec::new(),
-            metadata: EventMetadata::empty(),
+        let event = Event {
+            id: EventId::from(Uuid::from_u128(1)),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            content: Vec::new(),
+            headers: EventHeaders::empty(),
         };
 
         let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
@@ -437,12 +429,11 @@ mod tests {
 
     #[test]
     fn build_publish_message_omits_occ_header_without_expected_sequence() {
-        let event = EventData {
-            event_id: EventId::from(Uuid::from_u128(1)),
-            event_type: "trogon.cron.jobs.v1.JobAdded".to_string(),
-            stream_id: "backup".to_string(),
-            payload: Vec::new(),
-            metadata: EventMetadata::empty(),
+        let event = Event {
+            id: EventId::from(Uuid::from_u128(1)),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            content: Vec::new(),
+            headers: EventHeaders::empty(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)

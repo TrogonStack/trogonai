@@ -1,14 +1,15 @@
-mod event_data;
-mod event_metadata;
-mod event_metadata_error;
-mod metadata_key;
-mod recorded_event;
+#[path = "event.rs"]
+mod event_envelope;
+mod event_headers;
+mod event_headers_error;
+mod header_key;
+mod stream_event;
 
-pub use event_data::EventData;
-pub use event_metadata::EventMetadata;
-pub use event_metadata_error::EventMetadataError;
-pub use metadata_key::MetadataKey;
-pub use recorded_event::RecordedEvent;
+pub use event_envelope::Event;
+pub use event_headers::EventHeaders;
+pub use event_headers_error::EventHeadersError;
+pub use header_key::HeaderKey;
+pub use stream_event::StreamEvent;
 
 #[cfg(test)]
 mod tests {
@@ -78,134 +79,134 @@ mod tests {
     }
 
     #[test]
-    fn event_data_uses_event_traits() {
+    fn event_uses_event_traits() {
         let payload = TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
+        let event = Event::from_domain_event(&TestEventCodec, &payload).unwrap();
 
-        assert_eq!(event.stream_id(), "alpha");
-        assert_eq!(event.event_id.as_uuid().get_version_num(), 7);
-        assert_eq!(event.event_type, "TestEvent");
-        assert_eq!(event.subject_with_prefix("events.test."), "events.test.alpha");
+        assert_eq!(event.id.as_uuid().get_version_num(), 7);
+        assert_eq!(event.r#type, "TestEvent");
         assert_eq!(
-            event.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().value,
+            event
+                .decode_with::<TestEvent, _>("alpha", &TestEventCodec)
+                .unwrap()
+                .value,
             "beta"
         );
     }
 
     #[test]
-    fn event_data_accepts_event_supplied_event_id() {
+    fn event_accepts_event_supplied_event_id() {
         let event_id = EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0001));
         let payload = IdentifiedEvent {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
+        let event = Event::from_domain_event(&TestEventCodec, &payload).unwrap();
 
-        assert_eq!(event.event_id, event_id);
+        assert_eq!(event.id, event_id);
     }
 
     #[test]
-    fn event_data_rejects_non_uuid_event_ids() {
+    fn event_rejects_non_uuid_event_ids() {
         assert!(EventId::from_str("not-a-uuid").is_err());
     }
 
     #[test]
-    fn recorded_event_preserves_store_context() {
+    fn stream_event_preserves_store_context() {
         let payload = TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
+        let event = Event::from_domain_event(&TestEventCodec, &payload).unwrap();
 
         let recorded = event.record(
-            Some(position(2)),
+            "alpha",
+            position(2),
             DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
         );
 
         assert_eq!(recorded.stream_id(), "alpha");
-        assert_eq!(recorded.stream_position, Some(position(2)));
+        assert_eq!(recorded.stream_position, position(2));
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
     #[test]
-    fn event_data_and_recorded_event_decode_payloads() {
+    fn event_and_stream_event_decode_payloads() {
         let payload = TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = EventData::from_event("alpha", &TestEventCodec, &payload).unwrap();
+        let event = Event::from_domain_event(&TestEventCodec, &payload).unwrap();
         assert_eq!(
-            event.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
+            event.decode_with::<TestEvent, _>("alpha", &TestEventCodec).unwrap().id,
             "alpha"
         );
 
-        let recorded = event.record(None, DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap());
+        let recorded = event.record(
+            "alpha",
+            position(1),
+            DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
+        );
         assert_eq!(
-            recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
+            recorded.decode_with::<TestEvent, _>(&TestEventCodec).unwrap().id,
             "alpha"
         );
     }
 
     #[test]
-    fn event_data_and_recorded_event_round_trip_metadata() {
+    fn event_and_stream_event_round_trip_headers() {
         let event = TestEvent {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let metadata = EventMetadata::one(MetadataKey::new("trace-id").unwrap(), "trace-1").unwrap();
+        let headers = EventHeaders::one(HeaderKey::new("trace-id").unwrap(), "trace-1").unwrap();
 
-        let generated = EventData::from_event("alpha", &TestEventCodec, &event)
+        let generated = Event::from_domain_event(&TestEventCodec, &event)
             .unwrap()
-            .with_metadata(metadata.clone());
+            .with_headers(headers.clone());
         assert_eq!(
-            generated.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
+            generated.decode_with::<TestEvent, _>("alpha", &TestEventCodec).unwrap(),
             event
         );
-        assert_eq!(generated.metadata.get("trace-id"), Some("trace-1"));
+        assert_eq!(generated.headers.get("trace-id"), Some("trace-1"));
 
-        let no_metadata = EventData::from_event("alpha", &TestEventCodec, &event).unwrap();
-        assert!(no_metadata.metadata.is_empty());
+        let no_headers = Event::from_domain_event(&TestEventCodec, &event).unwrap();
+        assert!(no_headers.headers.is_empty());
 
-        let recorded = RecordedEvent {
-            event_id: generated.event_id,
-            event_type: generated.event_type.clone(),
-            event_stream_id: generated.stream_id.clone(),
-            payload: generated.payload.clone(),
-            metadata: generated.metadata.clone(),
-            stream_position: Some(position(7)),
+        let recorded = StreamEvent {
+            stream_id: "alpha".to_string(),
+            event: generated,
+            stream_position: position(7),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_002, 0).unwrap(),
         };
 
         assert_eq!(recorded.stream_id(), "alpha");
-        assert_eq!(recorded.stream_position, Some(position(7)));
-        assert_eq!(
-            recorded.decode_data_with::<TestEvent, _>(&TestEventCodec).unwrap(),
-            event
-        );
-        assert_eq!(recorded.metadata, metadata);
+        assert_eq!(recorded.stream_position, position(7));
+        assert_eq!(recorded.decode_with::<TestEvent, _>(&TestEventCodec).unwrap(), event);
+        assert_eq!(recorded.event.headers, headers);
         assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
     #[test]
-    fn event_metadata_validates_header_safe_names_and_values() {
-        let key = MetadataKey::new("trace-id").unwrap();
+    fn event_headers_validates_header_safe_names_and_values() {
+        let key = HeaderKey::new("trace-id").unwrap();
         assert_eq!(key.as_str(), "trace-id");
 
-        assert_eq!(MetadataKey::new("").unwrap_err(), EventMetadataError::EmptyName);
+        assert_eq!(HeaderKey::new("").unwrap_err(), EventHeadersError::EmptyName);
         assert!(matches!(
-            MetadataKey::new("Nats-Expected-Last-Subject-Sequence"),
-            Err(EventMetadataError::ReservedName { .. })
+            HeaderKey::new("Nats-Expected-Last-Subject-Sequence"),
+            Err(EventHeadersError::ReservedName { .. })
         ));
         assert!(matches!(
-            MetadataKey::new("trace id"),
-            Err(EventMetadataError::InvalidName { .. })
+            HeaderKey::new("trace id"),
+            Err(EventHeadersError::InvalidName { .. })
         ));
         assert!(matches!(
-            EventMetadata::one(MetadataKey::new("trace-id").unwrap(), "line\r\nbreak"),
-            Err(EventMetadataError::InvalidValue { .. })
+            EventHeaders::one(HeaderKey::new("trace-id").unwrap(), "line\r\nbreak"),
+            Err(EventHeadersError::InvalidValue { .. })
         ));
     }
 }

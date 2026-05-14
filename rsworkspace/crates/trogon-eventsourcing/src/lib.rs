@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod codec;
-mod decision;
+mod decider;
 mod event;
 mod event_id;
 mod execution;
@@ -10,9 +10,9 @@ pub mod snapshot;
 mod stream;
 pub mod testing;
 
-pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventDataEncodeError, EventIdentity, EventType};
-pub use decision::{Act, Decide, Decision, NonEmpty};
-pub use event::{EventData, EventMetadata, EventMetadataError, MetadataKey, RecordedEvent};
+pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventEncodeError, EventIdentity, EventType};
+pub use decider::{Act, Decide, Decision, NonEmpty};
+pub use event::{Event, EventHeaders, EventHeadersError, HeaderKey, StreamEvent};
 pub use event_id::EventId;
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
@@ -24,8 +24,8 @@ pub use nats::snapshot_store::{
     read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
 };
 pub use nats::{
-    StreamStoreError, TROGON_EVENT_METADATA_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream,
-    read_stream_range, record_stream_message,
+    StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
+    record_stream_message,
 };
 pub use snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema,
