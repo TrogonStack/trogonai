@@ -609,6 +609,14 @@ pub async fn post_pr_review(
         )
         .await?;
 
+    if resp.status >= 400 {
+        return Err(format!(
+            "GitHub API error {}: {}",
+            resp.status,
+            resp.body.chars().take(500).collect::<String>()
+        ));
+    }
+
     let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
     let review_id = response["id"].as_u64().unwrap_or(0);
     let html_url = response["html_url"].as_str().unwrap_or("(no url)");
@@ -1642,6 +1650,28 @@ mod tests {
         )
         .await;
         assert!(result.is_ok(), "absent event must succeed with COMMENT default: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_422_returns_err_with_github_message() {
+        // GitHub returns 422 when inline comment positions are invalid.
+        // The function must surface this as Err so the LLM can retry.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            422,
+            json!({"message": "Validation Failed", "errors": [{"code": "invalid"}]}).to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "REQUEST_CHANGES",
+                    "comments": [{"path": "foo.rs", "position": 9999, "body": "bad pos"}]}),
+        )
+        .await;
+        assert!(result.is_err(), "422 must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("422"),
+            "error message must include the status code"
+        );
     }
 
     #[tokio::test]
