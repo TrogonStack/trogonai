@@ -102,24 +102,20 @@ pub async fn handle(agent: &AgentLoop, payload: &[u8]) -> Option<Result<String, 
     info!(owner, repo, pr_number, "Starting PR review agent");
 
     let prompt = format!(
-        "You are a code reviewer. Review pull request #{pr_number} in {owner}/{repo}.\n\
-         The current head commit SHA is `{head_sha}` — pass it as `commit_sha` when calling `post_pr_review`.\n\
-         1. Use `get_file_contents` with path `.trogon/memory.md` — the result is a JSON object \
-            with `sha` and `content`; note the `sha` (you will need it to update the file later).\n\
-         2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
-         3. Use `list_pr_files` to see which files changed. Each file with a `patch` field has \
-            its diff lines numbered from 1 — those numbers are the `position` values for inline comments.\n\
-         4. Use `get_file_contents` when you need more context around a specific change.\n\
-         5. For each file that has a `patch` field, identify bugs, security issues, or correctness problems. \
-            If a file has no `patch` field, skip it — it is binary or too large to diff.\n\
-         6. Call `post_pr_review` once with all inline comments. Set `commit_sha` to `{head_sha}`. \
-            Set `event` to \"COMMENT\" unless you are certain the code is correct (\"APPROVE\") \
-            or has a critical defect (\"REQUEST_CHANGES\"). \
-            Each comment needs `path` (file path), `position` (number from the annotated patch), and `body`.\n\
-         7. If you learned something important about the repo conventions, update `.trogon/memory.md` \
-            using `update_file` (pass the `sha` from step 1, use a new branch), \
-            then open a PR with `create_pull_request`.\n\
-         Focus on correctness, security, and clarity. Be constructive."
+        "You are a code reviewer. Your task is to review pull request #{pr_number} in \
+         {owner}/{repo} and post the review using `post_pr_review`.\n\
+         The head commit SHA is `{head_sha}`.\n\n\
+         Steps:\n\
+         1. Call `get_pr_comments` to see prior review discussion.\n\
+         2. Call `list_pr_files` to see changed files. Each file with a `patch` field has its \
+            diff lines prefixed with a 1-based position number — use those as the `position` \
+            value in inline comments.\n\
+         3. Optionally call `get_file_contents` for more context.\n\
+         4. Call `post_pr_review` with your findings — this is REQUIRED. Set `commit_sha` to \
+            `{head_sha}`. Set `event` to \"COMMENT\", \"APPROVE\", or \"REQUEST_CHANGES\". \
+            Include inline `comments` (each with `path`, `position`, `body`) for every issue found.\n\n\
+         Do NOT skip step 4. Do NOT just write a text summary — you MUST call `post_pr_review`.\n\
+         Focus on bugs, security issues, and correctness."
     );
 
     let tools = pr_review_tools();
@@ -345,30 +341,26 @@ mod tests {
         let pr_number = 1u64;
         let head_sha = "abc";
         let prompt = format!(
-            "You are a code reviewer. Review pull request #{pr_number} in {owner}/{repo}.\n\
-             The current head commit SHA is `{head_sha}` — pass it as `commit_sha` when calling `post_pr_review`.\n\
-             1. Use `get_file_contents` with path `.trogon/memory.md` — the result is a JSON object \
-                with `sha` and `content`; note the `sha` (you will need it to update the file later).\n\
-             2. Use `get_pr_comments` to recall any previous review discussion on this PR.\n\
-             3. Use `list_pr_files` to see which files changed. Each file with a `patch` field has \
-                its diff lines numbered from 1 — those numbers are the `position` values for inline comments.\n\
-             4. Use `get_file_contents` when you need more context around a specific change.\n\
-             5. For each file that has a `patch` field, identify bugs, security issues, or correctness problems. \
-                If a file has no `patch` field, skip it — it is binary or too large to diff.\n\
-             6. Call `post_pr_review` once with all inline comments. Set `commit_sha` to `{head_sha}`. \
-                Set `event` to \"COMMENT\" unless you are certain the code is correct (\"APPROVE\") \
-                or has a critical defect (\"REQUEST_CHANGES\"). \
-                Each comment needs `path` (file path), `position` (number from the annotated patch), and `body`.\n\
-             7. If you learned something important about the repo conventions, update `.trogon/memory.md` \
-                using `update_file` (pass the `sha` from step 1, use a new branch), \
-                then open a PR with `create_pull_request`.\n\
-             Focus on correctness, security, and clarity. Be constructive."
+            "You are a code reviewer. Your task is to review pull request #{pr_number} in \
+             {owner}/{repo} and post the review using `post_pr_review`.\n\
+             The head commit SHA is `{head_sha}`.\n\n\
+             Steps:\n\
+             1. Call `get_pr_comments` to see prior review discussion.\n\
+             2. Call `list_pr_files` to see changed files. Each file with a `patch` field has its \
+                diff lines prefixed with a 1-based position number — use those as the `position` \
+                value in inline comments.\n\
+             3. Optionally call `get_file_contents` for more context.\n\
+             4. Call `post_pr_review` with your findings — this is REQUIRED. Set `commit_sha` to \
+                `{head_sha}`. Set `event` to \"COMMENT\", \"APPROVE\", or \"REQUEST_CHANGES\". \
+                Include inline `comments` (each with `path`, `position`, `body`) for every issue found.\n\n\
+             Do NOT skip step 4. Do NOT just write a text summary — you MUST call `post_pr_review`.\n\
+             Focus on bugs, security issues, and correctness."
         );
         assert!(prompt.contains("post_pr_review"), "prompt must mention post_pr_review");
         assert!(prompt.contains("position"), "prompt must mention position for inline comments");
         assert!(
-            prompt.contains("no `patch` field, skip it"),
-            "prompt must instruct agent to skip binary/large files"
+            prompt.contains("you MUST call `post_pr_review`"),
+            "prompt must explicitly mandate calling the tool"
         );
         assert!(prompt.contains(head_sha), "prompt must embed head SHA");
     }
