@@ -1,50 +1,18 @@
-use tracing::info;
 use trogon_nats::jetstream::JetStreamContext;
+use tracing::info;
 
 use crate::config::ResolvedConfig;
+use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-    if let Some(ref cfg) = config.github {
-        trogon_source_github::provision(client, cfg).await?;
-        info!(source = "github", "stream provisioned");
-    }
+    // Discord is NOT a SourcePlugin — it has a long-running gateway runner spawned
+    // in main.rs, but it still needs its JetStream stream provisioned.
     if let Some(ref cfg) = config.discord {
         trogon_source_discord::provision(client, cfg).await?;
         info!(source = "discord", "stream provisioned");
     }
-    if let Some(ref cfg) = config.slack {
-        trogon_source_slack::provision(client, cfg).await?;
-        info!(source = "slack", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.telegram {
-        trogon_source_telegram::provision(client, cfg).await?;
-        info!(source = "telegram", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.twitter {
-        trogon_source_twitter::provision(client, cfg).await?;
-        info!(source = "twitter", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.gitlab {
-        trogon_source_gitlab::provision(client, cfg).await?;
-        info!(source = "gitlab", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.incidentio {
-        trogon_source_incidentio::provision(client, cfg).await?;
-        info!(source = "incidentio", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.linear {
-        trogon_source_linear::provision(client, cfg).await?;
-        info!(source = "linear", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.notion {
-        trogon_source_notion::provision(client, cfg).await?;
-        info!(source = "notion", "stream provisioned");
-    }
-    if let Some(ref cfg) = config.sentry {
-        trogon_source_sentry::provision(client, cfg).await?;
-        info!(source = "sentry", "stream provisioned");
-    }
-    Ok(())
+
+    source_plugin::provision_all(client, config).await
 }
 
 #[cfg(test)]

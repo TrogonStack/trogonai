@@ -1,15 +1,15 @@
 use axum::Router;
-use tracing::info;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use crate::config::ResolvedConfig;
+use crate::source_plugin;
 
 pub(crate) fn mount_sources<P, S>(config: ResolvedConfig, publisher: ClaimCheckPublisher<P, S>) -> Router
 where
     P: JetStreamPublisher,
     S: ObjectStorePut,
 {
-    let mut app = Router::new()
+    let app = Router::new()
         .route(
             "/-/liveness",
             axum::routing::get(|| async { axum::http::StatusCode::OK }),
@@ -19,52 +19,7 @@ where
             axum::routing::get(|| async { axum::http::StatusCode::OK }),
         );
 
-    if let Some(ref cfg) = config.github {
-        app = app.nest("/github", trogon_source_github::router(publisher.clone(), cfg));
-        info!(source = "github", "mounted at /github");
-    }
-
-    if let Some(ref cfg) = config.slack {
-        app = app.nest("/slack", trogon_source_slack::router(publisher.clone(), cfg));
-        info!(source = "slack", "mounted at /slack");
-    }
-
-    if let Some(ref cfg) = config.telegram {
-        app = app.nest("/telegram", trogon_source_telegram::router(publisher.clone(), cfg));
-        info!(source = "telegram", "mounted at /telegram");
-    }
-
-    if let Some(ref cfg) = config.twitter {
-        app = app.nest("/twitter", trogon_source_twitter::router(publisher.clone(), cfg));
-        info!(source = "twitter", "mounted at /twitter");
-    }
-
-    if let Some(ref cfg) = config.gitlab {
-        app = app.nest("/gitlab", trogon_source_gitlab::router(publisher.clone(), cfg));
-        info!(source = "gitlab", "mounted at /gitlab");
-    }
-
-    if let Some(ref cfg) = config.incidentio {
-        app = app.nest("/incidentio", trogon_source_incidentio::router(publisher.clone(), cfg));
-        info!(source = "incidentio", "mounted at /incidentio");
-    }
-
-    if let Some(ref cfg) = config.linear {
-        app = app.nest("/linear", trogon_source_linear::router(publisher.clone(), cfg));
-        info!(source = "linear", "mounted at /linear");
-    }
-
-    if let Some(ref cfg) = config.notion {
-        app = app.nest("/notion", trogon_source_notion::router(publisher.clone(), cfg));
-        info!(source = "notion", "mounted at /notion");
-    }
-
-    if let Some(ref cfg) = config.sentry {
-        app = app.nest("/sentry", trogon_source_sentry::router(publisher.clone(), cfg));
-        info!(source = "sentry", "mounted at /sentry");
-    }
-
-    app
+    source_plugin::mount_all(app, publisher, &config)
 }
 
 #[cfg(test)]

@@ -470,6 +470,65 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     })
 }
 
+
+struct ResolvedCommon {
+    subject_prefix: NatsToken,
+    stream_name: NatsToken,
+    stream_max_age: StreamMaxAge,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+fn resolve_common(
+    source: &'static str,
+    subject_prefix: String,
+    stream_name: String,
+    nats_ack_timeout_secs: u64,
+    stream_max_age_secs: u64,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<ResolvedCommon> {
+    let subject_prefix = match NatsToken::new(subject_prefix) {
+        Ok(t) => t,
+        Err(e) => {
+            errors.push(ConfigValidationError::invalid_subject_token(
+                source,
+                "subject_prefix",
+                e,
+            ));
+            return None;
+        }
+    };
+
+    let stream_name = match NatsToken::new(stream_name) {
+        Ok(t) => t,
+        Err(e) => {
+            errors.push(ConfigValidationError::invalid_subject_token(source, "stream_name", e));
+            return None;
+        }
+    };
+
+    let nats_ack_timeout = match NonZeroDuration::from_secs(nats_ack_timeout_secs) {
+        Ok(d) => d,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(source, "nats_ack_timeout_secs", err));
+            return None;
+        }
+    };
+
+    let stream_max_age = match StreamMaxAge::from_secs(stream_max_age_secs) {
+        Ok(age) => age,
+        Err(err) => {
+            errors.push(ConfigValidationError::invalid(source, "stream_max_age_secs", err));
+            return None;
+        }
+    };
+
+    Some(ResolvedCommon {
+        subject_prefix,
+        stream_name,
+        stream_max_age,
+        nats_ack_timeout,
+    })
+}
 fn resolve_github(
     section: GithubConfig,
     errors: &mut Vec<ConfigValidationError>,
@@ -487,48 +546,15 @@ fn resolve_github(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "github",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("github", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token("github", "stream_name", e));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("github", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("github", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_github::GithubConfig {
         webhook_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -561,53 +587,16 @@ fn resolve_discord(
         trogon_source_discord::config::default_intents()
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "discord",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("discord", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "discord",
-                "stream_name",
-                e,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("discord", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("discord", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_discord::DiscordConfig {
         bot_token,
         intents,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -628,33 +617,7 @@ fn resolve_slack(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "slack",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
-
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token("slack", "stream_name", e));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("slack", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
+    let common = resolve_common("slack", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
     let timestamp_max_drift = match NonZeroDuration::from_secs(section.timestamp_max_drift_secs) {
         Ok(d) => d,
@@ -664,20 +627,12 @@ fn resolve_slack(
         }
     };
 
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("slack", "stream_max_age_secs", err));
-            return None;
-        }
-    };
-
     Some(trogon_source_slack::SlackConfig {
         signing_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
         timestamp_max_drift,
     })
 }
@@ -699,52 +654,15 @@ fn resolve_telegram(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "telegram",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("telegram", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "telegram",
-                "stream_name",
-                e,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("telegram", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("telegram", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_telegram::TelegramSourceConfig {
         webhook_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -765,56 +683,15 @@ fn resolve_twitter(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(token) => token,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "twitter",
-                "subject_prefix",
-                error,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("twitter", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(token) => token,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "twitter",
-                "stream_name",
-                error,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(duration) => duration,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid(
-                "twitter",
-                "nats_ack_timeout_secs",
-                error,
-            ));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid("twitter", "stream_max_age_secs", error));
-            return None;
-        }
-    };
 
     Some(trogon_source_twitter::TwitterConfig {
         consumer_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -835,48 +712,15 @@ fn resolve_gitlab(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "gitlab",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("gitlab", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token("gitlab", "stream_name", e));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("gitlab", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("gitlab", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_gitlab::GitlabConfig {
         webhook_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -897,49 +741,16 @@ fn resolve_linear(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "linear",
-                "subject_prefix",
-                e,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("linear", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(t) => t,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid_subject_token("linear", "stream_name", e));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(d) => d,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("linear", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("linear", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_linear::LinearConfig {
         webhook_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
         timestamp_tolerance: NonZeroDuration::from_secs(section.timestamp_tolerance_secs).ok(),
-        nats_ack_timeout,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -960,41 +771,7 @@ fn resolve_incidentio(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(token) => token,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "incidentio",
-                "subject_prefix",
-                err,
-            ));
-            return None;
-        }
-    };
-
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(token) => token,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "incidentio",
-                "stream_name",
-                err,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(duration) => duration,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid(
-                "incidentio",
-                "nats_ack_timeout_secs",
-                err,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("incidentio", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
     let timestamp_tolerance = match NonZeroDuration::from_secs(section.timestamp_tolerance_secs) {
         Ok(duration) => duration,
@@ -1008,20 +785,12 @@ fn resolve_incidentio(
         }
     };
 
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("incidentio", "stream_max_age_secs", err));
-            return None;
-        }
-    };
-
     Some(IncidentioSourceConfig {
         signing_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
         timestamp_tolerance,
     })
 }
@@ -1049,52 +818,15 @@ fn resolve_notion(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(token) => token,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "notion",
-                "subject_prefix",
-                err,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("notion", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(token) => token,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "notion",
-                "stream_name",
-                err,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(duration) => duration,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("notion", "nats_ack_timeout_secs", err));
-            return None;
-        }
-    };
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(err) => {
-            errors.push(ConfigValidationError::invalid("notion", "stream_max_age_secs", err));
-            return None;
-        }
-    };
 
     Some(trogon_source_notion::NotionConfig {
         verification_token,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
@@ -1127,37 +859,8 @@ fn resolve_sentry(
         }
     };
 
-    let subject_prefix = match NatsToken::new(section.subject_prefix) {
-        Ok(token) => token,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "sentry",
-                "subject_prefix",
-                error,
-            ));
-            return None;
-        }
-    };
+    let common = resolve_common("sentry", section.subject_prefix, section.stream_name, section.nats_ack_timeout_secs, section.stream_max_age_secs, errors)?;
 
-    let stream_name = match NatsToken::new(section.stream_name) {
-        Ok(token) => token,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid_subject_token(
-                "sentry",
-                "stream_name",
-                error,
-            ));
-            return None;
-        }
-    };
-
-    let nats_ack_timeout = match NonZeroDuration::from_secs(section.nats_ack_timeout_secs) {
-        Ok(duration) => duration,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid("sentry", "nats_ack_timeout_secs", error));
-            return None;
-        }
-    };
     if section.nats_ack_timeout_secs > SENTRY_MAX_ACK_TIMEOUT_SECS {
         errors.push(ConfigValidationError::invalid(
             "sentry",
@@ -1166,21 +869,12 @@ fn resolve_sentry(
         ));
         return None;
     }
-
-    let stream_max_age = match StreamMaxAge::from_secs(section.stream_max_age_secs) {
-        Ok(age) => age,
-        Err(error) => {
-            errors.push(ConfigValidationError::invalid("sentry", "stream_max_age_secs", error));
-            return None;
-        }
-    };
-
     Some(trogon_source_sentry::SentryConfig {
         client_secret,
-        subject_prefix,
-        stream_name,
-        stream_max_age,
-        nats_ack_timeout,
+        subject_prefix: common.subject_prefix,
+        stream_name: common.stream_name,
+        stream_max_age: common.stream_max_age,
+        nats_ack_timeout: common.nats_ack_timeout,
     })
 }
 
