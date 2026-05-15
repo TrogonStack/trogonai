@@ -5772,3 +5772,205 @@ async fn system_prompt_absent_when_env_var_not_set_via_nats() {
         })
         .await;
 }
+
+// ── trogon-tools integration via NATS ─────────────────────────────────────────
+
+/// A new session must have all trogon-tools in the HTTP request tools list
+/// without any explicit set_session_config_option call.
+#[tokio::test]
+async fn new_session_has_trogon_tools_in_http_request_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read a file")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            let tool_names: Vec<_> = call.tools.iter().map(|t| t.name()).collect();
+            for expected in &["read_file", "write_file", "str_replace", "search_files", "git_status"] {
+                assert!(
+                    tool_names.contains(expected),
+                    "{expected} must be in HTTP request tools by default; got: {tool_names:?}"
+                );
+            }
+        })
+        .await;
+}
+
+/// When the model returns a FunctionCall for a trogon-tool (read_file), the
+/// agent must dispatch it and send a follow-up HTTP request with the tool
+/// output as a FunctionCallOutput item.
+#[tokio::test]
+async fn trogon_tool_dispatch_via_nats_sends_follow_up() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Round 1: model requests read_file (path may not exist — we only
+            // verify that dispatch happens and output is returned).
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-nats-1".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-rf-nats".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"/nonexistent_integration_test_file.txt"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            // Round 2: model replies after receiving tool output.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read that file")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up call after trogon-tool dispatch");
+            let follow_up_inputs = &calls[1].inputs;
+            assert!(
+                follow_up_inputs.iter().any(|item| matches!(
+                    item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-rf-nats"
+                )),
+                "follow-up must contain FunctionCallOutput for cid-rf-nats"
+            );
+        })
+        .await;
+}
+
+/// read_file with a relative path must resolve against the session's cwd.
+/// Creates a real file in a tempdir, opens a session with that dir as cwd,
+/// then asks the model to read the file by relative name — the follow-up must
+/// contain the file content.
+#[tokio::test]
+async fn trogon_tool_uses_session_cwd_for_relative_path_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use tempfile::TempDir;
+            let dir = TempDir::new().unwrap();
+            std::fs::write(dir.path().join("marker.txt"), "nats-cwd-content\n").unwrap();
+            let cwd = dir.path().to_str().unwrap().to_string();
+
+            let h = Harness::new();
+
+            // Create a session with the tempdir as cwd.
+            let before = h.nats.published_payloads().len();
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new(&cwd),
+                "r.new_cwd",
+            );
+            let payloads = h.expect_n_publishes(before + 1).await;
+            let val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let sid = val["sessionId"].as_str().unwrap().to_string();
+
+            // Round 1: model requests read_file with a relative path.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-cwd-nats".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-cwd-nats".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"marker.txt"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            // Round 2: model replies after tool output.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read the marker")]),
+                "r.prompt_cwd",
+            );
+            h.expect_n_publishes(before + 2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up after read_file");
+            let output = calls[1].inputs.iter().find_map(|item| {
+                if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
+                    if call_id == "cid-cwd-nats" { Some(output.as_str()) } else { None }
+                } else {
+                    None
+                }
+            });
+            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-cwd-nats");
+            assert!(
+                output.unwrap().contains("nats-cwd-content"),
+                "tool output must contain file content resolved from session cwd, got: {:?}",
+                output
+            );
+        })
+        .await;
+}
+
+/// fetch_url targeting a link-local / metadata address must be blocked by the
+/// egress policy.  The agent must still send a follow-up with the error string.
+#[tokio::test]
+async fn fetch_url_egress_blocked_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-egress-nats".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-fetch-nats".to_string(),
+                    name: "fetch_url".to_string(),
+                    arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "blocked".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("fetch metadata")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up after blocked fetch_url");
+            let output = calls[1].inputs.iter().find_map(|item| {
+                if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
+                    if call_id == "cid-fetch-nats" { Some(output.as_str()) } else { None }
+                } else {
+                    None
+                }
+            });
+            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-fetch-nats");
+            assert!(
+                output.unwrap().contains("blocked by egress policy"),
+                "output must contain egress block message, got: {:?}", output
+            );
+        })
+        .await;
+}

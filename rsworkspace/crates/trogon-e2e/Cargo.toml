@@ -11,6 +11,10 @@ workspace = true
 name = "platform_live"
 path = "src/bin/platform_live.rs"
 
+[[bin]]
+name = "xai_live"
+path = "src/bin/xai_live.rs"
+
 [dependencies]
 acp-nats          = { workspace = true }
 acp-nats-agent    = { path = "../acp-nats-agent" }
@@ -19,10 +23,13 @@ async-nats        = { workspace = true, features = ["jetstream", "kv"] }
 bytes             = { workspace = true }
 futures-util      = { workspace = true }
 httpmock          = "0.7"
+serde             = { workspace = true }
+tempfile          = "3"
 reqwest           = { workspace = true, features = ["json"] }
 serde_json        = { workspace = true }
 tokio             = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 trogon-acp-runner    = { path = "../trogon-acp-runner", features = ["test-helpers"] }
+trogon-xai-runner    = { path = "../trogon-xai-runner", features = ["test-helpers"] }
 trogon-runner-tools  = { path = "../trogon-runner-tools" }
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-nats       = { workspace = true }

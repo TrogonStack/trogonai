@@ -5406,12 +5406,15 @@ dependencies = [
  "futures-util",
  "httpmock",
  "reqwest",
+ "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "trogon-acp-runner",
  "trogon-agent-core",
  "trogon-nats",
  "trogon-runner-tools",
+ "trogon-xai-runner",
  "uuid",
 ]
 
@@ -5873,12 +5876,15 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "testcontainers-modules",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
  "trogon-registry",
+ "trogon-runner-tools",
+ "trogon-tools",
  "uuid",
 ]
 
