@@ -14,10 +14,10 @@ use trogon_eventsourcing::nats::{
     JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_position,
 };
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, CanonicalEventCodec, CommandExecution, CommandFailure, Decide, Decision,
-    Event, EventCodec, EventHeaders, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderKey, NonEmpty,
+    AppendStreamRequest, AppendStreamResponse, CanonicalEventCodec, CommandExecution, CommandFailure, Decider,
+    Decision, Event, EventCodec, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderKey,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotChange, SnapshotRead, SnapshotStoreConfig, SnapshotWrite,
-    Snapshots, StreamAppend, StreamPosition, StreamRead, StreamState, WriteSnapshotRequest, spawn_on_tokio,
+    Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, spawn_on_tokio,
 };
 use trogon_eventsourcing::{
     SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
@@ -185,7 +185,7 @@ impl IncreaseCounterCommand {
     }
 }
 
-impl Decide for IncreaseCounterCommand {
+impl Decider for IncreaseCounterCommand {
     type StreamId = str;
     type State = CounterState;
     type Event = CounterIncreased;
@@ -206,7 +206,7 @@ impl Decide for IncreaseCounterCommand {
         })
     }
 
-    fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+    fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         Ok(Decision::event(CounterIncreased { amount: command.amount }))
     }
 }
@@ -299,8 +299,8 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
     Ok(Event::from_domain_event(&TestJsonCodec, &event)?)
 }
 
-fn event_batch(events: Vec<Event>) -> TestResult<NonEmpty<Event>> {
-    NonEmpty::from_vec(events).ok_or_else(|| std::io::Error::other("events must be non-empty").into())
+fn events(events: Vec<Event>) -> TestResult<Events<Event>> {
+    Events::from_vec(events).ok_or_else(|| std::io::Error::other("events must be non-empty").into())
 }
 
 fn test_snapshot_config() -> SnapshotStoreConfig {
@@ -346,14 +346,14 @@ async fn read_counter_snapshot_until(
 async fn append_one(
     store: &TestStore,
     stream_id: &str,
-    stream_state: StreamState,
+    stream_write_precondition: StreamWritePrecondition,
     value: impl Into<String>,
 ) -> Result<AppendStreamResponse, JetStreamStoreError<std::io::Error>> {
     store
         .append_stream(AppendStreamRequest::new(
             stream_id,
-            stream_state,
-            NonEmpty::one(test_event(stream_id, value)?),
+            stream_write_precondition,
+            Events::one(test_event(stream_id, value)?),
         ))
         .await
 }
@@ -361,26 +361,26 @@ async fn append_one(
 async fn append_many(
     store: &TestStore,
     stream_id: &str,
-    stream_state: StreamState,
+    stream_write_precondition: StreamWritePrecondition,
     values: Vec<String>,
 ) -> Result<AppendStreamResponse, JetStreamStoreError<std::io::Error>> {
     let mut events = Vec::with_capacity(values.len());
     for value in values {
         events.push(test_event(stream_id, value)?);
     }
-    let Some(events) = NonEmpty::from_vec(events) else {
+    let Some(events) = Events::from_vec(events) else {
         return Err(JetStreamStoreError::Codec(std::io::Error::other(
             "events must be non-empty",
         )));
     };
     store
-        .append_stream(AppendStreamRequest::new(stream_id, stream_state, events))
+        .append_stream(AppendStreamRequest::new(stream_id, stream_write_precondition, events))
         .await
 }
 
 fn assert_occ_conflict(
     result: Result<AppendStreamResponse, JetStreamStoreError<std::io::Error>>,
-    expected: StreamState,
+    expected: StreamWritePrecondition,
     current_position: Option<StreamPosition>,
 ) -> TestResult {
     match result {
@@ -426,9 +426,9 @@ where
     }
 }
 
-async fn assert_missing_append_succeeds(stream_state: StreamState) -> TestResult {
+async fn assert_missing_append_succeeds(stream_write_precondition: StreamWritePrecondition) -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let outcome = append_one(&fixture.store, "alpha", stream_state, "created").await?;
+    let outcome = append_one(&fixture.store, "alpha", stream_write_precondition, "created").await?;
     assert_eq!(outcome.stream_position, position(1));
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
@@ -438,10 +438,10 @@ async fn assert_missing_append_succeeds(stream_state: StreamState) -> TestResult
     fixture.delete().await
 }
 
-async fn assert_missing_append_conflicts(stream_state: StreamState) -> TestResult {
+async fn assert_missing_append_conflicts(stream_write_precondition: StreamWritePrecondition) -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let result = append_one(&fixture.store, "alpha", stream_state, "created").await;
-    assert_occ_conflict(result, stream_state, None)?;
+    let result = append_one(&fixture.store, "alpha", stream_write_precondition, "created").await;
+    assert_occ_conflict(result, stream_write_precondition, None)?;
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, None);
@@ -452,7 +452,7 @@ async fn assert_missing_append_conflicts(stream_state: StreamState) -> TestResul
 
 async fn existing_fixture() -> TestResult<(JetStreamFixture, StreamPosition)> {
     let fixture = JetStreamFixture::new().await?;
-    let outcome = append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    let outcome = append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
     assert_eq!(outcome.stream_position, position(1));
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
@@ -460,9 +460,9 @@ async fn existing_fixture() -> TestResult<(JetStreamFixture, StreamPosition)> {
     Ok((fixture, position(1)))
 }
 
-async fn assert_existing_append_succeeds(stream_state: StreamState) -> TestResult {
+async fn assert_existing_append_succeeds(stream_write_precondition: StreamWritePrecondition) -> TestResult {
     let (fixture, current_position) = existing_fixture().await?;
-    let outcome = append_one(&fixture.store, "alpha", stream_state, "next").await?;
+    let outcome = append_one(&fixture.store, "alpha", stream_write_precondition, "next").await?;
     let next_position = position(current_position.get() + 1);
     assert_eq!(outcome.stream_position, next_position);
 
@@ -473,10 +473,10 @@ async fn assert_existing_append_succeeds(stream_state: StreamState) -> TestResul
     fixture.delete().await
 }
 
-async fn assert_existing_append_conflicts(stream_state: StreamState) -> TestResult {
+async fn assert_existing_append_conflicts(stream_write_precondition: StreamWritePrecondition) -> TestResult {
     let (fixture, current_position) = existing_fixture().await?;
-    let result = append_one(&fixture.store, "alpha", stream_state, "next").await;
-    assert_occ_conflict(result, stream_state, Some(current_position))?;
+    let result = append_one(&fixture.store, "alpha", stream_write_precondition, "next").await;
+    assert_occ_conflict(result, stream_write_precondition, Some(current_position))?;
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(current_position));
@@ -500,8 +500,8 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            event_batch(vec![
+            StreamWritePrecondition::NoStream,
+            events(vec![
                 test_event_with_id("alpha", first_alpha_id, "alpha-one")?,
                 test_event_with_id("alpha", second_alpha_id, "alpha-two")?,
             ])?,
@@ -509,8 +509,14 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .await?;
     assert_eq!(outcome.stream_position, position(2));
 
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(2)), "alpha-three").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
+    append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(2)),
+        "alpha-three",
+    )
+    .await?;
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(4)));
@@ -561,9 +567,15 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_read_ranges_keep_current_position() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "one").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(1)), "two").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(2)), "three").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::At(position(1)), "two").await?;
+    append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(2)),
+        "three",
+    )
+    .await?;
 
     let read_from_zero = fixture.store.read_stream(ReadStreamRequest::new("alpha", 0)).await?;
     assert_eq!(read_from_zero.current_position, Some(position(3)));
@@ -596,11 +608,29 @@ async fn jetstream_store_read_ranges_keep_current_position() -> TestResult {
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_reads_subject_suffixes_from_global_offsets() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(1)), "alpha-two").await?;
-    append_one(&fixture.store, "beta", StreamState::At(position(2)), "beta-two").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(3)), "alpha-three").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
+    append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(1)),
+        "alpha-two",
+    )
+    .await?;
+    append_one(
+        &fixture.store,
+        "beta",
+        StreamWritePrecondition::At(position(2)),
+        "beta-two",
+    )
+    .await?;
+    append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(3)),
+        "alpha-three",
+    )
+    .await?;
 
     let cases = [
         (1, vec![1, 3, 5], vec!["alpha-one", "alpha-two", "alpha-three"]),
@@ -643,14 +673,14 @@ async fn jetstream_store_reads_subject_suffixes_from_global_offsets() -> TestRes
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_append_responses_match_recorded_stream_positions() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let alpha_one = append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    let beta_one = append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
+    let alpha_one = append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    let beta_one = append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
     let alpha_batch = fixture
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::At(alpha_one.stream_position),
-            event_batch(vec![
+            StreamWritePrecondition::At(alpha_one.stream_position),
+            events(vec![
                 test_event("alpha", "alpha-two")?,
                 test_event("alpha", "alpha-three")?,
             ])?,
@@ -659,7 +689,7 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
     let beta_two = append_one(
         &fixture.store,
         "beta",
-        StreamState::At(beta_one.stream_position),
+        StreamWritePrecondition::At(beta_one.stream_position),
         "beta-two",
     )
     .await?;
@@ -696,9 +726,15 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "one").await?;
-    let deleted = append_one(&fixture.store, "alpha", StreamState::At(position(1)), "two").await?;
-    append_one(&fixture.store, "alpha", StreamState::At(position(2)), "three").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "one").await?;
+    let deleted = append_one(&fixture.store, "alpha", StreamWritePrecondition::At(position(1)), "two").await?;
+    append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(2)),
+        "three",
+    )
+    .await?;
 
     assert!(
         fixture
@@ -724,8 +760,8 @@ async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResul
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_delete() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "one").await?;
-    let deleted = append_one(&fixture.store, "alpha", StreamState::At(position(1)), "two").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "one").await?;
+    let deleted = append_one(&fixture.store, "alpha", StreamWritePrecondition::At(position(1)), "two").await?;
     assert!(
         fixture
             .store
@@ -745,7 +781,13 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
         "one"
     );
 
-    let appended = append_one(&fixture.store, "alpha", StreamState::At(position(1)), "three").await?;
+    let appended = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(1)),
+        "three",
+    )
+    .await?;
     assert_eq!(appended.stream_position, position(3));
     let read_after_append = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read_after_append.current_position, Some(position(3)));
@@ -826,7 +868,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_ignores_corrupt_messages_from_other_subjects() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
 
     let mut headers = HeaderMap::new();
     headers.insert(TROGON_EVENT_TYPE, "test.event");
@@ -876,7 +918,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
         )
         .await?
         .await?;
-    let append = append_one(&fixture.store, "alpha", StreamState::Any, "alpha-valid").await?;
+    let append = append_one(&fixture.store, "alpha", StreamWritePrecondition::Any, "alpha-valid").await?;
     assert_eq!(append.stream_position, position(2));
 
     assert_read_stream_error(fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await)?;
@@ -903,7 +945,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_requires_atomic_publish_stream_support() -> TestResult {
     let fixture = JetStreamFixture::without_atomic_publish().await?;
-    let result = append_one(&fixture.store, "alpha", StreamState::NoStream, "created").await;
+    let result = append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "created").await;
     assert_append_publish_error(result)?;
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
@@ -916,21 +958,21 @@ async fn jetstream_store_requires_atomic_publish_stream_support() -> TestResult 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_occ_matrix_for_missing_stream() -> TestResult {
-    assert_missing_append_succeeds(StreamState::NoStream).await?;
-    assert_missing_append_succeeds(StreamState::Any).await?;
-    assert_missing_append_conflicts(StreamState::StreamExists).await?;
-    assert_missing_append_conflicts(StreamState::At(position(1))).await?;
+    assert_missing_append_succeeds(StreamWritePrecondition::NoStream).await?;
+    assert_missing_append_succeeds(StreamWritePrecondition::Any).await?;
+    assert_missing_append_conflicts(StreamWritePrecondition::StreamExists).await?;
+    assert_missing_append_conflicts(StreamWritePrecondition::At(position(1))).await?;
     Ok(())
 }
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_occ_matrix_for_existing_stream() -> TestResult {
-    assert_existing_append_succeeds(StreamState::Any).await?;
-    assert_existing_append_succeeds(StreamState::StreamExists).await?;
-    assert_existing_append_succeeds(StreamState::At(position(1))).await?;
-    assert_existing_append_conflicts(StreamState::NoStream).await?;
-    assert_existing_append_conflicts(StreamState::At(position(2))).await?;
+    assert_existing_append_succeeds(StreamWritePrecondition::Any).await?;
+    assert_existing_append_succeeds(StreamWritePrecondition::StreamExists).await?;
+    assert_existing_append_succeeds(StreamWritePrecondition::At(position(1))).await?;
+    assert_existing_append_conflicts(StreamWritePrecondition::NoStream).await?;
+    assert_existing_append_conflicts(StreamWritePrecondition::At(position(2))).await?;
     Ok(())
 }
 
@@ -938,19 +980,25 @@ async fn jetstream_store_occ_matrix_for_existing_stream() -> TestResult {
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
 
     let missing = fixture.store.read_stream(ReadStreamRequest::new("beta", 1)).await?;
     assert_eq!(missing.current_position, None);
     assert!(missing.events.is_empty());
 
-    let beta = append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
+    let beta = append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
     assert_eq!(beta.stream_position, position(2));
 
-    let beta_duplicate = append_one(&fixture.store, "beta", StreamState::NoStream, "beta-duplicate").await;
-    assert_occ_conflict(beta_duplicate, StreamState::NoStream, Some(position(2)))?;
+    let beta_duplicate = append_one(
+        &fixture.store,
+        "beta",
+        StreamWritePrecondition::NoStream,
+        "beta-duplicate",
+    )
+    .await;
+    assert_occ_conflict(beta_duplicate, StreamWritePrecondition::NoStream, Some(position(2)))?;
 
-    let gamma = append_one(&fixture.store, "gamma", StreamState::NoStream, "gamma-one").await?;
+    let gamma = append_one(&fixture.store, "gamma", StreamWritePrecondition::NoStream, "gamma-one").await?;
     assert_eq!(gamma.stream_position, position(3));
 
     let beta_read = fixture.store.read_stream(ReadStreamRequest::new("beta", 1)).await?;
@@ -974,13 +1022,31 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_stream_exists_uses_subject_sequence_after_interleaving() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
 
-    let alpha_two = append_one(&fixture.store, "alpha", StreamState::StreamExists, "alpha-two").await?;
+    let alpha_two = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::StreamExists,
+        "alpha-two",
+    )
+    .await?;
     assert_eq!(alpha_two.stream_position, position(3));
-    append_one(&fixture.store, "beta", StreamState::At(position(2)), "beta-two").await?;
-    let alpha_three = append_one(&fixture.store, "alpha", StreamState::StreamExists, "alpha-three").await?;
+    append_one(
+        &fixture.store,
+        "beta",
+        StreamWritePrecondition::At(position(2)),
+        "beta-two",
+    )
+    .await?;
+    let alpha_three = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::StreamExists,
+        "alpha-three",
+    )
+    .await?;
     assert_eq!(alpha_three.stream_position, position(5));
 
     let alpha = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
@@ -997,10 +1063,10 @@ async fn jetstream_store_stream_exists_uses_subject_sequence_after_interleaving(
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_any_can_start_new_subject_after_global_history() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
 
-    let gamma = append_one(&fixture.store, "gamma", StreamState::Any, "gamma-one").await?;
+    let gamma = append_one(&fixture.store, "gamma", StreamWritePrecondition::Any, "gamma-one").await?;
     assert_eq!(gamma.stream_position, position(3));
 
     let gamma_read = fixture.store.read_stream(ReadStreamRequest::new("gamma", 1)).await?;
@@ -1025,8 +1091,8 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(event),
+            StreamWritePrecondition::NoStream,
+            Events::one(event),
         ))
         .await?;
 
@@ -1192,7 +1258,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
     assert_eq!(first.stream_position, position(1));
     assert_eq!(first.state, CounterState { total: 2 });
 
-    append_one(&fixture.store, "noise", StreamState::NoStream, "noise-one").await?;
+    append_one(&fixture.store, "noise", StreamWritePrecondition::NoStream, "noise-one").await?;
 
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
@@ -1227,7 +1293,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_command_execution_keeps_interleaved_stream_state_isolated() -> TestResult {
+async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
     let snapshot_policy = FrequencySnapshot::new(NonZeroU64::MIN);
 
@@ -1357,8 +1423,8 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         .store
         .append_stream(AppendStreamRequest::new(
             "counter",
-            StreamState::Any,
-            NonEmpty::one(seed),
+            StreamWritePrecondition::Any,
+            Events::one(seed),
         ))
         .await?;
     assert_eq!(seed_outcome.stream_position, position(2));
@@ -1403,7 +1469,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
 
     let second_command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &second_command)
-        .with_write_precondition(StreamState::NoStream)
+        .with_write_precondition(StreamWritePrecondition::NoStream)
         .with_snapshot(Snapshots::new(
             &fixture.store,
             test_snapshot_config(),
@@ -1498,8 +1564,8 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
         .store
         .append_stream(AppendStreamRequest::new(
             "counter",
-            StreamState::NoStream,
-            NonEmpty::one(corrupt_event),
+            StreamWritePrecondition::NoStream,
+            Events::one(corrupt_event),
         ))
         .await?;
 
@@ -1594,7 +1660,15 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_append() -> TestRe
     let attempts = 24;
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
-        async move { append_one(&store, "alpha", StreamState::NoStream, format!("attempt-{index}")).await }
+        async move {
+            append_one(
+                &store,
+                "alpha",
+                StreamWritePrecondition::NoStream,
+                format!("attempt-{index}"),
+            )
+            .await
+        }
     }))
     .await;
 
@@ -1630,7 +1704,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_precondition_appen
             append_one(
                 &store,
                 "alpha",
-                StreamState::NoStream,
+                StreamWritePrecondition::NoStream,
                 format!("no-stream-attempt-{index}"),
             )
             .await
@@ -1665,7 +1739,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_batch_append() -> 
             append_many(
                 &store,
                 "alpha",
-                StreamState::NoStream,
+                StreamWritePrecondition::NoStream,
                 vec![format!("batch-{index}-one"), format!("batch-{index}-two")],
             )
             .await
@@ -1695,7 +1769,15 @@ async fn jetstream_store_any_allows_concurrent_appends_without_occ_guard() -> Te
     let attempts = 24;
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
-        async move { append_one(&store, "alpha", StreamState::Any, format!("any-attempt-{index}")).await }
+        async move {
+            append_one(
+                &store,
+                "alpha",
+                StreamWritePrecondition::Any,
+                format!("any-attempt-{index}"),
+            )
+            .await
+        }
     }))
     .await;
 
@@ -1716,7 +1798,7 @@ async fn jetstream_store_any_concurrent_appends_preserve_every_event_once() -> T
     let attempts = 16;
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
-        async move { append_one(&store, "alpha", StreamState::Any, format!("any-{index}")).await }
+        async move { append_one(&store, "alpha", StreamWritePrecondition::Any, format!("any-{index}")).await }
     }))
     .await;
     for result in results {
@@ -1751,7 +1833,7 @@ async fn jetstream_store_any_concurrent_appends_preserve_every_event_once() -> T
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_any_allows_concurrent_multi_event_batches() -> TestResult {
+async fn jetstream_store_any_allows_concurrent_multiple_events() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
     let attempts = 8;
     let events_per_attempt = 2;
@@ -1761,7 +1843,7 @@ async fn jetstream_store_any_allows_concurrent_multi_event_batches() -> TestResu
             append_many(
                 &store,
                 "alpha",
-                StreamState::Any,
+                StreamWritePrecondition::Any,
                 vec![format!("batch-{index}-one"), format!("batch-{index}-two")],
             )
             .await
@@ -1800,8 +1882,8 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
             store
                 .append_stream(AppendStreamRequest::new(
                     "alpha",
-                    StreamState::Any,
-                    NonEmpty::one(event),
+                    StreamWritePrecondition::Any,
+                    Events::one(event),
                 ))
                 .await
         }
@@ -1833,7 +1915,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_allows_only_one_concurrent_exact_revision_append() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
     let attempts = 24;
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
@@ -1841,7 +1923,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_append() -> T
             append_one(
                 &store,
                 "alpha",
-                StreamState::At(position(1)),
+                StreamWritePrecondition::At(position(1)),
                 format!("revision-attempt-{index}"),
             )
             .await
@@ -1868,7 +1950,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_append() -> T
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
     let attempts = 12;
     let events_per_attempt = 2;
     let results = join_all((0..attempts).map(|index| {
@@ -1877,7 +1959,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append(
             append_many(
                 &store,
                 "alpha",
-                StreamState::At(position(1)),
+                StreamWritePrecondition::At(position(1)),
                 vec![
                     format!("revision-batch-{index}-one"),
                     format!("revision-batch-{index}-two"),
@@ -1907,7 +1989,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append(
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_allows_concurrent_stream_exists_appends() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
     let attempts = 24;
     let results = join_all((0..attempts).map(|index| {
         let store = fixture.store.clone();
@@ -1915,7 +1997,7 @@ async fn jetstream_store_allows_concurrent_stream_exists_appends() -> TestResult
             append_one(
                 &store,
                 "alpha",
-                StreamState::StreamExists,
+                StreamWritePrecondition::StreamExists,
                 format!("exists-attempt-{index}"),
             )
             .await
@@ -1940,7 +2022,7 @@ async fn jetstream_store_allows_concurrent_stream_exists_appends() -> TestResult
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_allows_concurrent_stream_exists_batch_appends() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
     let attempts = 12;
     let events_per_attempt = 2;
     let results = join_all((0..attempts).map(|index| {
@@ -1949,7 +2031,7 @@ async fn jetstream_store_allows_concurrent_stream_exists_batch_appends() -> Test
             append_many(
                 &store,
                 "alpha",
-                StreamState::StreamExists,
+                StreamWritePrecondition::StreamExists,
                 vec![format!("exists-batch-{index}-one"), format!("exists-batch-{index}-two")],
             )
             .await
@@ -1979,8 +2061,8 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "first")?),
+            StreamWritePrecondition::NoStream,
+            Events::one(test_event_with_id("alpha", event_id, "first")?),
         ))
         .await?;
     assert_eq!(outcome.stream_position, position(1));
@@ -1989,8 +2071,8 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::At(position(1)),
-            NonEmpty::one(test_event_with_id("alpha", event_id, "duplicate")?),
+            StreamWritePrecondition::At(position(1)),
+            Events::one(test_event_with_id("alpha", event_id, "duplicate")?),
         ))
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2015,8 +2097,8 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "first")?),
+            StreamWritePrecondition::NoStream,
+            Events::one(test_event_with_id("alpha", event_id, "first")?),
         ))
         .await?;
 
@@ -2024,8 +2106,8 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::Any,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "duplicate")?),
+            StreamWritePrecondition::Any,
+            Events::one(test_event_with_id("alpha", event_id, "duplicate")?),
         ))
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2050,8 +2132,8 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "seed")?),
+            StreamWritePrecondition::NoStream,
+            Events::one(test_event_with_id("alpha", event_id, "seed")?),
         ))
         .await?;
 
@@ -2059,8 +2141,8 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::At(position(1)),
-            event_batch(vec![
+            StreamWritePrecondition::At(position(1)),
+            events(vec![
                 test_event_with_id("alpha", event_id, "duplicate-first")?,
                 test_event("alpha", "new-second")?,
             ])?,
@@ -2072,8 +2154,8 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::At(position(1)),
-            event_batch(vec![
+            StreamWritePrecondition::At(position(1)),
+            events(vec![
                 test_event("alpha", "new-first")?,
                 test_event_with_id("alpha", event_id, "duplicate-last")?,
             ])?,
@@ -2102,8 +2184,8 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_new_atomic_batch_with
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            event_batch(vec![
+            StreamWritePrecondition::NoStream,
+            events(vec![
                 test_event_with_id("alpha", event_id, "first")?,
                 test_event_with_id("alpha", event_id, "second")?,
             ])?,
@@ -2128,16 +2210,16 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("alpha", event_id, "alpha")?),
+            StreamWritePrecondition::NoStream,
+            Events::one(test_event_with_id("alpha", event_id, "alpha")?),
         ))
         .await?;
     let duplicate = fixture
         .store
         .append_stream(AppendStreamRequest::new(
             "beta",
-            StreamState::NoStream,
-            NonEmpty::one(test_event_with_id("beta", event_id, "beta")?),
+            StreamWritePrecondition::NoStream,
+            Events::one(test_event_with_id("beta", event_id, "beta")?),
         ))
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2156,15 +2238,37 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_uses_last_subject_sequence_for_occ_after_interleaved_subjects() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
-    let interleaved_outcome = append_one(&fixture.store, "alpha", StreamState::At(position(1)), "alpha-two").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
+    let interleaved_outcome = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(1)),
+        "alpha-two",
+    )
+    .await?;
     assert_eq!(interleaved_outcome.stream_position, position(3));
 
-    let stale_gap_revision = append_one(&fixture.store, "alpha", StreamState::At(position(2)), "alpha-stale").await;
-    assert_occ_conflict(stale_gap_revision, StreamState::At(position(2)), Some(position(3)))?;
+    let stale_gap_revision = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(2)),
+        "alpha-stale",
+    )
+    .await;
+    assert_occ_conflict(
+        stale_gap_revision,
+        StreamWritePrecondition::At(position(2)),
+        Some(position(3)),
+    )?;
 
-    let outcome = append_one(&fixture.store, "alpha", StreamState::At(position(3)), "alpha-three").await?;
+    let outcome = append_one(
+        &fixture.store,
+        "alpha",
+        StreamWritePrecondition::At(position(3)),
+        "alpha-three",
+    )
+    .await?;
     assert_eq!(outcome.stream_position, position(4));
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
@@ -2181,15 +2285,15 @@ async fn jetstream_store_uses_last_subject_sequence_for_occ_after_interleaved_su
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subjects() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "alpha-one").await?;
-    append_one(&fixture.store, "beta", StreamState::NoStream, "beta-one").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "alpha-one").await?;
+    append_one(&fixture.store, "beta", StreamWritePrecondition::NoStream, "beta-one").await?;
 
     let outcome = fixture
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::At(position(1)),
-            event_batch(vec![
+            StreamWritePrecondition::At(position(1)),
+            events(vec![
                 test_event("alpha", "alpha-two")?,
                 test_event("alpha", "alpha-three")?,
             ])?,
@@ -2211,17 +2315,17 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    append_one(&fixture.store, "alpha", StreamState::NoStream, "seed").await?;
+    append_one(&fixture.store, "alpha", StreamWritePrecondition::NoStream, "seed").await?;
 
     let stale_batch = fixture
         .store
         .append_stream(AppendStreamRequest::new(
             "alpha",
-            StreamState::NoStream,
-            event_batch(vec![test_event("alpha", "one")?, test_event("alpha", "two")?])?,
+            StreamWritePrecondition::NoStream,
+            events(vec![test_event("alpha", "one")?, test_event("alpha", "two")?])?,
         ))
         .await;
-    assert_occ_conflict(stale_batch, StreamState::NoStream, Some(position(1)))?;
+    assert_occ_conflict(stale_batch, StreamWritePrecondition::NoStream, Some(position(1)))?;
 
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));

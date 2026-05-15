@@ -4,7 +4,7 @@ use super::{JetStreamStore, JetStreamStoreError, StreamSubjectResolver};
 use crate::nats::stream_store::{StreamStoreError, append_stream as append_subject_stream, read_subject_stream};
 use crate::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamPosition,
-    StreamRead, StreamState,
+    StreamRead, StreamWritePrecondition,
 };
 
 impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
@@ -51,7 +51,7 @@ where
         request: AppendStreamRequest<'_, StreamId>,
     ) -> Result<AppendStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
-        let expected_state = request.stream_state;
+        let expected_state = request.stream_write_precondition;
         let events = request.events;
         let subject_state = self
             .subject_resolver
@@ -84,25 +84,25 @@ where
 
 fn resolve_expected_last_subject_sequence<StreamId, Error>(
     stream_id: &StreamId,
-    expected_state: StreamState,
+    expected_state: StreamWritePrecondition,
     current_position: Option<StreamPosition>,
 ) -> Result<Option<u64>, JetStreamStoreError<Error>>
 where
     StreamId: ToString + ?Sized,
 {
     match expected_state {
-        StreamState::Any => Ok(None),
-        StreamState::StreamExists => {
+        StreamWritePrecondition::Any => Ok(None),
+        StreamWritePrecondition::StreamExists => {
             current_position
                 .map(|_| None)
                 .ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
                     stream_id: stream_id.to_string(),
-                    expected: StreamState::StreamExists,
+                    expected: StreamWritePrecondition::StreamExists,
                     current_position,
                 })
         }
-        StreamState::NoStream => Ok(Some(0)),
-        StreamState::At(position) => Ok(Some(position.get())),
+        StreamWritePrecondition::NoStream => Ok(Some(0)),
+        StreamWritePrecondition::At(position) => Ok(Some(position.get())),
     }
 }
 

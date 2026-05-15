@@ -5,5 +5,5 @@ error[E0599]: no method named `when` found for struct `TestCase<TestCommand>` in
   |                                             ^^^^ method not found in `TestCase<TestCommand>`
   |
   = note: the method was found for
-          - `TestCase<C, Given<<C as trogon_eventsourcing::Decide>::Event>>`
+          - `TestCase<C, Given<<C as Decider>::Event>>`
           - `TestCase<C, NoHistory>`

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
 
-use crate::{Event, EventHeaders, EventId, NonEmpty, StreamEvent};
+use crate::{Event, EventHeaders, EventId, Events, StreamEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
@@ -74,7 +74,7 @@ pub async fn append_stream<J>(
     js: &J,
     subject: String,
     expected_last_subject_sequence: Option<u64>,
-    events: &NonEmpty<Event>,
+    events: &Events<Event>,
 ) -> Result<crate::StreamPosition, StreamStoreError>
 where
     J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,

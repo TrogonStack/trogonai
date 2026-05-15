@@ -1,4 +1,4 @@
-use trogon_eventsourcing::{Decide, Decision};
+use trogon_eventsourcing::{Decider, Decision};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestState {
@@ -24,7 +24,7 @@ pub enum TestDecisionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestCommand;
 
-impl Decide for TestCommand {
+impl Decider for TestCommand {
     type StreamId = str;
     type State = TestState;
     type Event = TestEvent;
@@ -46,7 +46,7 @@ impl Decide for TestCommand {
         }
     }
 
-    fn decide(state: &TestState, _command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
+    fn decide(state: &TestState, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         match state {
             TestState::Missing => Ok(Decision::event(TestEvent::Registered)),
             TestState::Present => Err(TestDecisionError::AlreadyRegistered),

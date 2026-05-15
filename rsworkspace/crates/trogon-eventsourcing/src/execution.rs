@@ -3,19 +3,21 @@ use crate::snapshot::{
     WriteSnapshotRequest,
 };
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead, StreamState,
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead,
+    StreamWritePrecondition,
 };
 use crate::{
-    CanonicalEventCodec, Decide, Decision, Event, EventCodec, EventEncodeError, EventIdentity, EventType, NonEmpty,
-    StreamEvent,
+    CanonicalEventCodec, Decider, Event, EventCodec, EventEncodeError, EventIdentity, EventType, Events, StreamEvent,
+    WritePrecondition,
 };
+use trogon_decider::DecisionFailure;
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub type BoxTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 type ExecutionFailure<C, RuntimeError> =
-    CommandFailure<<C as Decide>::DecideError, <C as Decide>::EvolveError, RuntimeError>;
+    CommandFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError, RuntimeError>;
 type ExecutionStep<C, RuntimeError, T> = Result<T, ExecutionFailure<C, RuntimeError>>;
 
 pub fn spawn_on_tokio(task: BoxTask) {
@@ -53,14 +55,14 @@ pub struct SnapshotDecisionContext<'a, State, Event> {
     /// because stream positions may be sparse.
     pub events_since_snapshot: u64,
     pub state: &'a State,
-    pub events: &'a NonEmpty<Event>,
+    pub events: &'a Events<Event>,
 }
 
 pub trait SnapshotPolicy<State, Event> {
     fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision;
 }
 
-pub trait CommandSnapshotPolicy: Decide
+pub trait CommandSnapshotPolicy: Decider
 where
     Self::State: SnapshotSchema,
 {
@@ -115,13 +117,13 @@ impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
 pub struct ExecutionResult<State, Event> {
     /// The stream high-watermark after the command append completed.
     pub stream_position: StreamPosition,
-    pub events: NonEmpty<Event>,
+    pub events: Events<Event>,
     pub state: State,
 }
 
 pub type CommandResult<C, InfraError> = Result<
-    ExecutionResult<<C as Decide>::State, <C as Decide>::Event>,
-    CommandFailure<<C as Decide>::DecideError, <C as Decide>::EvolveError, InfraError>,
+    ExecutionResult<<C as Decider>::State, <C as Decider>::Event>,
+    CommandFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError, InfraError>,
 >;
 
 #[derive(Debug)]
@@ -179,7 +181,7 @@ impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
 
 pub trait IntoSnapshots<'a, C>: Sized
 where
-    C: Decide,
+    C: Decider,
 {
     type Store;
     type Policy;
@@ -190,7 +192,7 @@ where
 
 impl<'a, C, S, P, Spawn> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn>
 where
-    C: Decide,
+    C: Decider,
 {
     type Store = S;
     type Policy = P;
@@ -218,13 +220,13 @@ where
 pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
     event_store: &'a E,
     command: &'a C,
-    write_precondition: Option<StreamState>,
+    write_precondition: Option<StreamWritePrecondition>,
     snapshots: S,
 }
 
 impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots>
 where
-    C: Decide,
+    C: Decider,
 {
     pub const fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
@@ -265,7 +267,7 @@ where
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
-        W: Into<Option<StreamState>>,
+        W: Into<Option<StreamWritePrecondition>>,
     {
         self.write_precondition = write_precondition.into();
         self
@@ -287,14 +289,14 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
     event_store: &'a E,
     command: &'a C,
-    write_precondition: Option<StreamState>,
+    write_precondition: Option<StreamWritePrecondition>,
     snapshots: S,
     event_codec: EC,
 }
 
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
 where
-    C: Decide,
+    C: Decider,
 {
     #[allow(clippy::type_complexity)]
     pub fn with_snapshot<I>(
@@ -328,7 +330,7 @@ where
 impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
-        W: Into<Option<StreamState>>,
+        W: Into<Option<StreamWritePrecondition>>,
     {
         self.write_precondition = write_precondition.into();
         self
@@ -339,9 +341,9 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         current_position: Option<StreamPosition>,
         stream_id: &C::StreamId,
         state: C::State,
-    ) -> ExecutionStep<C, SErr, (AppendStreamResponse, NonEmpty<C::Event>, C::State)>
+    ) -> ExecutionStep<C, SErr, (AppendStreamResponse, Events<C::Event>, C::State)>
     where
-        C: Decide,
+        C: Decider,
         C::Event: Clone + EventType + EventIdentity,
         C::StreamId: AsRef<str>,
         E: StreamAppend<C::StreamId, Error = SErr>,
@@ -349,14 +351,21 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
         <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
         EC::Error: std::error::Error + Send + Sync + 'static,
     {
-        let Decision::Event(events) = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let state = evolve_events::<C, SErr>(state, &events)?;
+        let decision = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
+        let (state, events) = decision
+            .handle(state, self.command)
+            .map_err(decision_failure_to_command_failure::<C, SErr>)?;
         let encoded_events = encode_events(&self.event_codec, &events)
             .map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
-        let stream_state = resolve_stream_state::<C>(self.write_precondition, current_position);
+        let stream_write_precondition =
+            resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
             .event_store
-            .append_stream(AppendStreamRequest::new(stream_id, stream_state, encoded_events))
+            .append_stream(AppendStreamRequest::new(
+                stream_id,
+                stream_write_precondition,
+                encoded_events,
+            ))
             .await
             .map_err(|source| CommandFailure::Append(source))?;
 
@@ -395,7 +404,7 @@ impl<'a, E, S, C, P, Spawn, EC> CommandExecutionWithCodec<'a, E, C, Snapshots<'a
 
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -415,7 +424,7 @@ where
 
 impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + EventType + EventIdentity,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -448,7 +457,7 @@ where
 
 impl<E, S, C, P, Spawn, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>>
 where
-    C: Decide,
+    C: Decider,
     C::State: Clone + Send + 'static,
     C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
     C::StreamId: AsRef<str> + ToOwned,
@@ -477,7 +486,7 @@ where
 
 impl<E, S, C, P, Spawn, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P, Spawn>, EC>
 where
-    C: Decide,
+    C: Decider,
     C::State: Clone + Send + 'static,
     C::Event: Clone + EventType + EventIdentity,
     C::StreamId: AsRef<str> + ToOwned,
@@ -573,16 +582,27 @@ where
     Box::new(error)
 }
 
-fn resolve_stream_state<C>(
-    write_precondition: Option<StreamState>,
+fn resolve_stream_write_precondition<C>(
+    write_precondition: Option<StreamWritePrecondition>,
     current_position: Option<StreamPosition>,
-) -> StreamState
+) -> StreamWritePrecondition
 where
-    C: Decide,
+    C: Decider,
 {
-    C::REQUIRED_WRITE_PRECONDITION
+    C::WRITE_PRECONDITION
+        .map(StreamWritePrecondition::from)
         .or(write_precondition)
-        .unwrap_or_else(|| StreamState::from_current_position(current_position))
+        .unwrap_or_else(|| StreamWritePrecondition::from_current_position(current_position))
+}
+
+impl From<WritePrecondition> for StreamWritePrecondition {
+    fn from(value: WritePrecondition) -> Self {
+        match value {
+            WritePrecondition::Any => Self::Any,
+            WritePrecondition::StreamExists => Self::StreamExists,
+            WritePrecondition::NoStream => Self::NoStream,
+        }
+    }
 }
 
 fn schedule_snapshot_write<S, State, StreamId, Spawn>(
@@ -619,7 +639,7 @@ fn replay_stream_events<C, EC, SErr>(
     event_codec: &EC,
 ) -> ExecutionStep<C, SErr, C::State>
 where
-    C: Decide,
+    C: Decider,
     EC: EventCodec<C::Event>,
     EC::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -633,18 +653,19 @@ where
     Ok(state)
 }
 
-fn evolve_events<C, SErr>(mut state: C::State, events: &NonEmpty<C::Event>) -> ExecutionStep<C, SErr, C::State>
+fn decision_failure_to_command_failure<C, RuntimeError>(
+    failure: DecisionFailure<C::DecideError, C::EvolveError>,
+) -> ExecutionFailure<C, RuntimeError>
 where
-    C: Decide,
+    C: Decider,
 {
-    for event in events.iter() {
-        state = C::evolve(state, event).map_err(CommandFailure::Evolve)?;
+    match failure {
+        DecisionFailure::Decide(error) => CommandFailure::Decide(error),
+        DecisionFailure::Evolve(error) => CommandFailure::Evolve(error),
     }
-
-    Ok(state)
 }
 
-fn encode_events<E, C>(codec: &C, events: &NonEmpty<E>) -> Result<NonEmpty<Event>, EventEncodeError<E, C>>
+fn encode_events<E, C>(codec: &C, events: &Events<E>) -> Result<Events<Event>, EventEncodeError<E, C>>
 where
     E: EventType + EventIdentity,
     C: EventCodec<E>,
@@ -655,7 +676,7 @@ where
         .skip(1)
         .map(|event| Event::from_domain_event(codec, event))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(NonEmpty::from_first(first, rest))
+    Ok(Events::from_first(first, rest))
 }
 
 #[cfg(test)]
@@ -671,8 +692,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse, SnapshotSchema,
-        StreamEvent, WriteSnapshotResponse,
+        CanonicalEventCodec, Decision, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
+        SnapshotSchema, StreamEvent, WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -695,6 +716,9 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum TestAction {
         Register,
+        RegisterThenDisable,
+        RegisterThenFail,
+        RegisterThenBroken,
         Disable,
         Remove,
         EmitBroken,
@@ -779,7 +803,7 @@ mod tests {
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
         read_from_sequences: Arc<Mutex<Vec<u64>>>,
-        stream_states: Arc<Mutex<Vec<StreamState>>>,
+        stream_write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         appended_events: Arc<Mutex<Vec<Event>>>,
         written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
     }
@@ -797,7 +821,7 @@ mod tests {
                 fail_append: false,
                 loaded_stream_ids: Arc::new(Mutex::new(Vec::new())),
                 read_from_sequences: Arc::new(Mutex::new(Vec::new())),
-                stream_states: Arc::new(Mutex::new(Vec::new())),
+                stream_write_preconditions: Arc::new(Mutex::new(Vec::new())),
                 appended_events: Arc::new(Mutex::new(Vec::new())),
                 written_snapshots: Arc::new(Mutex::new(Vec::new())),
             }
@@ -840,7 +864,7 @@ mod tests {
         }
     }
 
-    impl Decide for TestCommand {
+    impl Decider for TestCommand {
         type StreamId = str;
         type State = TestState;
         type Event = TestEvent;
@@ -860,13 +884,38 @@ mod tests {
             evolve_test_state(state, event)
         }
 
-        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
             match (state, command.action) {
                 (TestState::Missing, TestAction::Register) => {
                     Ok(Decision::event(TestEvent::Registered { id: command.id.clone() }))
                 }
+                (TestState::Missing, TestAction::RegisterThenDisable) => Ok(Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|state, command: &Self| match state {
+                        TestState::Present { enabled: true } => Ok(Decision::event(TestEvent::StateChanged {
+                            id: command.id.clone(),
+                            enabled: false,
+                        })),
+                        TestState::Present { enabled: false } => Err(TestDecisionError::AlreadyDisabled),
+                        TestState::Missing => Err(TestDecisionError::Missing),
+                    })
+                    .into_decision()),
+                (TestState::Missing, TestAction::RegisterThenFail) => Ok(Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|_, _| Err(TestDecisionError::AlreadyDisabled))
+                    .into_decision()),
+                (TestState::Missing, TestAction::RegisterThenBroken) => Ok(Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Broken { id: command.id.clone() }))
+                    .into_decision()),
                 (_, TestAction::EmitBroken) => Ok(Decision::event(TestEvent::Broken { id: command.id.clone() })),
-                (TestState::Present { .. }, TestAction::Register) => Err(TestDecisionError::AlreadyRegistered),
+                (
+                    TestState::Present { .. },
+                    TestAction::Register
+                    | TestAction::RegisterThenDisable
+                    | TestAction::RegisterThenFail
+                    | TestAction::RegisterThenBroken,
+                ) => Err(TestDecisionError::AlreadyRegistered),
                 (TestState::Present { enabled: false }, TestAction::Disable) => Err(TestDecisionError::AlreadyDisabled),
                 (TestState::Present { .. }, TestAction::Disable) => Ok(Decision::event(TestEvent::StateChanged {
                     id: command.id.clone(),
@@ -880,14 +929,14 @@ mod tests {
         }
     }
 
-    impl Decide for RequiredRegisterCommand {
+    impl Decider for RequiredRegisterCommand {
         type StreamId = str;
         type State = TestState;
         type Event = TestEvent;
         type DecideError = TestDecisionError;
         type EvolveError = TestCommandError;
 
-        const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
+        const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
 
         fn stream_id(&self) -> &Self::StreamId {
             self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
@@ -902,7 +951,7 @@ mod tests {
             evolve_test_state(state, event)
         }
 
-        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
             match state {
                 TestState::Missing => Ok(Decision::event(TestEvent::Registered { id: command.id.clone() })),
                 TestState::Present { .. } => Err(TestDecisionError::AlreadyRegistered),
@@ -1007,7 +1056,10 @@ mod tests {
             if self.fail_append {
                 return Err(TestInfraError::Append);
             }
-            self.stream_states.lock().unwrap().push(request.stream_state);
+            self.stream_write_preconditions
+                .lock()
+                .unwrap()
+                .push(request.stream_write_precondition);
             self.appended_events.lock().unwrap().extend(request.events.into_vec());
             Ok(AppendStreamResponse {
                 stream_position: self.stream_position,
@@ -1076,15 +1128,47 @@ mod tests {
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert_eq!(
             result.events,
-            NonEmpty::one(TestEvent::Registered {
+            Events::one(TestEvent::Registered {
                 id: "alpha".to_string(),
             })
         );
         assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::NoStream]
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
         );
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[1]);
+    }
+
+    #[test]
+    fn executes_act_decisions_with_evolved_step_state() {
+        let runtime = FakeRuntime {
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenDisable);
+
+        let result = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+
+        assert_eq!(result.stream_position, position(2));
+        assert_eq!(result.state, TestState::Present { enabled: false });
+        assert_eq!(
+            result.events,
+            Events::from_vec(vec![
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ])
+            .unwrap()
+        );
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
+        assert_eq!(runtime.appended_events.lock().unwrap().len(), 2);
     }
 
     #[test]
@@ -1121,8 +1205,8 @@ mod tests {
 
         assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
         assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::At(position(2))]
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(2))]
         );
         assert_eq!(result.state, TestState::Missing);
     }
@@ -1211,7 +1295,40 @@ mod tests {
         let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
 
         assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
-        assert!(runtime.stream_states.lock().unwrap().is_empty());
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_act_decide_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenFail);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandFailure::Decide(TestDecisionError::AlreadyDisabled)
+        ));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_act_evolve_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenBroken);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+
+        assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
         assert!(runtime.appended_events.lock().unwrap().is_empty());
     }
 
@@ -1257,8 +1374,8 @@ mod tests {
 
         assert_eq!(result.stream_position, position(2));
         assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::At(position(1))]
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(1))]
         );
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].r#type, "state_changed");
@@ -1319,8 +1436,8 @@ mod tests {
         let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
 
         assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::At(position(7))]
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(7))]
         );
     }
 
@@ -1334,16 +1451,19 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_write_precondition(StreamState::Any)
+                .with_write_precondition(StreamWritePrecondition::Any)
                 .execute_result(),
         )
         .unwrap();
 
-        assert_eq!(runtime.stream_states.lock().unwrap().as_slice(), &[StreamState::Any]);
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::Any]
+        );
     }
 
     #[test]
-    fn required_command_rule_uses_required_stream_state() {
+    fn required_command_rule_uses_required_stream_write_precondition() {
         let runtime = FakeRuntime {
             stream_position: position(1),
             ..Default::default()
@@ -1352,14 +1472,14 @@ mod tests {
 
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_write_precondition(StreamState::Any)
+                .with_write_precondition(StreamWritePrecondition::Any)
                 .execute_result(),
         )
         .unwrap();
 
         assert_eq!(
-            runtime.stream_states.lock().unwrap().as_slice(),
-            &[StreamState::NoStream]
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
         );
     }
 

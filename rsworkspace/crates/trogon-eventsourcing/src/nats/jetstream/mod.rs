@@ -7,7 +7,7 @@ use async_nats::jetstream::{self, kv};
 
 use crate::nats::snapshot_store::SnapshotStoreError;
 use crate::nats::stream_store::StreamStoreError;
-use crate::{StreamPosition, StreamState};
+use crate::{StreamPosition, StreamWritePrecondition};
 
 pub use stream::subject_current_position;
 
@@ -36,7 +36,7 @@ pub enum JetStreamStoreError<Error> {
     Codec(Error),
     OptimisticConcurrencyConflict {
         stream_id: String,
-        expected: StreamState,
+        expected: StreamWritePrecondition,
         current_position: Option<StreamPosition>,
     },
 }

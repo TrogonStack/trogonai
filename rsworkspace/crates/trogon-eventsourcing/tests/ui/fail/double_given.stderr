@@ -9,5 +9,5 @@ error[E0599]: no method named `given` found for struct `TestCase<TestCommand, No
    |
    |
    = note: the method was found for
-           - `TestCase<C, Given<<C as trogon_eventsourcing::Decide>::Event>>`
+           - `TestCase<C, Given<<C as Decider>::Event>>`
            - `TestCase<C>`
