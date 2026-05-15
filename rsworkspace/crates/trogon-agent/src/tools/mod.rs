@@ -1,6 +1,7 @@
 pub mod github;
 pub mod linear;
 pub mod slack;
+pub mod spawn_agent;
 
 /// Build the HTML comment marker used for idempotency dedup in PR/issue comments.
 ///
@@ -378,6 +379,7 @@ pub mod mock {
             Self {
                 http_client: MockHttpClient::new(),
                 proxy_url: proxy_url.into(),
+                cwd: String::new(),
                 github_token: github_token.into(),
                 linear_token: linear_token.into(),
                 slack_token: slack_token.into(),
@@ -404,6 +406,8 @@ pub struct ToolContext<H = reqwest::Client> {
     pub http_client: H,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
+    /// Working directory for the session — filesystem tools resolve paths relative to this.
+    pub cwd: String,
     /// Opaque proxy token for the GitHub API.
     pub github_token: String,
     /// Opaque proxy token for the Linear API.
@@ -418,6 +422,7 @@ impl ToolContext<reqwest::Client> {
     pub fn new(
         http_client: reqwest::Client,
         proxy_url: String,
+        cwd: String,
         github_token: String,
         linear_token: String,
         slack_token: String,
@@ -426,6 +431,7 @@ impl ToolContext<reqwest::Client> {
         Self {
             http_client,
             proxy_url,
+            cwd,
             github_token,
             linear_token,
             slack_token,
@@ -555,6 +561,7 @@ pub async fn dispatch_tool<H: HttpClient>(
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
+        "spawn_agent" => Err("spawn_agent requires a NATS client — dispatch via trogon-acp-runner".to_string()),
         unknown => Err(format!("Unknown tool: {unknown}")),
     };
     result.unwrap_or_else(|e| format!("Tool error: {e}"))
@@ -641,6 +648,20 @@ mod tests {
             "",
         );
         let result = dispatch_tool(&ctx, "get_linear_comments", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
+    /// `post_pr_review` is routed and returns a Tool error when inputs are missing.
+    #[tokio::test]
+    async fn dispatch_post_pr_review_routes_correctly() {
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "",
+            "",
+        );
+        let result = dispatch_tool(&ctx, "post_pr_review", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
     }
@@ -732,11 +753,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_spawn_agent_returns_helpful_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.contains("trogon-acp-runner"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_read_file_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "read_file", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "read_file should delegate to agent-core, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_git_status_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "git_status should delegate to agent-core, got: {result}");
+    }
+
+    #[tokio::test]
     async fn dispatch_post_linear_comment_routes_correctly() {
         let ctx = ToolContext::for_test("http://localhost:8080", "", "tok_linear_prod_test01", "");
         let result = dispatch_tool(&ctx, "post_linear_comment", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_spawn_agent_returns_nats_required_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "must be routed, got: {result}");
     }
 
     // ── idempotency_marker ────────────────────────────────────────────────────
@@ -868,6 +919,7 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
     ];
     tools.extend(slack::slack_tool_defs());
+    tools.push(spawn_agent::tool_def());
     tools
 }
 
@@ -894,13 +946,14 @@ mod catalog_tests {
             "update_linear_issue",
             "send_slack_message",
             "read_slack_channel",
+            "spawn_agent",
         ] {
             assert!(names.contains(expected), "missing tool: {expected}");
         }
     }
 
     #[test]
-    fn all_tool_defs_has_fourteen_entries() {
-        assert_eq!(all_tool_defs().len(), 14);
+    fn all_tool_defs_has_fifteen_entries() {
+        assert_eq!(all_tool_defs().len(), 15);
     }
 }

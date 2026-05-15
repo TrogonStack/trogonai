@@ -1,0 +1,33 @@
+[package]
+name = "trogon-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "trogon"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-client-protocol = { workspace = true, features = ["unstable_session_usage"] }
+anyhow      = "1"
+async-nats  = { workspace = true }
+axum        = { workspace = true }
+bytes       = { workspace = true }
+clap        = { workspace = true, features = ["env"] }
+futures     = { workspace = true }
+rustyline   = "14"
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true, features = ["full"] }
+tracing     = { workspace = true }
+uuid        = { workspace = true }
+
+[dev-dependencies]
+reqwest                = { workspace = true }
+testcontainers-modules = { workspace = true }
+futures                = { workspace = true }
+tempfile               = { workspace = true }
+tokio                  = { workspace = true, features = ["test-util"] }

@@ -34,4 +34,4 @@ serde_json = { workspace = true }
 tokio      = { workspace = true, features = ["full"] }
 tower      = "0.5"
 reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }

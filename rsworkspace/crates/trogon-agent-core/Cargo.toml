@@ -17,7 +17,9 @@ tracing       = "0.1"
 
 trogon-mcp     = { path = "../trogon-mcp" }
 trogon-std     = { path = "../trogon-std" }
+trogon-tools   = { path = "../trogon-tools" }
 
 [dev-dependencies]
 httpmock       = "0.7"
+tempfile       = "3"
 trogon-mcp     = { path = "../trogon-mcp", features = ["test-support"] }

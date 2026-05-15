@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-acp-runner = { path = "../trogon-acp-runner", features = [] }
+trogon-cli        = { path = "../trogon-cli" }
 trogon-nats       = { path = "../trogon-nats" }
 trogon-std        = { path = "../trogon-std" }
 uuid              = { version = "1", features = ["v4"] }
@@ -32,7 +33,7 @@ uuid              = { version = "1", features = ["v4"] }
 futures-util = "0.3"
 trogon-acp-runner = { path = "../trogon-acp-runner", features = ["test-helpers"] }
 trogon-nats = { path = "../trogon-nats", features = ["test-support"] }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 
 [[bin]]
 name = "trogon-acp"

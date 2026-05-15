@@ -21,6 +21,7 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         proxy_url.to_string(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         "tok_linear_prod_test01".to_string(),
         String::new(),
@@ -200,6 +201,7 @@ async fn agent_loop_max_iterations_reached() {
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         server.base_url(),
+        String::new(),
         String::new(),
         String::new(),
         String::new(),
@@ -467,6 +469,7 @@ async fn run_chat_max_iterations_reached() {
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         server.base_url(),
+        String::new(),
         String::new(),
         String::new(),
         String::new(),

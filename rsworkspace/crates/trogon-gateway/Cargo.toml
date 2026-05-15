@@ -45,7 +45,7 @@ tempfile = { workspace = true }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 futures-util = { workspace = true }
 hmac = "0.13"
 sha2 = "0.11"
