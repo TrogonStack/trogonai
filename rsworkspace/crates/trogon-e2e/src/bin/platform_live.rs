@@ -70,7 +70,11 @@ fn make_agent(base_url: &str) -> AgentLoop {
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext { proxy_url: "http://127.0.0.1:1".to_string() }),
+        tool_context: Arc::new(ToolContext {
+            proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
+        }),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,
