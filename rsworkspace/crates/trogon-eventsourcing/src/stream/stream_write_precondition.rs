@@ -1,7 +1,7 @@
 use super::stream_position::StreamPosition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamState {
+pub enum StreamWritePrecondition {
     /// Append without checking the stream's current position.
     Any,
     /// Append only if the stream already has at least one event.
@@ -16,7 +16,7 @@ pub enum StreamState {
     At(StreamPosition),
 }
 
-impl StreamState {
+impl StreamWritePrecondition {
     pub const fn from_current_position(current_position: Option<StreamPosition>) -> Self {
         match current_position {
             Some(position) => Self::At(position),

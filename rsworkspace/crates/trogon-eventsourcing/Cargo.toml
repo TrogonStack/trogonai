@@ -25,6 +25,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+trogon-decider = { version = "0.1.0", path = "../trogon-decider" }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats" }
 trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }
 uuid = { workspace = true }

@@ -1,8 +1,9 @@
 #![allow(clippy::panic)]
 
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData, mem::ManuallyDrop, ptr};
 
-use crate::{Decide, Decision, NonEmpty};
+use crate::{Decider, Events};
+use trogon_decider::DecisionFailure;
 
 #[macro_export]
 macro_rules! events {
@@ -15,17 +16,17 @@ macro_rules! events {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Decider<C>(PhantomData<fn() -> C>);
+pub struct DeciderSpec<C>(PhantomData<fn() -> C>);
 
-pub const fn decider<C>() -> Decider<C> {
-    Decider(PhantomData)
+pub const fn decider<C>() -> DeciderSpec<C> {
+    DeciderSpec(PhantomData)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThenEvents<Event> {
     stream_id: String,
     given: Vec<Event>,
-    then: NonEmpty<Event>,
+    then: Events<Event>,
 }
 
 impl<Event> ThenEvents<Event> {
@@ -59,6 +60,19 @@ pub struct ThenError<Event, Error> {
     given: Vec<Event>,
     error: Error,
 }
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionEvaluationFailure<DecideError, EvolveError> {
+    Decide(DecideError),
+    Evolve(EvolveError),
+}
+
+#[doc(hidden)]
+pub type DecisionEvaluation<C> = Result<
+    Events<<C as Decider>::Event>,
+    DecisionEvaluationFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
+>;
 
 impl<Event, Error> ThenError<Event, Error> {
     pub fn stream_id(&self) -> &str {
@@ -191,7 +205,7 @@ pub struct TestCase<C, Stage = Start> {
 }
 
 impl<C> TestCase<C, Start> {
-    pub const fn new(_decider: Decider<C>) -> Self {
+    pub const fn new(_decider: DeciderSpec<C>) -> Self {
         Self {
             marker: PhantomData,
             stage: Start,
@@ -200,9 +214,17 @@ impl<C> TestCase<C, Start> {
     }
 }
 
+impl<C, Stage> TestCase<C, Stage> {
+    fn complete_into_stage(mut self) -> Stage {
+        self.completed = true;
+        let this = ManuallyDrop::new(self);
+        unsafe { ptr::read(&this.stage) }
+    }
+}
+
 impl<C> TestCase<C, Start>
 where
-    C: Decide,
+    C: Decider,
 {
     pub fn given_no_history(mut self) -> TestCase<C, NoHistory> {
         self.completed = true;
@@ -231,7 +253,7 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: Decide,
+    C: Decider,
 {
     pub fn given<I, E>(mut self, events: I) -> Self
     where
@@ -245,7 +267,7 @@ where
 
 impl<C> TestCase<C, NoHistory>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + Debug,
     C::EvolveError: Debug,
 {
@@ -266,7 +288,7 @@ where
 
 impl<C> TestCase<C, Given<C::Event>>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + Debug,
     C::EvolveError: Debug,
 {
@@ -302,9 +324,10 @@ where
 
 impl<C> TestCase<C, When<C::Event, C::State, C>>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
+    C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
 {
     pub fn state(mut self, expected_state: C::State) -> Self
@@ -320,27 +343,41 @@ where
         self
     }
 
-    pub fn then<E>(mut self, expectation: E) -> E::Output
+    pub fn then<E>(self, expectation: E) -> E::Output
     where
         E: ThenExpectation<C>,
     {
-        self.completed = true;
-        assert_expected_state(self.stage.expected_state.take(), &self.stage.state);
-        let actual = C::decide(&self.stage.state, &self.stage.command);
-        expectation.assert_matches(std::mem::take(&mut self.stage.history), &self.stage.command, actual)
+        let When {
+            history,
+            state,
+            expected_state,
+            command,
+        } = self.complete_into_stage();
+        assert_expected_state(expected_state, &state);
+        let actual = decide_events::<C>(state, &command);
+        expectation.assert_matches(history, &command, actual)
     }
 
-    pub fn then_error(mut self, expected_error: C::DecideError) -> ThenError<C::Event, C::DecideError> {
-        self.completed = true;
-        assert_expected_state(self.stage.expected_state.take(), &self.stage.state);
-        let actual = C::decide(&self.stage.state, &self.stage.command);
+    pub fn then_error(self, expected_error: C::DecideError) -> ThenError<C::Event, C::DecideError> {
+        let When {
+            history,
+            state,
+            expected_state,
+            command,
+        } = self.complete_into_stage();
+        assert_expected_state(expected_state, &state);
+        let actual = decide_events::<C>(state, &command);
 
         match actual {
-            Err(error) => assert_eq!(
+            Err(DecisionEvaluationFailure::Decide(error)) => assert_eq!(
                 error, expected_error,
                 "then_error(...) expected an exact domain error, but the error did not match"
             ),
-            Ok(Decision::Event(events)) => panic!(
+            Err(DecisionEvaluationFailure::Evolve(error)) => panic!(
+                "then_error(...) expected a decide error, but emitted events could not be evolved:\nexpected error = {:?}\nactual evolve error = {:?}",
+                expected_error, error,
+            ),
+            Ok(events) => panic!(
                 "then_error(...) expected an error, but decide(...) emitted events:\nexpected error = {:?}\nactual events = {:?}",
                 expected_error,
                 events.as_slice(),
@@ -348,8 +385,8 @@ where
         }
 
         ThenError {
-            stream_id: self.stage.command.stream_id().to_string(),
-            given: std::mem::take(&mut self.stage.history),
+            stream_id: command.stream_id().to_string(),
+            given: history,
             error: expected_error,
         }
     }
@@ -366,35 +403,26 @@ impl<C, Stage> Drop for TestCase<C, Stage> {
 
 pub trait ThenExpectation<C>: private::Sealed<C>
 where
-    C: Decide,
+    C: Decider,
     C::StreamId: std::fmt::Display,
 {
     type Output;
 
-    fn assert_matches(
-        self,
-        given: Vec<C::Event>,
-        command: &C,
-        actual: Result<Decision<C::Event>, C::DecideError>,
-    ) -> Self::Output;
+    fn assert_matches(self, given: Vec<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output;
 }
 
-impl<C, E> ThenExpectation<C> for NonEmpty<E>
+impl<C, E> ThenExpectation<C> for Events<E>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
+    C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
     type Output = ThenEvents<C::Event>;
 
-    fn assert_matches(
-        self,
-        given: Vec<C::Event>,
-        command: &C,
-        actual: Result<Decision<C::Event>, C::DecideError>,
-    ) -> Self::Output {
+    fn assert_matches(self, given: Vec<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert_events_match::<C>(
             self.into_vec().into_iter().map(Into::into).collect(),
             given,
@@ -406,19 +434,15 @@ where
 
 impl<C> ThenExpectation<C> for Vec<C::Event>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
+    C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
 {
     type Output = ThenEvents<C::Event>;
 
-    fn assert_matches(
-        self,
-        given: Vec<C::Event>,
-        command: &C,
-        actual: Result<Decision<C::Event>, C::DecideError>,
-    ) -> Self::Output {
+    fn assert_matches(self, given: Vec<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert!(
             !self.is_empty(),
             "expected events in then(...), but event expectations must be non-empty"
@@ -429,20 +453,16 @@ where
 
 impl<C, E, const N: usize> ThenExpectation<C> for [E; N]
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
+    C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
     type Output = ThenEvents<C::Event>;
 
-    fn assert_matches(
-        self,
-        given: Vec<C::Event>,
-        command: &C,
-        actual: Result<Decision<C::Event>, C::DecideError>,
-    ) -> Self::Output {
+    fn assert_matches(self, given: Vec<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert!(
             N > 0,
             "expected events in then(...), but event expectations must be non-empty"
@@ -460,16 +480,17 @@ fn assert_events_match<C>(
     expected: Vec<C::Event>,
     given: Vec<C::Event>,
     command: &C,
-    actual: Result<Decision<C::Event>, C::DecideError>,
+    actual: DecisionEvaluation<C>,
 ) -> ThenEvents<C::Event>
 where
-    C: Decide,
+    C: Decider,
     C::Event: Clone + PartialEq + Debug,
     C::DecideError: PartialEq + Debug,
+    C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
 {
     match actual {
-        Ok(Decision::Event(events)) => {
+        Ok(events) => {
             assert_eq!(
                 events.as_slice(),
                 expected.as_slice(),
@@ -481,11 +502,27 @@ where
                 then: events,
             }
         }
-        Err(error) => panic!(
+        Err(DecisionEvaluationFailure::Decide(error)) => panic!(
             "then(...) expected events, but decide(...) returned an error:\nexpected events = {:?}\nactual error = {:?}",
             expected, error,
         ),
+        Err(DecisionEvaluationFailure::Evolve(error)) => panic!(
+            "then(...) expected events, but emitted events could not be evolved:\nexpected events = {:?}\nactual evolve error = {:?}",
+            expected, error,
+        ),
     }
+}
+
+fn decide_events<C>(state: C::State, command: &C) -> DecisionEvaluation<C>
+where
+    C: Decider,
+{
+    let decision = C::decide(&state, command).map_err(DecisionEvaluationFailure::Decide)?;
+    let (_, events) = decision.handle(state, command).map_err(|failure| match failure {
+        DecisionFailure::Decide(error) => DecisionEvaluationFailure::Decide(error),
+        DecisionFailure::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
+    })?;
+    Ok(events)
 }
 
 fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual: &State) {
@@ -495,26 +532,26 @@ fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual:
 }
 
 mod private {
-    use crate::{Decide, NonEmpty};
+    use crate::{Decider, Events};
 
     pub trait Sealed<C>
     where
-        C: Decide,
+        C: Decider,
     {
     }
 
-    impl<C, E> Sealed<C> for NonEmpty<E>
+    impl<C, E> Sealed<C> for Events<E>
     where
-        C: Decide,
+        C: Decider,
         E: Into<C::Event>,
     {
     }
 
-    impl<C> Sealed<C> for Vec<C::Event> where C: Decide {}
+    impl<C> Sealed<C> for Vec<C::Event> where C: Decider {}
 
     impl<C, E, const N: usize> Sealed<C> for [E; N]
     where
-        C: Decide,
+        C: Decider,
         E: Into<C::Event>,
     {
     }
@@ -589,7 +626,7 @@ mod tests {
         }
     }
 
-    impl Decide for TestCommand {
+    impl Decider for TestCommand {
         type StreamId = str;
         type State = TestState;
         type Event = TestEvent;
@@ -621,7 +658,7 @@ mod tests {
             }
         }
 
-        fn decide(state: &TestState, command: &Self) -> Result<Decision<TestEvent>, Self::DecideError> {
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
             match (&command.action, state) {
                 (TestAction::Register, TestState::Missing) => Ok(Decision::event(TestEvent::Registered {
                     id: command.id.to_string(),
@@ -745,11 +782,11 @@ mod tests {
     }
 
     #[test]
-    fn then_non_empty_events_works() {
+    fn then_events_works() {
         TestCase::new(decider::<TestCommand>())
             .given_no_history()
             .when(TestCommand::register("alpha"))
-            .then(NonEmpty::one(TestEvent::Registered {
+            .then(Events::one(TestEvent::Registered {
                 id: "alpha".to_string(),
             }));
     }

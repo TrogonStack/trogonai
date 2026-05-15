@@ -1,5 +1,5 @@
 use trogon_eventsourcing::{
-    Decide, Decision,
+    Decider, Decision,
     testing::{TestCase, decider},
 };
 
@@ -30,7 +30,7 @@ enum TestDecisionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TestCommand;
 
-impl Decide for TestCommand {
+impl Decider for TestCommand {
     type StreamId = str;
     type State = TestState;
     type Event = TestEvent;
@@ -54,7 +54,7 @@ impl Decide for TestCommand {
         }
     }
 
-    fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+    fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         match state {
             TestState::Disabled => Ok(Decision::event(TestEvent::Removed)),
             _ => Err(TestDecisionError::NotDisabled),

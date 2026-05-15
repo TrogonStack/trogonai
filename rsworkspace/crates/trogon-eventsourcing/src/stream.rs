@@ -3,14 +3,14 @@ mod append_stream_response;
 mod read_stream_request;
 mod read_stream_response;
 mod stream_position;
-mod stream_state;
+mod stream_write_precondition;
 
 pub use append_stream_request::AppendStreamRequest;
 pub use append_stream_response::AppendStreamResponse;
 pub use read_stream_request::ReadStreamRequest;
 pub use read_stream_response::ReadStreamResponse;
 pub use stream_position::{InvalidStreamPosition, StreamPosition};
-pub use stream_state::StreamState;
+pub use stream_write_precondition::StreamWritePrecondition;
 
 pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
     type Error;

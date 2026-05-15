@@ -1,7 +1,6 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod codec;
-mod decider;
 mod event;
 mod event_id;
 mod execution;
@@ -11,7 +10,6 @@ mod stream;
 pub mod testing;
 
 pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventEncodeError, EventIdentity, EventType};
-pub use decider::{Act, Decide, Decision, NonEmpty};
 pub use event::{Event, EventHeaders, EventHeadersError, HeaderKey, StreamEvent};
 pub use event_id::EventId;
 pub use execution::{
@@ -33,6 +31,7 @@ pub use snapshot::{
 };
 pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadStreamRequest, ReadStreamResponse,
-    StreamAppend, StreamPosition, StreamRead, StreamState,
+    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
-pub use testing::{Decider, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
+pub use testing::{DeciderSpec, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
+pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, IntoDecision, WritePrecondition};

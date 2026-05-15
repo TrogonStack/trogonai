@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// "has this stream advanced past the position I observed?".
 ///
 /// Valid use cases:
-/// - optimistic concurrency with `StreamState::At`
+/// - optimistic concurrency with `StreamWritePrecondition::At`
 /// - projection freshness checks
 /// - snapshot checkpoints
 /// - dropping stale realtime updates

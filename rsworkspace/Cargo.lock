@@ -3242,6 +3242,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "trogon-decider",
  "trogon-nats",
  "trogon-std",
  "trybuild",
