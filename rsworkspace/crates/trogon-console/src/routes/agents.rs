@@ -124,12 +124,69 @@ pub async fn list_agent_versions(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
+    state
+        .agents
+        .get(&id)
+        .await
+        .map_err(AppError::Store)?
+        .ok_or_else(|| AppError::NotFound(format!("agent {id} not found")))?;
+
     let versions = state
         .agents
         .list_versions(&id)
         .await
         .map_err(AppError::Store)?;
     Ok(Json(versions))
+}
+
+pub async fn get_agent_version(
+    State(state): State<Arc<AppState>>,
+    Path((id, version)): Path<(String, u32)>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .agents
+        .get(&id)
+        .await
+        .map_err(AppError::Store)?
+        .ok_or_else(|| AppError::NotFound(format!("agent {id} not found")))?;
+
+    state
+        .agents
+        .get_version(&id, version)
+        .await
+        .map_err(AppError::Store)?
+        .map(Json)
+        .ok_or_else(|| AppError::NotFound(format!("version {version} not found")))
+}
+
+pub async fn rollback_to_version(
+    State(state): State<Arc<AppState>>,
+    Path((id, version)): Path<(String, u32)>,
+) -> Result<impl IntoResponse, AppError> {
+    let snap = state
+        .agents
+        .get_version(&id, version)
+        .await
+        .map_err(AppError::Store)?
+        .ok_or_else(|| AppError::NotFound(format!("version {version} not found")))?;
+
+    let mut agent = state
+        .agents
+        .get(&id)
+        .await
+        .map_err(AppError::Store)?
+        .ok_or_else(|| AppError::NotFound(format!("agent {id} not found")))?;
+
+    agent.system_prompt = snap.system_prompt;
+    agent.skill_ids     = snap.skill_ids;
+    agent.tools         = snap.tools;
+    agent.mcp_servers   = snap.mcp_servers;
+    agent.model         = snap.model;
+    agent.version      += 1;
+    agent.updated_at    = now_iso();
+
+    state.agents.put(&agent).await.map_err(AppError::Store)?;
+    Ok(Json(agent))
 }
 
 pub async fn list_agent_sessions(

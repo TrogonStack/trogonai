@@ -37,6 +37,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(agents::delete_agent),
         )
         .route("/agents/{id}/versions", get(agents::list_agent_versions))
+        .route("/agents/{id}/versions/{version}", get(agents::get_agent_version))
+        .route("/agents/{id}/rollback/{version}", post(agents::rollback_to_version))
         .route("/agents/{id}/sessions", get(agents::list_agent_sessions))
         // Skills
         .route(

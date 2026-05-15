@@ -20,6 +20,11 @@ pub trait AgentRepository: Send + Sync + 'static {
     fn put<'a>(&'a self, agent: &'a AgentDefinition) -> BoxFuture<'a, Res<()>>;
     fn delete<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Res<()>>;
     fn list_versions<'a>(&'a self, agent_id: &'a str) -> BoxFuture<'a, Res<Vec<AgentVersion>>>;
+    fn get_version<'a>(
+        &'a self,
+        agent_id: &'a str,
+        version: u32,
+    ) -> BoxFuture<'a, Res<Option<AgentDefinition>>>;
 }
 
 // ── Skill ─────────────────────────────────────────────────────────────────────
