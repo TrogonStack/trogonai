@@ -125,9 +125,37 @@ async fn agent_store_list_versions_prefix_filter() {
     let versions_a = store.list_versions("agent_a").await.unwrap();
     assert_eq!(versions_a.len(), 2);
     assert!(versions_a.iter().all(|v| v.version <= 2));
+    // verify projection: model_id correctly carried from the full AgentDefinition snapshot
+    assert!(versions_a.iter().all(|v| v.model_id == "claude-3"));
 
     let versions_b = store.list_versions("agent_b").await.unwrap();
     assert_eq!(versions_b.len(), 1);
+}
+
+#[tokio::test]
+async fn agent_store_get_version_returns_full_definition() {
+    let (js, _c) = nats_js().await;
+    let store = AgentStore::open(&js).await.unwrap();
+
+    let mut agent = make_agent("ag_v", "2026-01-01");
+    agent.system_prompt = "original prompt".to_string();
+    agent.version = 1;
+    store.put(&agent).await.unwrap();
+
+    agent.system_prompt = "updated prompt".to_string();
+    agent.version = 2;
+    store.put(&agent).await.unwrap();
+
+    let v1 = store.get_version("ag_v", 1).await.unwrap().unwrap();
+    assert_eq!(v1.system_prompt, "original prompt");
+    assert_eq!(v1.version, 1);
+
+    let v2 = store.get_version("ag_v", 2).await.unwrap().unwrap();
+    assert_eq!(v2.system_prompt, "updated prompt");
+    assert_eq!(v2.version, 2);
+
+    let missing = store.get_version("ag_v", 99).await.unwrap();
+    assert!(missing.is_none());
 }
 
 #[tokio::test]
