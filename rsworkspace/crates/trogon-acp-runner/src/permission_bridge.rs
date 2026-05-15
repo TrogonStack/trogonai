@@ -18,7 +18,7 @@ use acp_nats::{acp_prefix::AcpPrefix, client_proxy::NatsClientProxy, session_id:
 use trogon_nats::{FlushClient, PublishClient, RequestClient};
 use tracing::warn;
 
-use crate::{PermissionReq, SessionStore};
+use trogon_runner_tools::{PermissionReq, SessionStore};
 
 /// Forward a single `PermissionReq` to the ACP client and send the allow/deny
 /// decision back on the embedded oneshot channel.
@@ -115,8 +115,8 @@ mod tests {
     use tokio::sync::oneshot;
     use trogon_nats::AdvancedMockNatsClient;
 
-    use crate::session_store::mock::MemorySessionStore;
-    use crate::SessionState;
+    use trogon_runner_tools::session_store::mock::MemorySessionStore;
+    use trogon_runner_tools::SessionState;
 
     const SESSION: &str = "sess-1";
     const SUBJECT: &str = "acp.session.sess-1.client.session.request_permission";

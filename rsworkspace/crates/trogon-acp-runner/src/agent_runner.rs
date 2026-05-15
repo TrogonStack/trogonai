@@ -152,6 +152,8 @@ pub mod mock {
         /// When `Some`, `run_chat_streaming` calls the captured permission checker
         /// with this (tool_name, tool_input) before returning, simulating a tool call.
         invoke_checker_for_tool: Arc<Mutex<Option<(String, serde_json::Value)>>>,
+        /// The last `system_prompt` argument passed to `run_chat_streaming`.
+        captured_system_prompt: Arc<Mutex<Option<String>>>,
     }
 
     impl MockAgentRunner {
@@ -169,6 +171,7 @@ pub mod mock {
                 permission_checker_set: Arc::new(Mutex::new(false)),
                 captured_permission_checker: Arc::new(Mutex::new(None)),
                 invoke_checker_for_tool: Arc::new(Mutex::new(None)),
+                captured_system_prompt: Arc::new(Mutex::new(None)),
             }
         }
 
@@ -229,6 +232,11 @@ pub mod mock {
         pub fn captured_steer(&self) -> Vec<String> {
             self.captured_steer.lock().unwrap().clone()
         }
+
+        /// Return the `system_prompt` argument from the last `run_chat_streaming` call.
+        pub fn captured_system_prompt(&self) -> Option<String> {
+            self.captured_system_prompt.lock().unwrap().clone()
+        }
     }
 
     #[async_trait::async_trait(?Send)]
@@ -267,7 +275,7 @@ pub mod mock {
             &self,
             messages: Vec<Message>,
             _tools: &[ToolDef],
-            _system_prompt: Option<&str>,
+            system_prompt: Option<&str>,
             event_tx: mpsc::Sender<AgentEvent>,
             mut steer_rx: Option<mpsc::Receiver<String>>,
         ) -> Result<Vec<Message>, AgentError> {
@@ -279,18 +287,18 @@ pub mod mock {
                 }
             }
 
+            *self.captured_system_prompt.lock().unwrap() = system_prompt.map(str::to_string);
             // Signal that the runner has started and the steer subscription is live.
             self.started_notify.notify_one();
 
             // If configured, wait for the first steer message asynchronously.
             // This is used by NATS integration tests where the message arrives
             // after the runner starts rather than being pre-injected.
-            if self.wait_for_steer {
-                if let Some(ref mut rx) = steer_rx {
-                    if let Some(msg) = rx.recv().await {
-                        self.captured_steer.lock().unwrap().push(msg);
-                    }
-                }
+            if self.wait_for_steer
+                && let Some(ref mut rx) = steer_rx
+                && let Some(msg) = rx.recv().await
+            {
+                self.captured_steer.lock().unwrap().push(msg);
             }
 
             // Drain any remaining buffered steer messages.

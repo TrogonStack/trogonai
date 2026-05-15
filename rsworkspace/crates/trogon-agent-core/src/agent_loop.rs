@@ -18,114 +18,9 @@ use tracing::{debug, info, warn};
 
 use crate::tools::{ToolContext, ToolDef, dispatch_tool};
 
-// ── PermissionChecker ─────────────────────────────────────────────────────────
-
-/// Called by the agent loop before each tool execution.
-/// Returns `true` to allow the tool to run, `false` to deny it.
-pub trait PermissionChecker: Send + Sync {
-    fn check<'a>(
-        &'a self,
-        tool_call_id: &'a str,
-        tool_name: &'a str,
-        tool_input: &'a serde_json::Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>>;
-}
-
-// ── ElicitationProvider ───────────────────────────────────────────────────────
-
-/// Called by the agent loop when the model uses the built-in `ask_user` tool.
-/// Returns the user's answer, or `None` if the user declined or cancelled.
-pub trait ElicitationProvider: Send + Sync {
-    fn elicit<'a>(
-        &'a self,
-        question: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + 'a>>;
-}
-
-// ── Wire types ────────────────────────────────────────────────────────────────
-
-/// A single message in the Anthropic conversation history.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: String,
-    pub content: Vec<ContentBlock>,
-}
-
-impl Message {
-    /// Simple user turn with plain text.
-    #[cfg_attr(coverage, coverage(off))]
-    pub fn user_text(text: impl Into<String>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: vec![ContentBlock::Text { text: text.into() }],
-        }
-    }
-
-    /// Assistant turn (used when appending a model response to history).
-    #[cfg_attr(coverage, coverage(off))]
-    pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content,
-        }
-    }
-
-    /// User turn carrying `tool_result` blocks.
-    pub fn tool_results(results: Vec<ToolResult>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: results
-                .into_iter()
-                .map(|r| ContentBlock::ToolResult {
-                    tool_use_id: r.tool_use_id,
-                    content: r.content,
-                })
-                .collect(),
-        }
-    }
-}
-
-/// Source for an image content block sent to the Anthropic API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ImageSource {
-    /// Base64-encoded image data.
-    Base64 { media_type: String, data: String },
-    /// Remote image URL.
-    Url { url: String },
-}
-
-/// A single block within a message's `content` array.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ContentBlock {
-    /// Plain text from the model or the user.
-    Text { text: String },
-    /// Image sent by the user (base64 or URL).
-    Image { source: ImageSource },
-    /// Extended thinking block produced by the model (requires thinking beta).
-    Thinking { thinking: String },
-    /// Tool invocation requested by the model.
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_tool_use_id: Option<String>,
-    },
-    /// Result returned to the model after executing a tool.
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-    },
-}
-
-/// Pair of tool-use ID and the string result to feed back to the model.
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    pub tool_use_id: String,
-    pub content: String,
-}
+pub use trogon_tools::{
+    ContentBlock, ElicitationProvider, ImageSource, Message, PermissionChecker, ToolResult,
+};
 
 /// A single block in the Anthropic `system` array.
 ///
@@ -169,6 +64,20 @@ struct AnthropicRequest<'a> {
 pub(crate) struct AnthropicResponse {
     pub(crate) stop_reason: String,
     pub(crate) content: Vec<ContentBlock>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub(crate) usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct AnthropicUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 // ── AnthropicHttpClient ───────────────────────────────────────────────────────
@@ -184,32 +93,30 @@ pub(crate) trait AnthropicHttpClient: Send + Sync + Clone + 'static {
 }
 
 impl AnthropicHttpClient for reqwest::Client {
-    fn call_anthropic<'a>(
+    async fn call_anthropic<'a>(
         &'a self,
         url: &'a str,
         token: &'a str,
         extra_headers: &'a [(String, String)],
         body: &'a Value,
-    ) -> impl std::future::Future<Output = Result<AnthropicResponse, AgentError>> + Send + 'a {
-        async move {
-            let mut req_builder = self
-                .post(url)
-                .header("Authorization", format!("Bearer {token}"))
-                .header("anthropic-version", "2023-06-01");
-            for (k, v) in extra_headers {
-                req_builder = req_builder.header(k.as_str(), v.as_str());
-            }
-            Ok(req_builder
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-                .error_for_status()
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-                .json::<AnthropicResponse>()
-                .await
-                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?)
+    ) -> Result<AnthropicResponse, AgentError> {
+        let mut req_builder = self
+            .post(url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("anthropic-version", "2023-06-01");
+        for (k, v) in extra_headers {
+            req_builder = req_builder.header(k.as_str(), v.as_str());
         }
+        req_builder
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+            .error_for_status()
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+            .json::<AnthropicResponse>()
+            .await
+            .map_err(|e| AgentError::Http(HttpError(e.to_string())))
     }
 }
 
@@ -358,6 +265,36 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
                 },
             ),
         )
+    }
+}
+
+/// [`AnthropicStreamingClient`] that returns a static `end_turn` SSE response
+/// without making any network calls. Use it to run the agent loop fully offline.
+#[derive(Clone)]
+pub struct NoopStreamingClient;
+
+impl AnthropicStreamingClient for NoopStreamingClient {
+    fn complete_streaming(
+        &self,
+        _body: serde_json::Value,
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Model not connected.\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        Box::pin(futures_util::stream::once(std::future::ready(Ok(
+            Bytes::from_static(sse.as_bytes()),
+        ))))
     }
 }
 
@@ -639,7 +576,8 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         system_prompt: Option<&str>,
         event_tx: tokio::sync::mpsc::Sender<AgentEvent>,
         mut steer_rx: Option<tokio::sync::mpsc::Receiver<String>>,
-    ) -> Result<Vec<Message>, AgentError> {
+    ) -> Result<Vec<Message>, AgentError>
+    {
         let mut messages = initial_messages;
 
         let mut all_tools: Vec<ToolDef> = tools.to_vec();
@@ -1006,10 +944,9 @@ impl SseParser {
                 }
             }
 
-            if !data.is_empty() {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
-                    events.push((event_type, v));
-                }
+            if !data.is_empty()
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                events.push((event_type, v));
             }
         }
         events
@@ -1098,10 +1035,12 @@ mod tests {
     // ── MockAnthropicClient ───────────────────────────────────────────────────
 
     #[derive(Clone)]
+    #[allow(dead_code)]
     struct MockAnthropicClient {
         response_json: String,
     }
 
+    #[allow(dead_code)]
     impl MockAnthropicClient {
         fn with_response(json: impl Into<String>) -> Self {
             Self { response_json: json.into() }
@@ -1119,34 +1058,6 @@ mod tests {
             let resp: AnthropicResponse = serde_json::from_str(&self.response_json)
                 .expect("test fixture must be valid JSON");
             async move { Ok(resp) }
-        }
-    }
-
-    fn make_test_agent() -> AgentLoop<MockAnthropicClient> {
-        use crate::tools::ToolContext;
-        let tool_context = Arc::new(ToolContext {
-            proxy_url: "http://unused:9999".to_string(),
-        });
-        AgentLoop {
-            http_client: MockAnthropicClient::with_response(
-                r#"{"stop_reason":"end_turn","content":[]}"#,
-            ),
-            proxy_url: "http://unused:9999".to_string(),
-            anthropic_token: "test".to_string(),
-            anthropic_base_url: None,
-            anthropic_extra_headers: vec![],
-            streaming_client: None,
-            model: "claude-opus-4-6".to_string(),
-            max_iterations: 1,
-            thinking_budget: None,
-            tool_context,
-            memory_owner: None,
-            memory_repo: None,
-            memory_path: None,
-            mcp_tool_defs: vec![],
-            mcp_dispatch: vec![],
-            permission_checker: None,
-            elicitation_provider: None,
         }
     }
 
@@ -1295,6 +1206,35 @@ mod tests {
         assert!(cached_tools.is_empty());
     }
 
+    fn make_test_agent() -> AgentLoop {
+        use crate::tools::ToolContext;
+        let http_client = reqwest::Client::new();
+        let tool_context = Arc::new(ToolContext {
+            http_client: http_client.clone(),
+            proxy_url: "http://unused:9999".to_string(),
+            cwd: ".".to_string(),
+        });
+        AgentLoop {
+            http_client,
+            proxy_url: "http://unused:9999".to_string(),
+            anthropic_token: "test".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            streaming_client: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 1,
+            thinking_budget: None,
+            tool_context,
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+            elicitation_provider: None,
+        }
+    }
+
 
     /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
     /// when content contains a ToolUse block with no matching MCP dispatch entry.
@@ -1418,37 +1358,32 @@ mod tests {
     /// Covers: TextDelta emitted in the max_tokens path when text is non-empty.
     #[tokio::test]
     async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
-        const SSE: &[u8] = b"\
-event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
-event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
-event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n\
-event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
-event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":5}}\n\n\
-event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
-
         struct MaxTokensMock;
         impl AnthropicStreamingClient for MaxTokensMock {
             fn complete_streaming(
                 &self,
                 _body: serde_json::Value,
             ) -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static>> {
-                Box::pin(futures_util::stream::once(std::future::ready(Ok(
-                    Bytes::from_static(SSE),
-                ))))
+                let sse: &'static [u8] = b"\
+event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n\
+event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+                Box::pin(futures_util::stream::once(std::future::ready(Ok(Bytes::from_static(sse)))))
             }
         }
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let mut agent = make_test_agent();
         agent.streaming_client = Some(Arc::new(MaxTokensMock));
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
         let result = agent
             .run_chat_streaming(vec![Message::user_text("hello")], &[], None, tx, None)
             .await;
         assert!(result.is_err());
-        let mut events = vec![];
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
         assert!(
             events
                 .iter()
@@ -1604,6 +1539,134 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         );
     }
 
+    // ── PermissionChecker deny ────────────────────────────────────────────────
+
+    struct DenyAllChecker;
+
+    impl PermissionChecker for DenyAllChecker {
+        fn check<'a>(
+            &'a self,
+            _id: &'a str,
+            _name: &'a str,
+            _input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(std::future::ready(false))
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tools_permission_denied_returns_denied_message() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker));
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({"path": "foo.txt"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_tools_streaming_permission_denied_returns_denied_message() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker));
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t2".to_string(),
+            name: "write_file".to_string(),
+            input: serde_json::json!({"path": "out.txt", "content": "x"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    // ── execute_tools (non-streaming) ask_user ────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_with_provider_returning_answer() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(Some("my answer".to_string()))) as Arc<dyn ElicitationProvider>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u1".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "What is X?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, "my answer");
+    }
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_with_provider_returning_none() {
+        let mut agent = make_test_agent();
+        agent.elicitation_provider =
+            Some(Arc::new(ConstElicitation(None)) as Arc<dyn ElicitationProvider>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "u2".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "Continue?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("declined") || results[0].content.contains("cancelled"),
+            "expected declined/cancelled, got: {}",
+            results[0].content
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_tools_ask_user_without_provider_returns_not_available() {
+        let agent = make_test_agent();
+        let content = vec![ContentBlock::ToolUse {
+            id: "u3".to_string(),
+            name: "ask_user".to_string(),
+            input: serde_json::json!({"question": "What now?"}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("not available"),
+            "expected 'not available', got: {}",
+            results[0].content
+        );
+    }
+
+    // ── messages_url ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn messages_url_uses_proxy_when_no_base_url() {
+        let agent = make_test_agent(); // anthropic_base_url: None
+        let url = agent.messages_url();
+        assert!(url.contains("http://unused:9999"), "got: {url}");
+        assert!(url.ends_with("/anthropic/v1/messages"), "got: {url}");
+    }
+
+    #[test]
+    fn messages_url_uses_base_url_when_set() {
+        let mut agent = make_test_agent();
+        agent.anthropic_base_url = Some("https://gateway.example.com/v1".to_string());
+        let url = agent.messages_url();
+        assert_eq!(url, "https://gateway.example.com/v1/messages");
+    }
+
     /// Proves TextDelta events are emitted as SSE bytes arrive, not buffered
     /// until the full stream closes. A DelayedStreamingClient delivers the
     /// text-delta chunk immediately and holds back the closing chunk for 100ms.
@@ -1666,5 +1729,153 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
         let result = handle.await.expect("task panicked");
         assert!(result.is_ok(), "run_chat_streaming failed: {result:?}");
+    }
+
+    // ── AgentEvent ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn agent_event_text_delta_is_constructible_and_cloneable() {
+        let ev = AgentEvent::TextDelta { text: "hello".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::TextDelta { text } if text == "hello"));
+    }
+
+    #[test]
+    fn agent_event_thinking_delta_is_constructible_and_cloneable() {
+        let ev = AgentEvent::ThinkingDelta { text: "reasoning...".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::ThinkingDelta { text } if text == "reasoning..."));
+    }
+
+    #[test]
+    fn agent_event_tool_call_started_fields_are_accessible() {
+        let input = serde_json::json!({"key": "val"});
+        let ev = AgentEvent::ToolCallStarted {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            input: input.clone(),
+            parent_tool_use_id: Some("parent-42".to_string()),
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::ToolCallStarted { id, name, input: inp, parent_tool_use_id } => {
+                assert_eq!(id, "call-1");
+                assert_eq!(name, "bash");
+                assert_eq!(inp, input);
+                assert_eq!(parent_tool_use_id.as_deref(), Some("parent-42"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_tool_call_started_without_parent() {
+        let ev = AgentEvent::ToolCallStarted {
+            id: "c".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        };
+        assert!(matches!(
+            ev,
+            AgentEvent::ToolCallStarted { parent_tool_use_id: None, .. }
+        ));
+    }
+
+    #[test]
+    fn agent_event_tool_call_finished_fields_are_accessible() {
+        let ev = AgentEvent::ToolCallFinished {
+            id: "call-2".to_string(),
+            output: "result text".to_string(),
+            exit_code: Some(0),
+            signal: None,
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                assert_eq!(id, "call-2");
+                assert_eq!(output, "result text");
+                assert_eq!(exit_code, Some(0));
+                assert!(signal.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_tool_call_finished_with_signal() {
+        let ev = AgentEvent::ToolCallFinished {
+            id: "c".to_string(),
+            output: String::new(),
+            exit_code: None,
+            signal: Some("SIGKILL".to_string()),
+        };
+        assert!(matches!(
+            ev,
+            AgentEvent::ToolCallFinished { signal: Some(s), .. } if s == "SIGKILL"
+        ));
+    }
+
+    #[test]
+    fn agent_event_system_status_is_constructible_and_cloneable() {
+        let ev = AgentEvent::SystemStatus { message: "overloaded".to_string() };
+        let cloned = ev.clone();
+        assert!(matches!(cloned, AgentEvent::SystemStatus { message } if message == "overloaded"));
+    }
+
+    #[test]
+    fn agent_event_usage_summary_fields_are_accessible() {
+        let ev = AgentEvent::UsageSummary {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 10,
+            cache_read_tokens: 5,
+        };
+        let cloned = ev.clone();
+        match cloned {
+            AgentEvent::UsageSummary {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            } => {
+                assert_eq!(input_tokens, 100);
+                assert_eq!(output_tokens, 50);
+                assert_eq!(cache_creation_tokens, 10);
+                assert_eq!(cache_read_tokens, 5);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn agent_event_debug_format_is_non_empty() {
+        let events = vec![
+            AgentEvent::TextDelta { text: "t".to_string() },
+            AgentEvent::ThinkingDelta { text: "th".to_string() },
+            AgentEvent::ToolCallStarted {
+                id: "i".to_string(),
+                name: "n".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            AgentEvent::ToolCallFinished {
+                id: "i".to_string(),
+                output: "o".to_string(),
+                exit_code: None,
+                signal: None,
+            },
+            AgentEvent::SystemStatus { message: "m".to_string() },
+            AgentEvent::UsageSummary {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 0,
+            },
+        ];
+        for ev in events {
+            let dbg = format!("{ev:?}");
+            assert!(!dbg.is_empty(), "Debug output must be non-empty");
+        }
     }
 }

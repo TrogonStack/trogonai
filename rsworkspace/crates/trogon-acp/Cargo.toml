@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-acp-runner = { path = "../trogon-acp-runner", features = [] }
+trogon-cli        = { path = "../trogon-cli" }
 trogon-nats       = { path = "../trogon-nats" }
 trogon-std        = { path = "../trogon-std" }
 uuid              = { version = "1", features = ["v4"] }

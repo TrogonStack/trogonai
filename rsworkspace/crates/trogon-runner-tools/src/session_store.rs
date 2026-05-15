@@ -1,7 +1,7 @@
 use async_nats::jetstream;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use trogon_agent_core::agent_loop::Message;
+use trogon_tools::Message;
 
 use crate::egress::EgressPolicy;
 
@@ -57,10 +57,20 @@ pub struct AuditEntry {
 
 const AUDIT_LOG_CAP: usize = 500;
 
+/// A single todo item stored in the session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoItem {
+    pub id: String,
+    pub content: String,
+    /// One of: `pending`, `in_progress`, `completed`.
+    pub status: String,
+}
+
+
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub messages: Vec<Message>,
     /// Per-session model override. `None` means use the agent's default model.
@@ -113,6 +123,21 @@ pub struct SessionState {
     /// Audit log of permission decisions for this session.
     #[serde(default)]
     pub audit_log: Vec<AuditEntry>,
+    /// ID of the persistent bash terminal created for this session.
+    /// Set on the first bash call; subsequent calls reuse the same terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
+    /// Todo list for this session, persisted in NATS KV.
+    #[serde(default)]
+    pub todos: Vec<TodoItem>,
+    /// Permission rules text set via `/config` (same format as TROGON.md `## Permissions` section).
+    /// Merged with rules loaded from TROGON.md — session rules take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_rules_text: Option<String>,
+    /// Token budget used to decide when to compact the message history.
+    /// Compaction triggers at 85 % of this value. Default: 200 000.
+    #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
+    pub token_budget: u64,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -124,6 +149,42 @@ pub fn append_audit_entries(audit_log: &mut Vec<AuditEntry>, mut new_entries: Ve
     }
 }
 
+fn default_token_budget() -> u64 {
+    200_000
+}
+
+fn is_default_token_budget(v: &u64) -> bool {
+    *v == 200_000
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            messages: Vec::new(),
+            model: None,
+            mode: String::new(),
+            cwd: String::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            title: String::new(),
+            mcp_servers: Vec::new(),
+            system_prompt: None,
+            additional_roots: Vec::new(),
+            disable_builtin_tools: false,
+            allowed_tools: Vec::new(),
+            parent_session_id: None,
+            branched_at_index: None,
+            tool_policies: Vec::new(),
+            egress_policy: None,
+            audit_log: Vec::new(),
+            terminal_id: None,
+            todos: Vec::new(),
+            permission_rules_text: None,
+            token_budget: default_token_budget(),
+        }
+    }
+}
+
 // ── SessionStore trait ────────────────────────────────────────────────────────
 
 /// Persistence interface for ACP session state.
@@ -131,8 +192,8 @@ pub fn append_audit_entries(audit_log: &mut Vec<AuditEntry>, mut new_entries: Ve
 /// The production implementation (`NatsSessionStore`) is backed by NATS KV.
 /// Tests can use `MemorySessionStore` (behind the `test-helpers` feature) to
 /// avoid any network dependencies.
-#[async_trait(?Send)]
-pub trait SessionStore: Clone {
+#[async_trait]
+pub trait SessionStore: Clone + Send + Sync + 'static {
     async fn load(&self, session_id: &str) -> anyhow::Result<SessionState>;
     async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()>;
     async fn delete(&self, session_id: &str) -> anyhow::Result<()>;
@@ -163,7 +224,7 @@ impl NatsSessionStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SessionStore for NatsSessionStore {
     /// Load session history, returning an empty state if the key does not exist.
     #[cfg_attr(coverage, coverage(off))]
@@ -209,10 +270,10 @@ impl SessionStore for NatsSessionStore {
         let ids = self.list_ids().await?;
         let mut children = Vec::new();
         for id in ids {
-            if let Ok(state) = self.load(&id).await {
-                if state.parent_session_id.as_deref() == Some(parent_id) {
-                    children.push(id);
-                }
+            if let Ok(state) = self.load(&id).await
+                && state.parent_session_id.as_deref() == Some(parent_id)
+            {
+                children.push(id);
             }
         }
         Ok(children)
@@ -239,7 +300,7 @@ pub mod mock {
         }
     }
 
-    #[async_trait::async_trait(?Send)]
+    #[async_trait::async_trait]
     impl SessionStore for MemorySessionStore {
         async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
             Ok(self
@@ -460,6 +521,97 @@ mod tests {
         assert_eq!(&ts[10..11], "T", "T separator: {ts}");
         assert_eq!(&ts[13..14], ":", "colon after hour: {ts}");
         assert_eq!(&ts[16..17], ":", "colon after minute: {ts}");
+    }
+
+    // ── StoredMcpServer serde ─────────────────────────────────────────────────
+
+    #[test]
+    fn stored_mcp_server_roundtrip_with_headers() {
+        let server = StoredMcpServer {
+            name: "my-server".to_string(),
+            url: "https://mcp.example.com/sse".to_string(),
+            headers: vec![
+                ("Authorization".to_string(), "Bearer tok".to_string()),
+                ("X-Tenant".to_string(), "acme".to_string()),
+            ],
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "my-server");
+        assert_eq!(back.url, "https://mcp.example.com/sse");
+        assert_eq!(back.headers.len(), 2);
+        assert_eq!(back.headers[0], ("Authorization".to_string(), "Bearer tok".to_string()));
+    }
+
+    #[test]
+    fn stored_mcp_server_empty_headers_roundtrip() {
+        let server = StoredMcpServer {
+            name: "bare".to_string(),
+            url: "http://localhost:8080".to_string(),
+            headers: vec![],
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
+        assert!(back.headers.is_empty());
+    }
+
+    #[test]
+    fn stored_mcp_server_missing_headers_field_defaults_to_empty() {
+        let json = r#"{"name":"s","url":"http://x"}"#;
+        let server: StoredMcpServer = serde_json::from_str(json).unwrap();
+        assert!(server.headers.is_empty(), "headers must default to empty vec");
+    }
+
+    // ── TodoItem serde ────────────────────────────────────────────────────────
+
+    #[test]
+    fn todo_item_roundtrip() {
+        let item = TodoItem {
+            id: "task-1".to_string(),
+            content: "Write tests".to_string(),
+            status: "in_progress".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, "task-1");
+        assert_eq!(back.content, "Write tests");
+        assert_eq!(back.status, "in_progress");
+    }
+
+    #[test]
+    fn todo_item_pending_status_roundtrip() {
+        let item = TodoItem {
+            id: "t".to_string(),
+            content: "c".to_string(),
+            status: "pending".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "pending");
+    }
+
+    #[test]
+    fn todo_item_completed_status_roundtrip() {
+        let item = TodoItem {
+            id: "t".to_string(),
+            content: "c".to_string(),
+            status: "completed".to_string(),
+        };
+        let json = serde_json::to_string(&item).unwrap();
+        let back: TodoItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, "completed");
+    }
+
+    #[test]
+    fn todo_item_clone_is_independent() {
+        let item = TodoItem {
+            id: "orig".to_string(),
+            content: "c".to_string(),
+            status: "pending".to_string(),
+        };
+        let mut cloned = item.clone();
+        cloned.id = "copy".to_string();
+        assert_eq!(item.id, "orig", "clone must not mutate original");
     }
 
     #[test]
@@ -683,6 +835,55 @@ mod tests {
         assert_eq!(back.audit_log.len(), 1);
         assert_eq!(back.audit_log[0].tool, "Read");
         assert_eq!(back.audit_log[0].outcome, AuditOutcome::Allowed);
+    }
+
+    // ── token_budget serde ────────────────────────────────────────────────────
+
+    #[test]
+    fn token_budget_default_is_200_000() {
+        let state = SessionState::default();
+        assert_eq!(state.token_budget, 200_000);
+    }
+
+    #[test]
+    fn token_budget_default_omitted_from_json() {
+        let state = SessionState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            !json.contains("token_budget"),
+            "default token_budget must be omitted from JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn token_budget_custom_value_serialized() {
+        let state = SessionState {
+            token_budget: 50_000,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(
+            json.contains("\"token_budget\":50000"),
+            "custom token_budget must appear in JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn token_budget_missing_from_json_deserializes_to_default() {
+        let json = r#"{"messages":[],"mode":""}"#;
+        let state: SessionState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.token_budget, 200_000);
+    }
+
+    #[test]
+    fn token_budget_custom_value_roundtrip() {
+        let state = SessionState {
+            token_budget: 100_000,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.token_budget, 100_000);
     }
 
     // ── MemorySessionStore::list_children ─────────────────────────────────────
