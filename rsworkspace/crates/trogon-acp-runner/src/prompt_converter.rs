@@ -446,6 +446,243 @@ fn tool_result_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::SessionConfigKind;
+
+    // ── system_status_to_text ─────────────────────────────────────────────────
+
+    #[test]
+    fn system_status_to_text_compact_complete_returns_completed() {
+        assert_eq!(
+            system_status_to_text("compact complete"),
+            Some("\n\nCompacting completed.".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_compacting_complete_uppercase_returns_completed() {
+        assert_eq!(
+            system_status_to_text("Compacting Complete"),
+            Some("\n\nCompacting completed.".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_compact_in_progress_returns_compacting() {
+        assert_eq!(
+            system_status_to_text("compact starting"),
+            Some("Compacting...".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_other_returns_none() {
+        assert_eq!(system_status_to_text("indexing files"), None);
+        assert_eq!(system_status_to_text(""), None);
+    }
+
+    // ── build_tool_call_meta ──────────────────────────────────────────────────
+
+    #[test]
+    fn build_tool_call_meta_without_parent() {
+        let meta = build_tool_call_meta("Edit", None).unwrap();
+        let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
+        assert_eq!(cc.get("toolName").and_then(|v| v.as_str()), Some("Edit"));
+        assert!(cc.get("parentToolUseId").is_none());
+    }
+
+    #[test]
+    fn build_tool_call_meta_with_parent() {
+        let meta = build_tool_call_meta("Read", Some("parent-id-42")).unwrap();
+        let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
+        assert_eq!(cc.get("toolName").and_then(|v| v.as_str()), Some("Read"));
+        assert_eq!(
+            cc.get("parentToolUseId").and_then(|v| v.as_str()),
+            Some("parent-id-42")
+        );
+    }
+
+    // ── todo_write_to_plan_entries ────────────────────────────────────────────
+
+    #[test]
+    fn todo_write_to_plan_entries_missing_todos_key_returns_none() {
+        assert!(todo_write_to_plan_entries(&serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_empty_array_returns_none() {
+        assert!(todo_write_to_plan_entries(&serde_json::json!({"todos": []})).is_none());
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_basic_entry() {
+        let input = serde_json::json!({"todos": [{"content": "do something", "status": "pending", "priority": "high"}]});
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "do something");
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_status_variants() {
+        let input = serde_json::json!({
+            "todos": [
+                {"content": "a", "status": "in_progress", "priority": "high"},
+                {"content": "b", "status": "completed", "priority": "high"},
+                {"content": "c", "status": "other", "priority": "high"},
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert!(matches!(entries[0].status, PlanEntryStatus::InProgress));
+        assert!(matches!(entries[1].status, PlanEntryStatus::Completed));
+        assert!(matches!(entries[2].status, PlanEntryStatus::Pending));
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_priority_variants() {
+        let input = serde_json::json!({
+            "todos": [
+                {"content": "a", "status": "pending", "priority": "medium"},
+                {"content": "b", "status": "pending", "priority": "low"},
+                {"content": "c", "status": "pending", "priority": "other"},
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert!(matches!(entries[0].priority, PlanEntryPriority::Medium));
+        assert!(matches!(entries[1].priority, PlanEntryPriority::Low));
+        assert!(matches!(entries[2].priority, PlanEntryPriority::High));
+    }
+
+    // ── build_plan_mode_config_options ────────────────────────────────────────
+
+    #[test]
+    fn build_plan_mode_config_options_returns_two_options() {
+        let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
+        assert_eq!(opts.len(), 2);
+    }
+
+    #[test]
+    fn build_plan_mode_config_options_mode_has_correct_current_value() {
+        let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
+        assert_eq!(opts[0].id.0.as_ref(), "mode");
+        if let SessionConfigKind::Select(s) = &opts[0].kind {
+            assert_eq!(s.current_value.0.as_ref(), "plan");
+        } else {
+            panic!("expected Select kind for mode option");
+        }
+    }
+
+    #[test]
+    fn build_plan_mode_config_options_model_has_correct_current_value() {
+        let opts = build_plan_mode_config_options("default", "claude-opus-4-6");
+        assert_eq!(opts[1].id.0.as_ref(), "model");
+        if let SessionConfigKind::Select(s) = &opts[1].kind {
+            assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
+        } else {
+            panic!("expected Select kind for model option");
+        }
+    }
+
+    // ── tool_result_content ───────────────────────────────────────────────────
+
+    #[test]
+    fn tool_result_content_edit_completed_returns_diff_and_location() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old", "new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/foo.rs");
+    }
+
+    #[test]
+    fn tool_result_content_edit_pending_returns_empty_content_but_location() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old", "new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_edit_missing_file_path_returns_empty() {
+        let input = serde_json::json!({"new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_edit_missing_new_string_returns_empty() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_multiedit_completed_returns_one_diff_per_edit() {
+        let input = serde_json::json!({
+            "file_path": "/src/bar.rs",
+            "edits": [
+                {"old_string": "a", "new_string": "x"},
+                {"old_string": "b", "new_string": "y"},
+            ]
+        });
+        let (content, locs) = tool_result_content("MultiEdit", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 2);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/bar.rs");
+    }
+
+    #[test]
+    fn tool_result_content_write_completed_returns_diff_and_location() {
+        let input = serde_json::json!({"file_path": "/out/file.txt", "content": "hello"});
+        let (content, locs) = tool_result_content("Write", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/out/file.txt");
+    }
+
+    #[test]
+    fn tool_result_content_write_pending_returns_location_only() {
+        let input = serde_json::json!({"file_path": "/out/file.txt"});
+        let (content, locs) = tool_result_content("Write", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_write_uses_output_when_no_content_field() {
+        let input = serde_json::json!({"file_path": "/out/file.txt"});
+        let (content, locs) =
+            tool_result_content("Write", &input, "fallback output", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_read_completed_returns_fenced_content_and_location() {
+        let input = serde_json::json!({"file_path": "/src/lib.rs"});
+        let (content, locs) =
+            tool_result_content("Read", &input, "fn main() {}", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/lib.rs");
+    }
+
+    #[test]
+    fn tool_result_content_read_pending_returns_empty_content_with_location() {
+        let input = serde_json::json!({"file_path": "/src/lib.rs"});
+        let (content, locs) = tool_result_content("Read", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_default_tool_returns_empty() {
+        let input = serde_json::json!({});
+        let (content, locs) =
+            tool_result_content("Bash", &input, "output", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
 
     // ── tool_kind_for ─────────────────────────────────────────────────────────
 

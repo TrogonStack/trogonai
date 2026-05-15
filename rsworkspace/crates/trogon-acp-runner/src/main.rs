@@ -45,7 +45,7 @@ use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::{ElicitationReq, PermissionReq};
 
-use trogon_agent_core::agent_loop::AgentLoop;
+use trogon_agent_core::agent_loop::{AgentLoop, NoopStreamingClient};
 use trogon_agent_core::tools::ToolContext;
 
 #[cfg_attr(coverage, coverage(off))]
@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok());
+    let anthropic_base_url: Option<String> = std::env::var("ANTHROPIC_BASE_URL").ok();
 
     // ── NATS connection ───────────────────────────────────────────────────────
 
@@ -122,17 +123,22 @@ async fn main() -> anyhow::Result<()> {
     // ── AgentLoop ─────────────────────────────────────────────────────────────
 
     let http_client = reqwest::Client::new();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
+        cwd,
+        http_client: http_client.clone(),
     });
 
     let mut agent_loop = AgentLoop {
         http_client,
         proxy_url,
         anthropic_token,
-        anthropic_base_url: None,
+        anthropic_base_url,
         anthropic_extra_headers: vec![],
-        streaming_client: None,
+        streaming_client: Some(std::sync::Arc::new(NoopStreamingClient)),
         model: model.clone(),
         max_iterations,
         tool_context,

@@ -1,0 +1,43 @@
+[package]
+name = "trogon-runner-tools"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+agent-client-protocol = { version = "0.10.2", features = [
+    "unstable_auth_methods",
+    "unstable_boolean_config",
+    "unstable_cancel_request",
+    "unstable_elicitation",
+    "unstable_message_id",
+    "unstable_session_close",
+    "unstable_session_fork",
+    "unstable_session_model",
+    "unstable_session_resume",
+    "unstable_session_usage",
+] }
+anyhow      = "1"
+async-nats  = { workspace = true, features = ["jetstream", "kv"] }
+async-trait = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+globset     = "0.4"
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+tokio       = { version = "1", features = ["full"] }
+tracing     = "0.1"
+
+trogon-mcp   = { path = "../trogon-mcp" }
+trogon-tools = { path = "../trogon-tools" }
+
+[dev-dependencies]
+async-nats             = { workspace = true }
+futures-util           = { version = "0.3", default-features = false, features = ["std"] }
+serde_json             = "1.0"
+testcontainers-modules = { workspace = true }
+tokio                  = { version = "1", features = ["full"] }
+
+[features]
+test-helpers = []

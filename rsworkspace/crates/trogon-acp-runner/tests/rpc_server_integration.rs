@@ -59,6 +59,8 @@ fn make_agent_loop() -> AgentLoop {
         thinking_budget: None,
         tool_context: Arc::new(ToolContext {
             proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
         }),
         memory_owner: None,
         memory_repo: None,
