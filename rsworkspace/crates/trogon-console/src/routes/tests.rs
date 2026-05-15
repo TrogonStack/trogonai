@@ -1222,6 +1222,282 @@ async fn get_credential_store_error_returns_500() {
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
+// ── agent version rollback ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn rollback_restores_system_prompt_and_increments_version() {
+    let state = mock_state();
+
+    // Create agent with v1 system_prompt
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({
+                "name": "Rollbackable",
+                "description": "",
+                "model": { "id": "claude-opus-4-7" },
+                "system_prompt": "original prompt"
+            }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    // Update to v2 with different system_prompt
+    build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/agents/{id}"),
+            json!({ "system_prompt": "bad prompt" }),
+        ))
+        .await
+        .unwrap();
+
+    // Rollback to v1
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/agents/{id}/rollback/1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rolled_back: Value = body_json(resp.into_body()).await;
+    assert_eq!(rolled_back["system_prompt"], "original prompt");
+    assert_eq!(rolled_back["version"], 3);
+}
+
+#[tokio::test]
+async fn rollback_unknown_version_returns_404() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "A", "description": "", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/agents/{id}/rollback/99"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn rollback_unknown_agent_returns_404() {
+    let state = mock_state();
+
+    // Create agent (writes v1 to versions map)
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "A", "description": "", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    // Delete agent — version snapshot still exists, agent record does not
+    build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/agents/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Rollback should return 404 because the agent no longer exists
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/agents/{id}/rollback/1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn rollback_store_error_returns_500() {
+    let app = build_router(fail_agents_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/agents/any_id/rollback/1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn get_agent_version_returns_full_definition() {
+    let state = mock_state();
+
+    // Create agent with v1 system_prompt
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({
+                "name": "Versioned",
+                "description": "",
+                "model": { "id": "m" },
+                "system_prompt": "v1 prompt"
+            }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    // Update to v2
+    build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "PUT",
+            &format!("/agents/{id}"),
+            json!({ "system_prompt": "v2 prompt" }),
+        ))
+        .await
+        .unwrap();
+
+    // Fetch version 1 — should return the original system_prompt
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/agents/{id}/versions/1")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v1: Value = body_json(resp.into_body()).await;
+    assert_eq!(v1["system_prompt"], "v1 prompt");
+    assert_eq!(v1["version"], 1);
+}
+
+#[tokio::test]
+async fn get_agent_version_unknown_returns_404() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "A", "description": "", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/agents/{id}/versions/99")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_agent_version_store_error_returns_500() {
+    let app = build_router(fail_agents_state());
+    let resp = app
+        .oneshot(get_request("/agents/any_id/versions/1"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn list_versions_for_deleted_agent_returns_404() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "A", "description": "", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/agents/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/agents/{id}/versions")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_version_for_deleted_agent_returns_404() {
+    let state = mock_state();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(json_request(
+            "POST",
+            "/agents",
+            json!({ "name": "A", "description": "", "model": { "id": "m" }, "system_prompt": "s" }),
+        ))
+        .await
+        .unwrap();
+    let created: Value = body_json(resp.into_body()).await;
+    let id = created["id"].as_str().unwrap();
+
+    build_router(Arc::clone(&state))
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/agents/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let resp = build_router(Arc::clone(&state))
+        .oneshot(get_request(&format!("/agents/{id}/versions/1")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
 // ── partial field updates ─────────────────────────────────────────────────────
 
 #[tokio::test]
