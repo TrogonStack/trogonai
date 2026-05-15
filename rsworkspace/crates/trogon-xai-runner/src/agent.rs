@@ -5305,4 +5305,162 @@ mod tests {
         assert_eq!(removes.len(), 1);
         assert_eq!(removes[0], ("tenant1".to_string(), "sess-abc".to_string()));
     }
+
+    // ── custom tool dispatch ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn custom_tool_call_dispatched() {
+        // When the model returns a FunctionCall for a non-bash tool followed by
+        // Finished { reason: ToolCalls }, the agent must send a second request
+        // whose input contains a FunctionCallOutput item.
+        let agent = make_agent();
+        agent.test_insert_session("ct1", "/tmp", None).await;
+
+        // Round 1: model requests git_status.
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-gs".to_string(),
+                name: "git_status".to_string(),
+                arguments: r#"{"path":"."}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        // Round 2: model replies after receiving tool output.
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "done".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("ct1", vec![ContentBlock::from("git status please")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "agent must make a follow-up call after tool execution");
+        let follow_up = &calls[1].input;
+        assert!(
+            follow_up.iter().any(|item| matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-gs")),
+            "follow-up must contain FunctionCallOutput for cid-gs"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_tool_notifier_kind() {
+        // ToolCall(InProgress) for a non-bash tool must carry ToolKind::Other.
+        let agent = make_agent();
+        agent.test_insert_session("ct2", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r2".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-rf".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"/tmp/nonexistent.txt"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("ct2", vec![ContentBlock::from("read file")]))
+            .await
+            .unwrap();
+
+        let notifs = agent.notifier.notifications.lock().unwrap();
+        let in_progress = notifs.iter().find(|n| {
+            matches!(&n.update, SessionUpdate::ToolCall(tc)
+                if tc.status == ToolCallStatus::InProgress
+                    && tc.tool_call_id.0.as_ref() == "cid-rf")
+        });
+        let tc = match &in_progress
+            .expect("ToolCall(InProgress) must be emitted for read_file")
+            .update
+        {
+            SessionUpdate::ToolCall(tc) => tc,
+            _ => unreachable!(),
+        };
+        assert_eq!(tc.kind, ToolKind::Other, "non-bash tools must use ToolKind::Other");
+    }
+
+    #[tokio::test]
+    async fn mixed_tool_calls() {
+        // A response with both bash and read_file calls must execute both and
+        // send two FunctionCallOutput items in a single follow-up request.
+        let agent = make_agent();
+        agent.test_insert_session("ct3", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r3".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-bash".to_string(),
+                name: "bash".to_string(),
+                arguments: r#"{"command":"echo hi"}"#.to_string(),
+            },
+            XaiEvent::FunctionCall {
+                call_id: "cid-read".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"/tmp/nonexistent.txt"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("ct3", vec![ContentBlock::from("do both")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "must make exactly one follow-up call");
+        let outputs: Vec<_> = calls[1]
+            .input
+            .iter()
+            .filter(|item| matches!(item, InputItem::FunctionCallOutput { .. }))
+            .collect();
+        assert_eq!(outputs.len(), 2, "follow-up must contain two FunctionCallOutput items");
+        assert!(
+            outputs.iter().any(|item| matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-bash")),
+            "bash output must be present"
+        );
+        assert!(
+            outputs.iter().any(|item| matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-read")),
+            "read_file output must be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_tool_no_response_id() {
+        // When current_response_id is None (no ResponseId event emitted) and
+        // tool calls are pending, the agent must clear them and break without
+        // panicking — no follow-up call is made.
+        let agent = make_agent();
+        agent.test_insert_session("ct4", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::FunctionCall {
+                call_id: "cid-orphan".to_string(),
+                name: "git_status".to_string(),
+                arguments: "{}".to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("ct4", vec![ContentBlock::from("status")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(
+            calls.len(),
+            1,
+            "no follow-up call must be made when response_id is missing"
+        );
+    }
 }
