@@ -49,21 +49,6 @@ pub async fn get_pr_diff(
     Ok(resp.body)
 }
 
-/// Prefix each line of a unified diff patch with its 1-based position number.
-///
-/// GitHub's pull-review API requires `position` — a 1-based index into the
-/// raw diff hunk — not a source-file line number. By annotating the patch
-/// before handing it to the model the LLM can reference position numbers
-/// directly without arithmetic.
-pub fn annotate_diff(patch: &str) -> String {
-    patch
-        .lines()
-        .enumerate()
-        .map(|(i, line)| format!("{} {line}", i + 1))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// List the files changed in a pull request.
 ///
 /// Returns a JSON array of file objects including `filename`, `status`, and
@@ -456,58 +441,6 @@ pub fn annotate_diff(patch: &str) -> String {
         .map(|(i, line)| format!("{:3}  {line}", i + 1))
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Submit a pull-request review with optional inline diff comments.
-///
-/// `commit_sha` must be the PR's head SHA (`pull_request.head.sha`).
-/// `event` must be `"COMMENT"`, `"APPROVE"`, or `"REQUEST_CHANGES"`.
-/// Each `comments` element must contain `"path"`, `"position"` (1-based line
-/// index into the file's unified diff hunk), and `"body"` fields.
-pub async fn post_pr_review(
-    ctx: &ToolContext<impl HttpClient>,
-    input: &Value,
-) -> Result<String, String> {
-    let owner = input["owner"].as_str().ok_or("missing owner")?;
-    let repo = input["repo"].as_str().ok_or("missing repo")?;
-    let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
-    let commit_sha = input["commit_sha"].as_str().ok_or("missing commit_sha")?;
-    let body = input["body"].as_str().unwrap_or("");
-    let event = input["event"].as_str().unwrap_or("COMMENT");
-    let comments = input["comments"].clone();
-
-    let url = format!(
-        "{}/github/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-        ctx.proxy_url,
-    );
-
-    let resp = ctx
-        .http_client
-        .post(
-            &url,
-            vec![
-                (
-                    "Authorization".to_string(),
-                    format!("Bearer {}", ctx.github_token),
-                ),
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github.v3+json".to_string(),
-                ),
-            ],
-            serde_json::json!({
-                "commit_id": commit_sha,
-                "body": body,
-                "event": event,
-                "comments": comments,
-            }),
-        )
-        .await?;
-    let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
-
-    let id = response["id"].as_u64().unwrap_or(0);
-    let state = response["state"].as_str().unwrap_or("PENDING");
-    Ok(format!("Review {id} submitted: {state}"))
 }
 
 /// Post a comment on a pull request (uses the Issues comments endpoint).
