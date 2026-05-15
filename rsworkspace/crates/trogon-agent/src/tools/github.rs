@@ -49,10 +49,27 @@ pub async fn get_pr_diff(
     Ok(resp.body)
 }
 
+/// Prefix each line of a unified diff patch with its 1-based position number.
+///
+/// GitHub's pull-review API requires `position` — a 1-based index into the
+/// raw diff hunk — not a source-file line number. By annotating the patch
+/// before handing it to the model the LLM can reference position numbers
+/// directly without arithmetic.
+pub fn annotate_diff(patch: &str) -> String {
+    patch
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{} {line}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// List the files changed in a pull request.
 ///
 /// Returns a JSON array of file objects including `filename`, `status`, and
-/// `patch` fields.
+/// `patch` fields. Each `patch` has its lines prefixed with a 1-based position
+/// number so the model can reference them directly when calling `post_pr_review`.
+/// Files without a `patch` field (binary or too large) are left as-is.
 pub async fn list_pr_files(
     ctx: &ToolContext<impl HttpClient>,
     input: &Value,
@@ -82,7 +99,19 @@ pub async fn list_pr_files(
             ],
         )
         .await?;
-    let files: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
+    let mut files: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
+
+    let arr = files
+        .as_array_mut()
+        .ok_or_else(|| format!("unexpected response from GitHub: {}", resp.body))?;
+
+    for file in arr.iter_mut() {
+        if let Some(patch) = file["patch"].as_str() {
+            let annotated = annotate_diff(patch);
+            file["patch"] = serde_json::json!(annotated);
+        }
+    }
+
     serde_json::to_string_pretty(&files).map_err(|e| e.to_string())
 }
 
@@ -525,6 +554,75 @@ pub async fn post_pr_comment(
     Ok(format!("Comment posted: {url_str}"))
 }
 
+/// Post a pull request review with optional inline diff comments.
+///
+/// `comments` is a JSON array of `{"path", "position", "body"}` objects where
+/// `position` is the 1-based line index in the file's annotated diff patch
+/// (as returned by `list_pr_files`).  GitHub requires `commit_id` when
+/// `comments` is non-empty; pass the PR head SHA as `commit_sha`.
+pub async fn post_pr_review(
+    ctx: &ToolContext<impl HttpClient>,
+    input: &Value,
+) -> Result<String, String> {
+    let owner = input["owner"].as_str().ok_or("missing owner")?;
+    let repo = input["repo"].as_str().ok_or("missing repo")?;
+    let pr_number = input["pr_number"].as_u64().ok_or("missing pr_number")?;
+    let body = input["body"].as_str().unwrap_or("");
+    let event = input["event"].as_str().unwrap_or("COMMENT");
+    let commit_sha = input["commit_sha"].as_str().unwrap_or("");
+
+    let url = format!(
+        "{}/github/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+        ctx.proxy_url,
+    );
+
+    let mut payload = serde_json::json!({
+        "body": body,
+        "event": event,
+    });
+
+    if !commit_sha.is_empty() {
+        payload["commit_id"] = serde_json::json!(commit_sha);
+    }
+
+    if let Some(comments) = input["comments"].as_array() {
+        if !comments.is_empty() {
+            payload["comments"] = serde_json::json!(comments);
+        }
+    }
+
+    let resp = ctx
+        .http_client
+        .post(
+            &url,
+            vec![
+                (
+                    "Authorization".to_string(),
+                    format!("Bearer {}", ctx.github_token),
+                ),
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github.v3+json".to_string(),
+                ),
+            ],
+            payload,
+        )
+        .await?;
+
+    if resp.status >= 400 {
+        return Err(format!(
+            "GitHub API error {}: {}",
+            resp.status,
+            resp.body.chars().take(500).collect::<String>()
+        ));
+    }
+
+    let response: Value = serde_json::from_str(&resp.body).map_err(|e| e.to_string())?;
+    let review_id = response["id"].as_u64().unwrap_or(0);
+    let html_url = response["html_url"].as_str().unwrap_or("(no url)");
+    Ok(format!("Review posted: #{review_id} — {html_url}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,6 +684,17 @@ mod tests {
         ctx.http_client.enqueue_ok(200, "not-valid-json{{");
         let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
         assert!(result.is_err(), "invalid JSON must propagate as Err");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_non_array_json_returns_err() {
+        // GitHub error responses are JSON objects, not arrays.
+        // The function must return Err rather than forwarding the object to the LLM.
+        let ctx = make_ctx();
+        ctx.http_client
+            .enqueue_ok(200, json!({"message": "Not Found"}).to_string());
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 9})).await;
+        assert!(result.is_err(), "non-array JSON must return Err: {result:?}");
     }
 
     // ── get_file_contents ─────────────────────────────────────────────────────
@@ -1199,5 +1308,839 @@ mod tests {
             ctx.http_client.is_empty(),
             "no POST should have been made when all reviewers are already assigned"
         );
+    }
+
+    // ── annotate_diff ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn annotate_diff_numbers_lines_from_one() {
+        let patch = "@@ -1,3 +1,4 @@\n fn foo() {}\n+fn bar() {}\n fn baz() {}";
+        let annotated = annotate_diff(patch);
+        let lines: Vec<&str> = annotated.lines().collect();
+        assert_eq!(lines[0], "1 @@ -1,3 +1,4 @@");
+        assert_eq!(lines[1], "2  fn foo() {}");
+        assert_eq!(lines[2], "3 +fn bar() {}");
+        assert_eq!(lines[3], "4  fn baz() {}");
+    }
+
+    #[test]
+    fn annotate_diff_empty_patch_returns_empty() {
+        assert_eq!(annotate_diff(""), "");
+    }
+
+    // ── list_pr_files annotates patches ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_pr_files_annotates_patch_lines() {
+        let ctx = make_ctx();
+        let patch = "@@ -1,2 +1,3 @@\n line1\n+line2";
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": patch
+            }])
+            .to_string(),
+        );
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 1})).await;
+        assert!(result.is_ok(), "list_pr_files must succeed: {result:?}");
+        let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
+        let annotated_patch = parsed[0]["patch"].as_str().unwrap();
+        assert!(
+            annotated_patch.starts_with("1 "),
+            "patch must start with position 1: {annotated_patch}"
+        );
+        assert!(
+            annotated_patch.contains("2  line1"),
+            "second line must be prefixed with 2: {annotated_patch}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_leaves_files_without_patch_unchanged() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{
+                "filename": "image.png",
+                "status": "added"
+                // no "patch" field — binary file
+            }])
+            .to_string(),
+        );
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 2})).await;
+        assert!(result.is_ok(), "must succeed for binary file: {result:?}");
+        let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert!(
+            parsed[0]["patch"].is_null(),
+            "binary file must have no patch field"
+        );
+    }
+
+    // ── post_pr_review ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn post_pr_review_returns_review_id_and_url() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({
+                "id": 42,
+                "html_url": "https://github.com/o/r/pull/1#pullrequestreview-42"
+            })
+            .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "commit_sha": "abc123",
+                "body": "Looks good overall.",
+                "event": "COMMENT",
+                "comments": [{"path": "src/lib.rs", "position": 3, "body": "Risky call"}]
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "post_pr_review must succeed: {result:?}");
+        let msg = result.unwrap();
+        assert!(msg.contains("#42"), "must include review id: {msg}");
+        assert!(
+            msg.contains("pullrequestreview-42"),
+            "must include html_url: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_without_comments_omits_comments_field() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 7, "html_url": "https://github.com/o/r/pull/2#pullrequestreview-7"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 2,
+                "body": "No issues found.",
+                "event": "APPROVE"
+            }),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "post_pr_review without comments must succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_http_error_propagates() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_err("connection refused");
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "HTTP error must propagate: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_owner_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing owner must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("missing owner"),
+            "error must name the missing field"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_non_json_response_returns_err() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(200, "this is not json {{");
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "non-JSON response must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_response_missing_id_and_url_uses_fallback() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(200, json!({}).to_string());
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_ok(), "empty-body response must succeed: {result:?}");
+        let msg = result.unwrap();
+        assert!(msg.contains("#0"), "fallback id must be 0: {msg}");
+        assert!(msg.contains("(no url)"), "fallback url must appear: {msg}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_empty_comments_array_succeeds() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 5, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-5"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "LGTM", "event": "APPROVE",
+                "comments": []
+            }),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "empty comments array must succeed: {result:?}"
+        );
+    }
+
+    // ── annotate_diff edge cases ──────────────────────────────────────────────
+
+    #[test]
+    fn annotate_diff_multi_hunk_positions_are_continuous() {
+        // Positions must count continuously across hunk boundaries —
+        // the first line of the second hunk is NOT reset to 1.
+        let patch = "@@ -1,2 +1,2 @@\n context\n-old\n+new\n@@ -10,2 +10,2 @@\n other\n-foo\n+bar";
+        let annotated = annotate_diff(patch);
+        let lines: Vec<&str> = annotated.lines().collect();
+        assert_eq!(lines[0], "1 @@ -1,2 +1,2 @@");
+        assert_eq!(lines[3], "4 +new");
+        // Second hunk header continues from position 5, not 1.
+        assert_eq!(lines[4], "5 @@ -10,2 +10,2 @@");
+        assert_eq!(lines[7], "8 +bar");
+    }
+
+    #[test]
+    fn annotate_diff_trailing_newline_does_not_produce_extra_line() {
+        let patch = "@@ -1 +1 @@\n+line\n";
+        let annotated = annotate_diff(patch);
+        // `str::lines()` strips the trailing newline — result must have 2 lines.
+        assert_eq!(annotated.lines().count(), 2);
+        assert_eq!(annotated.lines().last().unwrap(), "2 +line");
+    }
+
+    // ── list_pr_files edge cases ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_pr_files_multiple_files_annotates_each_patch_independently() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([
+                {"filename": "a.rs", "status": "modified", "patch": "@@ -1 +1 @@\n+added"},
+                {"filename": "b.png", "status": "added"},
+                {"filename": "c.rs", "status": "modified", "patch": "@@ -2 +2 @@\n-old\n+new"}
+            ])
+            .to_string(),
+        );
+        let result =
+            list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 5})).await;
+        assert!(result.is_ok(), "must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+
+        // a.rs — annotated from position 1
+        let patch_a = parsed[0]["patch"].as_str().unwrap();
+        assert!(patch_a.starts_with("1 "), "a.rs patch must start at position 1: {patch_a}");
+
+        // b.png — no patch (binary), field absent
+        assert!(parsed[1]["patch"].is_null(), "binary file must have no patch");
+
+        // c.rs — annotated independently from position 1 (not continuing from a.rs)
+        let patch_c = parsed[2]["patch"].as_str().unwrap();
+        assert!(patch_c.starts_with("1 "), "c.rs patch must start at position 1: {patch_c}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_pr_number_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r"})).await;
+        assert!(result.is_err(), "missing pr_number must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_owner_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err(), "missing owner must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_missing_repo_returns_err() {
+        let ctx = make_ctx();
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "pr_number": 1})).await;
+        assert!(result.is_err(), "missing repo must return Err: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_http_error_propagates() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_err("connection refused");
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err(), "HTTP error must propagate: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_empty_string_patch_annotated_as_empty() {
+        // A file with patch: "" (present but empty) must not crash.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{"filename": "f.rs", "status": "modified", "patch": ""}]).to_string(),
+        );
+        let result = list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 3})).await;
+        assert!(result.is_ok(), "empty patch must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert_eq!(parsed[0]["patch"].as_str().unwrap(), "");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_repo_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "pr_number": 1, "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing repo must return Err: {result:?}");
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_missing_pr_number_returns_err() {
+        let ctx = make_ctx();
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "body": "x", "event": "COMMENT"}),
+        )
+        .await;
+        assert!(result.is_err(), "missing pr_number must return Err: {result:?}");
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_absent_event_defaults_to_comment() {
+        // When `event` is absent the implementation defaults to "COMMENT".
+        // The GitHub API accepts this, so the call must succeed.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 1, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-1"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "looks good"}),
+        )
+        .await;
+        assert!(result.is_ok(), "absent event must succeed with COMMENT default: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_422_returns_err_with_github_message() {
+        // GitHub returns 422 when inline comment positions are invalid.
+        // The function must surface this as Err so the LLM can retry.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            422,
+            json!({"message": "Validation Failed", "errors": [{"code": "invalid"}]}).to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "body": "x", "event": "REQUEST_CHANGES",
+                    "comments": [{"path": "foo.rs", "position": 9999, "body": "bad pos"}]}),
+        )
+        .await;
+        assert!(result.is_err(), "422 must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("422"),
+            "error message must include the status code"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_pr_review_absent_body_defaults_to_empty_string() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 9, "html_url": "https://github.com/o/r/pull/1#pullrequestreview-9"})
+                .to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({"owner": "o", "repo": "r", "pr_number": 1, "event": "APPROVE"}),
+        )
+        .await;
+        assert!(result.is_ok(), "absent body must succeed with empty-string default: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_pr_files_non_200_with_valid_array_body_succeeds() {
+        // Some GitHub proxies return a 404 status but with a valid JSON array body.
+        // The function checks shape (array) not status, so it should succeed and
+        // return the (empty) list rather than treating the status as an error.
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(404, json!([]).to_string());
+        let result =
+            list_pr_files(&ctx, &json!({"owner": "o", "repo": "r", "pr_number": 99})).await;
+        assert!(result.is_ok(), "404 with array body must succeed: {result:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+        assert!(parsed.as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn annotate_diff_no_newline_at_eof_marker_is_numbered() {
+        // Git emits `\ No newline at end of file` as a real diff line.
+        // It must receive a position number like any other line.
+        let patch =
+            "@@ -1,2 +1,2 @@\n-old\n+new\n\\ No newline at end of file";
+        let annotated = annotate_diff(patch);
+        let lines: Vec<&str> = annotated.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[3], r"4 \ No newline at end of file");
+    }
+
+    // ── create_pull_request — existing PR found in pre-check ─────────────────
+
+    /// When the pre-check GET returns a non-empty array, the function must
+    /// return early with the existing PR — skipping the POST entirely.
+    /// This is the core idempotency path for `create_pull_request`.
+    #[tokio::test]
+    async fn create_pull_request_precheck_finds_existing_pr_returns_early() {
+        let ctx = make_ctx();
+
+        // Pre-check: existing PR found.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([{
+                "number": 55,
+                "html_url": "https://github.com/o/r/pull/55"
+            }])
+            .to_string(),
+        );
+        // No POST enqueued — the function must return before creating a new PR.
+
+        let result = create_pull_request(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r",
+                "title": "feat", "head": "feat/branch",
+                "_idempotency_key": "pr-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(result.is_ok(), "must succeed: {result:?}");
+        assert!(
+            result.unwrap().contains("Pull request #55"),
+            "must return the existing PR, not create a new one"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "no POST must be made when an existing PR is found"
+        );
+    }
+
+    // ── request_reviewers — GET connection error ──────────────────────────────
+
+    /// When the pre-check GET fails with a network error, `request_reviewers`
+    /// must degrade gracefully and request all reviewers (line: `Err(_) => reviewers.clone()`).
+    #[tokio::test]
+    async fn request_reviewers_get_connection_error_falls_back_to_all_reviewers() {
+        let ctx = make_ctx();
+
+        // GET fails — connection refused.
+        ctx.http_client.enqueue_err("connection refused");
+
+        // POST with all reviewers must follow.
+        ctx.http_client
+            .enqueue_ok(201, json!({"number": 12}).to_string());
+
+        let result = request_reviewers(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 12,
+                "reviewers": ["alice", "bob"],
+                "_idempotency_key": "get-error-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "must succeed after GET connection error: {result:?}"
+        );
+        assert!(result.unwrap().contains("Reviewers requested on PR #12"));
+        assert!(
+            ctx.http_client.is_empty(),
+            "both GET (failed) and POST must have been consumed"
+        );
+    }
+
+    // ── post_pr_comment — idempotency key, partial page, no marker → POST ────
+
+    /// When an idempotency key is present and the first (and only) page returns
+    /// fewer than 100 items without the marker, the dedup loop must break early
+    /// and proceed with the POST — the normal recovery scenario.
+    #[tokio::test]
+    async fn post_pr_comment_idempotency_key_partial_page_no_marker_posts() {
+        let ctx = make_ctx();
+
+        // One page with 3 comments — none containing the marker.
+        ctx.http_client.enqueue_ok(
+            200,
+            json!([
+                {"id": 1, "body": "First comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-1"},
+                {"id": 2, "body": "Second comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-2"},
+                {"id": 3, "body": "Third comment", "html_url": "https://github.com/o/r/issues/1#issuecomment-3"}
+            ])
+            .to_string(),
+        );
+
+        // POST — the actual comment creation.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 99, "html_url": "https://github.com/o/r/issues/1#issuecomment-99"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "New review comment",
+                "_idempotency_key": "partial-page-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "must succeed after partial-page dedup scan: {result:?}"
+        );
+        assert!(
+            result.unwrap().contains("Comment posted"),
+            "must return a 'Comment posted' message"
+        );
+        assert!(
+            ctx.http_client.is_empty(),
+            "both GET and POST must have been consumed"
+        );
+    }
+
+    // ── post_pr_comment — dedup loop break paths ─────────────────────────────
+
+    /// When the dedup scan GET fails with a network error, the loop must break
+    /// and proceed with the POST rather than aborting (line: `Err(_) => break 'dedup`).
+    #[tokio::test]
+    async fn post_pr_comment_dedup_get_error_breaks_loop_and_posts() {
+        let ctx = make_ctx();
+
+        // GET fails during dedup scan.
+        ctx.http_client.enqueue_err("connection refused");
+
+        // POST — the function must still proceed.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 88, "html_url": "https://github.com/o/r/issues/1#issuecomment-88"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "Recovery comment",
+                "_idempotency_key": "get-error-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "GET error during dedup must not abort — must proceed to POST: {result:?}"
+        );
+        assert!(result.unwrap().contains("Comment posted"));
+        assert!(ctx.http_client.is_empty(), "both GET (failed) and POST must have been consumed");
+    }
+
+    /// When the dedup scan GET returns 200 but the body is not a JSON array
+    /// (e.g. an error object), the loop must break and proceed with the POST
+    /// (line: `_ => break 'dedup`).
+    #[tokio::test]
+    async fn post_pr_comment_dedup_non_array_json_breaks_loop_and_posts() {
+        let ctx = make_ctx();
+
+        // GET returns a JSON object instead of an array — unexpected shape.
+        ctx.http_client
+            .enqueue_ok(200, json!({"message": "Not Found"}).to_string());
+
+        // POST — the function must still proceed.
+        ctx.http_client.enqueue_ok(
+            201,
+            json!({"id": 77, "html_url": "https://github.com/o/r/issues/1#issuecomment-77"})
+                .to_string(),
+        );
+
+        let result = post_pr_comment(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 1,
+                "body": "Recovery comment",
+                "_idempotency_key": "non-array-dedup-key"
+            }),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "non-array dedup response must not abort — must proceed to POST: {result:?}"
+        );
+        assert!(result.unwrap().contains("Comment posted"));
+        assert!(ctx.http_client.is_empty(), "both GET and POST must have been consumed");
+    }
+
+    // ── get_file_contents — missing path field ────────────────────────────────
+
+    #[tokio::test]
+    async fn get_file_contents_missing_path_returns_err() {
+        let ctx = make_ctx();
+        let result = get_file_contents(
+            &ctx,
+            &json!({"owner": "o", "repo": "r"}), // "path" intentionally absent
+        )
+        .await;
+        assert!(result.is_err(), "missing path must return Err: {result:?}");
+        assert!(
+            result.unwrap_err().contains("missing path"),
+            "error must name the missing field"
+        );
+    }
+
+    // ── get_pr_comments — missing required fields ─────────────────────────────
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_owner_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"repo": "r", "pr_number": 1})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_repo_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"owner": "o", "pr_number": 1})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn get_pr_comments_missing_pr_number_returns_err() {
+        let result = get_pr_comments(&make_ctx(), &json!({"owner": "o", "repo": "r"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    // ── update_file — missing required fields ─────────────────────────────────
+
+    #[tokio::test]
+    async fn update_file_missing_owner_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"repo": "r", "path": "f.txt", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_repo_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "path": "f.txt", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_path_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "message": "m", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing path"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_message_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "path": "f.txt", "content": "c"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing message"));
+    }
+
+    #[tokio::test]
+    async fn update_file_missing_content_returns_err() {
+        let result = update_file(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "path": "f.txt", "message": "m"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing content"));
+    }
+
+    // ── create_pull_request — missing required fields ─────────────────────────
+
+    #[tokio::test]
+    async fn create_pull_request_missing_owner_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"repo": "r", "title": "t", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_repo_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "title": "t", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_title_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "head": "h"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing title"));
+    }
+
+    #[tokio::test]
+    async fn create_pull_request_missing_head_returns_err() {
+        let result = create_pull_request(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "title": "t"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing head"));
+    }
+
+    // ── request_reviewers — missing required fields ───────────────────────────
+
+    #[tokio::test]
+    async fn request_reviewers_missing_owner_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"repo": "r", "pr_number": 1, "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_repo_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"owner": "o", "pr_number": 1, "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_pr_number_returns_err() {
+        let result = request_reviewers(
+            &make_ctx(),
+            &json!({"owner": "o", "repo": "r", "reviewers": ["alice"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn request_reviewers_missing_reviewers_returns_err() {
+        let result =
+            request_reviewers(&make_ctx(), &json!({"owner": "o", "repo": "r", "pr_number": 1}))
+                .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing reviewers array"));
+    }
+
+    // ── post_pr_comment — missing required fields ─────────────────────────────
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_owner_returns_err() {
+        let result = post_pr_comment(
+            &make_ctx(),
+            &json!({"repo": "r", "pr_number": 1, "body": "hi"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing owner"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_repo_returns_err() {
+        let result = post_pr_comment(
+            &make_ctx(),
+            &json!({"owner": "o", "pr_number": 1, "body": "hi"}),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing repo"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_pr_number_returns_err() {
+        let result =
+            post_pr_comment(&make_ctx(), &json!({"owner": "o", "repo": "r", "body": "hi"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing pr_number"));
+    }
+
+    #[tokio::test]
+    async fn post_pr_comment_missing_body_returns_err() {
+        let result =
+            post_pr_comment(&make_ctx(), &json!({"owner": "o", "repo": "r", "pr_number": 1}))
+                .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing body"));
     }
 }

@@ -278,6 +278,77 @@ async fn worker_strips_real_key_from_upstream_response_headers() {
     }
 }
 
+#[tokio::test]
+async fn worker_injects_user_agent_when_absent() {
+    let vault = Arc::new(MemoryVault::new());
+    seed_vault(&vault, "tok_anthropic_prod_abc123", "sk-ant-realkey").await;
+
+    let request = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_abc123",
+        "test.reply",
+    );
+    let payload = serde_json::to_vec(&request).unwrap();
+
+    let js = MockJetStreamConsumerClient::new();
+    js.push_msg(&payload);
+
+    let nats = MockNatsClient::new();
+    let http = MockHttpClient::new();
+    http.push_ok(r#"{"id":"msg_1"}"#);
+
+    worker::run(js, nats, Arc::clone(&vault), http.clone(), "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
+
+    let calls = http.captured_headers.lock().unwrap();
+    assert_eq!(calls.len(), 1, "expected exactly one HTTP call");
+    let ua_count = calls[0]
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+        .count();
+    assert_eq!(ua_count, 1, "User-Agent must be injected exactly once");
+    let (_, ua_value) = calls[0]
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+        .unwrap();
+    assert_eq!(ua_value, "trogon-agent/1.0");
+}
+
+#[tokio::test]
+async fn worker_preserves_caller_user_agent() {
+    let vault = Arc::new(MemoryVault::new());
+    seed_vault(&vault, "tok_anthropic_prod_abc123", "sk-ant-realkey").await;
+
+    let mut request = make_request(
+        "https://api.anthropic.com/v1/messages",
+        "Bearer tok_anthropic_prod_abc123",
+        "test.reply",
+    );
+    request.headers.push(("user-agent".to_string(), "my-cli/2.0".to_string()));
+    let payload = serde_json::to_vec(&request).unwrap();
+
+    let js = MockJetStreamConsumerClient::new();
+    js.push_msg(&payload);
+
+    let nats = MockNatsClient::new();
+    let http = MockHttpClient::new();
+    http.push_ok(r#"{"id":"msg_1"}"#);
+
+    worker::run(js, nats, Arc::clone(&vault), http.clone(), "proxy-workers", "PROXY_REQUESTS")
+        .await
+        .unwrap();
+
+    let calls = http.captured_headers.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    let ua_values: Vec<&str> = calls[0]
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(ua_values, vec!["my-cli/2.0"], "caller User-Agent must be preserved, not doubled");
+}
+
 // ── vault_admin tests ─────────────────────────────────────────────────────────
 //
 // vault_admin::run() uses tokio::select! over three subscriptions.  When all
@@ -308,7 +379,7 @@ async fn vault_admin_store_token_publishes_ok_reply() {
 
     tokio::time::timeout(
         std::time::Duration::from_millis(200),
-        vault_admin::run(nats.clone(), Arc::clone(&vault), "trogon"),
+        vault_admin::run(nats.clone(), Arc::clone(&vault), "trogon", None),
     )
     .await
     .ok(); // timeout is fine — loop may or may not exit by itself

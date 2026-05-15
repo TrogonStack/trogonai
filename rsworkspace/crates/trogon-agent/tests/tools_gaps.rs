@@ -264,6 +264,39 @@ async fn dispatch_tool_routes_post_pr_comment() {
     mock.assert_hits_async(1).await;
 }
 
+/// `dispatch_tool` routes `post_pr_review` to the GitHub pull-request reviews path.
+#[tokio::test]
+async fn dispatch_tool_routes_post_pr_review() {
+    let server = MockServer::start_async().await;
+
+    let mock = server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/github/repos/o/r/pulls/5/reviews");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "id": 99,
+                "html_url": "https://github.com/o/r/pull/5#pullrequestreview-99"
+            }));
+    });
+
+    let ctx = make_ctx(&server.base_url());
+    let result = dispatch_tool(
+        &ctx,
+        "post_pr_review",
+        &json!({
+            "owner": "o", "repo": "r", "pr_number": 5,
+            "commit_sha": "abc123",
+            "body": "Looks good",
+            "event": "COMMENT",
+            "comments": [{ "path": "src/lib.rs", "position": 3, "body": "Risky call" }]
+        }),
+    )
+    .await;
+    mock.assert_hits_async(1).await;
+    assert!(!result.contains("Unknown tool"), "dispatch must route post_pr_review: {result}");
+}
+
 /// `dispatch_tool` routes `get_linear_issue` to the Linear GraphQL path.
 #[tokio::test]
 async fn dispatch_tool_routes_get_linear_issue() {

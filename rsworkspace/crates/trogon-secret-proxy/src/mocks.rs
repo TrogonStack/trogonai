@@ -160,6 +160,8 @@ pub struct MockHttpClient {
     /// Streaming responses: stored as (status, headers, chunks) so the struct
     /// remains Clone (StreamingHttpResponse itself is not Clone).
     streaming: Arc<Mutex<VecDeque<Result<(u16, Vec<(String, String)>, Vec<Vec<u8>>), String>>>>,
+    /// Headers captured from each `send_request` / `send_request_streaming` call.
+    pub captured_headers: Arc<Mutex<Vec<Vec<(String, String)>>>>,
 }
 
 impl MockHttpClient {
@@ -167,6 +169,7 @@ impl MockHttpClient {
         Self {
             responses: Arc::new(Mutex::new(VecDeque::new())),
             streaming: Arc::new(Mutex::new(VecDeque::new())),
+            captured_headers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -226,9 +229,10 @@ impl HttpClient for MockHttpClient {
         &self,
         _method: &str,
         _url: &str,
-        _headers: &[(String, String)],
+        headers: &[(String, String)],
         _body: &[u8],
     ) -> Result<HttpResponse, String> {
+        self.captured_headers.lock().unwrap().push(headers.to_vec());
         self.responses
             .lock()
             .unwrap()
@@ -240,9 +244,10 @@ impl HttpClient for MockHttpClient {
         &self,
         _method: &str,
         _url: &str,
-        _headers: &[(String, String)],
+        headers: &[(String, String)],
         _body: &[u8],
     ) -> Result<StreamingHttpResponse, String> {
+        self.captured_headers.lock().unwrap().push(headers.to_vec());
         let entry = self
             .streaming
             .lock()
