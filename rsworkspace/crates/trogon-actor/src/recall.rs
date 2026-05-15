@@ -244,6 +244,17 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_formatting_january_date() {
+        // 2026-01-01 00:00 UTC exercises the mp≥10 branch in the calendar
+        // algorithm (mp=10 → mo=1, year = y+1 because mo≤2).
+        // 2026-01-01 = 20454 days from epoch → 20454 * 86400 = 1_767_225_600 s
+        let ms: u64 = 1_767_225_600 * 1000;
+        let entries = vec![msg(Role::User, "test", ms)];
+        let out = format_history(&entries).unwrap();
+        assert!(out.contains("2026-01-01 00:00Z"), "got: {out}");
+    }
+
+    #[test]
     fn sub_agent_spawn_and_routing_are_skipped() {
         let entries = vec![
             TranscriptEntry::SubAgentSpawn {
