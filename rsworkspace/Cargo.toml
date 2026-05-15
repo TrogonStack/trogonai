@@ -78,6 +78,7 @@ twilight-model = "=0.17.1"
 
 # Misc
 tempfile = "=3.27.0"
+time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 

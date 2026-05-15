@@ -19,6 +19,7 @@ use super::constants::{
     NATS_HEADER_REJECT_REASON, NATS_HEADER_SUBSCRIPTION_ID,
 };
 use super::signature;
+use super::verification_token::verification_subject;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
@@ -137,7 +138,7 @@ async fn publish_verification<P: JetStreamPublisher, S: ObjectStorePut>(
     body: Bytes,
     ack_timeout: NonZeroDuration,
 ) -> StatusCode {
-    let subject = format!("{subject_prefix}.subscription.verification");
+    let subject = verification_subject(subject_prefix);
     let outcome = publisher
         .publish_event(subject, async_nats::HeaderMap::new(), body, ack_timeout.into())
         .await;
@@ -237,7 +238,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
                 return StatusCode::UNAUTHORIZED;
             }
 
-            let subject = format!("{}.subscription.verification", state.subject_prefix);
+            let subject = verification_subject(&state.subject_prefix);
             span.record("event_type", "subscription.verification");
             span.record("subject", &subject);
 

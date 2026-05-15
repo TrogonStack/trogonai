@@ -195,13 +195,13 @@ mod tests {
 
     #[test]
     fn telegram_public_webhook_url_roundtrips() {
-        let url = TelegramPublicWebhookUrl::new("https://example.com/telegram/webhook").unwrap();
-        assert_eq!(url.as_str(), "https://example.com/telegram/webhook");
+        let url = TelegramPublicWebhookUrl::new("https://example.com/sources/telegram/primary/webhook").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/sources/telegram/primary/webhook");
     }
 
     #[test]
     fn telegram_public_webhook_url_requires_https() {
-        let err = TelegramPublicWebhookUrl::new("http://example.com/telegram/webhook").unwrap_err();
+        let err = TelegramPublicWebhookUrl::new("http://example.com/sources/telegram/primary/webhook").unwrap_err();
         assert_eq!(err.to_string(), "invalid public webhook URL: must use https");
         assert!(std::error::Error::source(&err).is_none());
     }

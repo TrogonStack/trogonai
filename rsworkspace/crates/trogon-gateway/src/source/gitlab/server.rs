@@ -1,11 +1,11 @@
 use std::fmt;
 use std::time::Duration;
 
-use super::config::GitLabWebhookSecret;
+use super::GitLabSigningToken;
 use super::config::GitlabConfig;
 use super::constants::{
-    HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_TOKEN, HEADER_WEBHOOK_UUID,
-    HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON,
+    HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_WEBHOOK_UUID, HTTP_BODY_SIZE_MAX,
+    NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON,
     NATS_HEADER_WEBHOOK_UUID,
 };
 use super::signature;
@@ -73,9 +73,10 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    webhook_secret: GitLabWebhookSecret,
+    signing_token: GitLabSigningToken,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
+    timestamp_tolerance: NonZeroDuration,
 }
 
 pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Result<(), C::Error> {
@@ -99,9 +100,10 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 ) -> Router {
     let state = AppState {
         publisher,
-        webhook_secret: config.webhook_secret.clone(),
+        signing_token: config.signing_token.clone(),
         subject_prefix: config.subject_prefix.clone(),
         nats_ack_timeout: config.nats_ack_timeout,
+        timestamp_tolerance: config.timestamp_tolerance,
     };
 
     Router::new()
@@ -132,19 +134,9 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let token = headers.get(HEADER_TOKEN).and_then(|v| v.to_str().ok());
-
-    match token {
-        Some(token) => {
-            if let Err(e) = signature::verify(state.webhook_secret.as_str(), token) {
-                warn!(reason = %e, "GitLab webhook token validation failed");
-                return StatusCode::UNAUTHORIZED;
-            }
-        }
-        None => {
-            warn!("Missing X-Gitlab-Token header");
-            return StatusCode::UNAUTHORIZED;
-        }
+    if let Err(e) = signature::verify(&headers, &body, &state.signing_token, state.timestamp_tolerance) {
+        warn!(reason = %e, "GitLab webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
     }
 
     let Some(raw_event) = headers.get(HEADER_EVENT).and_then(|v| v.to_str().ok()) else {
@@ -217,8 +209,11 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
+    use crate::source::standard_webhooks::sign_for_test;
     use axum::body::Body;
     use axum::http::Request;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use trogon_nats::jetstream::StreamMaxAge;
@@ -226,7 +221,7 @@ mod tests {
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
-    const TEST_SECRET: &str = "test-secret";
+    const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
 
     fn wrap_publisher(
         publisher: MockJetStreamPublisher,
@@ -241,11 +236,12 @@ mod tests {
 
     fn test_config() -> GitlabConfig {
         GitlabConfig {
-            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
+            signing_token: GitLabSigningToken::new(TEST_SIGNING_TOKEN).unwrap(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             stream_name: NatsToken::new("GITLAB").unwrap(),
             stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
             nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
         }
     }
 
@@ -257,21 +253,110 @@ mod tests {
         router(wrap_publisher(publisher), &test_config())
     }
 
-    fn webhook_request(body: &[u8], event: &str, token: Option<&str>) -> Request<Body> {
+    fn valid_timestamp() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string()
+    }
+
+    fn signing_token() -> GitLabSigningToken {
+        GitLabSigningToken::new(TEST_SIGNING_TOKEN).unwrap()
+    }
+
+    fn sign(webhook_id: &str, webhook_timestamp: &str, body: &[u8]) -> String {
+        let token = signing_token();
+        sign_for_test(token.as_bytes(), webhook_id, webhook_timestamp, body)
+    }
+
+    fn request_builder(event: Option<&str>) -> axum::http::request::Builder {
         let mut builder = Request::builder()
             .method("POST")
             .uri("/webhook")
-            .header(HEADER_EVENT, event)
             .header(HEADER_WEBHOOK_UUID, "wh-uuid-test")
             .header(HEADER_IDEMPOTENCY_KEY, "idem-key-test")
             .header(HEADER_INSTANCE, "https://gitlab.example.com")
             .header(HEADER_EVENT_UUID, "evt-uuid-test");
 
-        if let Some(t) = token {
-            builder = builder.header(HEADER_TOKEN, t);
+        if let Some(event) = event {
+            builder = builder.header(HEADER_EVENT, event);
         }
 
-        builder.body(Body::from(body.to_vec())).unwrap()
+        builder
+    }
+
+    fn webhook_request(body: &[u8], event: &str) -> Request<Body> {
+        let webhook_id = "msg_123";
+        let timestamp = valid_timestamp();
+        request_builder(Some(event))
+            .header(HEADER_WEBHOOK_ID, webhook_id)
+            .header(HEADER_WEBHOOK_TIMESTAMP, &timestamp)
+            .header(HEADER_WEBHOOK_SIGNATURE, sign(webhook_id, &timestamp, body))
+            .body(Body::from(body.to_vec()))
+            .unwrap()
+    }
+
+    fn unsigned_webhook_request(body: &[u8], event: &str) -> Request<Body> {
+        request_builder(Some(event)).body(Body::from(body.to_vec())).unwrap()
+    }
+
+    fn webhook_request_with_signature(body: &[u8], event: &str, signature: &str) -> Request<Body> {
+        let webhook_id = "msg_123";
+        let timestamp = valid_timestamp();
+        request_builder(Some(event))
+            .header(HEADER_WEBHOOK_ID, webhook_id)
+            .header(HEADER_WEBHOOK_TIMESTAMP, &timestamp)
+            .header(HEADER_WEBHOOK_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap()
+    }
+
+    fn signed_request_without_event(body: &[u8]) -> Request<Body> {
+        let webhook_id = "msg_123";
+        let timestamp = valid_timestamp();
+        request_builder(None)
+            .header(HEADER_WEBHOOK_ID, webhook_id)
+            .header(HEADER_WEBHOOK_TIMESTAMP, &timestamp)
+            .header(HEADER_WEBHOOK_SIGNATURE, sign(webhook_id, &timestamp, body))
+            .body(Body::from(body.to_vec()))
+            .unwrap()
+    }
+
+    fn signed_request_without_idempotency_key(body: &[u8], event: &str) -> Request<Body> {
+        let webhook_id = "msg_123";
+        let timestamp = valid_timestamp();
+        let signature = sign(webhook_id, &timestamp, body);
+        Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_EVENT, event)
+            .header(HEADER_WEBHOOK_ID, webhook_id)
+            .header(HEADER_WEBHOOK_TIMESTAMP, timestamp)
+            .header(HEADER_WEBHOOK_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap()
+    }
+
+    fn webhook_request_with_stale_timestamp(body: &[u8], event: &str) -> Request<Body> {
+        let webhook_id = "msg_123";
+        let timestamp = "1";
+        request_builder(Some(event))
+            .header(HEADER_WEBHOOK_ID, webhook_id)
+            .header(HEADER_WEBHOOK_TIMESTAMP, timestamp)
+            .header(HEADER_WEBHOOK_SIGNATURE, sign(webhook_id, timestamp, body))
+            .body(Body::from(body.to_vec()))
+            .unwrap()
+    }
+
+    fn request_with_legacy_token(body: &[u8], event: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_EVENT, event)
+            .header("x-gitlab-token", "test-secret")
+            .body(Body::from(body.to_vec()))
+            .unwrap()
     }
 
     #[test]
@@ -312,10 +397,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let body = br#"{"ref":"refs/heads/main"}"#;
-        let resp = app
-            .oneshot(webhook_request(body, "push", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "push")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -354,10 +436,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let body = br#"{"action":"opened"}"#;
-        let resp = app
-            .oneshot(webhook_request(body, "pull_request", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "pull_request")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["gitlab.pull_request"]);
@@ -370,7 +449,7 @@ mod tests {
         let app = mock_app(publisher.clone());
 
         let resp = app
-            .oneshot(webhook_request(b"{}", "push", Some("wrong-token")))
+            .oneshot(webhook_request_with_signature(b"{}", "push", "v1,d3Jvbmc="))
             .await
             .unwrap();
 
@@ -384,7 +463,34 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
 
-        let resp = app.oneshot(webhook_request(b"{}", "push", None)).await.unwrap();
+        let resp = app.oneshot(unsigned_webhook_request(b"{}", "push")).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stale_signature_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+
+        let resp = app
+            .oneshot(webhook_request_with_stale_timestamp(b"{}", "push"))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_subjects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_secret_token_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+
+        let resp = app.oneshot(request_with_legacy_token(b"{}", "push")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         assert!(publisher.published_subjects().is_empty());
@@ -396,12 +502,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let body = b"{}";
-        let req = Request::builder()
-            .method("POST")
-            .uri("/webhook")
-            .header(HEADER_TOKEN, TEST_SECRET)
-            .body(Body::from(&body[..]))
-            .unwrap();
+        let req = signed_request_without_event(body);
 
         let resp = app.oneshot(req).await.unwrap();
 
@@ -423,10 +524,7 @@ mod tests {
         publisher.fail_next_js_publish();
         let app = mock_app(publisher.clone());
         let body = b"{}";
-        let resp = app
-            .oneshot(webhook_request(body, "push", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "push")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -438,9 +536,10 @@ mod tests {
 
         let state = AppState {
             publisher: wrap_publisher(publisher.clone()),
-            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
+            signing_token: signing_token(),
             subject_prefix: NatsToken::new("custom").unwrap(),
             nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -451,10 +550,7 @@ mod tests {
             .with_state(state);
 
         let body = b"{}";
-        let resp = app
-            .oneshot(webhook_request(body, "issues", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "issues")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["custom.issues"]);
@@ -466,10 +562,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let body = b"";
-        let resp = app
-            .oneshot(webhook_request(body, "ping", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "ping")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_payloads(), vec![Bytes::new()]);
@@ -482,9 +575,10 @@ mod tests {
 
         let state = AppState {
             publisher: wrap_publisher(publisher.clone()),
-            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
+            signing_token: signing_token(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -494,13 +588,7 @@ mod tests {
             )
             .with_state(state);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/webhook")
-            .header(HEADER_EVENT, "push")
-            .header(HEADER_TOKEN, TEST_SECRET)
-            .body(Body::from(&b"{}"[..]))
-            .unwrap();
+        let req = signed_request_without_idempotency_key(b"{}", "push");
 
         let resp = app.oneshot(req).await.unwrap();
 
@@ -519,10 +607,7 @@ mod tests {
         let publisher = MockJetStreamPublisher::new();
         let app = mock_app(publisher.clone());
         let body = b"{}";
-        let resp = app
-            .oneshot(webhook_request(body, "Merge Request Hook", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "Merge Request Hook")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(publisher.published_subjects(), vec!["gitlab.merge_request_hook"]);
@@ -535,12 +620,7 @@ mod tests {
         publisher.fail_next_js_publish();
         let app = mock_app(publisher.clone());
         let body = b"{}";
-        let req = Request::builder()
-            .method("POST")
-            .uri("/webhook")
-            .header(HEADER_TOKEN, TEST_SECRET)
-            .body(Body::from(&body[..]))
-            .unwrap();
+        let req = signed_request_without_event(body);
 
         let resp = app.oneshot(req).await.unwrap();
 
@@ -630,9 +710,10 @@ mod tests {
                 "test-bucket".to_string(),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
-            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
+            signing_token: signing_token(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -640,10 +721,7 @@ mod tests {
             .with_state(state);
 
         let body = b"{}";
-        let resp = app
-            .oneshot(webhook_request(body, "push", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "push")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -660,9 +738,10 @@ mod tests {
                 "test-bucket".to_string(),
                 MaxPayload::from_server_limit(usize::MAX),
             ),
-            webhook_secret: GitLabWebhookSecret::new(TEST_SECRET).unwrap(),
+            signing_token: signing_token(),
             subject_prefix: NatsToken::new("gitlab").unwrap(),
             nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
         };
 
         let app = Router::new()
@@ -670,10 +749,7 @@ mod tests {
             .with_state(state);
 
         let body = b"{}";
-        let resp = app
-            .oneshot(webhook_request(body, "push", Some(TEST_SECRET)))
-            .await
-            .unwrap();
+        let resp = app.oneshot(webhook_request(body, "push")).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }

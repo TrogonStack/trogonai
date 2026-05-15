@@ -2,8 +2,10 @@ use trogon_std::{ByteSize, HttpBodySizeMax};
 
 pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(25)).unwrap();
 
-pub const HEADER_TOKEN: &str = "x-gitlab-token";
 pub const HEADER_EVENT: &str = "x-gitlab-event";
+pub const HEADER_WEBHOOK_ID: &str = "webhook-id";
+pub const HEADER_WEBHOOK_TIMESTAMP: &str = "webhook-timestamp";
+pub const HEADER_WEBHOOK_SIGNATURE: &str = "webhook-signature";
 pub const HEADER_WEBHOOK_UUID: &str = "x-gitlab-webhook-uuid";
 pub const HEADER_EVENT_UUID: &str = "x-gitlab-event-uuid";
 pub const HEADER_IDEMPOTENCY_KEY: &str = "idempotency-key";
