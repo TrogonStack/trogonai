@@ -167,6 +167,38 @@ async fn pr_review_handle_invalid_json_returns_error() {
     assert!(matches!(result, Some(Err(_))));
 }
 
+/// Draft PR → None (skipped before the agent is ever called).
+#[tokio::test]
+async fn pr_review_handle_draft_returns_none() {
+    let server = MockServer::start_async().await;
+
+    // The mock must not be hit — if it is, the test fails via assert_hits(0).
+    let mock = server.mock(|when, then| {
+        when.method(httpmock::Method::POST)
+            .path("/anthropic/v1/messages");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "stop_reason": "end_turn",
+                "content": [{ "type": "text", "text": "reviewed" }]
+            }));
+    });
+
+    let payload = serde_json::to_vec(&json!({
+        "action": "opened",
+        "number": 99,
+        "pull_request": { "draft": true, "head": { "sha": "abc" } },
+        "repository": { "owner": { "login": "org" }, "name": "repo" }
+    }))
+    .unwrap();
+
+    let agent = make_agent(&server.base_url());
+    let result = pr_review::handle(&agent, &payload).await;
+
+    assert!(result.is_none(), "draft PR must return None, got: {result:?}");
+    mock.assert_hits_async(0).await;
+}
+
 // ── issue_triage::handle ──────────────────────────────────────────────────────
 
 /// `create` + `Issue` type → agent runs → returns Some(Ok(...)).

@@ -1,0 +1,307 @@
+ Contexto arquitectónico                                                       
+   
+  Todo el trabajo es aditivo. NATS permanece como backend sin cambios. Los      
+  cambios se distribuyen en 3 capas:
+  - trogon-agent-core — herramientas genéricas (no saben nada de NATS)          
+  - trogon-acp-runner — runner ACP con acceso a NATS KV y WASM                  
+  - trogon-cli — crate nuevo, interfaz de terminal del usuario
+                                                                                
+  ---                                                                           
+  Fase 1 — Herramientas de filesystem y edición (PR 1 y PR 2)                   
+                                                                                
+  1. Ampliar ToolContext
+                                                                                
+  Archivo: crates/trogon-agent-core/src/tools/mod.rs
+                                                                                
+  pub struct ToolContext {
+      pub proxy_url: String,
+      pub cwd: String,                    // directorio de trabajo de la sesión 
+      pub http_client: reqwest::Client,   // cliente HTTP reutilizable          
+  }                                                                             
+                                                                                
+  dispatch_tool pasa de devolver "Unknown tool" a hacer routing real:           
+   
+  pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) ->   
+  String {                                                                      
+      match name {
+          "read_file"   => fs::read_file(ctx, input).await,                     
+          "write_file"  => fs::write_file(ctx, input).await,                    
+          "list_dir"    => fs::list_dir(ctx, input).await,
+          "glob"        => fs::glob_files(ctx, input).await,                    
+          "str_replace" => editor::str_replace(ctx, input).await,               
+          "git_status"  => git::status(ctx, input).await,
+          "git_diff"    => git::diff(ctx, input).await,                         
+          "git_log"     => git::log(ctx, input).await,
+          "fetch_url"   => web::fetch_url(ctx, input).await,                    
+          _             => format!("Unknown tool: {name}"),
+      }                                                                         
+  }
+                                                                                
+  Nuevas dependencias en trogon-agent-core/Cargo.toml:                          
+  globset   = "0.4"
+  ignore    = "0.4"                                                             
+  walkdir   = "2" 
+  html2text = "0.12"                                                            
+   
+  ---                                                                           
+  2. read_file    
+              
+  Archivo nuevo: crates/trogon-agent-core/src/tools/fs.rs
+                                                                                
+  - Parámetros: path: String, offset?: u32, limit?: u32                         
+  - Resuelve ruta relativa a ctx.cwd                                            
+  - Rechaza rutas fuera de cwd (protección contra path traversal)               
+  - Devuelve contenido con números de línea estilo cat -n                       
+  - Si offset/limit están presentes, devuelve solo ese rango de líneas          
+  - Si el archivo no existe, devuelve error legible                             
+                                                                                
+  ---                                                                           
+  3. write_file   
+                                                                                
+  Archivo: crates/trogon-agent-core/src/tools/fs.rs
+
+  - Parámetros: path: String, content: String
+  - Crea directorios intermedios con tokio::fs::create_dir_all
+  - Escribe atómicamente: primero a .tmp, luego rename                          
+  - Devuelve "OK" o mensaje de error                                            
+                                                                                
+  ---                                                                           
+  4. list_dir                                                                   
+                  
+  Archivo: crates/trogon-agent-core/src/tools/fs.rs
+                                                                                
+  - Parámetros: path?: String (default ".")
+  - Usa el crate ignore para respetar .gitignore automáticamente                
+  - Devuelve árbol de directorios en texto (estilo tree)                        
+  - Limita a 500 entradas para no saturar el contexto                           
+                                                                                
+  ---                                                                           
+  5. glob                                                                       
+                  
+  Archivo: crates/trogon-agent-core/src/tools/fs.rs
+
+  - Parámetros: pattern: String, path?: String                                  
+  - Usa globset para matching de patrones
+  - Filtra entradas ignoradas por .gitignore via ignore::Walk                   
+  - Devuelve lista de rutas relativas a cwd                                     
+                                                                                
+  ---                                                                           
+  6. str_replace                                                                
+                  
+  Archivo nuevo: crates/trogon-agent-core/src/tools/editor.rs
+
+  - Parámetros: path: String, old_str: String, new_str: String                  
+  - Lee el archivo completo
+  - Verifica que old_str aparezca exactamente una vez — si hay 0 o >1           
+  ocurrencias, devuelve error descriptivo con el conteo                         
+  - Reemplaza y escribe el resultado
+  - Devuelve diff de las líneas cambiadas (contexto ±3 líneas)                  
+                                                                                
+  ---                                                                           
+  7. git_status, git_diff, git_log                                              
+                                  
+  Archivo nuevo: crates/trogon-agent-core/src/tools/git.rs
+                                                                                
+  - Ejecutan git status --short, git diff, git log --oneline -20 respectivamente
+  - Usan tokio::process::Command con current_dir(&ctx.cwd)                      
+  - Sin nuevas dependencias (solo tokio)                                        
+  - Limitan output a ~4 KB; si excede, truncan con aviso al final
+                                                                                
+  ---             
+  8. fetch_url                                                                  
+                  
+  Archivo nuevo: crates/trogon-agent-core/src/tools/web.rs
+                                                                                
+  - Parámetros: url: String, raw?: bool
+  - Usa ctx.http_client (reutiliza el cliente, no crea uno nuevo por llamada)   
+  - Si raw: false (default): convierte HTML a texto plano con html2text         
+  - Trunca a 8 KB con aviso si la respuesta es más grande                       
+                                                                                
+  ---                                                                           
+  Fase 2 — Bash con estado (PR 3)                                               
+                                                                                
+  9. Bash con cwd real
+                                                                                
+  Archivo: crates/trogon-acp-runner/src/wasm_bash_tool.rs                       
+   
+  - Agregar campo sandbox_dir: PathBuf al struct WasmRuntimeBashTool            
+  - Pasarlo como cwd en CreateTerminalRequest
+  - sandbox_dir se inicializa desde session.cwd en new_session                  
+                                                                                
+  ---                                                                           
+  10. Terminal persistente (Bash stateful)                                      
+                                                                                
+  Archivos: crates/trogon-acp-runner/src/wasm_bash_tool.rs + session_store.rs
+                                                                                
+  - Agregar terminal_id: Option<String> a SessionState                          
+  - En la primera llamada a bash: crear terminal, guardar ID en SessionState via
+   NATS KV                                                                      
+  - En llamadas posteriores: reusar el mismo terminal con WriteToTerminalRequest
+  - Protocolo de demarcación de fin de comando:                                 
+  <comando>; echo "__EXIT_$?__"                                                 
+  - Leer stream hasta encontrar __EXIT_N__, extraer código de salida            
+  - Timeout configurable (default 30 s); al expirar, devolver error con output  
+  parcial                                                                       
+                                                                                
+  ---                                                                           
+  Fase 3 — CLI de terminal (PR 4)
+                                 
+  11. trogon-cli — REPL interactivo
+                                                                                
+  Crate nuevo: crates/trogon-cli/
+                                                                                
+  crates/trogon-cli/
+    Cargo.toml                                                                  
+    src/
+      main.rs          ← clap + arranque                                        
+      repl.rs          ← loop con rustyline + slash commands + @mentions        
+      session.rs       ← gestión de sesión ACP via NATS                         
+      print.rs         ← modo --print (no interactivo)                          
+      stdio_mcp_bridge.rs ← bridge stdio↔HTTP para servidores MCP               
+                                                                                
+  Dependencias nuevas: rustyline = "14", acp-nats (ya en workspace), clap (ya en
+   workspace), axum (ya en workspace).                                          
+                                                                                
+  Comportamiento del REPL:
+  - Conecta a NATS (default nats://localhost:4222, configurable via
+  TROGON_NATS_URL)                                                              
+  - Crea sesión ACP con cwd = std::env::current_dir()
+  - Loop: leer línea → procesar @mentions y slash commands → enviar prompt →    
+  stream de eventos → imprimir TextDelta en tiempo real                         
+  - Ctrl+C envía cancel a la sesión activa                                      
+  - Ctrl+D sale limpiamente cerrando la sesión                                  
+  - Historial persistido en ~/.local/share/trogon/history                       
+                                                                                
+  ---                                                                           
+  12. Modo --print (no interactivo)                                             
+                                                                                
+  Archivo: crates/trogon-cli/src/print.rs
+                                                                                
+  - Activado con trogon --print "haz X" o trogon -p "haz X"                     
+  - Lee prompt desde argumento o desde stdin si no se pasa texto                
+  - Imprime solo TextDelta a stdout (sin colores ni UI interactiva)             
+  - Útil para pipes: trogon --print "explica este error" < error.log            
+  - Exit code 0 si completa sin error, 1 si el agente devuelve error            
+                                                                                
+  ---                                                                           
+  13. NATS autostart                                                            
+                  
+  Archivo: crates/trogon-cli/src/main.rs
+
+  - Al conectar, si la conexión falla: intentar lanzar nats-server -p 4222 como 
+  proceso hijo
+  - Esperar hasta 3 s con retry cada 200 ms                                     
+  - Si nats-server no está en PATH: imprimir instrucciones de instalación y     
+  salir con error claro                                                         
+  - Al salir del CLI: terminar el proceso hijo solo si fue lanzado por este     
+  proceso (no si ya existía antes)                                              
+                  
+  ---                                                                           
+  Fase 4 — Contexto y memoria (PR 5)
+                                                                                
+  14. TROGON.md jerárquico
+                                                                                
+  Archivo nuevo: crates/trogon-acp-runner/src/trogon_md.rs                      
+   
+  - Buscar TROGON.md desde cwd hacia la raíz del filesystem (mismo patrón que   
+  Claude Code con CLAUDE.md)
+  - También cargar ~/.config/trogon/TROGON.md como configuración global del     
+  usuario                                                                       
+  - Concatenar todos los encontrados en orden: global → raíz del repo → más
+  específico al directorio actual                                               
+  - Inyectar el resultado en system_prompt al crear o cargar una sesión
+                                                                                
+  ---             
+  15. Auto-compact con threshold 85%                                            
+                                                                                
+  Archivo: crates/trogon-acp-runner/src/agent.rs
+                                                                                
+  Actualmente run_prompt llama a compact_messages incondicionalmente. Cambiar a:
+   
+  let token_estimate = estimate_token_count(&session.messages);                 
+  if token_estimate > TOKEN_BUDGET * 85 / 100 {                                 
+      compact_messages(&mut session).await?;                                    
+  }                                                                             
+                                                                                
+  estimate_token_count usa una heurística de len_bytes / 4 (buena aproximación  
+  para código en inglés/español). TOKEN_BUDGET configurable en SessionState,
+  default 200_000.                                                              
+                  
+  ---
+  Fase 5 — Extensibilidad (PR 6)
+                                                                                
+  16. @mentions de archivos
+                                                                                
+  Archivo: crates/trogon-cli/src/repl.rs
+
+  - Antes de enviar el prompt al agente, escanear el texto en busca de tokens   
+  @<path>
+  - Para cada match: resolver el path relativo a cwd, leer el contenido del     
+  archivo, sustituir @<path> por:                                               
+  [contenido de @<path>]
+  ```path                                                                       
+  <contenido del archivo>
+                                                                                
+  - Si el path no existe, dejar el token sin modificar y advertir al usuario    
+  - Soportar tab-completion del path en rustyline via un Helper personalizado
+                                                                                
+  ---             
+  17. Slash commands                                                            
+                    
+  Archivo: crates/trogon-cli/src/repl.rs
+                                                                                
+  Antes de enviar el prompt, verificar si la línea empieza con /:
+                                                                                
+  ┌─────────────┬───────────────────────────────────────────────────────┐       
+  │   Comando   │                        Acción                         │
+  ├─────────────┼───────────────────────────────────────────────────────┤       
+  │ /clear      │ Limpia historial de mensajes de la sesión via NATS KV │
+  ├─────────────┼───────────────────────────────────────────────────────┤
+  │ /compact    │ Fuerza compactación del contexto ahora                │
+  ├─────────────┼───────────────────────────────────────────────────────┤       
+  │ /help       │ Imprime lista de comandos disponibles                 │
+  ├─────────────┼───────────────────────────────────────────────────────┤       
+  │ /model <id> │ Cambia el modelo usado en la sesión                   │
+  └─────────────┴───────────────────────────────────────────────────────┘       
+   
+  Los comandos no se envían al agente; se ejecutan localmente en el CLI y se    
+  muestra confirmación al usuario.
+                                                                                
+  ---             
+  18. Herramientas paralelas (join_all)
+                                                                                
+  Archivo: crates/trogon-agent-core/src/agent_loop.rs
+                                                                                
+  En execute_tools_streaming, reemplazar el for secuencial:                     
+   
+  // antes (secuencial)                                                         
+  for call in &tool_calls {
+      let result = dispatch_tool(&ctx, &call.name, &call.input).await;
+      ...                                                                       
+  }
+                                                                                
+  // después (paralelo)
+  let futures: Vec<_> = tool_calls.iter()
+      .map(|call| dispatch_tool(&ctx, &call.name, &call.input))                 
+      .collect();
+  let results = futures::future::join_all(futures).await;                       
+                  
+  Restricción: si hay un PermissionChecker interactivo activo, serializar las   
+  llamadas (no preguntar dos cosas simultáneamente al usuario).
+                                                                                
+  ---             
+  19. Bridge stdio↔HTTP para servidores MCP
+                                           
+  Archivo: crates/trogon-cli/src/stdio_mcp_bridge.rs
+                                                                                
+  Problema: StoredMcpServer en trogon-acp-runner explícitamente no soporta      
+  stdio. El bridge resuelve esto en el lado del CLI, sin tocar el servidor:     
+                                                                                
+  - El CLI lanza el proceso MCP stdio como hijo (ej. npx                        
+  @modelcontextprotocol/server-filesystem ./)
+  - Levanta un servidor axum en un puerto local aleatorio que hace proxy        
+  JSON-RPC ↔ stdin/stdout del proceso hijo                                      
+  - Registra el servidor en la sesión como StoredMcpServer::Http { url: 
+  "http://127.0.0.1:<port>" }                                                   
+  - Al terminar el CLI, mata el proceso hijo y libera el puerto
+  - El runner en NATS no sabe nada de stdio; solo ve un servidor MCP HTTP normal
