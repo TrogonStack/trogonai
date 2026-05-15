@@ -1120,11 +1120,38 @@ impl EntityActor for RecallActor {
     }
 }
 
-/// First run: a Scribe actor writes user + assistant messages to the TRANSCRIPTS
-/// stream.  Second run: a RecallActor (with a `NatsTranscriptReader` attached to
-/// the runtime) calls `ctx.recall_entity_history()` and stores the formatted
-/// history block in its state.  The test asserts the recall result contains the
-/// expected message content written in the first run.
+/// Writes transcript messages under the same actor_type as RecallActor so the
+/// recall query (filtered by actor_type + entity_key) finds them.
+struct RecallScribe;
+
+impl EntityActor for RecallScribe {
+    type State = RecallState;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str {
+        "recall-actor" // must match RecallActor's actor_type
+    }
+
+    async fn handle(
+        &mut self,
+        _state: &mut RecallState,
+        ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        ctx.append_user_message("user prompt", None).await.ok();
+        ctx.append_assistant_message("assistant reply", Some(5))
+            .await
+            .ok();
+        Ok(())
+    }
+}
+
+/// First run: RecallScribe writes user + assistant messages to the TRANSCRIPTS
+/// stream under actor_type="recall-actor".  Second run: RecallActor (same
+/// actor_type, with a NatsTranscriptReader attached) calls
+/// `ctx.recall_entity_history()` and stores the result in its state.
+///
+/// Both actors must share the same actor_type so the recall query
+/// (`transcripts.recall-actor.e-recall.>`) finds the entries from the first run.
 #[tokio::test]
 async fn recall_entity_history_returns_past_messages() {
     let (nats, js, _container) = setup().await;
@@ -1138,7 +1165,8 @@ async fn recall_entity_history_returns_past_messages() {
     let transcript_store = TranscriptStore::new(js.clone());
     transcript_store.provision().await.unwrap();
 
-    // First run: Scribe writes "user prompt" + "assistant reply" for entity "e-recall".
+    // First run: RecallScribe writes "user prompt" + "assistant reply" under
+    // actor_type="recall-actor" so the recall query in the second run finds them.
     let runtime = ActorRuntime::new(
         state_store.clone(),
         publisher.clone(),
@@ -1146,7 +1174,10 @@ async fn recall_entity_history_returns_past_messages() {
         registry.clone(),
         js.clone(),
     );
-    runtime.handle_event(&mut Scribe, "e-recall", 0).await.unwrap();
+    runtime
+        .handle_event(&mut RecallScribe, "e-recall", 0)
+        .await
+        .unwrap();
 
     // Second run: RecallActor has a transcript reader — recall_entity_history() must
     // return a formatted block containing the messages from the first run.
