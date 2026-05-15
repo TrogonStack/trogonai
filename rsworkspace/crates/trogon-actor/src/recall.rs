@@ -178,6 +178,45 @@ mod tests {
     }
 
     #[test]
+    fn content_at_exact_limit_is_not_truncated() {
+        let exact = "y".repeat(MAX_CONTENT_CHARS);
+        let entries = vec![msg(Role::User, &exact, 1_000)];
+        let out = format_history(&entries).unwrap();
+        assert!(!out.contains('…'), "content at exact limit must not be truncated");
+        let line = out.lines().find(|l| l.contains("user:")).unwrap();
+        let content_part = line.splitn(2, "user: ").nth(1).unwrap();
+        assert_eq!(content_part.chars().count(), MAX_CONTENT_CHARS);
+    }
+
+    #[test]
+    fn system_and_tool_roles_are_labelled() {
+        let entries = vec![
+            msg(Role::System, "you are helpful", 1_000),
+            msg(Role::Tool, "tool output", 2_000),
+        ];
+        let out = format_history(&entries).unwrap();
+        assert!(out.contains("system: you are helpful"));
+        assert!(out.contains("tool: tool output"));
+    }
+
+    #[test]
+    fn exactly_max_messages_uses_compact_header() {
+        // Exactly MAX_MESSAGES entries → no cap, compact header "(N messages)".
+        let entries: Vec<TranscriptEntry> = (0..MAX_MESSAGES as u64)
+            .map(|i| msg(Role::User, &format!("m-{i}"), i * 1000))
+            .collect();
+        let out = format_history(&entries).unwrap();
+        assert!(
+            out.contains(&format!("## Entity history ({MAX_MESSAGES} messages)")),
+            "exactly MAX_MESSAGES must use compact header; got: {out}"
+        );
+        assert!(
+            !out.contains("showing last"),
+            "compact header must not mention 'showing last'"
+        );
+    }
+
+    #[test]
     fn cap_keeps_latest_messages() {
         // 105 messages: first is labelled "msg-0", last is "msg-104"
         let entries: Vec<TranscriptEntry> = (0..105u64)

@@ -268,6 +268,22 @@ mod tests {
     use trogon_transcript::TranscriptEntry;
 
     #[tokio::test]
+    async fn recall_entity_history_returns_some_when_configured() {
+        let (ctx, _) = ContextBuilder::new("pr", "owner/repo/1")
+            .with_recall_result("## Entity history (1 messages)\n\nuser: hello")
+            .build();
+        let result = ctx.recall_entity_history().await;
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("user: hello"));
+    }
+
+    #[tokio::test]
+    async fn recall_entity_history_returns_none_without_recall_fn() {
+        let (ctx, _) = ContextBuilder::new("pr", "owner/repo/1").build();
+        assert!(ctx.recall_entity_history().await.is_none());
+    }
+
+    #[tokio::test]
     async fn append_user_message_records_entry() {
         let (ctx, entries) = ContextBuilder::new("pr", "owner/repo/1").build();
         ctx.append_user_message("hello", None).await.unwrap();
