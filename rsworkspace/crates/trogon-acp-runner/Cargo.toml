@@ -83,7 +83,7 @@ futures                = "0.3"
 httpmock               = "0.7"
 tempfile               = { workspace = true }
 opentelemetry          = { workspace = true }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 trogon-nats            = { path = "../trogon-nats", features = ["test-support"] }
 trogon-runner-tools    = { path = "../trogon-runner-tools", features = ["test-helpers"] }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }
