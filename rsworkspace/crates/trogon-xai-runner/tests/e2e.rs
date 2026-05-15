@@ -4613,10 +4613,22 @@ async fn no_tools_omits_tools_from_http_request_via_nats() {
             h.expect_n_publishes(2).await;
 
             let call = h.http.last_call().unwrap();
+            // Server-side tools are omitted when none are enabled.
+            // The standard client-side tools (read_file, write_file, …) are
+            // always injected via all_tool_defs() regardless of enabled_tools.
+            let server_side: Vec<_> = call
+                .tools
+                .iter()
+                .filter(|t| matches!(t, trogon_xai_runner::ToolSpec::ServerSide(_)))
+                .collect();
             assert!(
-                call.tools.is_empty(),
-                "tools must be empty when no tools are enabled; got: {:?}",
-                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+                server_side.is_empty(),
+                "no server-side tools must be present when none are enabled; got: {:?}",
+                server_side.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+            assert!(
+                !call.tools.is_empty(),
+                "standard client-side tools must always be present"
             );
         })
         .await;
