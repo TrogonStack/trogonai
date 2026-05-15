@@ -155,6 +155,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to the bash execution helper when a wasm-runtime is available.
     execution_nats: Option<async_nats::Client>,
+    /// HTTP client used by trogon-tools (fetch_url and similar web tools).
+    tool_http_client: reqwest::Client,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier> {
@@ -279,6 +281,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             tenant_id,
             registry: None,
             execution_nats: None,
+            tool_http_client: reqwest::Client::new(),
         }
     }
 
@@ -883,7 +886,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt) = {
+        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -895,6 +898,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 s.last_response_id.clone(),
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
+                s.cwd.clone(),
             )
         };
 
@@ -996,6 +1000,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                     },
                     "required": ["command"]
                 }),
+            });
+        }
+
+        for def in trogon_tools::all_tool_defs() {
+            call_tools.push(ToolSpec::Function {
+                name: def.name,
+                description: def.description,
+                parameters: def.input_schema,
             });
         }
 
@@ -1249,71 +1261,82 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 }
             }
 
-            // Execute any pending client-side bash tool calls, then continue the
+            // Execute any pending client-side tool calls, then continue the
             // outer loop with the results so the model can incorporate the output.
-            let (bash_calls, other_calls): (Vec<_>, Vec<_>) = pending_tool_calls
-                .drain(..)
-                .partition(|(_, name, _)| name == "bash");
-            for (cid, name, _) in other_calls {
-                warn!(session_id, call_id = %cid, tool = %name, "xai: unhandled custom tool call — only bash is supported");
-                let notif = SessionNotification::new(
-                    session_id.clone(),
-                    SessionUpdate::ToolCallUpdate(
-                        ToolCallUpdate::new(
-                            cid,
-                            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
-                        ),
-                    ),
-                );
-                self.notifier.notify(notif).await;
-            }
-            if !bash_calls.is_empty() {
+            if !pending_tool_calls.is_empty() {
                 if tool_rounds >= MAX_TOOL_ROUNDS {
                     warn!(session_id, MAX_TOOL_ROUNDS, "xai: max tool rounds reached");
                     break 'outer StopReason::Cancelled;
                 }
-                if let (Some(nats), Some(resp_id)) = (&self.execution_nats, current_response_id.clone()) {
-                    let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                    let mut outputs: Vec<InputItem> = Vec::with_capacity(bash_calls.len());
-                    for (call_id, _, arguments) in bash_calls {
-                        let in_progress = SessionNotification::new(
-                            session_id.clone(),
-                            SessionUpdate::ToolCall(
-                                ToolCall::new(call_id.clone(), "bash")
-                                    .status(ToolCallStatus::InProgress)
-                                    .kind(ToolKind::Execute),
+                let Some(resp_id) = current_response_id.clone() else {
+                    warn!(
+                        session_id,
+                        pending = pending_tool_calls.len(),
+                        "xai: tool calls pending but no response_id — skipping"
+                    );
+                    pending_tool_calls.clear();
+                    break 'outer inner_stop;
+                };
+
+                let mut outputs: Vec<InputItem> = Vec::with_capacity(pending_tool_calls.len());
+                for (call_id, name, arguments) in pending_tool_calls.drain(..) {
+                    let kind = if name == "bash" { ToolKind::Execute } else { ToolKind::Other };
+                    self.notifier.notify(SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::ToolCall(
+                            ToolCall::new(call_id.clone(), name.clone())
+                                .status(ToolCallStatus::InProgress)
+                                .kind(kind),
+                        ),
+                    )).await;
+
+                    let result = match name.as_str() {
+                        "bash" => {
+                            if let Some(nats) = &self.execution_nats {
+                                let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
+                                execute_bash_via_nats(nats, wasm, &session_id, &arguments).await
+                            } else {
+                                "bash not available: no execution backend configured".to_string()
+                            }
+                        }
+                        _ => {
+                            let ctx = trogon_tools::ToolContext {
+                                proxy_url: String::new(),
+                                cwd: cwd.clone(),
+                                http_client: self.tool_http_client.clone(),
+                            };
+                            let input = serde_json::from_str::<serde_json::Value>(&arguments)
+                                .unwrap_or(serde_json::Value::Null);
+                            trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                        }
+                    };
+
+                    info!(session_id, call_id = %call_id, tool = %name, "xai: tool executed");
+                    self.notifier.notify(SessionNotification::new(
+                        session_id.clone(),
+                        SessionUpdate::ToolCallUpdate(
+                            ToolCallUpdate::new(
+                                call_id.clone(),
+                                ToolCallUpdateFields::new()
+                                    .status(ToolCallStatus::Completed)
+                                    .raw_output(serde_json::Value::String(result.clone())),
                             ),
-                        );
-                        self.notifier.notify(in_progress).await;
-                        let result = execute_bash_via_nats(nats, wasm, &session_id, &arguments).await;
-                        info!(session_id, call_id = %call_id, "xai: bash tool executed");
-                        let completed = SessionNotification::new(
-                            session_id.clone(),
-                            SessionUpdate::ToolCallUpdate(
-                                ToolCallUpdate::new(
-                                    call_id.clone(),
-                                    ToolCallUpdateFields::new()
-                                        .status(ToolCallStatus::Completed)
-                                        .raw_output(serde_json::Value::String(result.clone())),
-                                ),
-                            ),
-                        );
-                        self.notifier.notify(completed).await;
-                        outputs.push(InputItem::function_call_output(call_id, result));
-                    }
-                    current_prev_response_id = Some(resp_id);
-                    current_input = outputs;
-                    current_response_id = None;
-                    tool_rounds += 1;
-                    // Disables the stale-ID retry for this iteration: the ID we
-                    // just set is milliseconds old so it cannot be stale, and even
-                    // if it were, a retry would replay history without the
-                    // function_call_output items — producing a wrong response.
-                    continuation_in_progress = true;
-                    continue 'outer;
-                } else {
-                    warn!(session_id, pending = bash_calls.len(), "xai: bash calls pending but no execution backend — skipping");
+                        ),
+                    )).await;
+
+                    outputs.push(InputItem::function_call_output(call_id, result));
                 }
+
+                current_prev_response_id = Some(resp_id);
+                current_input = outputs;
+                current_response_id = None;
+                tool_rounds += 1;
+                // Disables the stale-ID retry for this iteration: the ID we
+                // just set is milliseconds old so it cannot be stale, and even
+                // if it were, a retry would replay history without the
+                // function_call_output items — producing a wrong response.
+                continuation_in_progress = true;
+                continue 'outer;
             }
 
             break 'outer inner_stop;
