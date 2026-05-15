@@ -26,6 +26,7 @@ const MAX_QUERY_ENTRIES: usize = 10_000;
 /// `TranscriptStore` uses the real `jetstream::Context` directly — it is tested
 /// via integration tests, not unit tests. The write path (used by actors at
 /// runtime) goes through `Session<NatsTranscriptPublisher>` instead.
+#[derive(Clone)]
 pub struct TranscriptStore {
     js: jetstream::Context,
 }

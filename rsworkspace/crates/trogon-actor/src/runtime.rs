@@ -19,9 +19,11 @@ pub const SPAWN_AGENT_TIMEOUT: Duration = Duration::from_secs(30);
 /// waits for the sub-agent's `ActorHost` to post the reply after handling.
 pub const TROGON_REPLY_TO_HEADER: &str = "Trogon-Reply-To";
 
+use trogon_transcript::TranscriptRead;
+
 use crate::{
     actor::EntityActor,
-    context::ActorContext,
+    context::{ActorContext, RecallFn},
     error::{ActorError, SaveError},
     state::{MAX_OCC_RETRIES, StateStore, state_kv_key},
     telemetry::metrics,
@@ -55,6 +57,7 @@ where
     nats: N,
     registry: Registry<R>,
     js: J,
+    transcript_reader: Option<Arc<dyn TranscriptRead>>,
 }
 
 impl<S, P, N, R, J> ActorRuntime<S, P, N, R, J>
@@ -72,7 +75,14 @@ where
             nats,
             registry,
             js,
+            transcript_reader: None,
         }
+    }
+
+    /// Attach a transcript reader so actors can call `ctx.recall_entity_history()`.
+    pub fn with_transcript_reader(mut self, reader: Arc<dyn TranscriptRead>) -> Self {
+        self.transcript_reader = Some(reader);
+        self
     }
 
     /// Borrow the registry — used by [`crate::host::ActorHost`] for registration
@@ -151,6 +161,25 @@ where
             let session_id = session.id().to_string();
 
             // ── 3. Build ActorContext (type-erased closures) ──────────────────
+            let recall_fn: Option<RecallFn> =
+                self.transcript_reader.as_ref().map(|reader| {
+                    let reader = Arc::clone(reader);
+                    let actor_type = A::actor_type().to_string();
+                    let key = entity_key.to_string();
+                    let f: RecallFn = Arc::new(move || {
+                        let reader = Arc::clone(&reader);
+                        let actor_type = actor_type.clone();
+                        let key = key.clone();
+                        Box::pin(async move {
+                            match reader.query_entity(&actor_type, &key).await {
+                                Ok(entries) => crate::recall::format_history(&entries),
+                                Err(_) => None,
+                            }
+                        })
+                    });
+                    f
+                });
+
             let ctx = build_context::<A, P, N, R, J>(
                 entity_key,
                 session_id,
@@ -159,6 +188,7 @@ where
                 self.registry.clone(),
                 self.js.clone(),
                 spawn_depth,
+                recall_fn,
             );
 
             // ── 4. Handle event ───────────────────────────────────────────────
@@ -193,6 +223,7 @@ fn build_context<A, P, N, R, J>(
     registry: Registry<R>,
     js: J,
     spawn_depth: u32,
+    recall_fn: Option<RecallFn>,
 ) -> ActorContext
 where
     A: EntityActor,
@@ -301,6 +332,7 @@ where
         spawn_depth,
         append_fn,
         spawn_fn,
+        recall_fn,
     )
 }
 
@@ -607,6 +639,136 @@ mod tests {
             .handle_event(&mut NoCapActor, "e-1", 0)
             .await
             .unwrap();
+    }
+
+    // ── Recall wiring ─────────────────────────────────────────────────────────
+
+    /// `with_transcript_reader` wires the recall closure: an actor that calls
+    /// `recall_entity_history()` receives the formatted history from the seeded mock.
+    #[tokio::test]
+    async fn with_transcript_reader_wires_recall_fn() {
+        use std::sync::Arc;
+        use trogon_transcript::{
+            TranscriptRead,
+            entry::{Role, TranscriptEntry},
+            reader::mock::MockTranscriptReader,
+        };
+
+        let reader = MockTranscriptReader::new();
+        reader.seed(vec![TranscriptEntry::Message {
+            role: Role::User,
+            content: "seeded message".to_string(),
+            timestamp: 1_778_761_800_000,
+            tokens: None,
+        }]);
+
+        let runtime = make_runtime()
+            .with_transcript_reader(Arc::new(reader) as Arc<dyn TranscriptRead>);
+
+        // Actor captures whatever recall_entity_history() returns.
+        let recall_result: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let recall_result_clone = Arc::clone(&recall_result);
+
+        struct RecallCapture {
+            out: Arc<Mutex<Option<String>>>,
+        }
+        impl EntityActor for RecallCapture {
+            type State = Counter;
+            type Error = std::convert::Infallible;
+            fn actor_type() -> &'static str {
+                "recall-capture"
+            }
+            async fn handle(
+                &mut self,
+                _state: &mut Counter,
+                ctx: &ActorContext,
+            ) -> Result<(), Self::Error> {
+                *self.out.lock().unwrap() = ctx.recall_entity_history().await;
+                Ok(())
+            }
+        }
+
+        runtime
+            .handle_event(
+                &mut RecallCapture {
+                    out: recall_result_clone,
+                },
+                "e-recall",
+                0,
+            )
+            .await
+            .unwrap();
+
+        let result = recall_result.lock().unwrap().clone();
+        assert!(result.is_some(), "recall must return Some when reader has entries");
+        assert!(
+            result.unwrap().contains("seeded message"),
+            "recall result must contain the seeded message text"
+        );
+    }
+
+    /// When the transcript reader returns `Err`, the recall closure silences
+    /// the error and `recall_entity_history()` returns `None`.
+    #[tokio::test]
+    async fn recall_reader_error_is_silenced_to_none() {
+        use std::sync::Arc;
+        use futures_util::future::BoxFuture;
+        use trogon_transcript::{TranscriptRead, TranscriptError, entry::TranscriptEntry};
+
+        struct ErrReader;
+        impl TranscriptRead for ErrReader {
+            fn query_entity<'a>(
+                &'a self,
+                _actor_type: &'a str,
+                _actor_key: &'a str,
+            ) -> BoxFuture<'a, Result<Vec<TranscriptEntry>, TranscriptError>> {
+                Box::pin(std::future::ready(Err(TranscriptError::Stream(
+                    "simulated failure".into(),
+                ))))
+            }
+        }
+
+        let runtime = make_runtime()
+            .with_transcript_reader(Arc::new(ErrReader));
+
+        let recall_result: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let recall_result_clone = Arc::clone(&recall_result);
+
+        struct RecallCapture {
+            out: Arc<Mutex<Option<String>>>,
+        }
+        impl EntityActor for RecallCapture {
+            type State = Counter;
+            type Error = std::convert::Infallible;
+            fn actor_type() -> &'static str {
+                "recall-err"
+            }
+            async fn handle(
+                &mut self,
+                _state: &mut Counter,
+                ctx: &ActorContext,
+            ) -> Result<(), Self::Error> {
+                *self.out.lock().unwrap() = ctx.recall_entity_history().await;
+                Ok(())
+            }
+        }
+
+        runtime
+            .handle_event(
+                &mut RecallCapture {
+                    out: recall_result_clone,
+                },
+                "e-err",
+                0,
+            )
+            .await
+            .unwrap();
+
+        let result = recall_result.lock().unwrap().clone();
+        assert!(
+            result.is_none(),
+            "reader error must be silenced; recall must return None"
+        );
     }
 
     /// Transport failure (subscribe returns error because no stream is

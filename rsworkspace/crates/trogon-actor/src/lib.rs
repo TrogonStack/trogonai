@@ -63,6 +63,7 @@ pub mod context;
 pub mod error;
 pub mod host;
 pub mod inbox;
+pub mod recall;
 pub mod runtime;
 pub mod state;
 pub mod telemetry;
@@ -70,8 +71,10 @@ pub mod telemetry;
 pub use actor::EntityActor;
 pub use context::{ActorContext, MAX_SPAWN_DEPTH};
 pub use error::{ActorError, SaveError};
+pub use recall::format_history;
 pub use runtime::{ActorRuntime, SPAWN_AGENT_TIMEOUT, TROGON_REPLY_TO_HEADER};
 pub use state::{MAX_OCC_RETRIES, StateStore, provision_state, state_kv_key};
+pub use trogon_transcript::TranscriptRead;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use context::test_helpers::ContextBuilder;
