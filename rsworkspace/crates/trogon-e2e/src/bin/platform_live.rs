@@ -27,7 +27,7 @@ use bytes::Bytes;
 use futures_util::StreamExt as _;
 use httpmock::prelude::*;
 use tokio::sync::{RwLock, mpsc};
-use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+use trogon_runner_tools::egress::{EgressAction, EgressPolicy};
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
 use trogon_acp_runner::{
@@ -70,7 +70,11 @@ fn make_agent(base_url: &str) -> AgentLoop {
         model: "claude-test".to_string(),
         max_iterations: 5,
         thinking_budget: None,
-        tool_context: Arc::new(ToolContext { proxy_url: "http://127.0.0.1:1".to_string() }),
+        tool_context: Arc::new(ToolContext {
+            proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: std::env::current_dir().unwrap_or_default().to_string_lossy().to_string(),
+            http_client: reqwest::Client::new(),
+        }),
         memory_owner: None,
         memory_repo: None,
         memory_path: None,

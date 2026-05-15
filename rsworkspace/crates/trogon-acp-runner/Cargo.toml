@@ -35,11 +35,13 @@ tokio         = { version = "1.49.0", features = ["full"] }
 tracing            = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-trogon-agent-core = { path = "../trogon-agent-core" }
-trogon-mcp        = { path = "../trogon-mcp" }
-trogon-nats       = { path = "../trogon-nats" }
-trogon-registry   = { workspace = true }
-trogon-std        = { path = "../trogon-std" }
+trogon-agent-core    = { path = "../trogon-agent-core" }
+trogon-mcp           = { path = "../trogon-mcp" }
+trogon-nats          = { path = "../trogon-nats" }
+trogon-registry      = { workspace = true }
+trogon-runner-tools  = { path = "../trogon-runner-tools" }
+trogon-std           = { path = "../trogon-std" }
+trogon-tools         = { path = "../trogon-tools" }
 
 [features]
 test-helpers = []
@@ -64,11 +66,25 @@ required-features = ["test-helpers"]
 name = "bash_tool_dispatch_integration"
 required-features = ["test-helpers"]
 
+[[test]]
+name = "compactor_threshold_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "nats_todo_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "spawn_agent_integration"
+required-features = ["test-helpers"]
+
 [dev-dependencies]
 futures                = "0.3"
 httpmock               = "0.7"
+tempfile               = { workspace = true }
 opentelemetry          = { workspace = true }
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 trogon-nats            = { path = "../trogon-nats", features = ["test-support"] }
+trogon-runner-tools    = { path = "../trogon-runner-tools", features = ["test-helpers"] }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }
 trogon-registry        = { workspace = true, features = ["test-support"] }

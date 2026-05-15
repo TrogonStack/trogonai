@@ -1,6 +1,7 @@
 pub mod github;
 pub mod linear;
 pub mod slack;
+pub mod spawn_agent;
 
 /// Build the HTML comment marker used for idempotency dedup in PR/issue comments.
 ///
@@ -554,6 +555,7 @@ pub async fn dispatch_tool<H: HttpClient>(
         "get_linear_comments" => linear::get_comments(ctx, input).await,
         "send_slack_message" => slack::send_message(ctx, input).await,
         "read_slack_channel" => slack::read_channel(ctx, input).await,
+        "spawn_agent" => Err("spawn_agent requires a NATS client — dispatch via trogon-acp-runner".to_string()),
         unknown => Err(format!("Unknown tool: {unknown}")),
     };
     result.unwrap_or_else(|e| format!("Tool error: {e}"))
@@ -730,6 +732,14 @@ mod tests {
         assert!(!result.contains("Unknown tool"));
     }
 
+    #[tokio::test]
+    async fn dispatch_spawn_agent_returns_nats_required_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "must be routed, got: {result}");
+    }
+
     // ── idempotency_marker ────────────────────────────────────────────────────
 
     /// Keys without `--` must be embedded verbatim — no substitution.
@@ -859,6 +869,7 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         ),
     ];
     tools.extend(slack::slack_tool_defs());
+    tools.push(spawn_agent::tool_def());
     tools
 }
 
@@ -885,13 +896,14 @@ mod catalog_tests {
             "update_linear_issue",
             "send_slack_message",
             "read_slack_channel",
+            "spawn_agent",
         ] {
             assert!(names.contains(expected), "missing tool: {expected}");
         }
     }
 
     #[test]
-    fn all_tool_defs_has_fourteen_entries() {
-        assert_eq!(all_tool_defs().len(), 14);
+    fn all_tool_defs_has_fifteen_entries() {
+        assert_eq!(all_tool_defs().len(), 15);
     }
 }

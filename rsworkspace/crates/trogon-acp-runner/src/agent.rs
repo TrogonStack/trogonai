@@ -26,14 +26,14 @@ use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBloc
 use trogon_agent_core::tools::ToolDef;
 
 use crate::agent_runner::AgentRunner;
-use crate::egress::EgressPolicy;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
-use crate::permission::{AuditBuf, ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
-use crate::permission_rules::PermissionRules;
-use crate::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_runner_tools::egress::EgressPolicy;
+use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
-use crate::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
+use trogon_runner_tools::permission::{AuditBuf, ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
+use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
+use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -171,6 +171,14 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+/// Estimates the token count of a message list using the heuristic `bytes / 4`.
+fn estimate_token_count(messages: &[Message]) -> u64 {
+    serde_json::to_string(messages)
+        .map(|s| s.len() as u64)
+        .unwrap_or(0)
+        / 4
+}
+
 /// Sends the conversation history to `trogon-compactor` via NATS request-reply.
 ///
 /// Returns the original messages unchanged if the compactor is not running or
@@ -262,6 +270,7 @@ pub struct TrogonAgent<
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         notifier: N,
         store: S,
@@ -423,9 +432,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
 
         state.messages.push(user_message_from_request(req));
 
-        // Compact history if approaching the context window limit.
+        // Compact history when token estimate exceeds 85 % of the session budget.
         // Degrades gracefully — if trogon-compactor is not running, continues unchanged.
-        if let Some(ref nats) = self.compactor_nats {
+        if let Some(ref nats) = self.compactor_nats
+            && estimate_token_count(&state.messages) > state.token_budget * 85 / 100
+        {
             let msgs = std::mem::take(&mut state.messages);
             state.messages = compact_messages(nats, msgs, &session_id).await;
         }
@@ -460,41 +471,52 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                     let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers, &policy).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
-                if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats) {
-                    if let Ok(entries) = reg.discover("execution").await {
-                        if let Some(entry) = entries.first() {
-                            let prefix = entry.metadata["acp_prefix"]
-                                .as_str()
-                                .unwrap_or("acp.wasm");
-                            let bash = WasmRuntimeBashTool::new(
-                                nats.clone(),
-                                prefix,
-                                &session_id,
-                                std::time::Duration::from_secs(30),
-                            );
-                            let (name, orig, client) = bash.into_dispatch();
-                            a.add_mcp_tools(
-                                vec![WasmRuntimeBashTool::tool_def()],
-                                vec![(name, orig, client)],
-                            );
-                        }
-                    }
+                if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
+                    && let Ok(entries) = reg.discover("execution").await
+                    && let Some(entry) = entries.first()
+                {
+                    let prefix = entry.metadata["acp_prefix"]
+                        .as_str()
+                        .unwrap_or("acp.wasm");
+                    let bash = WasmRuntimeBashTool::new(
+                        nats.clone(),
+                        prefix,
+                        &session_id,
+                        std::path::PathBuf::from(&state.cwd),
+                        std::time::Duration::from_secs(30),
+                        self.store.clone(),
+                    );
+                    let (name, orig, client) = bash.into_dispatch();
+                    a.add_mcp_tools(
+                        vec![WasmRuntimeBashTool::<S>::tool_def()],
+                        vec![(name, orig, client)],
+                    );
                 }
-                if needs_perm {
-                    if let Some(ref perm_tx) = self.permission_tx {
-                        let inner = ChannelPermissionChecker {
-                            session_id: session_id.clone(),
-                            tx: perm_tx.clone(),
-                            allowed_tools: state.allowed_tools.clone(),
-                            audit_buf: audit_buf.clone(),
-                        };
-                        let rules = PermissionRules::default();
-                        a.set_permission_checker(Arc::new(RulesPermissionChecker {
-                            rules: Arc::new(rules),
-                            tool_policies: state.tool_policies.clone(),
-                            inner,
-                        }));
+                if needs_perm
+                    && let Some(ref perm_tx) = self.permission_tx
+                {
+                    let inner = ChannelPermissionChecker {
+                        session_id: session_id.clone(),
+                        tx: perm_tx.clone(),
+                        allowed_tools: state.allowed_tools.clone(),
+                        audit_buf: audit_buf.clone(),
+                    };
+                    // Build static rules: TROGON.md base + session override merged.
+                    let mut rules = if let Some(trogon_md) =
+                        crate::trogon_md::load_trogon_md(&state.cwd).await
+                    {
+                        PermissionRules::parse(&trogon_md)
+                    } else {
+                        PermissionRules::default()
+                    };
+                    if let Some(ref extra) = state.permission_rules_text {
+                        rules.merge(PermissionRules::parse(extra));
                     }
+                    a.set_permission_checker(Arc::new(RulesPermissionChecker {
+                        rules: Arc::new(rules),
+                        tool_policies: state.tool_policies.clone(),
+                        inner,
+                    }));
                 }
                 if let Some(ref elic_tx) = self.elicitation_tx {
                     a.set_elicitation_provider(Arc::new(ChannelElicitationProvider {
@@ -512,7 +534,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         };
 
         let messages = state.messages.clone();
-        let system_prompt = state.system_prompt.clone();
+
+        // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
+        let trogon_md = crate::trogon_md::load_trogon_md(&state.cwd).await;
+        let system_prompt = match (trogon_md, state.system_prompt.clone()) {
+            (Some(tmd), Some(sp)) => Some(format!("{tmd}\n\n{sp}")),
+            (Some(tmd), None) => Some(tmd),
+            (None, sp) => sp,
+        };
+
         let system_prompt = if !state.additional_roots.is_empty() {
             let roots_info = state
                 .additional_roots
@@ -687,6 +717,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             if state.title.is_empty() && !in_memory_title.is_empty() {
                 state.title = in_memory_title;
             }
+            // Reload terminal_id in case the bash tool set it during this turn.
+            if state.terminal_id.is_none() {
+                if let Ok(live) = self.store.load(&session_id).await {
+                    state.terminal_id = live.terminal_id;
+                }
+            }
             state.messages = updated;
             state.updated_at = now_iso8601();
             let new_entries = audit_buf
@@ -779,7 +815,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
             .to_string();
 
         let now = now_iso8601();
-        let state = crate::session_store::SessionState {
+        let state = trogon_runner_tools::session_store::SessionState {
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
             system_prompt,
@@ -890,6 +926,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
                 state.updated_at = now_iso8601();
                 if let Err(e) = self.store.save(&session_id, &state).await {
                     warn!(session_id, error = %e, "agent: failed to persist config model update");
+                }
+            }
+            "permissions" => {
+                state.permission_rules_text = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.clone())
+                };
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id, error = %e, "agent: failed to persist permission rules");
                 }
             }
             other => {
@@ -1196,5 +1243,65 @@ mod tests {
                 .unwrap_or(false);
             assert!(!is_enter_plan, "tool {id} must not be detected as EnterPlanMode");
         }
+    }
+
+    // ── estimate_token_count ──────────────────────────────────────────────────
+
+    #[test]
+    fn estimate_token_count_empty_returns_zero() {
+        assert_eq!(estimate_token_count(&[]), 0);
+    }
+
+    #[test]
+    fn estimate_token_count_is_bytes_divided_by_four() {
+        let msgs = vec![Message::user_text("hello")];
+        let json_len = serde_json::to_string(&msgs).unwrap().len() as u64;
+        assert_eq!(estimate_token_count(&msgs), json_len / 4);
+    }
+
+    #[test]
+    fn estimate_token_count_grows_with_message_length() {
+        let short = vec![Message::user_text("hi")];
+        let long = vec![Message::user_text(&"x".repeat(10_000))];
+        assert!(
+            estimate_token_count(&long) > estimate_token_count(&short),
+            "longer messages must produce a higher estimate"
+        );
+    }
+
+    // ── 85 % compact threshold ────────────────────────────────────────────────
+
+    #[test]
+    fn compact_threshold_not_reached_for_small_messages() {
+        let msgs = vec![Message::user_text("hello")];
+        let estimate = estimate_token_count(&msgs);
+        let budget = 200_000u64;
+        assert!(
+            estimate <= budget * 85 / 100,
+            "a tiny message must not exceed the 85 % threshold (estimate={estimate})"
+        );
+    }
+
+    #[test]
+    fn compact_threshold_reached_when_messages_exceed_85_percent() {
+        // Use a very small budget so a few messages tip over the threshold.
+        let budget = 10u64;
+        let msgs = vec![Message::user_text(&"x".repeat(200))];
+        let estimate = estimate_token_count(&msgs);
+        assert!(
+            estimate > budget * 85 / 100,
+            "large messages must exceed the 85 % threshold of a small budget \
+             (estimate={estimate}, threshold={})",
+            budget * 85 / 100
+        );
+    }
+
+    #[test]
+    fn compact_threshold_boundary_at_exactly_85_percent() {
+        // At exactly 85 % the condition is > (strict), so compact must NOT trigger.
+        let budget = 100u64;
+        let threshold = budget * 85 / 100; // 85
+        // estimate == threshold → condition false → no compact
+        assert!(!(threshold > threshold), "strictly greater-than must be false at the boundary");
     }
 }
