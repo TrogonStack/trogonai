@@ -28,6 +28,7 @@ fn dummy_ctx() -> ToolContext {
         String::new(),
         String::new(),
         String::new(),
+        String::new(),
     )
 }
 
@@ -36,6 +37,7 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         proxy_url.to_string(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         "tok_linear_prod_test01".to_string(),
         String::new(),
@@ -334,6 +336,7 @@ async fn update_linear_issue_empty_patch_still_sends_request() {
     let ctx = ToolContext::new(
         reqwest::Client::new(),
         server.base_url(),
+        String::new(),
         String::new(),
         "tok_linear_prod_test01".to_string(),
         String::new(),

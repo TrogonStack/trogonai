@@ -193,6 +193,7 @@ async fn start_with_options(
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         mock_server.base_url(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         "tok_linear_prod_test01".to_string(),
         String::new(),
@@ -1923,6 +1924,7 @@ async fn start_with_compactor_nats() -> (TestEnv, async_nats::Client) {
     let tool_ctx = Arc::new(ToolContext::new(
         http.clone(),
         mock_server.base_url(),
+        String::new(),
         "tok_g".to_string(),
         "tok_l".to_string(),
         String::new(),

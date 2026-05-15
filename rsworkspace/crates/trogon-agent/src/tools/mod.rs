@@ -379,6 +379,7 @@ pub mod mock {
             Self {
                 http_client: MockHttpClient::new(),
                 proxy_url: proxy_url.into(),
+                cwd: String::new(),
                 github_token: github_token.into(),
                 linear_token: linear_token.into(),
                 slack_token: slack_token.into(),
@@ -405,6 +406,8 @@ pub struct ToolContext<H = reqwest::Client> {
     pub http_client: H,
     /// Base URL of the running `trogon-secret-proxy`.
     pub proxy_url: String,
+    /// Working directory for the session — filesystem tools resolve paths relative to this.
+    pub cwd: String,
     /// Opaque proxy token for the GitHub API.
     pub github_token: String,
     /// Opaque proxy token for the Linear API.
@@ -419,6 +422,7 @@ impl ToolContext<reqwest::Client> {
     pub fn new(
         http_client: reqwest::Client,
         proxy_url: String,
+        cwd: String,
         github_token: String,
         linear_token: String,
         slack_token: String,
@@ -427,6 +431,7 @@ impl ToolContext<reqwest::Client> {
         Self {
             http_client,
             proxy_url,
+            cwd,
             github_token,
             linear_token,
             slack_token,
@@ -548,6 +553,7 @@ pub async fn dispatch_tool<H: HttpClient>(
         "update_file" => github::update_file(ctx, input).await,
         "create_pull_request" => github::create_pull_request(ctx, input).await,
         "post_pr_comment" => github::post_pr_comment(ctx, input).await,
+        "post_pr_review" => github::post_pr_review(ctx, input).await,
         "request_reviewers" => github::request_reviewers(ctx, input).await,
         "get_linear_issue" => linear::get_issue(ctx, input).await,
         "update_linear_issue" => linear::update_issue(ctx, input).await,
@@ -646,6 +652,20 @@ mod tests {
         assert!(!result.contains("Unknown tool"));
     }
 
+    /// `post_pr_review` is routed and returns a Tool error when inputs are missing.
+    #[tokio::test]
+    async fn dispatch_post_pr_review_routes_correctly() {
+        let ctx = ToolContext::for_test(
+            "http://localhost:8080",
+            "tok_github_prod_test01",
+            "",
+            "",
+        );
+        let result = dispatch_tool(&ctx, "post_pr_review", &json!({})).await;
+        assert!(result.starts_with("Tool error:"), "got: {result}");
+        assert!(!result.contains("Unknown tool"));
+    }
+
     /// `request_reviewers` is routed and returns a Tool error when inputs are missing.
     #[tokio::test]
     async fn dispatch_request_reviewers_routes_correctly() {
@@ -722,6 +742,28 @@ mod tests {
         let result = dispatch_tool(&ctx, "update_linear_issue", &json!({})).await;
         assert!(result.starts_with("Tool error:"), "got: {result}");
         assert!(!result.contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_spawn_agent_returns_helpful_error() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "spawn_agent", &json!({})).await;
+        assert!(result.contains("trogon-acp-runner"), "got: {result}");
+        assert!(!result.contains("Unknown tool"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_read_file_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "read_file", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "read_file should delegate to agent-core, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_git_status_delegates_to_agent_core() {
+        let ctx = ToolContext::for_test("http://localhost:8080", "", "", "");
+        let result = dispatch_tool(&ctx, "git_status", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "git_status should delegate to agent-core, got: {result}");
     }
 
     #[tokio::test]

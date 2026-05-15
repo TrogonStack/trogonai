@@ -39,7 +39,7 @@ trogon-datadog      = { path = "../trogon-datadog" }
 trogon-incidentio   = { path = "../trogon-incidentio" }
 httpmock            = "0.7"
 tokio               = { version = "1.49.0", features = ["full"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 axum                = "0.8"
 reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 hmac                = "0.12"

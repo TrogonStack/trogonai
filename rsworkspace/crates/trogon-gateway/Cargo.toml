@@ -37,7 +37,7 @@ trogon-std = { workspace = true, features = ["clap", "telemetry-http"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
-testcontainers-modules = { version = "0.8", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 futures-util = { workspace = true }
 tower = "0.5"
 hmac = "0.12"
