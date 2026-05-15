@@ -19,9 +19,11 @@ pub const SPAWN_AGENT_TIMEOUT: Duration = Duration::from_secs(30);
 /// waits for the sub-agent's `ActorHost` to post the reply after handling.
 pub const TROGON_REPLY_TO_HEADER: &str = "Trogon-Reply-To";
 
+use trogon_transcript::TranscriptRead;
+
 use crate::{
     actor::EntityActor,
-    context::ActorContext,
+    context::{ActorContext, RecallFn},
     error::{ActorError, SaveError},
     state::{MAX_OCC_RETRIES, StateStore, state_kv_key},
     telemetry::metrics,
@@ -55,6 +57,7 @@ where
     nats: N,
     registry: Registry<R>,
     js: J,
+    transcript_reader: Option<Arc<dyn TranscriptRead>>,
 }
 
 impl<S, P, N, R, J> ActorRuntime<S, P, N, R, J>
@@ -72,7 +75,14 @@ where
             nats,
             registry,
             js,
+            transcript_reader: None,
         }
+    }
+
+    /// Attach a transcript reader so actors can call `ctx.recall_entity_history()`.
+    pub fn with_transcript_reader(mut self, reader: Arc<dyn TranscriptRead>) -> Self {
+        self.transcript_reader = Some(reader);
+        self
     }
 
     /// Borrow the registry — used by [`crate::host::ActorHost`] for registration
@@ -151,6 +161,25 @@ where
             let session_id = session.id().to_string();
 
             // ── 3. Build ActorContext (type-erased closures) ──────────────────
+            let recall_fn: Option<RecallFn> =
+                self.transcript_reader.as_ref().map(|reader| {
+                    let reader = Arc::clone(reader);
+                    let actor_type = A::actor_type().to_string();
+                    let key = entity_key.to_string();
+                    let f: RecallFn = Arc::new(move || {
+                        let reader = Arc::clone(&reader);
+                        let actor_type = actor_type.clone();
+                        let key = key.clone();
+                        Box::pin(async move {
+                            match reader.query_entity(&actor_type, &key).await {
+                                Ok(entries) => crate::recall::format_history(&entries),
+                                Err(_) => None,
+                            }
+                        })
+                    });
+                    f
+                });
+
             let ctx = build_context::<A, P, N, R, J>(
                 entity_key,
                 session_id,
@@ -159,6 +188,7 @@ where
                 self.registry.clone(),
                 self.js.clone(),
                 spawn_depth,
+                recall_fn,
             );
 
             // ── 4. Handle event ───────────────────────────────────────────────
@@ -193,6 +223,7 @@ fn build_context<A, P, N, R, J>(
     registry: Registry<R>,
     js: J,
     spawn_depth: u32,
+    recall_fn: Option<RecallFn>,
 ) -> ActorContext
 where
     A: EntityActor,
@@ -301,6 +332,7 @@ where
         spawn_depth,
         append_fn,
         spawn_fn,
+        recall_fn,
     )
 }
 

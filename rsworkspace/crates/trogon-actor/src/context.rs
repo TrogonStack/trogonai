@@ -14,13 +14,15 @@ use crate::error::ActorError;
 /// unbounded recursion.
 pub const MAX_SPAWN_DEPTH: u32 = 5;
 
-// Type aliases for the two injected operations.
+// Type aliases for the three injected operations.
 type AppendFn =
     Arc<dyn Fn(TranscriptEntry) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 // SpawnFn carries the *next* depth (current + 1) so it can embed it in the
 // NATS request headers for the child actor to read.
 type SpawnFn =
     Arc<dyn Fn(String, Bytes, u32) -> BoxFuture<'static, Result<Bytes, String>> + Send + Sync>;
+// RecallFn fetches and formats the entity's past transcript for the current actor.
+pub(crate) type RecallFn = Arc<dyn Fn() -> BoxFuture<'static, Option<String>> + Send + Sync>;
 
 /// Passed to every [`crate::EntityActor::handle`] invocation.
 ///
@@ -48,10 +50,11 @@ pub struct ActorContext {
     pub spawn_depth: u32,
     append_fn: AppendFn,
     spawn_fn: SpawnFn,
+    recall_fn: Option<RecallFn>,
 }
 
 impl ActorContext {
-    /// Construct a context by injecting the append and spawn functions.
+    /// Construct a context by injecting the append, spawn, and recall functions.
     ///
     /// Called by the runtime — actor implementors don't construct this directly.
     pub fn new(
@@ -61,6 +64,7 @@ impl ActorContext {
         spawn_depth: u32,
         append_fn: AppendFn,
         spawn_fn: SpawnFn,
+        recall_fn: Option<RecallFn>,
     ) -> Self {
         Self {
             entity_key: entity_key.into(),
@@ -69,6 +73,7 @@ impl ActorContext {
             spawn_depth,
             append_fn,
             spawn_fn,
+            recall_fn,
         }
     }
 
@@ -160,6 +165,21 @@ impl ActorContext {
             .await
             .map_err(ActorError::SpawnFailed)
     }
+
+    // ── Entity history recall ─────────────────────────────────────────────────
+
+    /// Return a formatted block of past transcript messages for this entity, or
+    /// `None` if no transcript reader is configured or no prior messages exist.
+    ///
+    /// Call this early in `handle()` — before writing new transcript entries —
+    /// and prepend the result to your LLM prompt so the model has context from
+    /// previous sessions.
+    pub async fn recall_entity_history(&self) -> Option<String> {
+        match &self.recall_fn {
+            Some(f) => f().await,
+            None => None,
+        }
+    }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -175,6 +195,7 @@ pub mod test_helpers {
         entity_key: String,
         actor_type: String,
         spawn_response: Bytes,
+        recall_result: Option<String>,
     }
 
     impl ContextBuilder {
@@ -183,11 +204,18 @@ pub mod test_helpers {
                 actor_type: actor_type.into(),
                 entity_key: entity_key.into(),
                 spawn_response: Bytes::new(),
+                recall_result: None,
             }
         }
 
         pub fn with_spawn_response(mut self, response: impl Into<Bytes>) -> Self {
             self.spawn_response = response.into();
+            self
+        }
+
+        /// Configure the fixed string that `recall_entity_history()` will return.
+        pub fn with_recall_result(mut self, result: impl Into<String>) -> Self {
+            self.recall_result = Some(result.into());
             self
         }
 
@@ -211,6 +239,14 @@ pub mod test_helpers {
                 Box::pin(async move { Ok(resp) })
             });
 
+            let recall_fn: Option<RecallFn> = self.recall_result.map(|s| {
+                let result: RecallFn = Arc::new(move || {
+                    let s = s.clone();
+                    Box::pin(async move { Some(s) })
+                });
+                result
+            });
+
             let ctx = ActorContext::new(
                 self.entity_key,
                 self.actor_type,
@@ -218,6 +254,7 @@ pub mod test_helpers {
                 0, // spawn_depth: top-level test context
                 append_fn,
                 spawn_fn,
+                recall_fn,
             );
 
             (ctx, entries)
