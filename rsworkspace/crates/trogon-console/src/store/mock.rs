@@ -27,7 +27,7 @@ macro_rules! fail_if {
 #[derive(Clone, Default)]
 pub struct MockAgentStore {
     agents: Arc<Mutex<HashMap<String, AgentDefinition>>>,
-    versions: Arc<Mutex<HashMap<String, Vec<AgentVersion>>>>,
+    versions: Arc<Mutex<HashMap<String, Vec<AgentDefinition>>>>,
     should_fail: bool,
     should_fail_put: bool,
 }
@@ -87,17 +87,12 @@ impl AgentRepository for MockAgentStore {
         if self.should_fail_put {
             return Box::pin(ready(Err("simulated put error".to_string())));
         }
-        let ver = AgentVersion {
-            version: agent.version,
-            updated_at: agent.updated_at.clone(),
-            model_id: agent.model.id.clone(),
-        };
         self.versions
             .lock()
             .unwrap()
             .entry(agent.id.clone())
             .or_default()
-            .push(ver);
+            .push(agent.clone());
         self.agents
             .lock()
             .unwrap()
@@ -121,15 +116,40 @@ impl AgentRepository for MockAgentStore {
         Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>,
     > {
         fail_if!(self);
-        let mut versions = self
+        let defs = self
             .versions
             .lock()
             .unwrap()
             .get(agent_id)
             .cloned()
             .unwrap_or_default();
+        let mut versions: Vec<AgentVersion> = defs
+            .into_iter()
+            .map(|def| AgentVersion {
+                version: def.version,
+                updated_at: def.updated_at,
+                model_id: def.model.id,
+            })
+            .collect();
         versions.sort_by_key(|v| v.version);
         Box::pin(ready(Ok(versions)))
+    }
+
+    fn get_version<'a>(
+        &'a self,
+        agent_id: &'a str,
+        version: u32,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>,
+    > {
+        fail_if!(self);
+        let result = self
+            .versions
+            .lock()
+            .unwrap()
+            .get(agent_id)
+            .and_then(|defs| defs.iter().find(|d| d.version == version).cloned());
+        Box::pin(ready(Ok(result)))
     }
 }
 

@@ -62,20 +62,14 @@ impl AgentStore {
     pub async fn put(&self, agent: &AgentDefinition) -> Result<(), String> {
         let bytes = serde_json::to_vec(agent).expect("AgentDefinition serialization");
         self.kv
-            .put(&agent.id, Bytes::from(bytes))
+            .put(&agent.id, Bytes::from(bytes.clone()))
             .await
             .map_err(|e| e.to_string())?;
 
-        // Record version snapshot
+        // Record full definition as version snapshot
         let version_key = format!("{}.v{}", agent.id, agent.version);
-        let version = AgentVersion {
-            version: agent.version,
-            updated_at: agent.updated_at.clone(),
-            model_id: agent.model.id.clone(),
-        };
-        let vbytes = serde_json::to_vec(&version).expect("AgentVersion serialization");
         self.versions_kv
-            .put(&version_key, Bytes::from(vbytes))
+            .put(&version_key, Bytes::from(bytes))
             .await
             .map_err(|e| e.to_string())?;
 
@@ -84,6 +78,18 @@ impl AgentStore {
 
     pub async fn delete(&self, id: &str) -> Result<(), String> {
         self.kv.delete(id).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_version(
+        &self,
+        agent_id: &str,
+        version: u32,
+    ) -> Result<Option<AgentDefinition>, String> {
+        let key = format!("{agent_id}.v{version}");
+        match self.versions_kv.get(&key).await.map_err(|e| e.to_string())? {
+            None => Ok(None),
+            Some(bytes) => Ok(serde_json::from_slice::<AgentDefinition>(&bytes).ok()),
+        }
     }
 
     pub async fn list_versions(&self, agent_id: &str) -> Result<Vec<AgentVersion>, String> {
@@ -100,9 +106,13 @@ impl AgentStore {
                 .get(&key)
                 .await
                 .map_err(|e| e.to_string())?
-                && let Ok(v) = serde_json::from_slice::<AgentVersion>(&bytes)
+                && let Ok(def) = serde_json::from_slice::<AgentDefinition>(&bytes)
             {
-                versions.push(v);
+                versions.push(AgentVersion {
+                    version: def.version,
+                    updated_at: def.updated_at,
+                    model_id: def.model.id,
+                });
             }
         }
         versions.sort_by_key(|v| v.version);
@@ -145,5 +155,15 @@ impl AgentRepository for AgentStore {
         Box<dyn std::future::Future<Output = Result<Vec<AgentVersion>, String>> + Send + 'a>,
     > {
         Box::pin(async move { self.list_versions(agent_id).await })
+    }
+
+    fn get_version<'a>(
+        &'a self,
+        agent_id: &'a str,
+        version: u32,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Option<AgentDefinition>, String>> + Send + 'a>,
+    > {
+        Box::pin(async move { self.get_version(agent_id, version).await })
     }
 }

@@ -500,6 +500,62 @@ async fn empty_session_has_idle_status_and_zero_counts() {
     assert_eq!(s["output_tokens"], 0);
 }
 
+// ── Rollback contract: CONSOLE_AGENTS after rollback ─────────────────────────
+
+/// After POST /agents/{id}/rollback/{version}, CONSOLE_AGENTS reflects the
+/// system_prompt from the target version snapshot.
+#[tokio::test]
+async fn rollback_writes_correct_system_prompt_to_kv() {
+    let env = start().await;
+
+    // Create agent with v1 system_prompt
+    let created: Value = env
+        .client
+        .post(format!("{}/agents", env.base_url))
+        .json(&serde_json::json!({
+            "name": "Rollback Agent",
+            "description": "",
+            "model": { "id": "claude-opus-4-7" },
+            "system_prompt": "v1 prompt"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let agent_id = created["id"].as_str().unwrap();
+
+    // Update to v2 with bad prompt
+    env.client
+        .put(format!("{}/agents/{agent_id}", env.base_url))
+        .json(&serde_json::json!({ "system_prompt": "bad prompt" }))
+        .send()
+        .await
+        .unwrap();
+
+    // Rollback to v1
+    let rolled: Value = env
+        .client
+        .post(format!("{}/agents/{agent_id}/rollback/1", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(rolled["system_prompt"], "v1 prompt");
+    assert_eq!(rolled["version"], 3);
+
+    // Verify CONSOLE_AGENTS KV reflects the rollback
+    let entry = kv_get_json(&env.js, "CONSOLE_AGENTS", agent_id).await;
+    assert_eq!(
+        entry["system_prompt"], "v1 prompt",
+        "CONSOLE_AGENTS must reflect rolled-back system_prompt: {entry}"
+    );
+    assert_eq!(entry["version"], 3);
+}
+
 /// GET /sessions lists all sessions regardless of tenant.
 #[tokio::test]
 async fn list_sessions_returns_all_agent_written_sessions() {
@@ -531,4 +587,167 @@ async fn list_sessions_returns_all_agent_written_sessions() {
         .unwrap();
 
     assert_eq!(sessions.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn list_versions_for_deleted_agent_returns_404() {
+    let env = start().await;
+
+    let agent: Value = env
+        .client
+        .post(format!("{}/agents", env.base_url))
+        .json(&serde_json::json!({
+            "name": "Agent", "description": "", "model": { "id": "m" }, "system_prompt": "s"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = agent["id"].as_str().unwrap();
+
+    env.client
+        .delete(format!("{}/agents/{id}", env.base_url))
+        .send()
+        .await
+        .unwrap();
+
+    let status = env
+        .client
+        .get(format!("{}/agents/{id}/versions", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn get_version_for_deleted_agent_returns_404() {
+    let env = start().await;
+
+    let agent: Value = env
+        .client
+        .post(format!("{}/agents", env.base_url))
+        .json(&serde_json::json!({
+            "name": "Agent", "description": "", "model": { "id": "m" }, "system_prompt": "s"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = agent["id"].as_str().unwrap();
+
+    env.client
+        .delete(format!("{}/agents/{id}", env.base_url))
+        .send()
+        .await
+        .unwrap();
+
+    let status = env
+        .client
+        .get(format!("{}/agents/{id}/versions/1", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn list_versions_returns_summary_for_each_version() {
+    let env = start().await;
+
+    let agent: Value = env
+        .client
+        .post(format!("{}/agents", env.base_url))
+        .json(&serde_json::json!({
+            "name": "Agent", "description": "", "model": { "id": "claude-3" }, "system_prompt": "v1"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = agent["id"].as_str().unwrap();
+
+    env.client
+        .put(format!("{}/agents/{id}", env.base_url))
+        .json(&serde_json::json!({ "system_prompt": "v2" }))
+        .send()
+        .await
+        .unwrap();
+
+    let versions: Value = env
+        .client
+        .get(format!("{}/agents/{id}/versions", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let arr = versions.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["version"], 1);
+    assert_eq!(arr[0]["model_id"], "claude-3");
+    assert_eq!(arr[1]["version"], 2);
+    assert_eq!(arr[1]["model_id"], "claude-3");
+}
+
+#[tokio::test]
+async fn get_version_returns_full_definition_with_correct_system_prompt() {
+    let env = start().await;
+
+    let agent: Value = env
+        .client
+        .post(format!("{}/agents", env.base_url))
+        .json(&serde_json::json!({
+            "name": "Agent", "description": "", "model": { "id": "m" }, "system_prompt": "original"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = agent["id"].as_str().unwrap();
+
+    env.client
+        .put(format!("{}/agents/{id}", env.base_url))
+        .json(&serde_json::json!({ "system_prompt": "updated" }))
+        .send()
+        .await
+        .unwrap();
+
+    let snap: Value = env
+        .client
+        .get(format!("{}/agents/{id}/versions/1", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(snap["version"], 1);
+    assert_eq!(snap["system_prompt"], "original");
+
+    let snap2: Value = env
+        .client
+        .get(format!("{}/agents/{id}/versions/2", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(snap2["version"], 2);
+    assert_eq!(snap2["system_prompt"], "updated");
 }
