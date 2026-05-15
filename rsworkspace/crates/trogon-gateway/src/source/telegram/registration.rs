@@ -316,7 +316,10 @@ mod tests {
             webhook_secret: TelegramWebhookSecret::new("webhook-secret").unwrap(),
             registration: Some(TelegramWebhookRegistrationConfig {
                 bot_token: TelegramBotToken::new(TEST_BOT_TOKEN).unwrap(),
-                public_webhook_url: TelegramPublicWebhookUrl::new("https://example.com/telegram/webhook").unwrap(),
+                public_webhook_url: TelegramPublicWebhookUrl::new(
+                    "https://example.com/sources/telegram/primary/webhook",
+                )
+                .unwrap(),
             }),
             subject_prefix: NatsToken::new("telegram").unwrap(),
             stream_name: NatsToken::new("TELEGRAM").unwrap(),
@@ -398,7 +401,7 @@ mod tests {
         assert_eq!(
             request.body,
             json!({
-                "url": "https://example.com/telegram/webhook",
+                "url": "https://example.com/sources/telegram/primary/webhook",
                 "secret_token": "webhook-secret",
             })
         );
@@ -515,7 +518,7 @@ mod tests {
             "http://not a valid url",
             &SetWebhook {
                 bot_token: TEST_BOT_TOKEN.to_string(),
-                public_webhook_url: "https://example.com/telegram/webhook".to_string(),
+                public_webhook_url: "https://example.com/sources/telegram/primary/webhook".to_string(),
                 webhook_secret: "webhook-secret".to_string(),
             },
         )
