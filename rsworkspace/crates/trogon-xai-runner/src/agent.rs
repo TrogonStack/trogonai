@@ -5349,10 +5349,12 @@ mod tests {
 
     #[tokio::test]
     async fn custom_tool_notifier_kind() {
-        // ToolCall(InProgress) for a non-bash tool must carry ToolKind::Other.
+        // ToolCall(InProgress) for a non-bash tool must carry ToolKind::Other;
+        // for bash it must carry ToolKind::Execute.
         let agent = make_agent();
         agent.test_insert_session("ct2", "/tmp", None).await;
 
+        // One response with both tool types so we verify both kinds in one prompt.
         agent.client.push_response(vec![
             XaiEvent::ResponseId { id: "r2".to_string() },
             XaiEvent::FunctionCall {
@@ -5360,30 +5362,48 @@ mod tests {
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"/tmp/nonexistent.txt"}"#.to_string(),
             },
+            XaiEvent::FunctionCall {
+                call_id: "cid-bash".to_string(),
+                name: "bash".to_string(),
+                arguments: r#"{"command":"echo hi"}"#.to_string(),
+            },
             XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
             XaiEvent::Done,
         ]);
         agent.client.push_response(vec![XaiEvent::Done]);
 
         agent
-            .prompt(PromptRequest::new("ct2", vec![ContentBlock::from("read file")]))
+            .prompt(PromptRequest::new("ct2", vec![ContentBlock::from("both tools")]))
             .await
             .unwrap();
 
         let notifs = agent.notifier.notifications.lock().unwrap();
-        let in_progress = notifs.iter().find(|n| {
-            matches!(&n.update, SessionUpdate::ToolCall(tc)
-                if tc.status == ToolCallStatus::InProgress
-                    && tc.tool_call_id.0.as_ref() == "cid-rf")
-        });
-        let tc = match &in_progress
+
+        let find_in_progress = |call_id: &str| {
+            notifs.iter().find(|n| {
+                matches!(&n.update, SessionUpdate::ToolCall(tc)
+                    if tc.status == ToolCallStatus::InProgress
+                        && tc.tool_call_id.0.as_ref() == call_id)
+            })
+        };
+
+        let tc_rf = match &find_in_progress("cid-rf")
             .expect("ToolCall(InProgress) must be emitted for read_file")
             .update
         {
             SessionUpdate::ToolCall(tc) => tc,
             _ => unreachable!(),
         };
-        assert_eq!(tc.kind, ToolKind::Other, "non-bash tools must use ToolKind::Other");
+        assert_eq!(tc_rf.kind, ToolKind::Other, "read_file must use ToolKind::Other");
+
+        let tc_bash = match &find_in_progress("cid-bash")
+            .expect("ToolCall(InProgress) must be emitted for bash")
+            .update
+        {
+            SessionUpdate::ToolCall(tc) => tc,
+            _ => unreachable!(),
+        };
+        assert_eq!(tc_bash.kind, ToolKind::Execute, "bash must use ToolKind::Execute");
     }
 
     #[tokio::test]
