@@ -591,7 +591,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
-                enabled_tools: Vec::new(),
+                enabled_tools: trogon_tools::all_tool_defs()
+                    .into_iter()
+                    .map(|d| d.name)
+                    .collect(),
                 system_prompt: session_system_prompt,
                 created_at: Instant::now(),
                 created_at_iso,
@@ -981,8 +984,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         };
 
         // Build the tools list: server-side enabled tools + optional bash function.
+        // Only AVAILABLE_TOOLS entries become ServerSide specs; trogon-tools in
+        // enabled_tools are added later as Function specs via all_tool_defs().
         let mut call_tools: Vec<ToolSpec> = enabled_tools
             .iter()
+            .filter(|t| AVAILABLE_TOOLS.iter().any(|(id, _)| *id == t.as_str()))
             .map(|t| ToolSpec::ServerSide(t.clone()))
             .collect();
         if wasm_prefix.is_some() {
@@ -1004,11 +1010,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         }
 
         for def in trogon_tools::all_tool_defs() {
-            call_tools.push(ToolSpec::Function {
-                name: def.name,
-                description: def.description,
-                parameters: def.input_schema,
-            });
+            if enabled_tools.iter().any(|t| t == &def.name) {
+                call_tools.push(ToolSpec::Function {
+                    name: def.name,
+                    description: def.description,
+                    parameters: def.input_schema,
+                });
+            }
         }
 
         let client = Arc::clone(&self.client);
@@ -1300,14 +1308,28 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             }
                         }
                         _ => {
-                            let ctx = trogon_tools::ToolContext {
-                                proxy_url: String::new(),
-                                cwd: cwd.clone(),
-                                http_client: self.tool_http_client.clone(),
-                            };
                             let input = serde_json::from_str::<serde_json::Value>(&arguments)
                                 .unwrap_or(serde_json::Value::Null);
-                            trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                            if name == "fetch_url" {
+                                let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                                if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
+                                    format!("fetch_url: URL blocked by egress policy: {url}")
+                                } else {
+                                    let ctx = trogon_tools::ToolContext {
+                                        proxy_url: String::new(),
+                                        cwd: cwd.clone(),
+                                        http_client: self.tool_http_client.clone(),
+                                    };
+                                    trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                                }
+                            } else {
+                                let ctx = trogon_tools::ToolContext {
+                                    proxy_url: String::new(),
+                                    cwd: cwd.clone(),
+                                    http_client: self.tool_http_client.clone(),
+                                };
+                                trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                            }
                         }
                     };
 
@@ -1591,6 +1613,25 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                 history: Vec::new(),
                 last_response_id: None,
                 enabled_tools: Vec::new(),
+                system_prompt: self.system_prompt.clone(),
+                created_at: Instant::now(),
+                created_at_iso: now_iso(),
+                parent_session_id: None,
+                branched_at_index: None,
+            },
+        );
+    }
+
+    pub async fn test_insert_session_with_tools(&self, id: &str, cwd: &str, tools: Vec<&str>) {
+        self.sessions.lock().await.insert(
+            id.to_string(),
+            XaiSession {
+                cwd: cwd.to_string(),
+                model: None,
+                api_key: Some("test-key".to_string()),
+                history: Vec::new(),
+                last_response_id: None,
+                enabled_tools: tools.into_iter().map(|t| t.to_string()).collect(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
@@ -5314,7 +5355,7 @@ mod tests {
         // Finished { reason: ToolCalls }, the agent must send a second request
         // whose input contains a FunctionCallOutput item.
         let agent = make_agent();
-        agent.test_insert_session("ct1", "/tmp", None).await;
+        agent.test_insert_session_with_tools("ct1", "/tmp", vec!["git_status"]).await;
 
         // Round 1: model requests git_status.
         agent.client.push_response(vec![
@@ -5348,11 +5389,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_files_dispatched_and_returns_output() {
+        // search_files must be dispatched through trogon-tools and its output
+        // returned as a FunctionCallOutput in the follow-up request.
+        let agent = make_agent();
+        agent.test_insert_session_with_tools("sf1", "/tmp", vec!["search_files"]).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-sf".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-sf".to_string(),
+                name: "search_files".to_string(),
+                arguments: r#"{"pattern":"fn main"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "done".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("sf1", vec![ContentBlock::from("search for main")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "agent must make a follow-up call after search_files");
+        assert!(
+            calls[1].input.iter().any(|item| matches!(
+                item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-sf"
+            )),
+            "follow-up must contain FunctionCallOutput for cid-sf"
+        );
+    }
+
+    #[tokio::test]
     async fn custom_tool_notifier_kind() {
         // ToolCall(InProgress) for a non-bash tool must carry ToolKind::Other;
         // for bash it must carry ToolKind::Execute.
         let agent = make_agent();
-        agent.test_insert_session("ct2", "/tmp", None).await;
+        agent.test_insert_session_with_tools("ct2", "/tmp", vec!["read_file"]).await;
 
         // One response with both tool types so we verify both kinds in one prompt.
         agent.client.push_response(vec![
@@ -5411,7 +5489,7 @@ mod tests {
         // A response with both bash and read_file calls must execute both and
         // send two FunctionCallOutput items in a single follow-up request.
         let agent = make_agent();
-        agent.test_insert_session("ct3", "/tmp", None).await;
+        agent.test_insert_session_with_tools("ct3", "/tmp", vec!["read_file"]).await;
 
         agent.client.push_response(vec![
             XaiEvent::ResponseId { id: "r3".to_string() },
@@ -5459,7 +5537,7 @@ mod tests {
         // tool calls are pending, the agent must clear them and break without
         // panicking — no follow-up call is made.
         let agent = make_agent();
-        agent.test_insert_session("ct4", "/tmp", None).await;
+        agent.test_insert_session_with_tools("ct4", "/tmp", vec!["git_status"]).await;
 
         agent.client.push_response(vec![
             XaiEvent::FunctionCall {
@@ -5481,6 +5559,168 @@ mod tests {
             calls.len(),
             1,
             "no follow-up call must be made when response_id is missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_url_blocked_by_egress_policy() {
+        // fetch_url targeting a link-local / metadata address must be blocked
+        // before the HTTP request is made.  The agent still sends a follow-up
+        // with the error string in a FunctionCallOutput item.
+        let agent = make_agent();
+        agent.test_insert_session_with_tools("egress1", "/tmp", vec!["fetch_url"]).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-egress".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-fetch".to_string(),
+                name: "fetch_url".to_string(),
+                arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "blocked".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("egress1", vec![ContentBlock::from("fetch metadata")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "agent must still make a follow-up after blocked fetch_url");
+        let follow_up = &calls[1].input;
+        let output_item = follow_up.iter().find(|item| {
+            matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-fetch")
+        });
+        assert!(output_item.is_some(), "follow-up must contain FunctionCallOutput for cid-fetch");
+        if let Some(InputItem::FunctionCallOutput { output, .. }) = output_item {
+            assert!(
+                output.contains("blocked by egress policy"),
+                "output must contain egress block message, got: {output}"
+            );
+        }
+    }
+
+    // ── Gap A: enabled_tools filters trogon-tools in HTTP request ────────────
+
+    #[tokio::test]
+    async fn trogon_tool_in_enabled_tools_appears_in_http_request() {
+        // A trogon-tool present in enabled_tools must be included in the tools
+        // list forwarded to the xAI HTTP request.
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_tools("gap_a1", "/tmp", vec!["write_file", "read_file"])
+            .await;
+
+        agent.client.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("gap_a1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let tools = &calls[0].tools;
+        assert!(
+            tools.iter().any(|t| t.name() == "write_file"),
+            "write_file in enabled_tools must appear in HTTP request tools"
+        );
+        assert!(
+            tools.iter().any(|t| t.name() == "read_file"),
+            "read_file in enabled_tools must appear in HTTP request tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn trogon_tool_not_in_enabled_tools_excluded_from_http_request() {
+        // A trogon-tool absent from enabled_tools must NOT appear in the tools
+        // list forwarded to the xAI HTTP request.
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_tools("gap_a2", "/tmp", vec!["read_file"])
+            .await;
+
+        agent.client.push_response(vec![XaiEvent::Done]);
+        agent
+            .prompt(PromptRequest::new("gap_a2", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let tools = &calls[0].tools;
+        assert!(
+            tools.iter().any(|t| t.name() == "read_file"),
+            "read_file must be present"
+        );
+        assert!(
+            !tools.iter().any(|t| t.name() == "write_file"),
+            "write_file not in enabled_tools must be excluded from HTTP request tools"
+        );
+        assert!(
+            !tools.iter().any(|t| t.name() == "str_replace"),
+            "str_replace not in enabled_tools must be excluded from HTTP request tools"
+        );
+    }
+
+    // ── cwd: relative paths resolve against session cwd ──────────────────────
+
+    #[tokio::test]
+    async fn tool_dispatch_uses_session_cwd_for_relative_paths() {
+        // read_file with a relative path must resolve against the session's cwd,
+        // not the process cwd.  We create a file in a tempdir, set it as cwd,
+        // and verify the tool output contains the file content.
+        use std::fs as stdfs;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        stdfs::write(dir.path().join("hello.txt"), "cwd-content-marker\n").unwrap();
+
+        let agent = make_agent();
+        agent
+            .test_insert_session_with_tools(
+                "cwd1",
+                dir.path().to_str().unwrap(),
+                vec!["read_file"],
+            )
+            .await;
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-cwd".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-cwd".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"hello.txt"}"#.to_string(),
+            },
+            XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::TextDelta { text: "done".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent
+            .prompt(PromptRequest::new("cwd1", vec![ContentBlock::from("read hello")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "must make a follow-up after read_file");
+        let output = calls[1].input.iter().find_map(|item| {
+            if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
+                if call_id == "cid-cwd" { Some(output.as_str()) } else { None }
+            } else {
+                None
+            }
+        });
+        assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-cwd");
+        assert!(
+            output.unwrap().contains("cwd-content-marker"),
+            "tool output must contain file content resolved from session cwd, got: {:?}",
+            output
         );
     }
 }

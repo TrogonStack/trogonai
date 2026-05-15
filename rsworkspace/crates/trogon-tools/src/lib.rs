@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod editor;
 pub mod fs;
 pub mod git;
+pub mod search;
 pub mod todo;
 pub mod types;
 pub mod web;
@@ -159,6 +160,19 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "search_files",
+            "Search for a literal string pattern across files in the working directory. Respects .gitignore. Returns matching lines with file:line format, truncated at 100 matches.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "pattern":          { "type": "string",  "description": "Literal string to search for" },
+                    "path":             { "type": "string",  "description": "Directory to search in, relative to working directory (default: '.')" },
+                    "case_insensitive": { "type": "boolean", "description": "If true, search is case-insensitive (default: false)" }
+                },
+                "required": ["pattern"]
+            }),
+        ),
+        tool_def(
             "todo_write",
             "Create or update a todo item. Status must be 'pending', 'in_progress', or 'completed'.",
             json!({
@@ -201,6 +215,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_log"       => git::log(ctx, input).await,
         "fetch_url"     => web::fetch_url(ctx, input).await,
         "notebook_edit" => fs::notebook_edit(ctx, input).await,
+        "search_files"  => search::search_files(ctx, input).await,
         "todo_write"    => todo::todo_write(ctx, input).await,
         "todo_read"     => todo::todo_read(ctx, input).await,
         _               => format!("Unknown tool: {name}"),
@@ -423,5 +438,20 @@ mod tests {
         .await;
         let result = dispatch_tool(&ctx, "todo_read", &json!({})).await;
         assert!(result.contains("t1"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_search_files_to_search() {
+        use std::fs as stdfs;
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        stdfs::write(dir.path().join("foo.rs"), "fn needle() {}\n").unwrap();
+        let ctx = ToolContext {
+            proxy_url: String::new(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+        };
+        let result = dispatch_tool(&ctx, "search_files", &json!({"pattern": "needle"})).await;
+        assert!(result.contains("foo.rs"), "got: {result}");
     }
 }
