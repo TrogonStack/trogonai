@@ -66,6 +66,7 @@
 pub mod entry;
 pub mod error;
 pub mod publisher;
+pub mod reader;
 pub mod session;
 pub mod store;
 pub mod subject;
@@ -74,6 +75,7 @@ pub use entry::{Role, TranscriptEntry, now_ms};
 pub use error::TranscriptError;
 pub use publisher::NatsTranscriptPublisher;
 pub use publisher::TranscriptPublisher;
+pub use reader::{NatsTranscriptReader, TranscriptRead};
 pub use session::Session;
 pub use store::TranscriptStore;
 pub use subject::{entity_subject_filter, sanitize_key, transcript_subject};

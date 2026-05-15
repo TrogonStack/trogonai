@@ -6,6 +6,7 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_actor::{
+    TranscriptRead,
     actor::EntityActor,
     context::ActorContext,
     error::ActorError,
@@ -13,6 +14,7 @@ use trogon_actor::{
     runtime::ActorRuntime,
     state::provision_state,
 };
+use trogon_transcript::reader::NatsTranscriptReader;
 use trogon_registry::{AgentCapability, Registry, provision as provision_registry};
 use trogon_transcript::{
     TranscriptError,
@@ -1088,6 +1090,205 @@ impl TranscriptPublisher for FailPublisher {
     ) -> Result<(), TranscriptError> {
         Err(TranscriptError::Publish("always fails".into()))
     }
+}
+
+// ── Entity history recall ─────────────────────────────────────────────────────
+
+/// An actor that stores its recall output in state so the test can inspect it.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct RecallState {
+    recall_result: Option<String>,
+}
+
+struct RecallActor;
+
+impl EntityActor for RecallActor {
+    type State = RecallState;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str {
+        "recall-actor"
+    }
+
+    async fn handle(
+        &mut self,
+        state: &mut RecallState,
+        ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        state.recall_result = ctx.recall_entity_history().await;
+        Ok(())
+    }
+}
+
+/// Writes transcript messages under the same actor_type as RecallActor so the
+/// recall query (filtered by actor_type + entity_key) finds them.
+struct RecallScribe;
+
+impl EntityActor for RecallScribe {
+    type State = RecallState;
+    type Error = std::convert::Infallible;
+
+    fn actor_type() -> &'static str {
+        "recall-actor" // must match RecallActor's actor_type
+    }
+
+    async fn handle(
+        &mut self,
+        _state: &mut RecallState,
+        ctx: &ActorContext,
+    ) -> Result<(), Self::Error> {
+        ctx.append_user_message("user prompt", None).await.ok();
+        ctx.append_assistant_message("assistant reply", Some(5))
+            .await
+            .ok();
+        Ok(())
+    }
+}
+
+/// First run: RecallScribe writes user + assistant messages to the TRANSCRIPTS
+/// stream under actor_type="recall-actor".  Second run: RecallActor (same
+/// actor_type, with a NatsTranscriptReader attached) calls
+/// `ctx.recall_entity_history()` and stores the result in its state.
+///
+/// Both actors must share the same actor_type so the recall query
+/// (`transcripts.recall-actor.e-recall.>`) finds the entries from the first run.
+#[tokio::test]
+async fn recall_entity_history_returns_past_messages() {
+    let (nats, js, _container) = setup().await;
+
+    // Provision both ACTOR_STATE and TRANSCRIPTS.
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let transcript_store = TranscriptStore::new(js.clone());
+    transcript_store.provision().await.unwrap();
+
+    // First run: RecallScribe writes "user prompt" + "assistant reply" under
+    // actor_type="recall-actor" so the recall query in the second run finds them.
+    let runtime = ActorRuntime::new(
+        state_store.clone(),
+        publisher.clone(),
+        nats.clone(),
+        registry.clone(),
+        js.clone(),
+    );
+    runtime
+        .handle_event(&mut RecallScribe, "e-recall", 0)
+        .await
+        .unwrap();
+
+    // Second run: RecallActor has a transcript reader — recall_entity_history() must
+    // return a formatted block containing the messages from the first run.
+    let reader: Arc<dyn TranscriptRead> =
+        Arc::new(NatsTranscriptReader::new(js.clone()));
+    let runtime_with_recall = ActorRuntime::new(
+        state_store.clone(),
+        publisher.clone(),
+        nats.clone(),
+        registry.clone(),
+        js.clone(),
+    )
+    .with_transcript_reader(reader);
+
+    runtime_with_recall
+        .handle_event(&mut RecallActor, "e-recall", 0)
+        .await
+        .unwrap();
+
+    // Load RecallActor state and verify.
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv
+        .entry("recall-actor.e-recall")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
+    let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
+
+    let history = saved.recall_result.expect("recall_result must be Some");
+    assert!(
+        history.contains("user: user prompt"),
+        "history must contain the user message; got: {history}"
+    );
+    assert!(
+        history.contains("assistant: assistant reply"),
+        "history must contain the assistant message; got: {history}"
+    );
+    assert!(
+        history.contains("## Entity history"),
+        "history must start with the header; got: {history}"
+    );
+}
+
+/// Without a transcript reader, `recall_entity_history()` returns `None`.
+#[tokio::test]
+async fn recall_entity_history_returns_none_without_reader() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    // No with_transcript_reader() call — recall_fn is None.
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone());
+    runtime
+        .handle_event(&mut RecallActor, "e-no-reader", 0)
+        .await
+        .unwrap();
+
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv
+        .entry("recall-actor.e-no-reader")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
+    let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        saved.recall_result.is_none(),
+        "recall_result must be None when no reader is configured"
+    );
+}
+
+/// When the TRANSCRIPTS stream has no entries for an entity, `recall_entity_history()`
+/// returns `None` (no history block to inject).
+#[tokio::test]
+async fn recall_entity_history_returns_none_when_no_prior_entries() {
+    let (nats, js, _container) = setup().await;
+
+    let state_store = provision_state(&js).await.unwrap();
+    let registry_store = provision_registry(&js).await.unwrap();
+    let publisher = NatsTranscriptPublisher::new(js.clone());
+    let registry = Registry::new(registry_store);
+
+    let transcript_store = TranscriptStore::new(js.clone());
+    transcript_store.provision().await.unwrap();
+
+    // Attach reader but entity "e-fresh" has no prior transcript entries.
+    let reader: Arc<dyn TranscriptRead> = Arc::new(NatsTranscriptReader::new(js.clone()));
+    let runtime = ActorRuntime::new(state_store, publisher, nats, registry, js.clone())
+        .with_transcript_reader(reader);
+
+    runtime
+        .handle_event(&mut RecallActor, "e-fresh", 0)
+        .await
+        .unwrap();
+
+    let kv = js.get_key_value("ACTOR_STATE").await.unwrap();
+    let bytes = kv
+        .entry("recall-actor.e-fresh")
+        .await
+        .unwrap()
+        .unwrap()
+        .value;
+    let saved: RecallState = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        saved.recall_result.is_none(),
+        "recall_result must be None when entity has no prior messages"
+    );
 }
 
 /// When the transcript publisher fails, the `let _ = session.append(...)` inside
