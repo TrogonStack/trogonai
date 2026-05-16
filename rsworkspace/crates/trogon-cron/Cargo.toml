@@ -38,7 +38,7 @@ trogon-nats = { path = "../trogon-nats" }
 trogon-eventsourcing = { workspace = true }
 trogon-cron-jobs-proto = { workspace = true }
 trogon-service-config = { workspace = true }
-trogon-std = { path = "../trogon-std", features = ["clap", "signal", "uuid"] }
+trogon-std = { path = "../trogon-std", features = ["clap", "uuid"] }
 
 [dev-dependencies]
 proptest = "1"

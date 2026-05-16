@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ use futures::{Stream, StreamExt, future};
 use trogon_eventsourcing::{StreamEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
-use trogon_std::{NowV7, UuidV7Generator, signal};
+use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
     JobEventCase, JobEventCodec, ResolvedJob,
@@ -154,6 +155,15 @@ where
     L: LeaderLock,
 {
     pub async fn run(self) -> Result<(), CronError> {
+        self.run_until(std::future::pending::<()>()).await
+    }
+
+    pub async fn run_until<S>(self, shutdown: S) -> Result<(), CronError>
+    where
+        S: Future<Output = ()>,
+    {
+        tokio::pin!(shutdown);
+
         let mut desired_jobs = DesiredJobs::new();
         let mut scheduler_watcher = inactive_scheduler_watcher();
         let mut leader = LeaderElection::new(self.leader_lock, self.node_id.clone(), self.leader_timing);
@@ -162,7 +172,7 @@ where
 
         loop {
             tokio::select! {
-                _ = signal::shutdown_signal() => {
+                _ = shutdown.as_mut() => {
                     tracing::info!("Shutdown signal received, releasing leader lease");
                     if let Err(error) = leader.release().await {
                         tracing::warn!(error = %error, "Failed to release leader lease");
@@ -225,7 +235,11 @@ where
                                 retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
                                 "Scheduler event watcher returned an error, attempting to re-establish it"
                             );
-                            match reestablish_scheduler_processor(&self.store, &self.schedule_publisher).await? {
+                            match reestablish_scheduler_processor(
+                                &self.store,
+                                &self.schedule_publisher,
+                                &mut shutdown,
+                            ).await? {
                                 ReestablishedProcessor::Ready((jobs, watcher)) => {
                                     desired_jobs = jobs;
                                     scheduler_watcher = watcher;
@@ -244,7 +258,11 @@ where
                                 retry_ms = WATCH_RETRY_INTERVAL.as_millis(),
                                 "Scheduler event watcher ended, attempting to re-establish it"
                             );
-                            match reestablish_scheduler_processor(&self.store, &self.schedule_publisher).await? {
+                            match reestablish_scheduler_processor(
+                                &self.store,
+                                &self.schedule_publisher,
+                                &mut shutdown,
+                            ).await? {
                                 ReestablishedProcessor::Ready((jobs, watcher)) => {
                                     desired_jobs = jobs;
                                     scheduler_watcher = watcher;
@@ -297,13 +315,18 @@ where
     Ok((desired_jobs, watcher))
 }
 
-async fn reestablish_scheduler_processor<P>(store: &Store, publisher: &P) -> Result<ReestablishedProcessor, CronError>
+async fn reestablish_scheduler_processor<P, S>(
+    store: &Store,
+    publisher: &P,
+    shutdown: &mut Pin<&mut S>,
+) -> Result<ReestablishedProcessor, CronError>
 where
     P: SchedulePublisher<Error = CronError>,
+    S: Future<Output = ()>,
 {
     loop {
         tokio::select! {
-            _ = signal::shutdown_signal() => {
+            _ = shutdown.as_mut() => {
                 return Ok(ReestablishedProcessor::Shutdown);
             }
             result = establish_scheduler_processor(store, publisher) => {
@@ -322,7 +345,12 @@ where
             }
         }
 
-        tokio::time::sleep(WATCH_RETRY_INTERVAL).await;
+        tokio::select! {
+            _ = shutdown.as_mut() => {
+                return Ok(ReestablishedProcessor::Shutdown);
+            }
+            _ = tokio::time::sleep(WATCH_RETRY_INTERVAL) => {}
+        }
     }
 }
 

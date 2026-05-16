@@ -9,7 +9,7 @@ mod runtime_config;
 use std::time::Duration;
 
 #[cfg(not(coverage))]
-use tracing::{error, info};
+use tracing::{error, info, warn};
 #[cfg(not(coverage))]
 use trogon_cron::CronController;
 #[cfg(not(coverage))]
@@ -61,8 +61,42 @@ async fn run(cli: cli::Cli) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(coverage))]
 async fn run_controller(nats: async_nats::Client) -> Result<(), Box<dyn std::error::Error>> {
     let controller = CronController::from_nats(nats).await?;
-    controller.run().await?;
+    controller.run_until(shutdown_signal()).await?;
     Ok(())
+}
+
+#[cfg(not(coverage))]
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            warn!(error = %error, "Failed to install Ctrl+C handler");
+            std::future::pending::<()>().await;
+            return;
+        }
+        info!("Received SIGINT (Ctrl+C)");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+                info!("Received SIGTERM");
+            }
+            Err(error) => {
+                warn!(error = %error, "Failed to install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
 }
 
 #[cfg(all(coverage, test))]
