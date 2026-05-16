@@ -25,11 +25,18 @@
 //!     Opened,
 //! }
 //!
-//! #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+//! #[derive(Debug, Clone, PartialEq, Eq)]
 //! enum AccountError {
-//!     #[error("{self:?}")]
 //!     AlreadyOpen,
 //! }
+//!
+//! impl std::fmt::Display for AccountError {
+//!     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//!         write!(formatter, "{self:?}")
+//!     }
+//! }
+//!
+//! impl std::error::Error for AccountError {}
 //!
 //! #[derive(Debug, Clone, PartialEq, Eq)]
 //! struct OpenAccount {
@@ -88,11 +95,18 @@
 //! #     Opened,
 //! # }
 //! #
-//! # #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+//! # #[derive(Debug, Clone, PartialEq, Eq)]
 //! # enum AccountError {
-//! #     #[error("{self:?}")]
 //! #     AlreadyOpen,
 //! # }
+//! #
+//! # impl std::fmt::Display for AccountError {
+//! #     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//! #         write!(formatter, "{self:?}")
+//! #     }
+//! # }
+//! #
+//! # impl std::error::Error for AccountError {}
 //! #
 //! # #[derive(Debug, Clone, PartialEq, Eq)]
 //! # struct OpenAccount {
@@ -129,7 +143,7 @@
 
 use std::{fmt::Debug, marker::PhantomData, mem::ManuallyDrop, ptr};
 
-use crate::{Decider, DecisionFailure, Events, evaluate_decision};
+use crate::{Decider, DecisionFailure, Events};
 
 /// Prior events used to rebuild decider state in tests.
 ///
@@ -723,7 +737,8 @@ fn decide_events<C>(state: C::State, command: &C) -> DecisionEvaluation<C>
 where
     C: Decider,
 {
-    let (_, events) = evaluate_decision(state, command).map_err(|failure| match failure {
+    let decision = C::decide(&state, command).map_err(DecisionEvaluationFailure::Decide)?;
+    let (_, events) = decision.handle(state, command).map_err(|failure| match failure {
         DecisionFailure::Decide(error) => DecisionEvaluationFailure::Decide(error),
         DecisionFailure::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
     })?;
@@ -782,23 +797,34 @@ mod tests {
         Removed { id: String },
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     enum TestDomainError {
-        #[error("{self:?}")]
         MissingJobForDisable { id: String },
-        #[error("{self:?}")]
         MissingJobForRemoval { id: String },
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+    impl std::fmt::Display for TestDomainError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestDomainError {}
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
     enum TestCommandError {
-        #[error("{self:?}")]
         AlreadyRegistered { id: String },
-        #[error("{self:?}")]
         JobNotFound { id: String },
-        #[error("{self:?}")]
         AlreadyDisabled { id: String },
     }
+
+    impl std::fmt::Display for TestCommandError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestCommandError {}
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum TestAction {

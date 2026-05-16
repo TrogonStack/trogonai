@@ -17,17 +17,31 @@ enum TestEvent {
     Removed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TestHistoryError {
-    #[error("{self:?}")]
     Invalid,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+impl std::fmt::Display for TestHistoryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for TestHistoryError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TestDecisionError {
-    #[error("{self:?}")]
     NotDisabled,
 }
+
+impl std::fmt::Display for TestDecisionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for TestDecisionError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TestCommand;
