@@ -1,0 +1,11 @@
+error[E0599]: no method named `then_error` found for struct `TestCase<TestCommand>` in the current scope
+  --> tests/ui/fail/missing_initial_when.rs:10:10
+   |
+ 9 | /     TestCase::<TestCommand>::new()
+10 | |         .then_error(TestDecisionError::AlreadyRegistered);
+   | |         -^^^^^^^^^^ method not found in `TestCase<TestCommand>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `TestCase<C, When<<C as Decider>::Event, <C as Decider>::State, C>>`

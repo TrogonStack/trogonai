@@ -1,0 +1,19 @@
+error[E0599]: no method named `when` found for struct `TestCase<TestCommand, When<TestEvent, TestState, TestCommand>>` in the current scope
+  --> tests/ui/fail/double_when.rs:12:10
+   |
+ 9 |       TestCase::<TestCommand>::new()
+   |       ------------------------------
+   |       |
+   |  _____method `when` is available on `TestCase<TestCommand>`
+   | |
+10 | |         .given_no_history()
+   | |          ------------------ method `when` is available on `TestCase<TestCommand, NoHistory>`
+11 | |         .when(TestCommand)
+12 | |         .when(TestCommand);
+   | |_________-^^^^
+   |
+help: there is a method `then` with a similar name
+   |
+12 -         .when(TestCommand);
+12 +         .then(TestCommand);
+   |
