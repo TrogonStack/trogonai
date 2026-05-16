@@ -81,7 +81,7 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
-    use trogon_decider::testing::{TestCase, decider};
+    use trogon_decider::testing::TestCase;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_remove_job_decider() {
-        TestCase::new(decider::<RemoveJobCommand>())
+        TestCase::<RemoveJobCommand>::new()
             .given([added("backup")])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .then(trogon_decider::events![removed()]);
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_remove_job_failures() {
-        TestCase::new(decider::<RemoveJobCommand>())
+        TestCase::<RemoveJobCommand>::new()
             .given_no_history()
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(RemoveJobDecideError::JobNotFound {
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn given_when_then_rejects_removing_deleted_job() {
-        TestCase::new(decider::<RemoveJobCommand>())
+        TestCase::<RemoveJobCommand>::new()
             .given([added("backup")])
             .given([removed()])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))

@@ -82,7 +82,7 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<sta
 #[cfg(test)]
 mod tests {
     use buffa::{EnumValue, MessageField};
-    use trogon_decider::testing::{TestCase, decider};
+    use trogon_decider::testing::TestCase;
 
     use super::*;
     use crate::commands::domain::JobId;
@@ -132,7 +132,7 @@ mod tests {
         let paused = job_paused();
         let resumed = job_resumed();
 
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given([added.clone()])
             .when(PauseJobCommand::new(job_id("backup")))
             .state(state_v1::State {
@@ -140,7 +140,7 @@ mod tests {
             })
             .then(trogon_decider::events![paused.clone()]);
 
-        TestCase::new(decider::<ResumeJobCommand>())
+        TestCase::<ResumeJobCommand>::new()
             .given([added.clone()])
             .given([paused.clone()])
             .when(ResumeJobCommand::new(job_id("backup")))
@@ -149,7 +149,7 @@ mod tests {
             })
             .then(trogon_decider::events![resumed.clone()]);
 
-        TestCase::new(decider::<RemoveJobCommand>())
+        TestCase::<RemoveJobCommand>::new()
             .given([added])
             .given([paused])
             .given([resumed])
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn pause_from_missing_history_returns_domain_error() {
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given_no_history()
             .when(PauseJobCommand::new(job_id("backup")))
             .state(state_v1::State {

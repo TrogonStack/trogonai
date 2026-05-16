@@ -83,7 +83,7 @@ impl CommandSnapshotPolicy for ResumeJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
-    use trogon_decider::testing::{TestCase, Timeline, decider};
+    use trogon_decider::testing::{TestCase, Timeline};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_resume_job_decider() {
-        TestCase::new(decider::<ResumeJobCommand>())
+        TestCase::<ResumeJobCommand>::new()
             .given([added("backup")])
             .given([paused()])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_resume_job_failures() {
-        TestCase::new(decider::<ResumeJobCommand>())
+        TestCase::<ResumeJobCommand>::new()
             .given([added("backup")])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(ResumeJobDecideError::AlreadyActive {
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn given_when_then_rejects_resuming_missing_jobs() {
-        TestCase::new(decider::<ResumeJobCommand>())
+        TestCase::<ResumeJobCommand>::new()
             .given_no_history()
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(ResumeJobDecideError::JobNotFound {
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn given_when_then_rejects_resuming_deleted_jobs() {
-        TestCase::new(decider::<ResumeJobCommand>())
+        TestCase::<ResumeJobCommand>::new()
             .given([added("backup")])
             .given([paused()])
             .given([removed()])
@@ -180,17 +180,17 @@ mod tests {
 
     #[test]
     fn timeline_matches_cases_by_command_stream() {
-        let register = TestCase::new(decider::<AddJobCommand>())
+        let register = TestCase::<AddJobCommand>::new()
             .given_no_history()
             .when(AddJobCommand::new(active_job("backup")))
             .then(trogon_decider::events![added("backup")]);
 
-        let pause = TestCase::new(decider::<PauseJobCommand>())
+        let pause = TestCase::<PauseJobCommand>::new()
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then(trogon_decider::events![paused()]);
 
-        let resume = TestCase::new(decider::<ResumeJobCommand>())
+        let resume = TestCase::<ResumeJobCommand>::new()
             .given(pause.history())
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
             .then(trogon_decider::events![resumed()]);
