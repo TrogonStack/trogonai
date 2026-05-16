@@ -463,7 +463,7 @@ async fn runner_pr_handler_agent_error_does_not_crash() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
-                .body_contains("Review the pull request #1 ");
+                .body_contains("pull request #1");
             then.status(500);
         })
         .await;
@@ -473,7 +473,7 @@ async fn runner_pr_handler_agent_error_does_not_crash() {
         .mock_async(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/anthropic/v1/messages")
-                .body_contains("Review the pull request #2 ");
+                .body_contains("pull request #2");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body(end_turn_response());

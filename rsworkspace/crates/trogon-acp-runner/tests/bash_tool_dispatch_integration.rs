@@ -77,56 +77,74 @@ fn make_agent(base_url: &str, nats: async_nats::Client, prefix: &str, session_id
     }
 }
 
-/// Mock Anthropic response: the LLM requests a `bash` tool call.
-fn bash_tool_use_body(command: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{
-            "type": "tool_use",
-            "id": "bash_001",
-            "name": "bash",
-            "input": { "command": command }
-        }],
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+fn sse_body(events: &[(&str, serde_json::Value)]) -> String {
+    events
+        .iter()
+        .map(|(ev, data)| format!("event: {ev}\ndata: {data}\n\n"))
+        .collect()
 }
 
-/// Mock Anthropic response: the LLM finishes with a text reply.
+/// Mock Anthropic SSE response: the LLM requests a `bash` tool call.
+fn bash_tool_use_body(command: &str) -> String {
+    let input_json = serde_json::to_string(&serde_json::json!({"command": command})).unwrap();
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "bash_001", "name": "bash"}
+        })),
+        ("content_block_delta", serde_json::json!({
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": input_json}
+        })),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+/// Mock Anthropic SSE response: the LLM finishes with a text reply.
 fn end_turn_body(text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [{ "type": "text", "text": text }],
-        "usage": {
-            "input_tokens": 15,
-            "output_tokens": 8,
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
-        }
-    })
-    .to_string()
+    sse_body(&[
+        ("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 15, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}})),
+        ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}})),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        ("message_delta", serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 8}})),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
 }
 
 /// Spawn mock NATS responders for the four terminal subjects used by
 /// `WasmRuntimeBashTool`: create → wait_for_exit → output → release.
-fn spawn_terminal_responders(nats: async_nats::Client, base: String, terminal_id: &'static str, output: &'static str) {
+///
+/// All subscriptions are established before the returned future resolves, so
+/// there is no race between the tool sending requests and the responder
+/// subscribing.
+async fn spawn_terminal_responders(nats: async_nats::Client, base: String, terminal_id: &'static str, output: &'static str) {
+    // Subscribe to all subjects upfront so messages cannot arrive before the
+    // subscriber is ready.
+    let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+    let mut wait_sub = nats.subscribe(format!("{base}.wait_for_exit")).await.unwrap();
+    let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+    let mut release_sub = nats.subscribe(format!("{base}.release")).await.unwrap();
+
     tokio::spawn(async move {
         // 1. create terminal
-        let mut sub = nats.subscribe(format!("{base}.create")).await.unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = create_sub.next().await {
             let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
             let payload = serde_json::to_vec(&resp).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
         // 2. wait for exit
-        let mut sub = nats.subscribe(format!("{base}.wait_for_exit")).await.unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = wait_sub.next().await {
             let resp = WaitForTerminalExitResponse::new(
                 TerminalExitStatus::new().exit_code(Some(0)),
             );
@@ -135,16 +153,14 @@ fn spawn_terminal_responders(nats: async_nats::Client, base: String, terminal_id
         }
 
         // 3. output
-        let mut sub = nats.subscribe(format!("{base}.output")).await.unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = output_sub.next().await {
             let resp = TerminalOutputResponse::new(output.to_string(), false);
             let payload = serde_json::to_vec(&resp).unwrap();
             nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
         // 4. release (best-effort, no reply expected)
-        let mut sub = nats.subscribe(format!("{base}.release")).await.unwrap();
-        sub.next().await;
+        release_sub.next().await;
     });
 }
 
@@ -171,9 +187,9 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
     let cmd_output = "hello\n";
     let base = format!("{prefix}.session.{session_id}.client.terminal");
 
-    // Spawn NATS mock responders before the agent runs.
-    spawn_terminal_responders(nats.clone(), base, "tid-001", cmd_output);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Establish NATS mock responders before the agent runs (subscriptions are
+    // set up synchronously inside spawn_terminal_responders).
+    spawn_terminal_responders(nats.clone(), base, "tid-001", cmd_output).await;
 
     // Mock Anthropic API:
     //   call 1 (no tool_result in body) → bash tool_use
@@ -184,13 +200,13 @@ async fn agent_loop_dispatches_bash_tool_via_nats_and_returns_output() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Command completed successfully."));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(bash_tool_use_body(command));
     });
 
@@ -255,13 +271,13 @@ async fn agent_loop_handles_bash_tool_nats_error_without_crashing() {
             .path("/messages")
             .body_contains("tool_result");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(end_turn_body("Handled the error."));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "text/event-stream")
             .body(bash_tool_use_body("echo hi"));
     });
 

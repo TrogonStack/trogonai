@@ -118,10 +118,10 @@ impl McpCallTool for WasmRuntimeBashTool {
                 let out: TerminalOutputResponse =
                     serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
 
-                // 4. release (best-effort)
+                // 4. release (best-effort, fire-and-forget — no reply expected)
                 let rel_req = ReleaseTerminalRequest::new(session_id, tid);
                 if let Ok(payload) = serde_json::to_vec(&rel_req) {
-                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                    let _ = nats.publish(format!("{base}.release"), payload.into()).await;
                 }
 
                 Ok(out.output)

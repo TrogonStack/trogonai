@@ -14,7 +14,7 @@ use agent_client_protocol::{Agent, PromptRequest};
 use futures::channel::mpsc;
 use futures::stream::BoxStream;
 use trogon_nats::jetstream::{
-    MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamPublisher,
+    GetStreamError, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamPublisher,
     MockJetStreamStream,
 };
 use trogon_nats::mocks::MockError;
@@ -54,7 +54,7 @@ impl trogon_nats::jetstream::JetStreamPublisher for MockJs {
 }
 
 impl trogon_nats::jetstream::JetStreamGetStream for MockJs {
-    type Error = MockError;
+    type Error = GetStreamError;
     type Stream = MockJetStreamStream;
 
     async fn get_stream<T: AsRef<str> + Send>(

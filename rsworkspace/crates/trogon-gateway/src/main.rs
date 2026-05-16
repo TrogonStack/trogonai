@@ -33,8 +33,6 @@ use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClien
 #[cfg(not(coverage))]
 use trogon_std::args::{CliArgs, ParseArgs};
 #[cfg(not(coverage))]
-use trogon_gateway::source;
-#[cfg(not(coverage))]
 use trogon_std::env::SystemEnv;
 #[cfg(not(coverage))]
 use trogon_std::fs::SystemFs;
