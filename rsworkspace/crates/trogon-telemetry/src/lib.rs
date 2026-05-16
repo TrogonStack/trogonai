@@ -205,6 +205,10 @@ mod tests {
     use trogon_std::env::InMemoryEnv;
     use trogon_std::fs::{MemAppendWriter, MemFs};
 
+    fn otel_endpoint_configured(env: &impl ReadEnv) -> bool {
+        env.var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok()
+    }
+
     struct OpenAppendErrorFs {
         inner: MemFs,
     }

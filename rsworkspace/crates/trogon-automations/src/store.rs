@@ -20,6 +20,7 @@ use futures_util::StreamExt as _;
 use tracing::warn;
 
 use crate::automation::Automation;
+use crate::trigger;
 
 /// NATS KV bucket name (shared across all tenants).
 pub const BUCKET: &str = "AUTOMATIONS";
@@ -66,6 +67,7 @@ impl AutomationStore {
     ///
     /// The KV key is derived from `automation.tenant_id` and `automation.id`.
     pub async fn put(&self, automation: &Automation) -> Result<(), StoreError> {
+        trigger::validate(&automation.trigger).map_err(StoreError)?;
         let key = kv_key(&automation.tenant_id, &automation.id);
         let bytes = serde_json::to_vec(automation).map_err(|e| StoreError(e.to_string()))?;
         self.kv

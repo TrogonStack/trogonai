@@ -60,63 +60,41 @@ async fn wasm_bash_tool_call_tool_completes_round_trip() {
     let terminal_id = "tid-abc";
     let base = format!("{prefix}.session.{session_id}.client.terminal");
 
-    // Spawn mock responders for each terminal subject.
+    // Subscribe to all subjects upfront so messages cannot arrive before the
+    // subscriber is ready (avoids race between tool request and subscriber setup).
     let nats_srv = nats.clone();
+    let mut create_sub = nats_srv.subscribe(format!("{base}.create")).await.unwrap();
+    let mut wait_sub = nats_srv.subscribe(format!("{base}.wait_for_exit")).await.unwrap();
+    let mut output_sub = nats_srv.subscribe(format!("{base}.output")).await.unwrap();
+    let mut release_sub = nats_srv.subscribe(format!("{base}.release")).await.unwrap();
+
     tokio::spawn(async move {
         // 1. create
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.create"))
-            .await
-            .unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = create_sub.next().await {
             let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
             let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
         // 2. wait_for_exit
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.wait_for_exit"))
-            .await
-            .unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = wait_sub.next().await {
             let resp = WaitForTerminalExitResponse::new(
                 TerminalExitStatus::new().exit_code(Some(0)),
             );
             let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
         // 3. output
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.output"))
-            .await
-            .unwrap();
-        if let Some(msg) = sub.next().await {
+        if let Some(msg) = output_sub.next().await {
             let resp = TerminalOutputResponse::new("hello\n".to_string(), false);
             let payload = serde_json::to_vec(&resp).unwrap();
-            nats_srv
-                .publish(msg.reply.unwrap(), payload.into())
-                .await
-                .unwrap();
+            nats_srv.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
         }
 
         // 4. release (best-effort, no reply needed)
-        let mut sub = nats_srv
-            .subscribe(format!("{base}.release"))
-            .await
-            .unwrap();
-        sub.next().await; // drain
+        release_sub.next().await;
     });
-
-    // Give subscribers a moment to register.
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     let tool = WasmRuntimeBashTool::new(
         nats.clone(),

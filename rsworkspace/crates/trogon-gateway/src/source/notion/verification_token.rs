@@ -52,6 +52,7 @@ impl std::error::Error for VerificationTokenError {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) async fn latest<J>(js: &J, config: &NotionConfig) -> Result<NotionVerificationToken, VerificationTokenError>
 where
     J: JetStreamGetStream<Error = GetStreamError>,
@@ -102,6 +103,7 @@ fn parse_token(body: &[u8]) -> Result<NotionVerificationToken, VerificationToken
     NotionVerificationToken::new(token).map_err(VerificationTokenError::InvalidVerificationToken)
 }
 
+#[allow(dead_code)]
 fn map_last_raw_message_error(error: LastRawMessageError) -> VerificationTokenError {
     if error.kind() == LastRawMessageErrorKind::NoMessageFound {
         VerificationTokenError::NoVerificationRequest

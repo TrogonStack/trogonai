@@ -57,6 +57,32 @@ pub fn matches(trigger: &str, nats_subject: &str, payload: &Value) -> bool {
     }
 }
 
+/// Return `Err` if `trigger` has an invalid format.
+///
+/// Rules:
+///   - Must not be empty.
+///   - Must not contain whitespace.
+///   - If it contains `:`, neither subject nor action can be empty.
+pub fn validate(trigger: &str) -> Result<(), String> {
+    if trigger.is_empty() {
+        return Err("trigger must not be empty".to_string());
+    }
+    if trigger.chars().any(|c| c.is_whitespace()) {
+        return Err(format!("trigger must not contain whitespace: {trigger:?}"));
+    }
+    if let Some((subj, action)) = trigger.split_once(':') {
+        if subj.is_empty() {
+            return Err("trigger subject must not be empty".to_string());
+        }
+        if action.is_empty() {
+            return Err(
+                "trigger action must not be empty (omit `:` to match any action)".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +281,37 @@ mod tests {
             "github.pull_request",
             &payload
         ));
+    }
+
+    // ── validate ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_rejects_empty() {
+        assert!(validate("").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_whitespace() {
+        assert!(validate("github.push opened").is_err());
+        assert!(validate("github.push\t").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_empty_action() {
+        assert!(validate("github.push:").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_empty_subject() {
+        assert!(validate(":opened").is_err());
+    }
+
+    #[test]
+    fn validate_accepts_valid_triggers() {
+        assert!(validate("github.push").is_ok());
+        assert!(validate("github.pull_request:opened").is_ok());
+        assert!(validate("cron").is_ok());
+        assert!(validate("cron.my-job-id").is_ok());
+        assert!(validate("linear.Issue:create").is_ok());
     }
 }

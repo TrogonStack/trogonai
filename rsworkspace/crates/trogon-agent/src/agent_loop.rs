@@ -319,10 +319,29 @@ pub struct Usage {
 pub struct Message {
     pub role: String,
     pub content: Vec<ContentBlock>,
-    // usage is tracked internally for checkpointing; never sent to Anthropic
-    // (the API returns 400 "extra inputs are not permitted" if present).
-    #[serde(default, skip_serializing)]
+    // Persisted in NATS KV but never sent to Anthropic — the API returns 400
+    // for extra fields. `AnthropicMessageRef` wraps Message for the request
+    // and omits this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+}
+
+/// Serialization wrapper for `Message` that omits `usage`.
+///
+/// Anthropic returns 400 "extra inputs are not permitted" when `messages`
+/// contains a `usage` field. This newtype is used in `AnthropicRequest` so
+/// `usage` is silently dropped on the wire while still being persisted in NATS KV.
+#[derive(Debug)]
+struct AnthropicMessageRef<'a>(&'a Message);
+
+impl serde::Serialize for AnthropicMessageRef<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("Message", 2)?;
+        s.serialize_field("role", &self.0.role)?;
+        s.serialize_field("content", &self.0.content)?;
+        s.end()
+    }
 }
 
 impl Message {
@@ -421,7 +440,7 @@ struct AnthropicRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<Vec<SystemBlock<'a>>>,
     tools: &'a [ToolDef],
-    messages: &'a [Message],
+    messages: Vec<AnthropicMessageRef<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1284,12 +1303,14 @@ impl AgentLoop {
                 }]
             });
 
+            let anthropic_messages: Vec<AnthropicMessageRef<'_>> =
+                messages.iter().map(AnthropicMessageRef).collect();
             let request = AnthropicRequest {
                 model: &self.model,
                 max_tokens: 4096,
                 system,
                 tools: &cached_tools,
-                messages: &messages,
+                messages: anthropic_messages,
             };
 
             let body =
@@ -2025,12 +2046,14 @@ impl AgentLoop {
                 }]
             });
 
+            let anthropic_messages: Vec<AnthropicMessageRef<'_>> =
+                messages.iter().map(AnthropicMessageRef).collect();
             let request = AnthropicRequest {
                 model: &self.model,
                 max_tokens: 4096,
                 system,
                 tools: &cached_tools,
-                messages: &messages,
+                messages: anthropic_messages,
             };
 
             let body =
@@ -2450,7 +2473,7 @@ mod tests {
             max_tokens: 1024,
             system,
             tools: &tools,
-            messages: &[],
+            messages: vec![],
         };
         let body = serde_json::to_value(&req).unwrap();
 
@@ -2539,7 +2562,7 @@ mod tests {
             max_tokens: 1024,
             system: None,
             tools: &tools,
-            messages: &[],
+            messages: vec![],
         };
         let body = serde_json::to_value(&req).unwrap();
         assert!(
@@ -7162,16 +7185,23 @@ mod tests {
         );
     }
 
-    /// Anthropic rejects messages that contain a `usage` field with
-    /// "extra inputs are not permitted" (400). Verify it is never serialized.
+    /// `AnthropicMessageRef` must omit `usage` so Anthropic does not return 400.
+    /// `Message` itself serializes `usage` for NATS KV persistence.
     #[test]
-    fn message_usage_is_not_serialized() {
+    fn anthropic_message_ref_omits_usage() {
         let mut msg = Message::assistant(vec![ContentBlock::Text { text: "hi".into() }]);
         msg.usage = Some(Usage { input_tokens: 10, output_tokens: 5, ..Default::default() });
-        let json = serde_json::to_string(&msg).unwrap();
+
+        let wire = serde_json::to_string(&AnthropicMessageRef(&msg)).unwrap();
         assert!(
-            !json.contains("usage"),
-            "Message must not serialize `usage` — Anthropic returns 400 for extra fields; got: {json}"
+            !wire.contains("usage"),
+            "AnthropicMessageRef must not serialize `usage` — Anthropic returns 400 for extra fields; got: {wire}"
+        );
+
+        let stored = serde_json::to_string(&msg).unwrap();
+        assert!(
+            stored.contains("usage"),
+            "Message must serialize `usage` for NATS KV persistence; got: {stored}"
         );
     }
 
