@@ -6,6 +6,9 @@ description = "Event-sourcing primitives and JetStream-backed storage for Trogon
 license = "MIT"
 repository = "https://github.com/TrogonStack/trogonai"
 
+[features]
+test-support = ["trogon-decider/test-support"]
+
 [lints.rust]
 warnings = "deny"
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
@@ -32,4 +35,3 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-trybuild = "1"

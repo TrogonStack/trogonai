@@ -81,11 +81,9 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
+    use trogon_decider::testing::{TestCase, decider};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
-    use trogon_eventsourcing::{
-        CommandExecution, Events, run_task_immediately,
-        testing::{TestCase, decider},
-    };
+    use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
     use super::*;
     use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -130,7 +128,7 @@ mod tests {
         TestCase::new(decider::<RemoveJobCommand>())
             .given([added("backup")])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![removed()]);
+            .then(trogon_decider::events![removed()]);
     }
 
     #[test]

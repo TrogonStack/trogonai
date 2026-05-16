@@ -82,7 +82,7 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::JobEvent) -> Result<sta
 #[cfg(test)]
 mod tests {
     use buffa::{EnumValue, MessageField};
-    use trogon_eventsourcing::testing::{TestCase, decider};
+    use trogon_decider::testing::{TestCase, decider};
 
     use super::*;
     use crate::commands::domain::JobId;
@@ -138,7 +138,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             })
-            .then(trogon_eventsourcing::events![paused.clone()]);
+            .then(trogon_decider::events![paused.clone()]);
 
         TestCase::new(decider::<ResumeJobCommand>())
             .given([added.clone()])
@@ -147,7 +147,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)),
             })
-            .then(trogon_eventsourcing::events![resumed.clone()]);
+            .then(trogon_decider::events![resumed.clone()]);
 
         TestCase::new(decider::<RemoveJobCommand>())
             .given([added])
@@ -157,7 +157,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             })
-            .then(trogon_eventsourcing::events![job_removed()]);
+            .then(trogon_decider::events![job_removed()]);
     }
 
     #[test]

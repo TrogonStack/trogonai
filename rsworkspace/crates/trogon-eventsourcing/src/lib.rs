@@ -7,7 +7,6 @@ mod execution;
 pub mod nats;
 pub mod snapshot;
 mod stream;
-pub mod testing;
 
 pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventEncodeError, EventIdentity, EventType};
 pub use event::{Event, EventHeaders, EventHeadersError, HeaderKey, StreamEvent};
@@ -33,5 +32,16 @@ pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadStreamRequest, ReadStreamResponse,
     StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
-pub use testing::{DeciderSpec, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
+#[cfg(feature = "test-support")]
+pub use trogon_decider::testing;
+#[cfg(feature = "test-support")]
+pub use trogon_decider::testing::{DeciderSpec, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
 pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, WritePrecondition};
+
+#[cfg(feature = "test-support")]
+#[macro_export]
+macro_rules! events {
+    ($($tokens:tt)*) => {
+        ::trogon_decider::events![$($tokens)*]
+    };
+}
