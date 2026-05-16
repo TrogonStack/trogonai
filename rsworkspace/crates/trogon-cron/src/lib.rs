@@ -42,4 +42,4 @@ pub use schedule::ResolvedJob;
 pub use store::{Store, connect_store, open_command_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
 pub use trogon_cron_jobs_proto::{JobEventCase, JobEventCodec, state_v1, v1};
-pub use trogon_eventsourcing::{CommandFailure, CommandResult, ExecutionResult, StreamState};
+pub use trogon_eventsourcing::{CommandFailure, CommandResult, ExecutionResult, StreamWritePrecondition};

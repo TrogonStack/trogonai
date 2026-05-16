@@ -8,7 +8,7 @@ use async_nats::jetstream::{
     context::ConsumerInfoErrorKind,
 };
 use futures::{Stream, StreamExt, future};
-use trogon_eventsourcing::{RecordedEvent, record_stream_message};
+use trogon_eventsourcing::{StreamEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator, signal};
@@ -365,7 +365,7 @@ async fn rebuild_scheduler_state_from_stream(
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
-            .decode_data_with(&JobEventCodec)
+            .decode_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         let _ = apply_scheduler_event(&mut desired_jobs, &stream_id, &data)?;
         if reached_bootstrap_tail {
@@ -460,7 +460,7 @@ async fn handle_scheduler_message(
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(event.stream_id())?;
     let data = event
-        .decode_data_with(&JobEventCodec)
+        .decode_with(&JobEventCodec)
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
     let rollback = DesiredJobsRollback {
         stream_id: stream_id.clone(),
@@ -615,14 +615,12 @@ async fn recreate_scheduler_consumer(stream: &jetstream::stream::Stream, start_s
     Ok(())
 }
 
-fn decode_recorded_job_event(
-    message: async_nats::jetstream::message::StreamMessage,
-) -> Result<RecordedEvent, CronError> {
+fn decode_recorded_job_event(message: async_nats::jetstream::message::StreamMessage) -> Result<StreamEvent, CronError> {
     record_stream_message(message)
         .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
-fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedEvent, CronError> {
+fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, CronError> {
     let stream_message =
         async_nats::jetstream::message::StreamMessage::try_from(message.message.clone()).map_err(|source| {
             CronError::event_source(

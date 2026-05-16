@@ -1,6 +1,6 @@
 use buffa::MessageField;
 use trogon_cron_jobs_proto::{state_v1, v1};
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot, StreamState};
+use trogon_eventsourcing::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 
 use super::domain::{Job, JobId};
 
@@ -17,20 +17,28 @@ pub enum AddJobDecideError {
     UnknownStateValue { value: i32 },
 }
 
+impl std::fmt::Display for AddJobDecideError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for AddJobDecideError {}
+
 impl AddJobCommand {
     pub const fn new(job: Job) -> Self {
         Self { job }
     }
 }
 
-impl Decide for AddJobCommand {
+impl Decider for AddJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
     type DecideError = AddJobDecideError;
     type EvolveError = super::EvolveError;
 
-    const REQUIRED_WRITE_PRECONDITION: Option<StreamState> = Some(StreamState::NoStream);
+    const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
         self.job.id.as_str()
@@ -44,7 +52,7 @@ impl Decide for AddJobCommand {
         super::state::evolve(state, event)
     }
 
-    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let Some(value) = state.state.as_ref() else {
             return Err(AddJobDecideError::MissingStateValue);
         };
@@ -82,7 +90,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 mod tests {
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, CommandFailure, NonEmpty, run_task_immediately,
+        CommandExecution, CommandFailure, Events, run_task_immediately,
         testing::{TestCase, decider},
     };
 
@@ -184,7 +192,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.stream_position.get(), 1);
-        assert_eq!(outcome.events, NonEmpty::one(added("backup")));
+        assert_eq!(outcome.events, Events::one(added("backup")));
 
         let stored_job = store
             .get_job(GetJobCommand::new(crate::JobId::parse("backup").unwrap()))

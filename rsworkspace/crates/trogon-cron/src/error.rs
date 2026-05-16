@@ -1,5 +1,5 @@
 use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
-use trogon_eventsourcing::{StreamPosition, StreamState};
+use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
 
 use crate::commands::domain::MessageHeadersError;
 
@@ -31,7 +31,7 @@ pub enum CronError {
     },
     OptimisticConcurrencyConflict {
         id: String,
-        expected: StreamState,
+        expected: StreamWritePrecondition,
         current_position: Option<StreamPosition>,
     },
     Serde(serde_json::Error),
@@ -276,7 +276,7 @@ impl From<JetStreamStoreError<CronError>> for CronError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::{StreamPosition, StreamState};
+    use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
     use trogon_nats::SubjectTokenViolation;
 
     fn position(value: u64) -> StreamPosition {
@@ -324,7 +324,7 @@ mod tests {
 
         let occ_missing = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: StreamState::NoStream,
+            expected: StreamWritePrecondition::NoStream,
             current_position: None,
         };
         assert!(occ_missing.to_string().contains("job has no current position"));
@@ -332,7 +332,7 @@ mod tests {
 
         let occ_current = CronError::OptimisticConcurrencyConflict {
             id: "job-1".to_string(),
-            expected: StreamState::At(position(3)),
+            expected: StreamWritePrecondition::At(position(3)),
             current_position: Some(position(4)),
         };
         assert!(occ_current.to_string().contains("current position is 4"));

@@ -1,5 +1,5 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decide, Decision, FrequencySnapshot};
+use trogon_eventsourcing::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
 use super::domain::JobId;
 
@@ -17,13 +17,21 @@ pub enum ResumeJobDecideError {
     UnknownStateValue { value: i32 },
 }
 
+impl std::fmt::Display for ResumeJobDecideError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for ResumeJobDecideError {}
+
 impl ResumeJobCommand {
     pub const fn new(id: JobId) -> Self {
         Self { id }
     }
 }
 
-impl Decide for ResumeJobCommand {
+impl Decider for ResumeJobCommand {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::JobEvent;
@@ -42,7 +50,7 @@ impl Decide for ResumeJobCommand {
         super::state::evolve(state, event)
     }
 
-    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self::Event>, Self::DecideError> {
+    fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let Some(value) = state.state.as_ref() else {
             return Err(ResumeJobDecideError::MissingStateValue);
         };
@@ -77,7 +85,7 @@ mod tests {
     use buffa::MessageField;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{
-        CommandExecution, NonEmpty, run_task_immediately,
+        CommandExecution, Events, run_task_immediately,
         testing::{TestCase, Timeline, decider},
     };
 
@@ -218,7 +226,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.stream_position.get(), 3);
-        assert_eq!(outcome.events, NonEmpty::one(resumed()));
+        assert_eq!(outcome.events, Events::one(resumed()));
 
         let job = store
             .get_job(GetJobCommand::new(crate::JobId::parse("backup").unwrap()))
