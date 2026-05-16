@@ -34,4 +34,4 @@ pub use stream::{
     StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 pub use testing::{DeciderSpec, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
-pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, IntoDecision, WritePrecondition};
+pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, WritePrecondition};
