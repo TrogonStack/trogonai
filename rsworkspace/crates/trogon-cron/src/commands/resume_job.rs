@@ -83,11 +83,9 @@ impl CommandSnapshotPolicy for ResumeJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
+    use trogon_decider::testing::{TestCase, Timeline, decider};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
-    use trogon_eventsourcing::{
-        CommandExecution, Events, run_task_immediately,
-        testing::{TestCase, Timeline, decider},
-    };
+    use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
     use super::*;
     use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -145,7 +143,7 @@ mod tests {
             .given([added("backup")])
             .given([paused()])
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![resumed()]);
+            .then(trogon_decider::events![resumed()]);
     }
 
     #[test]
@@ -185,22 +183,21 @@ mod tests {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given_no_history()
             .when(AddJobCommand::new(active_job("backup")))
-            .then(trogon_eventsourcing::events![added("backup")]);
+            .then(trogon_decider::events![added("backup")]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![paused()]);
+            .then(trogon_decider::events![paused()]);
 
         let resume = TestCase::new(decider::<ResumeJobCommand>())
             .given(pause.history())
             .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![resumed()]);
+            .then(trogon_decider::events![resumed()]);
 
-        Timeline::new().given([register, pause, resume]).then_stream(
-            "backup",
-            trogon_eventsourcing::events![added("backup"), paused(), resumed()],
-        );
+        Timeline::new()
+            .given([register, pause, resume])
+            .then_stream("backup", trogon_decider::events![added("backup"), paused(), resumed()]);
     }
 
     #[tokio::test]

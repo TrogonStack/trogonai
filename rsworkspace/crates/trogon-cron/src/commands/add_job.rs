@@ -88,11 +88,9 @@ impl CommandSnapshotPolicy for AddJobCommand {
 
 #[cfg(test)]
 mod tests {
+    use trogon_decider::testing::{TestCase, decider};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
-    use trogon_eventsourcing::{
-        CommandExecution, CommandFailure, Events, run_task_immediately,
-        testing::{TestCase, decider},
-    };
+    use trogon_eventsourcing::{CommandExecution, CommandFailure, Events, run_task_immediately};
 
     use super::*;
     use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -157,7 +155,7 @@ mod tests {
         TestCase::new(decider::<AddJobCommand>())
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then(trogon_eventsourcing::events![added("backup")]);
+            .then(trogon_decider::events![added("backup")]);
     }
 
     #[test]

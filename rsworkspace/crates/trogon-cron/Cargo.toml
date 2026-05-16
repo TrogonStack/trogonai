@@ -45,6 +45,7 @@ proptest = "1"
 tempfile = { workspace = true }
 time = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+trogon-decider = { workspace = true, features = ["test-support"] }
 
 [[bin]]
 name = "trogon-cron"

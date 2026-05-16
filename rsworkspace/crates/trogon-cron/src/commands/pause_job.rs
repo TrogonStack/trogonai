@@ -83,11 +83,9 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
+    use trogon_decider::testing::{TestCase, Timeline, decider};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
-    use trogon_eventsourcing::{
-        CommandExecution, Events, run_task_immediately,
-        testing::{TestCase, Timeline, decider},
-    };
+    use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
     use super::*;
     use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -138,7 +136,7 @@ mod tests {
         TestCase::new(decider::<PauseJobCommand>())
             .given([added("backup")])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![paused()]);
+            .then(trogon_decider::events![paused()]);
     }
 
     #[test]
@@ -179,16 +177,16 @@ mod tests {
         let register = TestCase::new(decider::<AddJobCommand>())
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then(trogon_eventsourcing::events![added("backup")]);
+            .then(trogon_decider::events![added("backup")]);
 
         let pause = TestCase::new(decider::<PauseJobCommand>())
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_eventsourcing::events![paused()]);
+            .then(trogon_decider::events![paused()]);
 
         Timeline::new()
             .given([register, pause])
-            .then_stream("backup", trogon_eventsourcing::events![added("backup"), paused()]);
+            .then_stream("backup", trogon_decider::events![added("backup"), paused()]);
     }
 
     #[tokio::test]
