@@ -6,6 +6,9 @@ description = "Typed decider primitives for Trogon event-sourced workflows"
 license = "MIT"
 repository = "https://github.com/TrogonStack/trogonai"
 
+[features]
+test-support = []
+
 [lints.rust]
 warnings = "deny"
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
@@ -15,3 +18,11 @@ all = "deny"
 expect_used = "deny"
 panic = "deny"
 unwrap_used = "deny"
+
+[dev-dependencies]
+trybuild = "1"
+
+[[test]]
+name = "trybuild"
+path = "tests/trybuild.rs"
+required-features = ["test-support"]

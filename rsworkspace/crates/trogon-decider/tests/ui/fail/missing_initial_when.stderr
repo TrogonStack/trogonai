@@ -7,4 +7,5 @@ error[E0599]: no method named `then_error` found for struct `TestCase<TestComman
    | |_________|
    |
    |
-   = note: the method was found for `TestCase<C, trogon_decider::testing::When<<C as Decider>::Event, <C as Decider>::State, C>>`
+   = note: the method was found for
+           - `TestCase<C, When<<C as Decider>::Event, <C as Decider>::State, C>>`

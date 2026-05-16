@@ -103,6 +103,8 @@
 mod act;
 mod decision;
 mod events;
+#[cfg(feature = "test-support")]
+pub mod testing;
 mod write_precondition;
 
 pub use act::{Act, ActBuilder};
@@ -112,6 +114,8 @@ pub use decision::Decision;
 #[doc(hidden)]
 pub use decision::{DecisionFailure, DecisionResult};
 pub use events::Events;
+#[cfg(feature = "test-support")]
+pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use write_precondition::WritePrecondition;
 
 /// Decision-making for a typed command.
