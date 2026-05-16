@@ -155,7 +155,7 @@ mod tests {
         TestCase::<AddJobCommand>::new()
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then(trogon_decider::events![added("backup")]);
+            .then([added("backup")]);
     }
 
     #[test]

@@ -128,7 +128,7 @@ mod tests {
         TestCase::<RemoveJobCommand>::new()
             .given([added("backup")])
             .when(RemoveJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_decider::events![removed()]);
+            .then([removed()]);
     }
 
     #[test]

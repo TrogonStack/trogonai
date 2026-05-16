@@ -138,7 +138,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             })
-            .then(trogon_decider::events![paused.clone()]);
+            .then([paused.clone()]);
 
         TestCase::<ResumeJobCommand>::new()
             .given([added.clone()])
@@ -147,7 +147,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)),
             })
-            .then(trogon_decider::events![resumed.clone()]);
+            .then([resumed.clone()]);
 
         TestCase::<RemoveJobCommand>::new()
             .given([added])
@@ -157,7 +157,7 @@ mod tests {
             .state(state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)),
             })
-            .then(trogon_decider::events![job_removed()]);
+            .then([job_removed()]);
     }
 
     #[test]
