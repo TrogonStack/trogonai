@@ -13,7 +13,7 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    JobEventCase, JobEventCodec,
+    JobEventCase,
     error::CronError,
     kv::{CRON_JOBS_CHECKPOINT_KEY, EVENTS_SUBJECT_PREFIX},
     read_model::{
@@ -389,7 +389,7 @@ where
         let reached_tail = sequence >= info.state.last_sequence;
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
-        let data = event.decode_with(&JobEventCodec).map_err(|source| {
+        let data = event.decode::<v1::JobEvent>().map_err(|source| {
             CronError::event_source(
                 "failed to decode job event during cron jobs read-model catch-up",
                 source,
@@ -430,7 +430,7 @@ pub(crate) async fn project_appended_events(
 
     for event in events {
         let decoded = event
-            .decode_with(job_id, &JobEventCodec)
+            .decode::<v1::JobEvent>(job_id)
             .map_err(|source| CronError::event_source("failed to decode job event for cron jobs read model", source))?;
         if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
             apply_projection_change(bucket, &change).await?;
@@ -506,7 +506,7 @@ async fn rebuild_jobs_from_stream(
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
-            .decode_with(&JobEventCodec)
+            .decode::<v1::JobEvent>()
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
         if reached_tail {
@@ -573,7 +573,7 @@ fn prepare_watched_projection_change(
         }
     };
 
-    let data = match event.decode_with(&JobEventCodec) {
+    let data = match event.decode::<v1::JobEvent>() {
         Ok(data) => data,
         Err(error) => {
             tracing::error!(error = %error, "Failed to decode watched cron job event payload");

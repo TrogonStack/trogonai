@@ -15,7 +15,7 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    JobEventCase, JobEventCodec, ResolvedJob,
+    JobEventCase, ResolvedJob,
     error::CronError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
@@ -393,7 +393,7 @@ async fn rebuild_scheduler_state_from_stream(
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
-            .decode_with(&JobEventCodec)
+            .decode::<v1::JobEvent>()
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         let _ = apply_scheduler_event(&mut desired_jobs, &stream_id, &data)?;
         if reached_bootstrap_tail {
@@ -488,7 +488,7 @@ async fn handle_scheduler_message(
     let event = decode_recorded_watch_message(message)?;
     let stream_id = job_id_from_event_subject(event.stream_id())?;
     let data = event
-        .decode_with(&JobEventCodec)
+        .decode::<v1::JobEvent>()
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
     let rollback = DesiredJobsRollback {
         stream_id: stream_id.clone(),

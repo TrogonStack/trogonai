@@ -7,7 +7,7 @@ use crate::stream::{
     StreamWritePrecondition,
 };
 use crate::{
-    CanonicalEventCodec, Decider, Event, EventCodec, EventEncodeError, EventIdentity, EventType, Events, StreamEvent,
+    Decider, Event, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType, Events, StreamEvent,
     WritePrecondition,
 };
 use trogon_decider::DecisionFailure;
@@ -275,67 +275,6 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    pub fn with_codec<EC>(self, event_codec: EC) -> CommandExecutionWithCodec<'a, E, C, S, EC> {
-        CommandExecutionWithCodec {
-            event_store: self.event_store,
-            command: self.command,
-            write_precondition: self.write_precondition,
-            snapshots: self.snapshots,
-            event_codec,
-        }
-    }
-}
-
-pub struct CommandExecutionWithCodec<'a, E, C, S, EC> {
-    event_store: &'a E,
-    command: &'a C,
-    write_precondition: Option<StreamWritePrecondition>,
-    snapshots: S,
-    event_codec: EC,
-}
-
-impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC>
-where
-    C: Decider,
-{
-    #[allow(clippy::type_complexity)]
-    pub fn with_snapshot<I>(
-        self,
-        snapshots: I,
-    ) -> CommandExecutionWithCodec<
-        'a,
-        E,
-        C,
-        Snapshots<
-            'a,
-            <I as IntoSnapshots<'a, C>>::Store,
-            <I as IntoSnapshots<'a, C>>::Policy,
-            <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
-        >,
-        EC,
-    >
-    where
-        I: IntoSnapshots<'a, C>,
-    {
-        CommandExecutionWithCodec {
-            event_store: self.event_store,
-            command: self.command,
-            write_precondition: self.write_precondition,
-            snapshots: snapshots.into_snapshots(),
-            event_codec: self.event_codec,
-        }
-    }
-}
-
-impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
-    pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
-    where
-        W: Into<Option<StreamWritePrecondition>>,
-    {
-        self.write_precondition = write_precondition.into();
-        self
-    }
-
     async fn append_decision<SErr>(
         &self,
         current_position: Option<StreamPosition>,
@@ -344,19 +283,17 @@ impl<'a, E, C, S, EC> CommandExecutionWithCodec<'a, E, C, S, EC> {
     ) -> ExecutionStep<C, SErr, (AppendStreamResponse, Events<C::Event>, C::State)>
     where
         C: Decider,
-        C::Event: Clone + EventType + EventIdentity,
+        C::Event: Clone + EventType + EventIdentity + EventEncode,
         C::StreamId: AsRef<str>,
         E: StreamAppend<C::StreamId, Error = SErr>,
-        EC: EventCodec<C::Event>,
         <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-        EC::Error: std::error::Error + Send + Sync + 'static,
+        <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
     {
         let decision = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
         let (state, events) = decision
             .handle(state, self.command)
             .map_err(decision_failure_to_command_failure::<C, SErr>)?;
-        let encoded_events = encode_events(&self.event_codec, &events)
-            .map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
+        let encoded_events = encode_events(&events).map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
         let stream_write_precondition =
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -387,50 +324,15 @@ impl<'a, E, S, C, P, Spawn> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn
     }
 }
 
-impl<'a, E, S, C, P, Spawn, EC> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S, P, Spawn>, EC> {
-    pub fn with_task_runtime<NextSpawn>(
-        self,
-        schedule_snapshot_task: NextSpawn,
-    ) -> CommandExecutionWithCodec<'a, E, C, Snapshots<'a, S, P, NextSpawn>, EC> {
-        CommandExecutionWithCodec {
-            event_store: self.event_store,
-            command: self.command,
-            write_precondition: self.write_precondition,
-            snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
-            event_codec: self.event_codec,
-        }
-    }
-}
-
 impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decider,
-    C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
+    C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
-        std::error::Error + Send + Sync + 'static,
-{
-    pub async fn execute(self) -> CommandResult<C, SErr> {
-        self.execute_result().await
-    }
-
-    async fn execute_result(self) -> CommandResult<C, SErr> {
-        self.with_codec(C::Event::canonical_codec()).execute_result().await
-    }
-}
-
-impl<E, C, EC, SErr> CommandExecutionWithCodec<'_, E, C, WithoutSnapshots, EC>
-where
-    C: Decider,
-    C::Event: Clone + EventType + EventIdentity,
-    C::StreamId: AsRef<str>,
-    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    EC: EventCodec<C::Event>,
-    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    EC::Error: std::error::Error + Send + Sync + 'static,
+    <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
+    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -444,7 +346,7 @@ where
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_position = stream_read.current_position;
-        let state = replay_stream_events::<C, EC, SErr>(C::initial_state(), stream_read.events, &self.event_codec)?;
+        let state = replay_stream_events::<C, SErr>(C::initial_state(), stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
 
         Ok(ExecutionResult {
@@ -459,7 +361,7 @@ impl<E, S, C, P, Spawn, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spa
 where
     C: Decider,
     C::State: Clone + Send + 'static,
-    C::Event: Clone + CanonicalEventCodec + EventType + EventIdentity,
+    C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
     C::StreamId: AsRef<str> + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
@@ -470,38 +372,9 @@ where
     P: SnapshotPolicy<C::State, C::Event>,
     Spawn: Fn(BoxTask) + Send + Sync,
     SErr: std::fmt::Display + Send + 'static,
-    <C::Event as CanonicalEventCodec>::Codec: EventCodec<C::Event>,
     <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    <<C::Event as CanonicalEventCodec>::Codec as EventCodec<C::Event>>::Error:
-        std::error::Error + Send + Sync + 'static,
-{
-    pub async fn execute(self) -> CommandResult<C, SErr> {
-        self.execute_result().await
-    }
-
-    async fn execute_result(self) -> CommandResult<C, SErr> {
-        self.with_codec(C::Event::canonical_codec()).execute_result().await
-    }
-}
-
-impl<E, S, C, P, Spawn, SErr, EC> CommandExecutionWithCodec<'_, E, C, Snapshots<'_, S, P, Spawn>, EC>
-where
-    C: Decider,
-    C::State: Clone + Send + 'static,
-    C::Event: Clone + EventType + EventIdentity,
-    C::StreamId: AsRef<str> + ToOwned,
-    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: Clone
-        + SnapshotRead<C::State, C::StreamId, Error = SErr>
-        + SnapshotWrite<C::State, C::StreamId, Error = SErr>
-        + 'static,
-    P: SnapshotPolicy<C::State, C::Event>,
-    Spawn: Fn(BoxTask) + Send + Sync,
-    SErr: std::fmt::Display + Send + 'static,
-    EC: EventCodec<C::Event>,
-    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    EC::Error: std::error::Error + Send + Sync + 'static,
+    <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
+    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -546,7 +419,7 @@ where
         }
 
         let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_stream_events::<C, EC, SErr>(state, stream_read.events, &self.event_codec)?;
+        let state = replay_stream_events::<C, SErr>(state, stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
         let events_since_snapshot = replayed_event_count + events.len() as u64;
 
@@ -633,19 +506,18 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     }));
 }
 
-fn replay_stream_events<C, EC, SErr>(
+fn replay_stream_events<C, SErr>(
     mut state: C::State,
     stream_events: Vec<StreamEvent>,
-    event_codec: &EC,
 ) -> ExecutionStep<C, SErr, C::State>
 where
     C: Decider,
-    EC: EventCodec<C::Event>,
-    EC::Error: std::error::Error + Send + Sync + 'static,
+    C::Event: EventDecode,
+    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
 {
     for stream_event in stream_events {
         let event = stream_event
-            .decode_with(event_codec)
+            .decode::<C::Event>()
             .map_err(|source| CommandFailure::DecodeEvent(box_error(source)))?;
         state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
     }
@@ -665,16 +537,15 @@ where
     }
 }
 
-fn encode_events<E, C>(codec: &C, events: &Events<E>) -> Result<Events<Event>, EventEncodeError<E, C>>
+fn encode_events<E>(events: &Events<E>) -> Result<Events<Event>, EventEncodeError<E>>
 where
-    E: EventType + EventIdentity,
-    C: EventCodec<E>,
+    E: EventType + EventIdentity + EventEncode,
 {
-    let first = Event::from_domain_event(codec, events.first())?;
+    let first = Event::from_domain_event(events.first())?;
     let rest = events
         .iter()
         .skip(1)
-        .map(|event| Event::from_domain_event(codec, event))
+        .map(Event::from_domain_event)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Events::from_first(first, rest))
 }
@@ -692,7 +563,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        CanonicalEventCodec, Decision, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
+        Decision, EventDecode, EventEncode, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
         SnapshotSchema, StreamEvent, WriteSnapshotResponse,
     };
 
@@ -990,46 +861,19 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Clone, Copy, Default)]
-    struct TestEventCodec;
-
-    impl EventCodec<TestEvent> for TestEventCodec {
+    impl EventEncode for TestEvent {
         type Error = serde_json::Error;
 
-        fn encode(&self, value: &TestEvent) -> Result<Vec<u8>, Self::Error> {
-            serde_json::to_vec(value)
+        fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+            serde_json::to_vec(self)
         }
+    }
 
-        fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
+    impl EventDecode for TestEvent {
+        type Error = serde_json::Error;
+
+        fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
             serde_json::from_slice(payload)
-        }
-    }
-
-    impl CanonicalEventCodec for TestEvent {
-        type Codec = TestEventCodec;
-
-        fn canonical_codec() -> Self::Codec {
-            TestEventCodec
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, Default)]
-    struct WrappedJsonCodec;
-
-    impl EventCodec<TestEvent> for WrappedJsonCodec {
-        type Error = TestInfraError;
-
-        fn encode(&self, value: &TestEvent) -> Result<Vec<u8>, Self::Error> {
-            serde_json::to_string(value)
-                .map(|json| format!("wrapped:{json}"))
-                .map(String::into_bytes)
-                .map_err(Into::into)
-        }
-
-        fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<TestEvent, Self::Error> {
-            let value = std::str::from_utf8(payload).map_err(|_| TestInfraError::Json)?;
-            let json = value.strip_prefix("wrapped:").ok_or(TestInfraError::Json)?;
-            serde_json::from_str(json).map_err(Into::into)
         }
     }
 
@@ -1123,7 +967,7 @@ mod tests {
             | TestEvent::Removed { id }
             | TestEvent::Broken { id } => id.clone(),
         };
-        Event::from_domain_event(&TestEventCodec, &event).unwrap().record(
+        Event::from_domain_event(&event).unwrap().record(
             stream_id,
             position(sequence),
             DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
@@ -1396,42 +1240,6 @@ mod tests {
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].r#type, "state_changed");
         assert_eq!(result.state, TestState::Present { enabled: false });
-    }
-
-    #[test]
-    fn supports_custom_event_codecs() {
-        let runtime = FakeRuntime {
-            current_position: Some(position(1)),
-            stream_events: vec![
-                Event::from_domain_event(
-                    &WrappedJsonCodec,
-                    &TestEvent::Registered {
-                        id: "alpha".to_string(),
-                    },
-                )
-                .unwrap()
-                .record(
-                    "alpha",
-                    position(1),
-                    DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
-                ),
-            ],
-            stream_position: position(2),
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Disable);
-
-        let result = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_codec(WrappedJsonCodec)
-                .execute_result(),
-        )
-        .unwrap();
-        let appended_events = runtime.appended_events.lock().unwrap();
-
-        assert_eq!(result.state, TestState::Present { enabled: false });
-        assert_eq!(appended_events.len(), 1);
-        assert!(appended_events[0].content.starts_with(b"wrapped:"));
     }
 
     #[test]

@@ -14,8 +14,8 @@ use trogon_eventsourcing::nats::{
     JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_position,
 };
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, CanonicalEventCodec, CommandExecution, CommandFailure, Decider,
-    Decision, Event, EventCodec, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderKey,
+    AppendStreamRequest, AppendStreamResponse, CommandExecution, CommandFailure, Decider, Decision, Event, EventDecode,
+    EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderKey,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotChange, SnapshotRead, SnapshotStoreConfig, SnapshotWrite,
     Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, spawn_on_tokio,
 };
@@ -38,22 +38,18 @@ fn recorded_positions(values: impl IntoIterator<Item = u64>) -> Vec<StreamPositi
     values.into_iter().map(position).collect()
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct TestJsonCodec;
-
-impl<T> EventCodec<T> for TestJsonCodec
+fn encode_json<T>(value: &T) -> Result<Vec<u8>, serde_json::Error>
 where
-    T: Serialize + DeserializeOwned,
+    T: Serialize,
 {
-    type Error = serde_json::Error;
+    serde_json::to_vec(value)
+}
 
-    fn encode(&self, value: &T) -> Result<Vec<u8>, Self::Error> {
-        serde_json::to_vec(value)
-    }
-
-    fn decode(&self, _event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<T, Self::Error> {
-        serde_json::from_slice(payload)
-    }
+fn decode_json<T>(payload: &[u8]) -> Result<T, serde_json::Error>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_slice(payload)
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +91,22 @@ impl EventType for TestEvent {
     }
 }
 
+impl EventEncode for TestEvent {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl EventDecode for TestEvent {
+    type Error = serde_json::Error;
+
+    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
+        decode_json(payload)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct IdentifiedTestEvent {
     #[serde(skip)]
@@ -113,6 +125,22 @@ impl EventType for IdentifiedTestEvent {
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
         Ok("test.event")
+    }
+}
+
+impl EventEncode for IdentifiedTestEvent {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl EventDecode for IdentifiedTestEvent {
+    type Error = serde_json::Error;
+
+    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
+        decode_json(payload)
     }
 }
 
@@ -141,6 +169,22 @@ impl EventType for CounterIncreased {
     }
 }
 
+impl EventEncode for CounterIncreased {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl EventDecode for CounterIncreased {
+    type Error = serde_json::Error;
+
+    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
+        decode_json(payload)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct IdentifiedCounterIncreased {
     #[serde(skip)]
@@ -162,11 +206,19 @@ impl EventType for IdentifiedCounterIncreased {
     }
 }
 
-impl CanonicalEventCodec for CounterIncreased {
-    type Codec = TestJsonCodec;
+impl EventEncode for IdentifiedCounterIncreased {
+    type Error = serde_json::Error;
 
-    fn canonical_codec() -> Self::Codec {
-        TestJsonCodec
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl EventDecode for IdentifiedCounterIncreased {
+    type Error = serde_json::Error;
+
+    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
+        decode_json(payload)
     }
 }
 
@@ -287,8 +339,7 @@ fn nats_test_url() -> String {
 
 fn test_event(_stream_id: &str, value: impl Into<String>) -> Result<Event, JetStreamStoreError<std::io::Error>> {
     let event = TestEvent { value: value.into() };
-    Event::from_domain_event(&TestJsonCodec, &event)
-        .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    Event::from_domain_event(&event).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<Event> {
@@ -296,7 +347,7 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
         event_id: Some(EventId::from(event_id)),
         value: value.into(),
     };
-    Ok(Event::from_domain_event(&TestJsonCodec, &event)?)
+    Ok(Event::from_domain_event(&event)?)
 }
 
 fn events(events: Vec<Event>) -> TestResult<Events<Event>> {
@@ -534,9 +585,9 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
     assert_eq!(second.stream_position, position(2));
     assert_eq!(third.stream_position, position(4));
     assert!(first.event.headers.is_empty());
-    assert_eq!(first.decode_with::<TestEvent, _>(&TestJsonCodec)?.value, "alpha-one");
-    assert_eq!(second.decode_with::<TestEvent, _>(&TestJsonCodec)?.value, "alpha-two");
-    assert_eq!(third.decode_with::<TestEvent, _>(&TestJsonCodec)?.value, "alpha-three");
+    assert_eq!(first.decode::<TestEvent>()?.value, "alpha-one");
+    assert_eq!(second.decode::<TestEvent>()?.value, "alpha-two");
+    assert_eq!(third.decode::<TestEvent>()?.value, "alpha-three");
 
     let third_stream_position = third.stream_position;
     let third_stream_position_value = third_stream_position.get();
@@ -546,12 +597,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .await?;
     assert_eq!(read_from_third.current_position, Some(third_stream_position));
     assert_eq!(read_from_third.events.len(), 1);
-    assert_eq!(
-        read_from_third.events[0]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value,
-        "alpha-three"
-    );
+    assert_eq!(read_from_third.events[0].decode::<TestEvent>()?.value, "alpha-three");
 
     let read_after_third = fixture
         .store
@@ -584,18 +630,8 @@ async fn jetstream_store_read_ranges_keep_current_position() -> TestResult {
     let read_from_two = fixture.store.read_stream(ReadStreamRequest::new("alpha", 2)).await?;
     assert_eq!(read_from_two.current_position, Some(position(3)));
     assert_eq!(read_from_two.events.len(), 2);
-    assert_eq!(
-        read_from_two.events[0]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value,
-        "two"
-    );
-    assert_eq!(
-        read_from_two.events[1]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value,
-        "three"
-    );
+    assert_eq!(read_from_two.events[0].decode::<TestEvent>()?.value, "two");
+    assert_eq!(read_from_two.events[1].decode::<TestEvent>()?.value, "three");
 
     let read_after_end = fixture.store.read_stream(ReadStreamRequest::new("alpha", 4)).await?;
     assert_eq!(read_after_end.current_position, Some(position(3)));
@@ -657,11 +693,7 @@ async fn jetstream_store_reads_subject_suffixes_from_global_offsets() -> TestRes
         let values = read
             .events
             .iter()
-            .map(|event| {
-                event
-                    .decode_with::<TestEvent, _>(&TestJsonCodec)
-                    .map(|event| event.value)
-            })
+            .map(|event| event.decode::<TestEvent>().map(|event| event.value))
             .collect::<serde_json::Result<Vec<_>>>()?;
         assert_eq!(values, expected_values);
     }
@@ -747,11 +779,8 @@ async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResul
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(3)));
     assert_eq!(read.events.len(), 2);
-    assert_eq!(read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value, "one");
-    assert_eq!(
-        read.events[1].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "three"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "one");
+    assert_eq!(read.events[1].decode::<TestEvent>()?.value, "three");
 
     fixture.delete().await
 }
@@ -774,12 +803,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
     assert_eq!(read_after_delete.current_position, Some(position(1)));
     assert_eq!(read_after_delete.events.len(), 1);
     assert_eq!(read_after_delete.events[0].stream_position, position(1));
-    assert_eq!(
-        read_after_delete.events[0]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value,
-        "one"
-    );
+    assert_eq!(read_after_delete.events[0].decode::<TestEvent>()?.value, "one");
 
     let appended = append_one(
         &fixture.store,
@@ -889,10 +913,7 @@ async fn jetstream_store_ignores_corrupt_messages_from_other_subjects() -> TestR
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "alpha-one"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "alpha-one");
 
     assert_read_stream_error(fixture.store.read_stream(ReadStreamRequest::new("beta", 1)).await)?;
 
@@ -927,12 +948,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
     assert_eq!(read_from_valid.current_position, Some(position(2)));
     assert_eq!(read_from_valid.events.len(), 1);
     assert_eq!(read_from_valid.events[0].stream_position, position(2));
-    assert_eq!(
-        read_from_valid.events[0]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value,
-        "alpha-valid"
-    );
+    assert_eq!(read_from_valid.events[0].decode::<TestEvent>()?.value, "alpha-valid");
 
     let read_after_valid = fixture.store.read_stream(ReadStreamRequest::new("alpha", 3)).await?;
     assert_eq!(read_after_valid.current_position, Some(position(2)));
@@ -1005,10 +1021,7 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
     assert_eq!(beta_read.current_position, Some(position(2)));
     assert_eq!(beta_read.events.len(), 1);
     assert_eq!(beta_read.events[0].stream_position, position(2));
-    assert_eq!(
-        beta_read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "beta-one"
-    );
+    assert_eq!(beta_read.events[0].decode::<TestEvent>()?.value, "beta-one");
 
     let gamma_read = fixture.store.read_stream(ReadStreamRequest::new("gamma", 1)).await?;
     assert_eq!(gamma_read.current_position, Some(position(3)));
@@ -1086,7 +1099,7 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         value: "headers".to_string(),
     };
     let event_headers = EventHeaders::one(HeaderKey::new("trace-id")?, "trace-1")?;
-    let event = Event::from_domain_event(&TestJsonCodec, &header_payload)?.with_headers(event_headers.clone());
+    let event = Event::from_domain_event(&header_payload)?.with_headers(event_headers.clone());
     fixture
         .store
         .append_stream(AppendStreamRequest::new(
@@ -1148,18 +1161,8 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
     let read = fixture.store.read_stream(ReadStreamRequest::new("counter", 1)).await?;
     assert_eq!(read.current_position, Some(position(2)));
     assert_eq!(read.events.len(), 2);
-    assert_eq!(
-        read.events[0]
-            .decode_with::<CounterIncreased, _>(&TestJsonCodec)?
-            .amount,
-        2
-    );
-    assert_eq!(
-        read.events[1]
-            .decode_with::<CounterIncreased, _>(&TestJsonCodec)?
-            .amount,
-        3
-    );
+    assert_eq!(read.events[0].decode::<CounterIncreased>()?.amount, 2);
+    assert_eq!(read.events[1].decode::<CounterIncreased>()?.amount, 3);
 
     fixture.delete().await
 }
@@ -1365,11 +1368,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let alpha_amounts = alpha
         .events
         .iter()
-        .map(|event| {
-            event
-                .decode_with::<CounterIncreased, _>(&TestJsonCodec)
-                .map(|event| event.amount)
-        })
+        .map(|event| event.decode::<CounterIncreased>().map(|event| event.amount))
         .collect::<serde_json::Result<Vec<_>>>()?;
     assert_eq!(alpha_amounts, vec![1, 2]);
 
@@ -1385,11 +1384,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let beta_amounts = beta
         .events
         .iter()
-        .map(|event| {
-            event
-                .decode_with::<CounterIncreased, _>(&TestJsonCodec)
-                .map(|event| event.amount)
-        })
+        .map(|event| event.decode::<CounterIncreased>().map(|event| event.amount))
         .collect::<serde_json::Result<Vec<_>>>()?;
     assert_eq!(beta_amounts, vec![10, 5]);
 
@@ -1418,7 +1413,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         ))),
         amount: 5,
     };
-    let seed = Event::from_domain_event(&TestJsonCodec, &seed_payload)?;
+    let seed = Event::from_domain_event(&seed_payload)?;
     let seed_outcome = fixture
         .store
         .append_stream(AppendStreamRequest::new(
@@ -1494,12 +1489,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
     let read = fixture.store.read_stream(ReadStreamRequest::new("counter", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0]
-            .decode_with::<CounterIncreased, _>(&TestJsonCodec)?
-            .amount,
-        1
-    );
+    assert_eq!(read.events[0].decode::<CounterIncreased>()?.amount, 1);
 
     fixture.delete().await
 }
@@ -1536,12 +1526,7 @@ async fn jetstream_command_execution_ignores_corrupt_events_from_other_subjects(
     assert_eq!(read.current_position, Some(position(2)));
     assert_eq!(read.events.len(), 1);
     assert_eq!(read.events[0].stream_position, position(2));
-    assert_eq!(
-        read.events[0]
-            .decode_with::<CounterIncreased, _>(&TestJsonCodec)?
-            .amount,
-        5
-    );
+    assert_eq!(read.events[0].decode::<CounterIncreased>()?.amount, 5);
 
     let missing = fixture.store.read_stream(ReadStreamRequest::new("missing", 1)).await?;
     assert_eq!(missing.current_position, None);
@@ -1683,12 +1668,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_append() -> TestRe
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert!(
-        read.events[0]
-            .decode_with::<TestEvent, _>(&TestJsonCodec)?
-            .value
-            .starts_with("attempt-")
-    );
+    assert!(read.events[0].decode::<TestEvent>()?.value.starts_with("attempt-"));
 
     fixture.delete().await
 }
@@ -1817,11 +1797,7 @@ async fn jetstream_store_any_concurrent_appends_preserve_every_event_once() -> T
     let mut values = read
         .events
         .iter()
-        .map(|event| {
-            event
-                .decode_with::<TestEvent, _>(&TestJsonCodec)
-                .map(|event| event.value)
-        })
+        .map(|event| event.decode::<TestEvent>().map(|event| event.value))
         .collect::<serde_json::Result<Vec<_>>>()?;
     values.sort();
     let mut expected_values = (0..attempts).map(|index| format!("any-{index}")).collect::<Vec<_>>();
@@ -1877,7 +1853,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
                 event_id: Some(EventId::from(event_id)),
                 value: format!("attempt-{index}"),
             };
-            let event = Event::from_domain_event(&TestJsonCodec, &payload)
+            let event = Event::from_domain_event(&payload)
                 .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
                 .append_stream(AppendStreamRequest::new(
@@ -2080,10 +2056,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "first"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "first");
 
     fixture.delete().await
 }
@@ -2115,10 +2088,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "first"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "first");
 
     fixture.delete().await
 }
@@ -2166,10 +2136,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "seed"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "seed");
 
     fixture.delete().await
 }
@@ -2330,10 +2297,7 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
     let read = fixture.store.read_stream(ReadStreamRequest::new("alpha", 1)).await?;
     assert_eq!(read.current_position, Some(position(1)));
     assert_eq!(read.events.len(), 1);
-    assert_eq!(
-        read.events[0].decode_with::<TestEvent, _>(&TestJsonCodec)?.value,
-        "seed"
-    );
+    assert_eq!(read.events[0].decode::<TestEvent>()?.value, "seed");
 
     fixture.delete().await
 }

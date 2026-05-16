@@ -1,37 +1,37 @@
 use std::fmt;
 
-use crate::{EventCodec, EventType};
+use crate::{EventEncode, EventType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EncodeEventError<EventTypeError, EventCodecError> {
+pub enum EncodeEventError<EventTypeError, EventEncodeError> {
     EventType(EventTypeError),
-    EventCodec(EventCodecError),
+    EventEncode(EventEncodeError),
 }
 
-pub type EventEncodeError<E, C> = EncodeEventError<<E as EventType>::Error, <C as EventCodec<E>>::Error>;
+pub type EventEncodeError<E> = EncodeEventError<<E as EventType>::Error, <E as EventEncode>::Error>;
 
-impl<EventTypeError, EventCodecError> fmt::Display for EncodeEventError<EventTypeError, EventCodecError>
+impl<EventTypeError, EventEncodeError> fmt::Display for EncodeEventError<EventTypeError, EventEncodeError>
 where
     EventTypeError: fmt::Display,
-    EventCodecError: fmt::Display,
+    EventEncodeError: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EventType(source) => write!(f, "{source}"),
-            Self::EventCodec(source) => write!(f, "{source}"),
+            Self::EventEncode(source) => write!(f, "{source}"),
         }
     }
 }
 
-impl<EventTypeError, EventCodecError> std::error::Error for EncodeEventError<EventTypeError, EventCodecError>
+impl<EventTypeError, EventEncodeError> std::error::Error for EncodeEventError<EventTypeError, EventEncodeError>
 where
     EventTypeError: std::error::Error + 'static,
-    EventCodecError: std::error::Error + 'static,
+    EventEncodeError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::EventType(source) => Some(source),
-            Self::EventCodec(source) => Some(source),
+            Self::EventEncode(source) => Some(source),
         }
     }
 }
