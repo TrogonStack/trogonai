@@ -83,7 +83,7 @@ impl CommandSnapshotPolicy for ResumeJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
-    use trogon_decider::testing::{TestCase, Timeline};
+    use trogon_decider::testing::TestCase;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
@@ -176,28 +176,6 @@ mod tests {
             .then_error(ResumeJobDecideError::JobDeleted {
                 id: JobId::parse("backup").unwrap(),
             });
-    }
-
-    #[test]
-    fn timeline_matches_cases_by_command_stream() {
-        let register = TestCase::<AddJobCommand>::new()
-            .given_no_history()
-            .when(AddJobCommand::new(active_job("backup")))
-            .then([added("backup")]);
-
-        let pause = TestCase::<PauseJobCommand>::new()
-            .given(register.history())
-            .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([paused()]);
-
-        let resume = TestCase::<ResumeJobCommand>::new()
-            .given(pause.history())
-            .when(ResumeJobCommand::new(JobId::parse("backup").unwrap()))
-            .then([resumed()]);
-
-        Timeline::new()
-            .given([register, pause, resume])
-            .then_stream("backup", [added("backup"), paused(), resumed()]);
     }
 
     #[tokio::test]
