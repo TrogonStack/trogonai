@@ -391,7 +391,8 @@ impl StreamRead<str> for MockCronStore {
                 continue;
             }
             recorded.push(event.record(
-                Some(stream_position(sequence)?),
+                stream_id,
+                stream_position(sequence)?,
                 DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
                     CronError::event_source(
                         "failed to build mocked recorded event timestamp",
@@ -412,17 +413,11 @@ impl StreamAppend<str> for MockCronStore {
 
     async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
         let stream_id = request.stream_id.to_string();
-        let expected_state = request.stream_state;
+        let expected_state = request.stream_write_precondition;
         let events = request.events;
         let jobs = self.jobs.clone();
         let stream_positions = self.stream_positions.clone();
         let event_log = self.events.clone();
-        if events.iter().any(|event| event.stream_id() != stream_id.as_str()) {
-            return Err(CronError::event_source(
-                "failed to append mocked job event batch",
-                std::io::Error::other(format!("batch contains events outside stream '{}'", stream_id)),
-            ));
-        }
 
         let mut jobs = jobs.lock().unwrap();
         let mut stream_positions = stream_positions.lock().unwrap();
@@ -455,7 +450,7 @@ impl StreamAppend<str> for MockCronStore {
 
         for event_data in events {
             let event = event_data
-                .decode_with(&JobEventCodec)
+                .decode_with(stream_id.as_str(), &JobEventCodec)
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
