@@ -8,7 +8,7 @@ use async_nats::jetstream::{
     kv,
 };
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::{EventData, RecordedEvent, StreamPosition, record_stream_message};
+use trogon_eventsourcing::{Event, StreamEvent, StreamPosition, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
@@ -389,7 +389,7 @@ where
         let reached_tail = sequence >= info.state.last_sequence;
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
-        let data = event.decode_data_with(&JobEventCodec).map_err(|source| {
+        let data = event.decode_with(&JobEventCodec).map_err(|source| {
             CronError::event_source(
                 "failed to decode job event during cron jobs read-model catch-up",
                 source,
@@ -410,7 +410,7 @@ where
 pub(crate) async fn project_appended_events(
     bucket: &kv::Store,
     job_id: &str,
-    events: &[EventData],
+    events: &[Event],
     final_position: StreamPosition,
 ) -> Result<(), CronError> {
     if events.is_empty() {
@@ -430,7 +430,7 @@ pub(crate) async fn project_appended_events(
 
     for event in events {
         let decoded = event
-            .decode_data_with(&JobEventCodec)
+            .decode_with(job_id, &JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode job event for cron jobs read model", source))?;
         if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
             apply_projection_change(bucket, &change).await?;
@@ -506,7 +506,7 @@ async fn rebuild_jobs_from_stream(
         let event = decode_recorded_watch_message(&message)?;
         let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
-            .decode_data_with(&JobEventCodec)
+            .decode_with(&JobEventCodec)
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
         apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
         if reached_tail {
@@ -517,14 +517,12 @@ async fn rebuild_jobs_from_stream(
     Ok(states.into_values().filter_map(JobStreamState::into_job).collect())
 }
 
-fn decode_recorded_job_event(
-    message: async_nats::jetstream::message::StreamMessage,
-) -> Result<RecordedEvent, CronError> {
+fn decode_recorded_job_event(message: async_nats::jetstream::message::StreamMessage) -> Result<StreamEvent, CronError> {
     record_stream_message(message)
         .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 
-fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<RecordedEvent, CronError> {
+fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, CronError> {
     let stream_message =
         async_nats::jetstream::message::StreamMessage::try_from(message.message.clone()).map_err(|source| {
             CronError::event_source("failed to reconstruct stream message from watch delivery", source)
@@ -575,7 +573,7 @@ fn prepare_watched_projection_change(
         }
     };
 
-    let data = match event.decode_data_with(&JobEventCodec) {
+    let data = match event.decode_with(&JobEventCodec) {
         Ok(data) => data,
         Err(error) => {
             tracing::error!(error = %error, "Failed to decode watched cron job event payload");

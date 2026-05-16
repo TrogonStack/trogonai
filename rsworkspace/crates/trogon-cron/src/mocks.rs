@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, EventData, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamState,
+    AppendStreamRequest, AppendStreamResponse, Event, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
+    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
@@ -143,7 +143,7 @@ impl ReleaseLease for MockLeaderLock {
 pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, CronJob>>>,
     stream_positions: Arc<Mutex<HashMap<String, StreamPosition>>>,
-    events: Arc<Mutex<HashMap<String, Vec<EventData>>>>,
+    events: Arc<Mutex<HashMap<String, Vec<Event>>>>,
     command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
 }
 
@@ -175,7 +175,7 @@ impl MockCronStore {
             .insert(id.clone(), initial_position);
         self.events.lock().unwrap().insert(
             id.clone(),
-            vec![EventData::from_event(&id, &JobEventCodec, &event).unwrap()],
+            vec![Event::from_domain_event(&JobEventCodec, &event).unwrap()],
         );
         self.jobs.lock().unwrap().insert(id.clone(), job);
     }
@@ -432,19 +432,19 @@ impl StreamAppend<str> for MockCronStore {
         let current_position = stream_positions.get(stream_id.as_str()).copied();
         let write_state = JobWriteState::new(current_position, current_position.is_some());
         match expected_state {
-            StreamState::Any => {}
-            StreamState::StreamExists if write_state.exists() => {}
-            StreamState::StreamExists => {
+            StreamWritePrecondition::Any => {}
+            StreamWritePrecondition::StreamExists if write_state.exists() => {}
+            StreamWritePrecondition::StreamExists => {
                 return Err(CronError::OptimisticConcurrencyConflict {
                     id: stream_id.to_string(),
-                    expected: StreamState::StreamExists,
+                    expected: StreamWritePrecondition::StreamExists,
                     current_position,
                 });
             }
-            StreamState::NoStream => {
+            StreamWritePrecondition::NoStream => {
                 JobWriteCondition::MustNotExist.ensure(stream_id.as_str(), write_state)?;
             }
-            StreamState::At(position) => {
+            StreamWritePrecondition::At(position) => {
                 JobWriteCondition::MustBeAtPosition(position).ensure(stream_id.as_str(), write_state)?;
             }
         }
@@ -455,7 +455,7 @@ impl StreamAppend<str> for MockCronStore {
 
         for event_data in events {
             let event = event_data
-                .decode_data_with(&JobEventCodec)
+                .decode_with(&JobEventCodec)
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);

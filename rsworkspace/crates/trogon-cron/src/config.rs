@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{StreamPosition, StreamState};
+use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
 
 use crate::error::CronError;
 
@@ -47,7 +47,7 @@ impl JobWriteCondition {
     }
 }
 
-impl From<JobWriteCondition> for StreamState {
+impl From<JobWriteCondition> for StreamWritePrecondition {
     fn from(value: JobWriteCondition) -> Self {
         match value {
             JobWriteCondition::MustNotExist => Self::NoStream,
