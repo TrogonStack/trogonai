@@ -889,7 +889,7 @@ mod tests {
                 (TestState::Missing, TestAction::Register) => {
                     Ok(Decision::event(TestEvent::Registered { id: command.id.clone() }))
                 }
-                (TestState::Missing, TestAction::RegisterThenDisable) => Ok(Decision::<Self>::act()
+                (TestState::Missing, TestAction::RegisterThenDisable) => Decision::<Self>::act()
                     .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
                     .execute(|state, command: &Self| match state {
                         TestState::Present { enabled: true } => Ok(Decision::event(TestEvent::StateChanged {
@@ -899,15 +899,15 @@ mod tests {
                         TestState::Present { enabled: false } => Err(TestDecisionError::AlreadyDisabled),
                         TestState::Missing => Err(TestDecisionError::Missing),
                     })
-                    .into_decision()),
-                (TestState::Missing, TestAction::RegisterThenFail) => Ok(Decision::<Self>::act()
+                    .into(),
+                (TestState::Missing, TestAction::RegisterThenFail) => Decision::<Self>::act()
                     .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
                     .execute(|_, _| Err(TestDecisionError::AlreadyDisabled))
-                    .into_decision()),
-                (TestState::Missing, TestAction::RegisterThenBroken) => Ok(Decision::<Self>::act()
+                    .into(),
+                (TestState::Missing, TestAction::RegisterThenBroken) => Decision::<Self>::act()
                     .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
                     .execute(|_, command: &Self| Decision::event(TestEvent::Broken { id: command.id.clone() }))
-                    .into_decision()),
+                    .into(),
                 (_, TestAction::EmitBroken) => Ok(Decision::event(TestEvent::Broken { id: command.id.clone() })),
                 (
                     TestState::Present { .. },
