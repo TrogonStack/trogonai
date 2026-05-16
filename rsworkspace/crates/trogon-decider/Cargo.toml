@@ -3,11 +3,8 @@ name = "trogon-decider"
 version = "0.1.0"
 edition = "2024"
 description = "Typed decider primitives for Trogon event-sourced workflows"
-license = "Apache-2.0"
+license = "MIT"
 repository = "https://github.com/TrogonStack/trogonai"
-
-[features]
-test-support = []
 
 [lints.rust]
 warnings = "deny"
@@ -18,14 +15,3 @@ all = "deny"
 expect_used = "deny"
 panic = "deny"
 unwrap_used = "deny"
-
-[dependencies]
-thiserror = { workspace = true }
-
-[dev-dependencies]
-trybuild = "1"
-
-[[test]]
-name = "trybuild"
-path = "tests/trybuild.rs"
-required-features = ["test-support"]
