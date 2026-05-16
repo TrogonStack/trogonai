@@ -6,7 +6,7 @@ use async_nats::Request;
 use async_nats::jetstream;
 use chrono::{Duration as ChronoDuration, Utc};
 use trogon_cron::{
-    AddJobCommand, CronController, GetJobCommand, JobEventCase, JobEventCodec, JobEventSchedule, JobEventStatus, JobId,
+    AddJobCommand, CronController, GetJobCommand, JobEventCase, JobEventSchedule, JobEventStatus, JobId,
     PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
     state_v1, v1,
 };
@@ -427,7 +427,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let events = stream
         .events
         .iter()
-        .map(|event| event.decode_data_with::<v1::JobEvent, _>(&JobEventCodec).unwrap())
+        .map(|event| event.decode::<v1::JobEvent>().unwrap())
         .collect::<Vec<_>>();
     assert!(matches!(&events[0].event, Some(JobEventCase::JobAdded(_))));
     assert!(matches!(&events[1].event, Some(JobEventCase::JobPaused(_))));

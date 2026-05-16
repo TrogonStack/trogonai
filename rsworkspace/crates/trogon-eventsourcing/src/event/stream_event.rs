@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{Event, EventCodec, StreamPosition};
+use crate::{Event, EventDecode, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamEvent {
@@ -19,10 +19,10 @@ impl StreamEvent {
         format!("{prefix}{}", self.stream_id())
     }
 
-    pub fn decode_with<E, C>(&self, codec: &C) -> Result<E, C::Error>
+    pub fn decode<E>(&self) -> Result<E, E::Error>
     where
-        C: EventCodec<E>,
+        E: EventDecode,
     {
-        self.event.decode_with(&self.stream_id, codec)
+        self.event.decode(&self.stream_id)
     }
 }

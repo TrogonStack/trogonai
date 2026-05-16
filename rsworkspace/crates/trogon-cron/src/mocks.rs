@@ -19,7 +19,7 @@ use trogon_eventsourcing::{
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
 use crate::{
-    GetJobCommand, JobEventCase, JobEventCodec, ListJobsCommand, ResolvedJob,
+    GetJobCommand, JobEventCase, ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
@@ -173,10 +173,10 @@ impl MockCronStore {
             .lock()
             .unwrap()
             .insert(id.clone(), initial_position);
-        self.events.lock().unwrap().insert(
-            id.clone(),
-            vec![Event::from_domain_event(&JobEventCodec, &event).unwrap()],
-        );
+        self.events
+            .lock()
+            .unwrap()
+            .insert(id.clone(), vec![Event::from_domain_event(&event).unwrap()]);
         self.jobs.lock().unwrap().insert(id.clone(), job);
     }
 
@@ -450,7 +450,7 @@ impl StreamAppend<str> for MockCronStore {
 
         for event_data in events {
             let event = event_data
-                .decode_with(stream_id.as_str(), &JobEventCodec)
+                .decode::<v1::JobEvent>(stream_id.as_str())
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);

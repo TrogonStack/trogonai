@@ -8,7 +8,7 @@ pub mod nats;
 pub mod snapshot;
 mod stream;
 
-pub use codec::{CanonicalEventCodec, EncodeEventError, EventCodec, EventEncodeError, EventIdentity, EventType};
+pub use codec::{EncodeEventError, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType};
 pub use event::{Event, EventHeaders, EventHeadersError, HeaderKey, StreamEvent};
 pub use event_id::EventId;
 pub use execution::{

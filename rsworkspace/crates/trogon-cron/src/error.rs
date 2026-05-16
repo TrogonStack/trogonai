@@ -219,8 +219,8 @@ impl From<serde_json::Error> for CronError {
     }
 }
 
-impl From<trogon_cron_jobs_proto::JobEventCodecError> for CronError {
-    fn from(value: trogon_cron_jobs_proto::JobEventCodecError) -> Self {
+impl From<trogon_cron_jobs_proto::JobEventPayloadError> for CronError {
+    fn from(value: trogon_cron_jobs_proto::JobEventPayloadError) -> Self {
         Self::event_source("failed to encode or decode job event payload", value)
     }
 }
