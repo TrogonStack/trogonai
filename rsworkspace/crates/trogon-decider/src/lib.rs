@@ -36,15 +36,31 @@
 //!     Placed { customer_id: String },
 //! }
 //!
-//! #[derive(thiserror::Error, Debug, PartialEq, Eq)]
+//! #[derive(Debug, PartialEq, Eq)]
 //! enum PlaceOrderError {
-//!     #[error("order is already placed")]
 //!     AlreadyPlaced,
 //! }
 //!
-//! #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-//! #[error("invalid order event")]
+//! impl std::fmt::Display for PlaceOrderError {
+//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//!         match self {
+//!             Self::AlreadyPlaced => f.write_str("order is already placed"),
+//!         }
+//!     }
+//! }
+//!
+//! impl std::error::Error for PlaceOrderError {}
+//!
+//! #[derive(Debug, PartialEq, Eq)]
 //! struct PlaceOrderEvolveError;
+//!
+//! impl std::fmt::Display for PlaceOrderEvolveError {
+//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//!         f.write_str("invalid order event")
+//!     }
+//! }
+//!
+//! impl std::error::Error for PlaceOrderEvolveError {}
 //!
 //! impl Decider for PlaceOrder {
 //!     type StreamId = str;
@@ -90,8 +106,6 @@
 mod act;
 mod decision;
 mod events;
-#[cfg(feature = "test-support")]
-pub mod testing;
 mod write_precondition;
 
 pub use act::{Act, ActBuilder};
@@ -99,10 +113,8 @@ pub use act::{Act, ActBuilder};
 pub use act::{ActChain, ActRun, First, Steps, Then};
 pub use decision::Decision;
 #[doc(hidden)]
-pub use decision::{DecisionFailure, DecisionResult, evaluate_decision};
+pub use decision::{DecisionFailure, DecisionResult};
 pub use events::Events;
-#[cfg(feature = "test-support")]
-pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use write_precondition::WritePrecondition;
 
 /// Decision-making for a typed command.
@@ -157,13 +169,22 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct TestCommand;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum TestError {
-        #[error("test decide error")]
         Decide,
-        #[error("test evolve error")]
         Evolve,
     }
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Decide => formatter.write_str("test decide error"),
+                Self::Evolve => formatter.write_str("test evolve error"),
+            }
+        }
+    }
+
+    impl std::error::Error for TestError {}
 
     impl Decider for TestCommand {
         type StreamId = str;
@@ -264,7 +285,8 @@ mod tests {
     #[test]
     fn decider_trait_exposes_initial_state_and_decision() {
         let command = TestCommand;
-        let (state, events) = evaluate_decision::<TestCommand>(TestCommand::initial_state(), &command).unwrap();
+        let decision = TestCommand::decide(&TestCommand::initial_state(), &command).unwrap();
+        let (state, events) = decision.handle(TestCommand::initial_state(), &command).unwrap();
 
         assert_eq!(state, 1);
         assert_eq!(events.as_slice(), &["updated"]);
