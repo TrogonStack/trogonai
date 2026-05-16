@@ -136,7 +136,7 @@ mod tests {
         TestCase::<PauseJobCommand>::new()
             .given([added("backup")])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_decider::events![paused()]);
+            .then([paused()]);
     }
 
     #[test]
@@ -177,16 +177,16 @@ mod tests {
         let register = TestCase::<AddJobCommand>::new()
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
-            .then(trogon_decider::events![added("backup")]);
+            .then([added("backup")]);
 
         let pause = TestCase::<PauseJobCommand>::new()
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
-            .then(trogon_decider::events![paused()]);
+            .then([paused()]);
 
         Timeline::new()
             .given([register, pause])
-            .then_stream("backup", trogon_decider::events![added("backup"), paused()]);
+            .then_stream("backup", [added("backup"), paused()]);
     }
 
     #[tokio::test]
