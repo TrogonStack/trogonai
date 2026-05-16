@@ -35,7 +35,7 @@ pub use stream::{
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing;
 #[cfg(feature = "test-support")]
-pub use trogon_decider::testing::{DeciderSpec, TestCase, ThenError, ThenEvents, ThenExpectation, Timeline, decider};
+pub use trogon_decider::testing::{TestCase, ThenError, ThenEvents, ThenExpectation, Timeline};
 pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, WritePrecondition};
 
 #[cfg(feature = "test-support")]

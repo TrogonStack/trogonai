@@ -88,7 +88,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 
 #[cfg(test)]
 mod tests {
-    use trogon_decider::testing::{TestCase, decider};
+    use trogon_decider::testing::TestCase;
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, CommandFailure, Events, run_task_immediately};
 
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_register_job_decider() {
-        TestCase::new(decider::<AddJobCommand>())
+        TestCase::<AddJobCommand>::new()
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
             .then(trogon_decider::events![added("backup")]);
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_register_job_failures() {
-        TestCase::new(decider::<AddJobCommand>())
+        TestCase::<AddJobCommand>::new()
             .given([added("backup")])
             .when(AddJobCommand::new(job("backup")))
             .then_error(AddJobDecideError::AlreadyExists {
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn rejects_adding_deleted_job_ids() {
-        TestCase::new(decider::<AddJobCommand>())
+        TestCase::<AddJobCommand>::new()
             .given([added("backup")])
             .given([removed()])
             .when(AddJobCommand::new(job("backup")))

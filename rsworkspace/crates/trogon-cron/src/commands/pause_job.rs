@@ -83,7 +83,7 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
-    use trogon_decider::testing::{TestCase, Timeline, decider};
+    use trogon_decider::testing::{TestCase, Timeline};
     use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_pause_job_decider() {
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given([added("backup")])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then(trogon_decider::events![paused()]);
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_pause_job_failures() {
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given([added("backup")])
             .given([paused()])
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn given_when_then_rejects_pausing_missing_jobs() {
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given_no_history()
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then_error(PauseJobDecideError::JobNotFound {
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn given_when_then_rejects_pausing_deleted_jobs() {
-        TestCase::new(decider::<PauseJobCommand>())
+        TestCase::<PauseJobCommand>::new()
             .given([added("backup")])
             .given([paused()])
             .given([removed()])
@@ -174,12 +174,12 @@ mod tests {
 
     #[test]
     fn timeline_matches_cases_by_command_stream() {
-        let register = TestCase::new(decider::<AddJobCommand>())
+        let register = TestCase::<AddJobCommand>::new()
             .given_no_history()
             .when(AddJobCommand::new(job("backup")))
             .then(trogon_decider::events![added("backup")]);
 
-        let pause = TestCase::new(decider::<PauseJobCommand>())
+        let pause = TestCase::<PauseJobCommand>::new()
             .given(register.history())
             .when(PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .then(trogon_decider::events![paused()]);
