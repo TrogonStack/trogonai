@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+import "trogon/cron/jobs/v1/job_details.proto";
+
+message JobAdded {
+  JobDetails job = 1;
+}

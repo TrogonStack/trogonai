@@ -1,4 +1,7 @@
 [tools]
+buf = "1.69.0"
+"cargo:protoc-gen-buffa" = "0.5.2"
+"cargo:protoc-gen-buffa-packaging" = "0.5.2"
 rust = { version = "1.93.0", profile = "default" }
 
 [tasks.dev]
@@ -20,6 +23,10 @@ depends = ["check:rust"]
 [tasks."check:rust"]
 dir = "rsworkspace"
 run = "cargo clippy --workspace && cargo fmt --check"
+
+[tasks."proto:generate"]
+description = "Generate Buffa Rust protobuf bindings from Buf modules"
+run = "buf generate && cd rsworkspace && cargo fmt --all"
 
 [tasks."rsc"]
 description = "Format and check all Rust code (fmt, clippy, all targets, all features)"

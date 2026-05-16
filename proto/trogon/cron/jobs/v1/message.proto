@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+message JobMessage {
+  string content = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated Header headers = 2;
+}
+
+message Header {
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string value = 2 [features.field_presence = LEGACY_REQUIRED];
+}

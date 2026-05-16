@@ -1,0 +1,11 @@
+version: v2
+clean: true
+plugins:
+  - local: protoc-gen-buffa
+    out: rsworkspace/crates/trogon-cron-jobs-proto/src/gen
+    opt:
+      - json=true
+      - unknown_fields=false
+  - local: protoc-gen-buffa-packaging
+    out: rsworkspace/crates/trogon-cron-jobs-proto/src/gen
+    strategy: all

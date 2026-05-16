@@ -1,0 +1,20 @@
+[package]
+name = "trogon-cron-jobs-proto"
+version = "0.1.0"
+edition = "2024"
+
+[lints.rust]
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
+
+[lints.clippy]
+all = "deny"
+
+[dependencies]
+buffa = { workspace = true }
+serde = { workspace = true }
+trogon-eventsourcing = { workspace = true }
+
+[dev-dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = { workspace = true }

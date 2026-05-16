@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogon.cron.jobs.v1;
+
+import "trogon/cron/jobs/v1/delivery.proto";
+import "trogon/cron/jobs/v1/message.proto";
+import "trogon/cron/jobs/v1/schedule.proto";
+
+message JobDetails {
+  JobStatus status = 1 [features.field_presence = LEGACY_REQUIRED];
+  JobSchedule schedule = 2 [features.field_presence = LEGACY_REQUIRED];
+  JobDelivery delivery = 3 [features.field_presence = LEGACY_REQUIRED];
+  JobMessage message = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+enum JobStatus {
+  option features.enum_type = CLOSED;
+
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_ENABLED = 1;
+  JOB_STATUS_DISABLED = 2;
+}
