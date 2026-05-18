@@ -5318,6 +5318,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        agent.test_insert_session("ms1", "/tmp", Some("grok-3-mini".to_string())).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ms1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["model"].as_str(),
+            Some("grok-3-mini"),
+            "model override must appear in get_state (needed by /model command)"
+        );
+    }
+
+    #[tokio::test]
     async fn ext_get_state_missing_session_id_returns_invalid_params() {
         use agent_client_protocol::Agent;
         let agent = make_agent();
