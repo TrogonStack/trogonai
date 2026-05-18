@@ -5300,6 +5300,110 @@ mod tests {
         assert!(children_c.is_empty(), "C must have no children");
     }
 
+    // ── TROGON.md injection ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
+        let dir = std::env::temp_dir().join("xai_trogon_md_inject");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("TROGON.md"), "project rules here").await.unwrap();
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        );
+        agent.test_insert_session("t1", dir.to_str().unwrap(), None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input.iter().find(|item| item.role() == Some("system"))
+            .expect("system item must be present when TROGON.md exists");
+        let content = system_item.content().unwrap_or_default();
+        assert!(
+            content.contains("project rules here"),
+            "TROGON.md content must appear in system prompt, got: {content}"
+        );
+
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_uses_session_system_prompt_unchanged() {
+        let dir = std::env::temp_dir().join("xai_trogon_md_absent");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        // Ensure no TROGON.md in this dir
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        );
+        agent.test_insert_session("t2", dir.to_str().unwrap(), None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t2", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let has_system = input.iter().any(|item| item.role() == Some("system"));
+        assert!(!has_system, "no system item expected when no TROGON.md and no session prompt");
+    }
+
+    #[tokio::test]
+    async fn prompt_trogon_md_prepended_before_session_system_prompt() {
+        let dir = std::env::temp_dir().join("xai_trogon_md_combine");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("TROGON.md"), "from trogon md").await.unwrap();
+
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "from env prompt") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        );
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("t3", dir.to_str().unwrap(), None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t3", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input.iter().find(|item| item.role() == Some("system"))
+            .expect("system item must be present");
+        let content = system_item.content().unwrap_or_default();
+        let trogon_pos = content.find("from trogon md").expect("TROGON.md content missing");
+        let env_pos = content.find("from env prompt").expect("env prompt missing");
+        assert!(trogon_pos < env_pos, "TROGON.md must be prepended before session system prompt");
+
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+    }
+
     // ── MockSessionStore.remove ───────────────────────────────────────────────
 
     #[tokio::test]
