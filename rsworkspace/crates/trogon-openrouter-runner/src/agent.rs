@@ -3068,4 +3068,101 @@ mod tests {
             assert!(has_usage, "a UsageUpdate notification must be fired for Usage events");
         }).await;
     }
+
+    // ── TROGON.md injection ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
+        let dir = std::env::temp_dir().join("or_trogon_md_inject");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("TROGON.md"), "openrouter project rules").await.unwrap();
+
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(dir.clone()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages.iter().find(|m| m.role == "system")
+                .expect("system message must be present when TROGON.md exists");
+            assert!(
+                system_msg.content.contains("openrouter project rules"),
+                "TROGON.md content must appear in system prompt, got: {}",
+                system_msg.content
+            );
+            tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_sends_no_system_message() {
+        let dir = std::env::temp_dir().join("or_trogon_md_absent");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(dir.clone()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let has_system = messages.iter().any(|m| m.role == "system");
+            assert!(!has_system, "no system message expected when no TROGON.md and no session prompt");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_trogon_md_prepended_before_session_system_prompt() {
+        let dir = std::env::temp_dir().join("or_trogon_md_combine");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("TROGON.md"), "from trogon md").await.unwrap();
+
+        // Insert agent with a pre-set system prompt
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_system_prompt("from session prompt".to_string());
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(dir.clone()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages.iter().find(|m| m.role == "system")
+                .expect("system message must be present");
+            let trogon_pos = system_msg.content.find("from trogon md").expect("TROGON.md content missing");
+            let session_pos = system_msg.content.find("from session prompt").expect("session prompt missing");
+            assert!(trogon_pos < session_pos, "TROGON.md must be prepended before session system prompt");
+            tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+        }).await;
+    }
 }
