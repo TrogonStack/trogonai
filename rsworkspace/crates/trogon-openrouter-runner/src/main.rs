@@ -48,12 +48,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
+    let model_ids: Vec<String> = cfg
+        .models_str
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
     let cap = trogon_registry::AgentCapability {
         agent_type: cfg.agent_type.clone(),
-        capabilities: vec!["chat".to_string()],
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
         nats_subject: format!("{}.agent.>", cfg.prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &cfg.prefix }),
+        metadata: serde_json::json!({ "acp_prefix": &cfg.prefix, "models": model_ids }),
     };
     registry
         .register(&cap)

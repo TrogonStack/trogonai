@@ -138,8 +138,15 @@ impl<S: RegistryStore> Registry<S> {
         Ok(capabilities)
     }
 
-    pub async fn find_by_model(&self, _model_id: &str) -> Result<Option<AgentCapability>, String> {
-        todo!("PR 6 — Dev B")
+    pub async fn find_by_model(&self, model_id: &str) -> Result<Option<AgentCapability>, String> {
+        let all = self.list_all().await.map_err(|e| e.to_string())?;
+        Ok(all.into_iter().find(|cap| {
+            cap.metadata
+                .get("models")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().any(|m| m.as_str() == Some(model_id)))
+                .unwrap_or(false)
+        }))
     }
 }
 
