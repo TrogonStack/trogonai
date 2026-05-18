@@ -76,12 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let reg_store = trogon_registry::provision(&js_ctx).await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
+    let model_ids: Vec<String> = models
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string()],
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
         nats_subject: format!("{}.agent.>", prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &prefix }),
+        metadata: serde_json::json!({ "acp_prefix": &prefix, "models": model_ids }),
     };
     registry.register(&cap).await
         .map_err(|e| format!("initial registry registration failed: {e}"))?;
