@@ -388,10 +388,10 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .read_snapshot(ReadSnapshotRequest::new(
-                self.snapshots.snapshot_config.clone(),
+            .read_snapshot(ReadSnapshotRequest {
+                config: self.snapshots.snapshot_config.clone(),
                 stream_id,
-            ))
+            })
             .await
             .map_err(|source| CommandFailure::ReadSnapshot(source))?;
         let snapshot = snapshot.snapshot;
@@ -471,7 +471,7 @@ where
     C::WRITE_PRECONDITION
         .map(StreamWritePrecondition::from)
         .or(write_precondition)
-        .unwrap_or_else(|| StreamWritePrecondition::from_current_position(current_position))
+        .unwrap_or_else(|| current_position.into())
 }
 
 impl From<WritePrecondition> for StreamWritePrecondition {
@@ -504,7 +504,11 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
 
     schedule_snapshot_task(Box::pin(async move {
         if let Err(source) = snapshot_store
-            .write_snapshot(WriteSnapshotRequest::new(snapshot_config, stream_id.borrow(), snapshot))
+            .write_snapshot(WriteSnapshotRequest {
+                config: snapshot_config,
+                stream_id: stream_id.borrow(),
+                snapshot,
+            })
             .await
         {
             tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
@@ -947,7 +951,9 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.stream_id.to_string());
-            Ok(ReadSnapshotResponse::new(self.snapshot.clone()))
+            Ok(ReadSnapshotResponse {
+                snapshot: self.snapshot.clone(),
+            })
         }
     }
 
@@ -962,7 +968,7 @@ mod tests {
                 return Err(TestInfraError::WriteSnapshot);
             }
             self.written_snapshots.lock().unwrap().push(request.snapshot);
-            Ok(WriteSnapshotResponse::new())
+            Ok(WriteSnapshotResponse)
         }
     }
 

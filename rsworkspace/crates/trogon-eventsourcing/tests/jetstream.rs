@@ -374,7 +374,10 @@ async fn read_counter_snapshot_until(
 
     loop {
         let snapshot = store
-            .read_snapshot(ReadSnapshotRequest::new(test_snapshot_config(), stream_id))
+            .read_snapshot(ReadSnapshotRequest {
+                config: test_snapshot_config(),
+                stream_id,
+            })
             .await?
             .snapshot;
 
@@ -1389,7 +1392,10 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     assert_eq!(first.state, CounterState { total: 1 });
     let first_snapshot: Option<Snapshot<CounterState>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(test_snapshot_config(), "counter"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: test_snapshot_config(),
+            stream_id: "counter",
+        })
         .await?
         .snapshot;
     assert_eq!(first_snapshot, None);
@@ -1645,11 +1651,11 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
 
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            test_snapshot_config(),
-            "counter",
-            Snapshot::new(position(2), CounterState { total: 5 }),
-        ))
+        .write_snapshot(WriteSnapshotRequest {
+            config: test_snapshot_config(),
+            stream_id: "counter",
+            snapshot: Snapshot::new(position(2), CounterState { total: 5 }),
+        })
         .await?;
     let snapshot = CommandExecution::new(&fixture.store, &command)
         .with_snapshot(Snapshots::new(
@@ -1697,7 +1703,10 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
 
     let snapshot: Option<Snapshot<CounterState>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(test_snapshot_config(), "counter"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: test_snapshot_config(),
+            stream_id: "counter",
+        })
         .await?
         .snapshot;
     assert_eq!(snapshot, None);
@@ -1800,11 +1809,11 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
     let fixture = JetStreamFixture::new().await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            test_snapshot_config(),
-            "counter",
-            Snapshot::new(position(10), CounterState { total: 10 }),
-        ))
+        .write_snapshot(WriteSnapshotRequest {
+            config: test_snapshot_config(),
+            stream_id: "counter",
+            snapshot: Snapshot::new(position(10), CounterState { total: 10 }),
+        })
         .await?;
 
     let command = IncreaseCounterCommand::new("counter", 1);
@@ -1841,11 +1850,11 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
         .map_err(debug_error)?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            test_snapshot_config(),
-            "counter",
-            Snapshot::new(position(10), CounterState { total: 10 }),
-        ))
+        .write_snapshot(WriteSnapshotRequest {
+            config: test_snapshot_config(),
+            stream_id: "counter",
+            snapshot: Snapshot::new(position(10), CounterState { total: 10 }),
+        })
         .await?;
 
     let command = IncreaseCounterCommand::new("counter", 1);
@@ -2663,67 +2672,73 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 
     let missing: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+        })
         .await?
         .snapshot;
     assert_eq!(missing, None);
 
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(2),
                 TestSnapshot {
                     value: "alpha-v2".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(1),
                 TestSnapshot {
                     value: "alpha-v1".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(3),
                 TestSnapshot {
                     value: "alpha-v3".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "beta",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "beta",
+            snapshot: Snapshot::new(
                 position(5),
                 TestSnapshot {
                     value: "beta-v5".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
 
     let loaded_alpha = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+        })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
@@ -2774,7 +2789,10 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     .await?;
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+        })
         .await?
         .snapshot;
     assert_eq!(deleted_alpha, None);
@@ -2800,20 +2818,23 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(4),
                 TestSnapshot {
                     value: "alpha-v4".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     let recreated_alpha = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+        })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist after recreate"))?;
@@ -2849,23 +2870,26 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     assert_snapshot_error(
         SnapshotRead::<TestSnapshot, str>::read_snapshot(
             &fixture.store,
-            ReadSnapshotRequest::new(config.clone(), "corrupt"),
+            ReadSnapshotRequest {
+                config: config.clone(),
+                stream_id: "corrupt",
+            },
         )
         .await,
     )?;
     assert_snapshot_error(
         fixture
             .store
-            .write_snapshot(WriteSnapshotRequest::new(
-                config.clone(),
-                "corrupt",
-                Snapshot::new(
+            .write_snapshot(WriteSnapshotRequest {
+                config: config.clone(),
+                stream_id: "corrupt",
+                snapshot: Snapshot::new(
                     position(1),
                     TestSnapshot {
                         value: "still-corrupt".to_string(),
                     },
                 ),
-            ))
+            })
             .await,
     )?;
     persist_snapshot_change::<TestSnapshot>(
@@ -2876,26 +2900,32 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     .await?;
     let deleted_corrupt: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "corrupt"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "corrupt",
+        })
         .await?
         .snapshot;
     assert_eq!(deleted_corrupt, None);
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "corrupt",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "corrupt",
+            snapshot: Snapshot::new(
                 position(2),
                 TestSnapshot {
                     value: "recreated-corrupt-key".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     let recreated_corrupt = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "corrupt"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "corrupt",
+        })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("corrupt snapshot key should be recreated"))?;
@@ -2931,16 +2961,16 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
         let config = config.clone();
         async move {
             store
-                .write_snapshot(WriteSnapshotRequest::new(
+                .write_snapshot(WriteSnapshotRequest {
                     config,
-                    "alpha",
-                    Snapshot::new(
+                    stream_id: "alpha",
+                    snapshot: Snapshot::new(
                         position(version),
                         TestSnapshot {
                             value: format!("alpha-v{version}"),
                         },
                     ),
-                ))
+                })
                 .await
         }
     }))
@@ -2952,7 +2982,10 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
 
     let loaded = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config, "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config,
+            stream_id: "alpha",
+        })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
@@ -2977,55 +3010,55 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
 
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(1),
                 TestSnapshot {
                     value: "alpha-v1".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(2),
                 TestSnapshot {
                     value: "alpha-v2".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "beta",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "beta",
+            snapshot: Snapshot::new(
                 position(3),
                 TestSnapshot {
                     value: "beta-v3".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "gamma",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "gamma",
+            snapshot: Snapshot::new(
                 position(4),
                 TestSnapshot {
                     value: "gamma-v4".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     persist_snapshot_change::<TestSnapshot>(
         fixture.store.snapshot_bucket(),
@@ -3075,16 +3108,16 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.delete.");
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(1),
                 TestSnapshot {
                     value: "alpha-v1".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
 
     let results =
@@ -3104,7 +3137,10 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
 
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest::new(config.clone(), "alpha"))
+        .read_snapshot(ReadSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+        })
         .await?
         .snapshot;
     assert_eq!(deleted_alpha, None);
@@ -3215,16 +3251,16 @@ async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_list
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.corrupt.");
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(1),
                 TestSnapshot {
                     value: "alpha-v1".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store
@@ -3249,16 +3285,16 @@ async fn jetstream_snapshot_store_ignores_corrupt_entries_outside_snapshot_names
     let config = SnapshotStoreConfig::without_checkpoint("snapshots.clean.");
     fixture
         .store
-        .write_snapshot(WriteSnapshotRequest::new(
-            config.clone(),
-            "alpha",
-            Snapshot::new(
+        .write_snapshot(WriteSnapshotRequest {
+            config: config.clone(),
+            stream_id: "alpha",
+            snapshot: Snapshot::new(
                 position(1),
                 TestSnapshot {
                     value: "alpha-v1".to_string(),
                 },
             ),
-        ))
+        })
         .await?;
     fixture
         .store

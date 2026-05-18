@@ -18,7 +18,7 @@ where
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
         crate::nats::snapshot_store::read_snapshot(self.snapshot_bucket(), &request.config, request.stream_id.as_ref())
             .await
-            .map(ReadSnapshotResponse::new)
+            .map(|snapshot| ReadSnapshotResponse { snapshot })
             .map_err(JetStreamStoreError::Snapshot)
     }
 }
@@ -42,7 +42,7 @@ where
             request.snapshot,
         )
         .await
-        .map(|()| WriteSnapshotResponse::new())
+        .map(|()| WriteSnapshotResponse)
         .map_err(JetStreamStoreError::Snapshot)
     }
 }

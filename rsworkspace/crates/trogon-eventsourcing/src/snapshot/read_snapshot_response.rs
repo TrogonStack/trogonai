@@ -6,10 +6,6 @@ pub struct ReadSnapshotResponse<SnapshotPayload> {
 }
 
 impl<SnapshotPayload> ReadSnapshotResponse<SnapshotPayload> {
-    pub const fn new(snapshot: Option<Snapshot<SnapshotPayload>>) -> Self {
-        Self { snapshot }
-    }
-
     pub fn into_snapshot(self) -> Option<Snapshot<SnapshotPayload>> {
         self.snapshot
     }

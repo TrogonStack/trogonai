@@ -16,8 +16,8 @@ pub enum StreamWritePrecondition {
     At(StreamPosition),
 }
 
-impl StreamWritePrecondition {
-    pub const fn from_current_position(current_position: Option<StreamPosition>) -> Self {
+impl From<Option<StreamPosition>> for StreamWritePrecondition {
+    fn from(current_position: Option<StreamPosition>) -> Self {
         match current_position {
             Some(position) => Self::At(position),
             None => Self::NoStream,

@@ -520,7 +520,7 @@ where
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
         self.read_command_snapshot(request.config, request.stream_id)
-            .map(ReadSnapshotResponse::new)
+            .map(|snapshot| ReadSnapshotResponse { snapshot })
     }
 }
 
@@ -541,7 +541,7 @@ where
             .entry(request.config.key_prefix().to_string())
             .or_default()
             .insert(request.stream_id.to_string(), snapshot);
-        Ok(WriteSnapshotResponse::new())
+        Ok(WriteSnapshotResponse)
     }
 }
 
