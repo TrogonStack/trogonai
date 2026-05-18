@@ -676,7 +676,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt) = {
+        let (model, api_key, mut messages, session_system_prompt, cwd) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -686,7 +686,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 s.api_key.clone(),
                 s.history.clone(),
                 s.system_prompt.clone(),
+                s.cwd.clone(),
             )
+        };
+
+        let trogon_md = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await;
+        let session_system_prompt = match (trogon_md, session_system_prompt) {
+            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
+            (Some(md), None) => Some(md),
+            (None, sp) => sp,
         };
 
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();

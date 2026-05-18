@@ -58,6 +58,9 @@ struct CodexSession {
     model: Option<String>,
     /// Session this was branched from. None for root sessions.
     parent_session_id: Option<String>,
+    /// True until the first prompt is dispatched; Dev A wires TROGON.md injection here (PR 7).
+    #[allow(dead_code)]
+    first_turn: bool,
     #[allow(dead_code)]
     history: Vec<trogon_runner_tools::portable_session::PortableMessage>,
     #[allow(dead_code)]
@@ -330,6 +333,7 @@ where
                 cwd,
                 model: None,
                 parent_session_id: None,
+                first_turn: true,
                 history: Vec::new(),
                 pending_history: None,
             },
@@ -412,6 +416,7 @@ where
                 cwd,
                 model: inherited_model.clone(),
                 parent_session_id: Some(source_id.clone()),
+                first_turn: true,
                 history: Vec::new(),
                 pending_history: None,
             },
@@ -678,6 +683,7 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
                 cwd: cwd.to_string(),
                 model,
                 parent_session_id: None,
+                first_turn: true,
                 history: Vec::new(),
                 pending_history: None,
             },

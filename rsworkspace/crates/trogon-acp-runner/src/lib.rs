@@ -5,7 +5,7 @@ pub mod agent_runner;
 pub mod egress;
 pub mod permission_rules;
 pub mod wasm_bash_tool;
-pub mod trogon_md;
+pub use trogon_runner_tools::trogon_md;
 pub mod elicitation;
 pub mod permission_bridge;
 pub mod prompt_converter;
