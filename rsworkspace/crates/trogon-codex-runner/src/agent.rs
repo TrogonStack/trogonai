@@ -58,6 +58,10 @@ struct CodexSession {
     model: Option<String>,
     /// Session this was branched from. None for root sessions.
     parent_session_id: Option<String>,
+    #[allow(dead_code)]
+    history: Vec<trogon_runner_tools::portable_session::PortableMessage>,
+    #[allow(dead_code)]
+    pending_history: Option<Vec<trogon_runner_tools::portable_session::PortableMessage>>,
 }
 
 // ── NatsNotifierFactory ───────────────────────────────────────────────────────
@@ -326,6 +330,8 @@ where
                 cwd,
                 model: None,
                 parent_session_id: None,
+                history: Vec::new(),
+                pending_history: None,
             },
         );
 
@@ -406,6 +412,8 @@ where
                 cwd,
                 model: inherited_model.clone(),
                 parent_session_id: Some(source_id.clone()),
+                history: Vec::new(),
+                pending_history: None,
             },
         );
 
@@ -644,6 +652,12 @@ where
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/export" {
+            todo!("PR 7 — Dev A")
+        }
+        if args.method.as_ref() == "session/import" {
+            todo!("PR 7 — Dev A")
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -664,6 +678,8 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
                 cwd: cwd.to_string(),
                 model,
                 parent_session_id: None,
+                history: Vec::new(),
+                pending_history: None,
             },
         );
     }
