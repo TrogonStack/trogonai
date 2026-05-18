@@ -1404,6 +1404,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ext_get_state_includes_thread_id() {
+        let agent = make_agent().await;
+        agent.test_insert_session("ti1", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ti1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["thread_id"].as_str(),
+            Some("thread-ti1"),
+            "thread_id must be present in get_state (test helper sets thread-{{id}})"
+        );
+    }
+
+    #[tokio::test]
     async fn ext_get_state_missing_session_id_returns_invalid_params() {
         let agent = make_agent().await;
         let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
