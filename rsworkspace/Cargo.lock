@@ -50,8 +50,6 @@ name = "acp-nats-server"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
- "acp-nats-agent",
- "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
  "async-nats",
@@ -69,13 +67,9 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
- "trogon-acp-runner",
- "trogon-agent-core",
- "trogon-codex-runner",
  "trogon-nats",
- "trogon-registry",
  "trogon-std",
- "trogon-xai-runner",
+ "trogon-telemetry",
  "uuid",
 ]
 
@@ -85,7 +79,6 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "acp-nats-agent",
- "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
  "async-nats",
@@ -103,6 +96,7 @@ dependencies = [
  "trogon-agent-core",
  "trogon-nats",
  "trogon-std",
+ "trogon-telemetry",
 ]
 
 [[package]]
@@ -111,7 +105,6 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "acp-nats-agent",
- "acp-telemetry",
  "agent-client-protocol",
  "async-compat",
  "async-nats",
@@ -133,22 +126,8 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-std",
+ "trogon-telemetry",
  "trogon-xai-runner",
-]
-
-[[package]]
-name = "acp-telemetry"
-version = "0.1.0"
-dependencies = [
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "tokio",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "trogon-std",
 ]
 
 [[package]]
@@ -1081,8 +1060,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -2916,6 +2897,55 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
+name = "mcp-nats"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "futures",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
+name = "mcp-nats-server"
+version = "0.0.1"
+dependencies = [
+ "axum 0.8.9",
+ "clap",
+ "mcp-nats",
+ "rmcp",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-telemetry",
+ "uuid",
+]
+
+[[package]]
+name = "mcp-nats-stdio"
+version = "0.0.1"
+dependencies = [
+ "clap",
+ "mcp-nats",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-std",
+ "trogon-telemetry",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3298,6 +3328,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5a797f0e07bdf071d15742978fc3128ec6c22891c31a3a931513263904c982a"
 
 [[package]]
 name = "pem-rfc7468"
@@ -3894,6 +3930,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmcp"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e12ca9067b5ebfbd5b3fcdc4acfceb81aa7d5ab2a879dff7cb75d22434276aad"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "pastey",
+ "pin-project-lite",
+ "rand 0.10.1",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4062,6 +4127,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
+ "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive",
@@ -4440,6 +4506,19 @@ name = "sptr"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
+
+[[package]]
+name = "sse-stream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3962b63f038885f15bce2c6e02c0e7925c072f1ac86bb60fd44c5c6b762fb72"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body 1.0.1",
+ "http-body-util",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "stable_deref_trait"
@@ -5402,12 +5481,19 @@ dependencies = [
 name = "trogon-e2e"
 version = "0.0.1"
 dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
  "async-nats",
  "bytes",
  "futures-util",
+ "httpmock",
  "reqwest",
  "serde_json",
  "tokio",
+ "trogon-acp-runner",
+ "trogon-agent-core",
+ "trogon-nats",
  "uuid",
 ]
 
@@ -5415,35 +5501,35 @@ dependencies = [
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum 0.8.9",
+ "base64 0.22.1",
+ "bytes",
  "clap",
  "confique",
+ "form_urlencoded",
+ "futures-core",
  "futures-util",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
+ "reqwest",
  "serde",
- "sha2 0.10.9",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
  "tempfile",
  "testcontainers-modules",
  "tokio",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "trogon-nats",
  "trogon-service-config",
- "trogon-source-discord",
- "trogon-source-github",
- "trogon-source-gitlab",
- "trogon-source-incidentio",
- "trogon-source-linear",
- "trogon-source-microsoft-graph",
- "trogon-source-notion",
- "trogon-source-sentry",
- "trogon-source-slack",
- "trogon-source-telegram",
- "trogon-source-twitter",
  "trogon-std",
+ "trogon-telemetry",
+ "twilight-gateway",
+ "twilight-model",
+ "url",
 ]
 
 [[package]]
@@ -5525,6 +5611,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-memory"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "trogon-transcript",
+]
+
+[[package]]
 name = "trogon-nats"
 version = "0.1.0"
 dependencies = [
@@ -5546,10 +5653,81 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-openrouter-runner"
+version = "0.0.1"
+dependencies = [
+ "acp-nats",
+ "acp-nats-agent",
+ "agent-client-protocol",
+ "async-nats",
+ "async-trait",
+ "axum 0.8.9",
+ "bytes",
+ "futures",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-registry",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-std",
+ "trogon-transcript",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-outcomes"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-orchestrator",
+ "trogon-registry",
+ "trogon-std",
+ "trogon-transcript",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-pr-actor"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "bytes",
  "clap",
@@ -5567,6 +5745,7 @@ dependencies = [
  "trogon-registry",
  "trogon-service-config",
  "trogon-std",
+ "trogon-telemetry",
  "trogon-transcript",
 ]
 
@@ -5588,7 +5767,6 @@ dependencies = [
 name = "trogon-router"
 version = "0.1.0"
 dependencies = [
- "acp-telemetry",
  "async-nats",
  "axum 0.8.9",
  "bytes",
@@ -5607,6 +5785,7 @@ dependencies = [
  "trogon-registry",
  "trogon-service-config",
  "trogon-std",
+ "trogon-telemetry",
  "trogon-transcript",
  "uuid",
 ]
@@ -5621,6 +5800,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "globset",
+ "reqwest",
  "serde",
  "serde_json",
  "testcontainers-modules",
@@ -5667,250 +5847,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-source-discord"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "bytes",
- "futures-core",
- "futures-util",
- "serde",
- "serde_json",
- "testcontainers-modules",
- "tokio",
- "tracing",
- "trogon-nats",
- "trogon-std",
- "twilight-gateway",
- "twilight-model",
-]
-
-[[package]]
-name = "trogon-source-github"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "futures-util",
- "hex",
- "hmac 0.13.0",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-gitlab"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "futures-util",
- "sha2 0.11.0",
- "subtle",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-incidentio"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum 0.8.9",
- "base64 0.22.1",
- "bytes",
- "futures-util",
- "hmac 0.13.0",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-linear"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "futures-util",
- "hex",
- "hmac 0.13.0",
- "reqwest",
- "serde_json",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-microsoft-graph"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum 0.8.9",
- "form_urlencoded",
- "hex",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-notion"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "futures-util",
- "hex",
- "hmac 0.12.1",
- "hmac 0.13.0",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-sentry"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum 0.8.9",
- "futures-util",
- "hex",
- "hmac 0.13.0",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-slack"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "form_urlencoded",
- "futures-util",
- "hex",
- "hmac 0.12.1",
- "hmac 0.13.0",
- "serde_json",
- "sha2 0.10.9",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
-name = "trogon-source-telegram"
-version = "0.1.0"
-dependencies = [
- "acp-telemetry",
- "async-nats",
- "axum 0.8.9",
- "bytes",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
- "url",
-]
-
-[[package]]
-name = "trogon-source-twitter"
-version = "0.1.0"
-dependencies = [
- "async-nats",
- "axum 0.8.9",
- "base64 0.22.1",
- "bytes",
- "futures-util",
- "hmac 0.12.1",
- "hmac 0.13.0",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sha2 0.11.0",
- "testcontainers-modules",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
- "trogon-nats",
- "trogon-std",
-]
-
-[[package]]
 name = "trogon-splitio"
 version = "0.1.0"
 dependencies = [
@@ -5943,6 +5879,20 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+]
+
+[[package]]
+name = "trogon-telemetry"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "trogon-std",
 ]
 
 [[package]]
@@ -6035,7 +5985,6 @@ name = "trogon-wasm-runtime"
 version = "0.1.0"
 dependencies = [
  "acp-nats",
- "acp-telemetry",
  "agent-client-protocol",
  "anyhow",
  "async-nats",
@@ -6051,10 +6000,36 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-std",
+ "trogon-telemetry",
  "uuid",
  "wasmtime",
  "wasmtime-wasi",
  "wat",
+]
+
+[[package]]
+name = "trogon-webhook-dispatcher"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "axum 0.8.9",
+ "bytes",
+ "futures",
+ "futures-util",
+ "hex",
+ "hmac 0.12.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "testcontainers-modules",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
 ]
 
 [[package]]
