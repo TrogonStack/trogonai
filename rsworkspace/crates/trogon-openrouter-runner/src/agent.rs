@@ -3179,6 +3179,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
+        let dir = std::env::temp_dir().join("or_trogon_md_passthrough");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_system_prompt("session-only prompt".to_string());
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(dir.clone()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages
+                .iter()
+                .find(|m| m.role == "system")
+                .expect("system message must be present when session has a system prompt, even without TROGON.md");
+            assert!(
+                system_msg.content.contains("session-only prompt"),
+                "session system prompt must pass through unchanged when no TROGON.md: {}",
+                system_msg.content
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn prompt_trogon_md_prepended_before_session_system_prompt() {
         let dir = std::env::temp_dir().join("or_trogon_md_combine");
         tokio::fs::create_dir_all(&dir).await.unwrap();

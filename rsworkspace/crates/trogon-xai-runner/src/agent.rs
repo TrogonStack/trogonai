@@ -5379,9 +5379,11 @@ mod tests {
     async fn prompt_without_trogon_md_uses_session_system_prompt_unchanged() {
         let dir = std::env::temp_dir().join("xai_trogon_md_absent");
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        // Ensure no TROGON.md in this dir
         tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
 
+        // Hold env_lock so XAI_SYSTEM_PROMPT is unset while this agent is constructed.
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
         let agent: TestAgent = XaiAgent::with_deps(
@@ -5402,6 +5404,45 @@ mod tests {
         let input = &calls.last().unwrap().input;
         let has_system = input.iter().any(|item| item.role() == Some("system"));
         assert!(!has_system, "no system item expected when no TROGON.md and no session prompt");
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
+        let dir = std::env::temp_dir().join("xai_trogon_md_passthrough");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
+
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "agent system prompt") };
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent: TestAgent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        );
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("t4", dir.to_str().unwrap(), None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t4", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input
+            .iter()
+            .find(|item| item.role() == Some("system"))
+            .expect("system item must be present when session has a system prompt, even without TROGON.md");
+        let content = system_item.content().unwrap_or_default();
+        assert!(
+            content.contains("agent system prompt"),
+            "session system prompt must pass through unchanged when no TROGON.md: {content}"
+        );
     }
 
     #[tokio::test]
