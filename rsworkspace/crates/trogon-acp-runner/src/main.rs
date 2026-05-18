@@ -98,10 +98,10 @@ async fn main() -> anyhow::Result<()> {
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string()],
+        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
         nats_subject: format!("{}.agent.>", acp_prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &acp_prefix }),
+        metadata: serde_json::json!({ "acp_prefix": &acp_prefix, "models": [&model] }),
     };
     registry.register(&cap).await
         .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
