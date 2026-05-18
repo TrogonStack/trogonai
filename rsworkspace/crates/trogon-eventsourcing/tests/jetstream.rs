@@ -539,7 +539,7 @@ async fn existing_fixture() -> TestResult<(JetStreamFixture, StreamPosition)> {
 async fn assert_existing_append_succeeds(stream_write_precondition: StreamWritePrecondition) -> TestResult {
     let (fixture, current_position) = existing_fixture().await?;
     let outcome = append_one(&fixture.store, "alpha", stream_write_precondition, "next").await?;
-    let next_position = position(current_position.get() + 1);
+    let next_position = position(current_position.as_u64() + 1);
     assert_eq!(outcome.stream_position, next_position);
 
     let read = fixture
@@ -633,7 +633,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
     assert_eq!(third.decode::<TestEvent>()?.value, "alpha-three");
 
     let third_stream_position = third.stream_position;
-    let third_stream_position_value = third_stream_position.get();
+    let third_stream_position_value = third_stream_position.as_u64();
     let read_from_third = fixture
         .store
         .read_stream(ReadStreamRequest {
@@ -854,7 +854,7 @@ async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResul
         fixture
             .store
             .events_stream()
-            .delete_message(deleted.stream_position.get())
+            .delete_message(deleted.stream_position.as_u64())
             .await?
     );
 
@@ -883,7 +883,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
         fixture
             .store
             .events_stream()
-            .delete_message(deleted.stream_position.get())
+            .delete_message(deleted.stream_position.as_u64())
             .await?
     );
 
@@ -3093,7 +3093,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     let mut listed = list_snapshots::<TestSnapshot>(fixture.store.snapshot_bucket(), &config)
         .await?
         .into_iter()
-        .map(|snapshot| (snapshot.position.get(), snapshot.payload.value))
+        .map(|snapshot| (snapshot.position.as_u64(), snapshot.payload.value))
         .collect::<Vec<_>>();
     listed.sort();
     assert_eq!(listed, vec![(2, "alpha-v2".to_string()), (3, "beta-v3".to_string())]);

@@ -436,7 +436,7 @@ pub(crate) async fn project_appended_events(
             apply_projection_change(bucket, &change).await?;
         }
     }
-    maybe_advance_read_model_checkpoint(bucket, final_position.get()).await
+    maybe_advance_read_model_checkpoint(bucket, final_position.as_u64()).await
 }
 
 async fn rewrite_cron_jobs_projection<J>(js: &J, jobs: &[CronJob]) -> Result<(), CronError>

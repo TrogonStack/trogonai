@@ -446,7 +446,7 @@ impl StreamAppend<str> for MockCronStore {
 
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
         let mut projected_job = current_job;
-        let mut raw_position = current_position.map(StreamPosition::get).unwrap_or(0);
+        let mut raw_position = current_position.map(StreamPosition::as_u64).unwrap_or(0);
 
         for event_data in events {
             let event = event_data

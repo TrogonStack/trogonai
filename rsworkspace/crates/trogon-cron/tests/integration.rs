@@ -385,7 +385,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(paused.stream_position.get(), added_position.get() + 1);
+    assert_eq!(paused.stream_position.as_u64(), added_position.as_u64() + 1);
     assert_eq!(
         paused.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
@@ -397,7 +397,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(resumed.stream_position.get(), paused.stream_position.get() + 1);
+    assert_eq!(resumed.stream_position.as_u64(), paused.stream_position.as_u64() + 1);
     assert_eq!(
         resumed.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
@@ -409,7 +409,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .execute()
         .await
         .unwrap();
-    assert_eq!(removed.stream_position.get(), resumed.stream_position.get() + 1);
+    assert_eq!(removed.stream_position.as_u64(), resumed.stream_position.as_u64() + 1);
     assert_eq!(
         removed.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_DELETED)

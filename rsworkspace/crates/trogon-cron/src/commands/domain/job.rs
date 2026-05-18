@@ -83,7 +83,7 @@ impl EverySeconds {
             .ok_or(JobSpecError::EverySecondsMustBePositive)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn as_u64(self) -> u64 {
         self.0.get()
     }
 }
@@ -101,7 +101,7 @@ impl Serialize for EverySeconds {
     where
         S: Serializer,
     {
-        serializer.serialize_u64(self.get())
+        serializer.serialize_u64(self.as_u64())
     }
 }
 
@@ -428,7 +428,7 @@ impl TtlSeconds {
             .ok_or(JobSpecError::TtlMustBePositive)
     }
 
-    pub fn get(self) -> u64 {
+    pub fn as_u64(self) -> u64 {
         self.0.get()
     }
 }
@@ -446,7 +446,7 @@ impl Serialize for TtlSeconds {
     where
         S: Serializer,
     {
-        serializer.serialize_u64(self.get())
+        serializer.serialize_u64(self.as_u64())
     }
 }
 
@@ -546,7 +546,7 @@ impl From<Schedule> for JobEventSchedule {
         match value {
             Schedule::At { at } => Self::At { at },
             Schedule::Every { every_sec } => Self::Every {
-                every_sec: every_sec.get(),
+                every_sec: every_sec.as_u64(),
             },
             Schedule::Cron { expr, timezone } => Self::Cron {
                 expr: expr.into_string(),
@@ -561,7 +561,7 @@ impl From<&Schedule> for JobEventSchedule {
         match value {
             Schedule::At { at } => Self::At { at: *at },
             Schedule::Every { every_sec } => Self::Every {
-                every_sec: every_sec.get(),
+                every_sec: every_sec.as_u64(),
             },
             Schedule::Cron { expr, timezone } => Self::Cron {
                 expr: expr.as_str().to_string(),
@@ -596,7 +596,7 @@ impl From<Delivery> for JobEventDelivery {
         match value {
             Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
-                ttl_sec: ttl_sec.map(TtlSeconds::get),
+                ttl_sec: ttl_sec.map(TtlSeconds::as_u64),
                 source: source.map(Into::into),
             },
         }
@@ -608,7 +608,7 @@ impl From<&Delivery> for JobEventDelivery {
         match value {
             Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsEvent {
                 route: route.as_str().to_string(),
-                ttl_sec: ttl_sec.map(TtlSeconds::get),
+                ttl_sec: ttl_sec.map(TtlSeconds::as_u64),
                 source: source.as_ref().map(Into::into),
             },
         }
@@ -931,13 +931,13 @@ mod tests {
             #[test]
             fn every_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
                 let every = EverySeconds::new(n).unwrap();
-                prop_assert_eq!(every.get(), n);
+                prop_assert_eq!(every.as_u64(), n);
             }
 
             #[test]
             fn ttl_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
                 let ttl = TtlSeconds::new(n).unwrap();
-                prop_assert_eq!(ttl.get(), n);
+                prop_assert_eq!(ttl.as_u64(), n);
             }
 
             #[test]
@@ -1040,7 +1040,7 @@ mod tests {
             fn schedule_every_constructor_matches_value_object(n in 1u64..) {
                 let schedule = Schedule::every(n).unwrap();
                 match schedule {
-                    Schedule::Every { every_sec } => prop_assert_eq!(every_sec.get(), n),
+                    Schedule::Every { every_sec } => prop_assert_eq!(every_sec.as_u64(), n),
                     other => prop_assert!(false, "expected Every, got {other:?}"),
                 }
             }

@@ -200,7 +200,7 @@ mod tests {
             .execute()
             .await
             .unwrap();
-        assert_eq!(outcome.stream_position.get(), 3);
+        assert_eq!(outcome.stream_position.as_u64(), 3);
         assert_eq!(outcome.events, Events::one(resumed()));
 
         let job = store

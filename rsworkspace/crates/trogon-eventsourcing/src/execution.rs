@@ -400,7 +400,7 @@ where
             .map(|snapshot| snapshot.payload)
             .unwrap_or_else(C::initial_state);
         let start_sequence = snapshot_position
-            .map(|position| position.get().saturating_add(1))
+            .map(|position| position.as_u64().saturating_add(1))
             .unwrap_or(1);
         let stream_read = self
             .event_store
@@ -909,7 +909,7 @@ mod tests {
                 events: self
                     .stream_events
                     .iter()
-                    .filter(|event| event.stream_position.get() >= request.from_sequence)
+                    .filter(|event| event.stream_position.as_u64() >= request.from_sequence)
                     .cloned()
                     .collect(),
             })

@@ -102,7 +102,7 @@ where
                 })
         }
         StreamWritePrecondition::NoStream => Ok(Some(0)),
-        StreamWritePrecondition::At(position) => Ok(Some(position.get())),
+        StreamWritePrecondition::At(position) => Ok(Some(position.as_u64())),
     }
 }
 

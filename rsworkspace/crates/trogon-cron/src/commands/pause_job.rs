@@ -188,7 +188,7 @@ mod tests {
             .execute()
             .await
             .unwrap();
-        assert_eq!(outcome.stream_position.get(), 2);
+        assert_eq!(outcome.stream_position.as_u64(), 2);
         assert_eq!(outcome.events, Events::one(paused()));
 
         let job = store

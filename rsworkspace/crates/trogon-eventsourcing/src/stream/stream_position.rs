@@ -31,7 +31,7 @@ impl StreamPosition {
         Self(value)
     }
 
-    pub const fn get(self) -> u64 {
+    pub const fn as_u64(self) -> u64 {
         self.0.get()
     }
 
@@ -53,13 +53,13 @@ impl TryFrom<u64> for StreamPosition {
 
 impl From<StreamPosition> for u64 {
     fn from(value: StreamPosition) -> Self {
-        value.get()
+        value.as_u64()
     }
 }
 
 impl std::fmt::Display for StreamPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.get().fmt(f)
+        self.as_u64().fmt(f)
     }
 }
 
