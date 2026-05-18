@@ -3069,6 +3069,55 @@ mod tests {
         }).await;
     }
 
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/projects/myapp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": &sid }).to_string(),
+            )
+            .unwrap();
+            let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+            let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match session");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        local().run_until(async move {
+            let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidParams);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        local().run_until(async move {
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+            )
+            .unwrap();
+            let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidParams);
+        }).await;
+    }
+
     // ── TROGON.md injection ───────────────────────────────────────────────────
 
     #[tokio::test]

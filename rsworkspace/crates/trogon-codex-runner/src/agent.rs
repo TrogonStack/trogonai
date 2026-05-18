@@ -1387,6 +1387,41 @@ mod tests {
         assert!(children_c.is_empty(), "C must have no children");
     }
 
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        let agent = make_agent().await;
+        agent.test_insert_session("gs1", "/projects/myapp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "gs1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match inserted session");
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+        )
+        .unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
     // ── cancel ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
