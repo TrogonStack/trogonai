@@ -1,16 +1,24 @@
+mod codec;
+mod encode_event_error;
 mod event_headers;
 mod event_headers_error;
+mod event_id;
+mod event_identity;
+mod event_type;
 mod header_key;
 mod stream_event;
 
 use trogon_std::UuidV7Generator;
 
-use crate::{
-    EncodeEventError, EventDecode, EventEncode, EventEncodeError, EventId, EventIdentity, EventType, StreamPosition,
-};
+use crate::StreamPosition;
 
+pub use codec::{EventDecode, EventEncode};
+pub use encode_event_error::{EncodeEventError, EventEncodeError};
 pub use event_headers::EventHeaders;
 pub use event_headers_error::EventHeadersError;
+pub use event_id::EventId;
+pub use event_identity::EventIdentity;
+pub use event_type::EventType;
 pub use header_key::HeaderKey;
 pub use stream_event::StreamEvent;
 
@@ -196,7 +204,6 @@ mod tests {
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.stream_position, position(2));
-        assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
     #[test]
@@ -242,7 +249,6 @@ mod tests {
         assert_eq!(recorded.stream_position, position(7));
         assert_eq!(recorded.decode::<TestEvent>().unwrap(), event);
         assert_eq!(recorded.event.headers, headers);
-        assert_eq!(recorded.subject_with_prefix("events.test."), "events.test.alpha");
     }
 
     #[test]

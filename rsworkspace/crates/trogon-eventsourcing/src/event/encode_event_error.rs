@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{EventEncode, EventType};
+use super::{EventEncode, EventType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncodeEventError<EventTypeError, EventEncodeError> {

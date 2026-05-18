@@ -298,11 +298,11 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
             .event_store
-            .append_stream(AppendStreamRequest::new(
+            .append_stream(AppendStreamRequest {
                 stream_id,
                 stream_write_precondition,
-                encoded_events,
-            ))
+                events: encoded_events,
+            })
             .await
             .map_err(|source| CommandFailure::Append(source))?;
 
@@ -342,7 +342,10 @@ where
         let stream_id = self.command.stream_id();
         let stream_read = self
             .event_store
-            .read_stream(ReadStreamRequest::new(stream_id, 1))
+            .read_stream(ReadStreamRequest {
+                stream_id,
+                from_sequence: 1,
+            })
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_position = stream_read.current_position;
@@ -401,7 +404,10 @@ where
             .unwrap_or(1);
         let stream_read = self
             .event_store
-            .read_stream(ReadStreamRequest::new(stream_id, start_sequence))
+            .read_stream(ReadStreamRequest {
+                stream_id,
+                from_sequence: start_sequence,
+            })
             .await
             .map_err(|source| CommandFailure::ReadStream(source))?;
         let current_position = stream_read.current_position;

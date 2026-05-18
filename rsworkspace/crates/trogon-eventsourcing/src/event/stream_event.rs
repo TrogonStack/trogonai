@@ -15,10 +15,6 @@ impl StreamEvent {
         &self.stream_id
     }
 
-    pub fn subject_with_prefix(&self, prefix: &str) -> String {
-        format!("{prefix}{}", self.stream_id())
-    }
-
     pub fn decode<E>(&self) -> Result<E, E::Error>
     where
         E: EventDecode,

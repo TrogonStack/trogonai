@@ -418,7 +418,10 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let fresh = connect_store(nats).await.unwrap();
     let stream = fresh
         .event_store
-        .read_stream(ReadStreamRequest::new("lifecycle", 1))
+        .read_stream(ReadStreamRequest {
+            stream_id: "lifecycle",
+            from_sequence: 1,
+        })
         .await
         .unwrap();
     assert_eq!(stream.current_position, Some(removed.stream_position));

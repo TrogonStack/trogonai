@@ -1,16 +1,15 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod codec;
 mod event;
-mod event_id;
 mod execution;
 pub mod nats;
 pub mod snapshot;
 mod stream;
 
-pub use codec::{EncodeEventError, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType};
-pub use event::{Event, EventHeaders, EventHeadersError, HeaderKey, StreamEvent};
-pub use event_id::EventId;
+pub use event::{
+    EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventHeadersError, EventId,
+    EventIdentity, EventType, HeaderKey, StreamEvent,
+};
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
     FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
