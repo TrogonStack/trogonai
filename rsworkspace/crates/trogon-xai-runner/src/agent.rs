@@ -62,6 +62,7 @@ const MAX_SESSIONS: usize = 100;
 /// stateless HTTP API. The runner must maintain conversation history locally and
 /// replay it on every turn — unless `last_response_id` is set, in which case
 /// the xAI server already holds the prior context and only the new message is sent.
+#[derive(serde::Serialize)]
 struct XaiSession {
     cwd: String,
     /// Per-session model override. None means use the agent default.
@@ -86,6 +87,7 @@ struct XaiSession {
     system_prompt: Option<String>,
     /// Wall-clock time at which this session was created. Used for LRU eviction
     /// when the session count reaches `MAX_SESSIONS`.
+    #[serde(skip)]
     created_at: Instant,
     /// ISO 8601 timestamp captured at session creation, written to the SESSIONS KV bucket.
     created_at_iso: String,
@@ -1396,6 +1398,23 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 .collect();
             let result = serde_json::json!({ "children": children });
             let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        if args.method.as_ref() == "session/get_state" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let state = sessions.get(session_id).ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "session not found")
+            })?;
+            let raw = serde_json::to_string(state)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }

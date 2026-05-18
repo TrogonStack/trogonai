@@ -51,6 +51,7 @@ fn internal_error(msg: impl Into<String>) -> Error {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
+#[derive(serde::Serialize)]
 struct CodexSession {
     thread_id: String,
     cwd: String,
@@ -654,6 +655,23 @@ where
                 .collect();
             let result = serde_json::json!({ "children": children });
             let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        if args.method.as_ref() == "session/get_state" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let state = sessions.get(session_id).ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "session not found")
+            })?;
+            let raw = serde_json::to_string(state)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
