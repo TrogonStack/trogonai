@@ -6,6 +6,7 @@ use agent_client_protocol::{
     AgentCapabilities, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, ContentBlock, ContentChunk, EmbeddedResourceResource, Error, ErrorCode,
+    ExtRequest, ExtResponse,
     ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse, ModelInfo,
     NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
@@ -854,6 +855,19 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             info!(session_id, "openrouter: prompt cancelled");
         }
         Ok(())
+    }
+
+    async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
+        match args.method.as_ref() {
+            "session/list_children" => {
+                let raw = serde_json::value::RawValue::from_string("[]".to_string())
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                Ok(ExtResponse::new(raw.into()))
+            }
+            "session/export" => { todo!("PR 7 — Dev A") }
+            "session/import" => { todo!("PR 7 — Dev A") }
+            _ => Err(Error::new(ErrorCode::MethodNotFound.into(), args.method.to_string())),
+        }
     }
 
 }

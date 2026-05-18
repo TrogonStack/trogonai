@@ -137,6 +137,10 @@ impl<S: RegistryStore> Registry<S> {
 
         Ok(capabilities)
     }
+
+    pub async fn find_by_model(&self, _model_id: &str) -> Result<Option<AgentCapability>, String> {
+        todo!("PR 6 — Dev B")
+    }
 }
 
 #[cfg(test)]
