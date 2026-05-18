@@ -43,12 +43,14 @@ fn not_found(msg: impl Into<String>) -> Error {
 
 const MAX_SESSIONS: usize = 100;
 
+#[derive(serde::Serialize)]
 struct OpenRouterSession {
     cwd: String,
     model: Option<String>,
     api_key: Option<String>,
     history: Vec<Message>,
     system_prompt: Option<String>,
+    #[serde(skip)]
     created_at: Instant,
     created_at_iso: String,
     parent_session_id: Option<String>,
@@ -869,6 +871,23 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         match args.method.as_ref() {
             "session/list_children" => {
                 let raw = serde_json::value::RawValue::from_string("[]".to_string())
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                Ok(ExtResponse::new(raw.into()))
+            }
+            "session/get_state" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let sessions = self.sessions.lock().await;
+                let state = sessions.get(session_id).ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                })?;
+                let raw = serde_json::to_string(state)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                let raw = serde_json::value::RawValue::from_string(raw)
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
