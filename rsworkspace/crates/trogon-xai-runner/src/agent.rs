@@ -883,7 +883,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt) = {
+        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -895,7 +895,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 s.last_response_id.clone(),
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
+                s.cwd.clone(),
             )
+        };
+
+        let trogon_md = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await;
+        let session_system_prompt = match (trogon_md, session_system_prompt) {
+            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
+            (Some(md), None) => Some(md),
+            (None, sp) => sp,
         };
 
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
