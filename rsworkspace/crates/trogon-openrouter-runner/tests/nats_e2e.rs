@@ -18,9 +18,10 @@ use acp_nats::AcpPrefix;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats_agent::AgentSideNatsConnection;
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ContentBlock, CreateTerminalResponse, ForkSessionRequest,
-    LoadSessionRequest, NewSessionRequest, PromptRequest, PromptResponse, SessionConfigKind,
-    SessionId, SetSessionConfigOptionRequest, SetSessionModelRequest, TerminalOutputResponse,
+    Agent as _, CloseSessionRequest, ContentBlock, CreateTerminalResponse, ExtRequest,
+    ForkSessionRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, PromptResponse,
+    SessionConfigKind, SessionId, SetSessionConfigOptionRequest, SetSessionModelRequest,
+    TerminalOutputResponse,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -743,6 +744,112 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
                     "tool {name} must be enabled when restoring pre-fix snapshot"
                 );
             }
+        })
+        .await;
+}
+
+// ── session/export and session/import with NatsSessionStore ──────────────────
+
+/// Full export→import round-trip with a real NatsSessionStore:
+///
+/// 1. new_session(sid1) → import messages=[{role:"user",text:"nats test"}]
+/// 2. export from sid1 → parse PortableMessage, assert len==1, text=="nats test"
+/// 3. new_session(sid2) → import using sid1's export JSON
+/// 4. export from sid2 → assert same content
+#[tokio::test]
+async fn ext_method_export_import_round_trip_with_nats_store() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let store = Arc::new(
+        trogon_openrouter_runner::NatsSessionStore::open(&js, 0)
+            .await
+            .expect("NatsSessionStore::open"),
+    );
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix.clone());
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "", NoOpHttpClient)
+        .with_session_store(store.clone());
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            // ── 1. Create two sessions ────────────────────────────────────────
+            let sid1 = agent
+                .new_session(NewSessionRequest::new("/"))
+                .await
+                .expect("new_session sid1")
+                .session_id;
+
+            let sid2 = agent
+                .new_session(NewSessionRequest::new("/"))
+                .await
+                .expect("new_session sid2")
+                .session_id;
+
+            // ── 2. Import a message into sid1 ─────────────────────────────────
+            let import_params = serde_json::value::RawValue::from_string(
+                format!(
+                    r#"{{"sessionId":"{}","messages":[{{"role":"user","text":"nats test"}}]}}"#,
+                    sid1
+                ),
+            )
+            .unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+                .expect("session/import into sid1");
+
+            // ── 3. Export from sid1 ───────────────────────────────────────────
+            let export1_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, sid1),
+            )
+            .unwrap();
+            let export1_resp = agent
+                .ext_method(ExtRequest::new("session/export", export1_params.into()))
+                .await
+                .expect("session/export from sid1");
+
+            let portable1: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export1_resp.0.get())
+                    .expect("parse sid1 export as Vec<PortableMessage>");
+            assert_eq!(portable1.len(), 1, "sid1 export must have 1 message");
+            assert_eq!(portable1[0].role, "user", "sid1 message role must be user");
+            assert_eq!(
+                portable1[0].text, "nats test",
+                "sid1 message text must be 'nats test'"
+            );
+
+            // ── 4. Import sid1's export into sid2 ────────────────────────────
+            let export1_json = export1_resp.0.get().to_string();
+            let import2_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}","messages":{}}}"#, sid2, export1_json),
+            )
+            .unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import2_params.into()))
+                .await
+                .expect("session/import into sid2");
+
+            // ── 5. Export from sid2 and verify same content ───────────────────
+            let export2_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}"}}"#, sid2),
+            )
+            .unwrap();
+            let export2_resp = agent
+                .ext_method(ExtRequest::new("session/export", export2_params.into()))
+                .await
+                .expect("session/export from sid2");
+
+            let portable2: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export2_resp.0.get())
+                    .expect("parse sid2 export as Vec<PortableMessage>");
+            assert_eq!(
+                portable2.len(),
+                portable1.len(),
+                "sid2 export must have same message count as sid1"
+            );
+            assert_eq!(portable2[0].role, portable1[0].role, "role must match");
+            assert_eq!(portable2[0].text, portable1[0].text, "text must match");
         })
         .await;
 }

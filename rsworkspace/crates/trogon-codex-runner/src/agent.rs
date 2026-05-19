@@ -703,6 +703,13 @@ where
             let mut sessions = self.sessions.lock().await;
             let s = sessions.get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+            // Write to both history and pending_history:
+            // - s.history: makes export consistent with other runners (returns imported
+            //   messages immediately, before any prompt)
+            // - s.pending_history: injects context into the codex subprocess on the
+            //   first turn as a "Prior conversation:" text prefix
+            // Without both, either export is wrong or the subprocess never sees the context.
+            s.history = messages.clone();
             s.pending_history = Some(messages);
             s.first_turn = true;
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
@@ -1536,6 +1543,46 @@ mod tests {
         assert!(agent.ext_method(ext_req).await.is_err());
     }
 
+    #[tokio::test]
+    async fn export_after_real_turn_contains_accumulated_history() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let spawner = MockProcessSpawner {
+            events: vec![
+                CodexEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
+                CodexEvent::TextDelta {
+                    text: " world".to_string(),
+                },
+                CodexEvent::TurnCompleted,
+            ],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("ep1", "/tmp", None).await;
+
+        agent
+            .prompt(PromptRequest::new(
+                "ep1",
+                vec![ContentBlock::from("question".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ep1" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/export", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(msgs.len(), 2, "expected user + assistant messages");
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].text, "question");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].text, "hello world");
+    }
+
     // ── ext_method / session/import ───────────────────────────────────────────
 
     #[tokio::test]
@@ -1567,6 +1614,11 @@ mod tests {
         let msgs = pending.unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].text, "ctx");
+
+        // import must also write to s.history for export consistency
+        let history = agent.test_get_history("i1").await;
+        assert_eq!(history.len(), 1, "s.history must mirror imported messages");
+        assert_eq!(history[0].text, "ctx");
 
         // import must reset first_turn to true
         let first_turn = agent
@@ -1623,14 +1675,27 @@ mod tests {
             .await
             .unwrap();
 
-        // Re-export from dst (pending_history is the imported data).
-        // For the round-trip check we verify pending_history directly.
+        // Re-export from dst: must return the imported messages immediately
+        // (before any prompt) — consistent with xai/openrouter/acp behaviour.
+        let export_dst_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "dst" }).to_string(),
+        )
+        .unwrap();
+        let export_dst_resp = agent
+            .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
+            .await
+            .unwrap();
+        let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(export_dst_resp.0.get()).unwrap();
+        assert_eq!(dst_portable.len(), 2, "export after import must return imported messages");
+        assert_eq!(dst_portable[0].role, "user");
+        assert_eq!(dst_portable[0].text, "q");
+        assert_eq!(dst_portable[1].role, "assistant");
+        assert_eq!(dst_portable[1].text, "a");
+
+        // pending_history must also be set (for subprocess injection on first prompt).
         let pending = agent.test_get_pending_history("dst").await.unwrap();
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending[0].role, "user");
-        assert_eq!(pending[0].text, "q");
-        assert_eq!(pending[1].role, "assistant");
-        assert_eq!(pending[1].text, "a");
+        assert_eq!(pending.len(), 2, "pending_history must also be set for subprocess injection");
     }
 
     // ── history accumulation ──────────────────────────────────────────────────
@@ -1678,6 +1743,19 @@ mod tests {
         assert_eq!(history[0].text, "hello");
         assert_eq!(history[1].role, "assistant");
         assert_eq!(history[1].text, "world");
+    }
+
+    // ── ext_method / session/import — error cases ─────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_import_unknown_session_returns_error() {
+        let agent = make_agent().await;
+        // no sessions inserted
+        let params = serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
+        ).unwrap();
+        let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+        assert!(result.is_err(), "import of unknown session must return Err");
     }
 
     // ── history: pending prepend on import then prompt ────────────────────────
@@ -1736,13 +1814,16 @@ mod tests {
             "pending_history must be None after prompt consumed it"
         );
 
-        // History should contain the user message (stored as raw input, not
-        // with the prepended "Prior conversation:" prefix) and the assistant reply.
+        // History should contain the imported message + user message + assistant reply.
+        // s.history is written on import so export is consistent; prompt appends
+        // the new user/assistant turn on top of the already-stored imported messages.
         let history = agent.test_get_history("ip1").await;
-        assert_eq!(history.len(), 2, "expected user + assistant messages");
+        assert_eq!(history.len(), 3, "expected imported + user + assistant messages");
         assert_eq!(history[0].role, "user");
-        assert_eq!(history[0].text, "actual question");
-        assert_eq!(history[1].role, "assistant");
-        assert_eq!(history[1].text, "response");
+        assert_eq!(history[0].text, "prior context");
+        assert_eq!(history[1].role, "user");
+        assert_eq!(history[1].text, "actual question");
+        assert_eq!(history[2].role, "assistant");
+        assert_eq!(history[2].text, "response");
     }
 }

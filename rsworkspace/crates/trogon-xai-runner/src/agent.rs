@@ -1531,6 +1531,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             s.history = messages.into_iter()
                 .map(|m| Message { role: m.role, content: Some(m.text), prompt_tokens: None, completion_tokens: None })
                 .collect();
+            s.last_response_id = None;
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
@@ -6299,5 +6300,27 @@ mod tests {
             assert_eq!(s.role, d.role);
             assert_eq!(s.text, d.text);
         }
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_unknown_session_returns_error() {
+        let agent = make_agent();
+        // no sessions inserted
+        let params = serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
+        ).unwrap();
+        let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+        assert!(result.is_err(), "import of unknown session must return Err");
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_malformed_messages_returns_error() {
+        let agent = make_agent();
+        agent.test_insert_session("s1", "/tmp", None).await;
+        let params = serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string()
+        ).unwrap();
+        let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+        assert!(result.is_err(), "malformed messages must return Err");
     }
 }

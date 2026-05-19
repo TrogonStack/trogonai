@@ -1797,4 +1797,30 @@ mod tests {
         assert_eq!(portable.len(), 1);
         assert_eq!(portable[0].text, "", "Thinking block must be dropped (empty text)");
     }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_import_malformed_messages_returns_error() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        // messages is not an array of PortableMessage — it's a plain string
+        let params = serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string()
+        ).unwrap();
+        let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+        assert!(result.is_err(), "malformed messages must return Err");
+    }
 }

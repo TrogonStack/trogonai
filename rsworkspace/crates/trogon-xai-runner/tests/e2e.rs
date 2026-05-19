@@ -5974,3 +5974,140 @@ async fn fetch_url_egress_blocked_via_nats() {
         })
         .await;
 }
+
+// ── session/export returns history via NATS ───────────────────────────────────
+
+/// `session/export` dispatched through the NATS ext routing must return the
+/// session's accumulated history as portable messages.
+#[tokio::test]
+async fn export_via_nats_returns_session_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Prompt to build some history.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-export-test".to_string() },
+                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            // Export via global ext subject.
+            let params_json = serde_json::json!({ "sessionId": sid }).to_string();
+            let params = serde_json::value::RawValue::from_string(params_json).unwrap();
+            h.global(
+                "acp.agent.ext.session/export",
+                ExtRequest::new("session/export", params.into()),
+                "r.export",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "session/export must not return an error; got: {val}"
+            );
+            let messages = val.as_array().expect("session/export must return a JSON array");
+            assert!(
+                !messages.is_empty(),
+                "export must return at least one message after a prompt"
+            );
+            let last = messages.last().unwrap();
+            assert_eq!(
+                last["role"].as_str(),
+                Some("assistant"),
+                "last exported message must be the assistant reply"
+            );
+            assert_eq!(
+                last["text"].as_str(),
+                Some("hello"),
+                "exported assistant text must match the prompt response"
+            );
+        })
+        .await;
+}
+
+// ── session/import clears last_response_id via NATS ──────────────────────────
+
+/// After a prompt sets `last_response_id`, a `session/import` via NATS must
+/// clear it so the next prompt sends the full history instead of using the
+/// stale stateful API thread.
+#[tokio::test]
+async fn import_via_nats_clears_last_response_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Turn 1: prompt → sets last_response_id to "resp-turn1".
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-turn1".to_string() },
+                XaiEvent::TextDelta { text: "two".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("What is 1+1?")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            let call1 = h.http.last_call().unwrap();
+            assert_eq!(
+                call1.previous_response_id, None,
+                "first prompt must not have a previous_response_id"
+            );
+
+            // Import new messages via global ext subject — must clear last_response_id.
+            let params_json = serde_json::json!({
+                "sessionId": sid,
+                "messages": [
+                    { "role": "user", "text": "imported user" },
+                    { "role": "assistant", "text": "imported assistant" }
+                ]
+            })
+            .to_string();
+            let params = serde_json::value::RawValue::from_string(params_json).unwrap();
+            h.global(
+                "acp.agent.ext.session/import",
+                ExtRequest::new("session/import", params.into()),
+                "r.import",
+            );
+            h.expect_n_publishes(3).await; // publishes: 3
+
+            // Turn 2: prompt after import — must NOT use previous_response_id.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "four".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("And 2+2?")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(4).await; // publishes: 4
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have made exactly two HTTP calls");
+            assert_eq!(
+                calls[1].previous_response_id, None,
+                "prompt after import must not carry last_response_id (import cleared it)"
+            );
+            // The second call must include the imported messages in the input.
+            assert!(
+                calls[1].input_len >= 3,
+                "second prompt must include imported messages + new user turn, got input_len={}",
+                calls[1].input_len
+            );
+        })
+        .await;
+}
