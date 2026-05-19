@@ -1,15 +1,13 @@
 use std::{borrow::Borrow, str::FromStr};
 
-use super::event_headers_error::EventHeadersError;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HeaderName(String);
 
 impl HeaderName {
-    pub fn new(name: impl Into<String>) -> Result<Self, EventHeadersError> {
+    pub fn new(name: impl Into<String>) -> Result<Self, HeaderNameError> {
         let name = name.into();
         if name.is_empty() {
-            return Err(EventHeadersError::EmptyName);
+            return Err(HeaderNameError);
         }
         Ok(Self(name))
     }
@@ -20,7 +18,7 @@ impl HeaderName {
 }
 
 impl FromStr for HeaderName {
-    type Err = EventHeadersError;
+    type Err = HeaderNameError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value)
@@ -28,7 +26,7 @@ impl FromStr for HeaderName {
 }
 
 impl TryFrom<String> for HeaderName {
-    type Error = EventHeadersError;
+    type Error = HeaderNameError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -36,7 +34,7 @@ impl TryFrom<String> for HeaderName {
 }
 
 impl TryFrom<&str> for HeaderName {
-    type Error = EventHeadersError;
+    type Error = HeaderNameError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -54,3 +52,14 @@ impl Borrow<str> for HeaderName {
         self.as_str()
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderNameError;
+
+impl std::fmt::Display for HeaderNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("event header name cannot be empty")
+    }
+}
+
+impl std::error::Error for HeaderNameError {}

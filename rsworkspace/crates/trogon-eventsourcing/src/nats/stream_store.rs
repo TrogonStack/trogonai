@@ -150,7 +150,7 @@ fn build_publish_message(
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
     for (name, value) in event.headers.iter() {
-        publish = publish.header(event_header_name(name.as_str()), value);
+        publish = publish.header(event_header_name(name.as_str()), value.as_str());
     }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
         publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);
@@ -394,7 +394,10 @@ mod tests {
 
         let event_headers = event_headers_from_headers(&headers).unwrap();
 
-        assert_eq!(event_headers.get("trace-id"), Some("trace-1"));
+        assert_eq!(
+            event_headers.get("trace-id").map(|value| value.as_str()),
+            Some("trace-1")
+        );
         assert_eq!(event_headers.len(), 1);
     }
 

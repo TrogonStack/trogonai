@@ -1,11 +1,12 @@
 mod codec;
 mod encode_event_error;
 mod event_headers;
-mod event_headers_error;
+mod event_headers_from_entries_error;
 mod event_id;
 mod event_identity;
 mod event_type;
 mod header_name;
+mod header_value;
 mod stream_event;
 
 use trogon_std::NowV7;
@@ -13,11 +14,12 @@ use trogon_std::NowV7;
 pub use codec::{EventData, EventDecode, EventEncode};
 pub use encode_event_error::{EncodeEventError, EventEncodeError};
 pub use event_headers::EventHeaders;
-pub use event_headers_error::EventHeadersError;
+pub use event_headers_from_entries_error::EventHeadersFromEntriesError;
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;
-pub use header_name::HeaderName;
+pub use header_name::{HeaderName, HeaderNameError};
+pub use header_value::{HeaderValue, HeaderValueError};
 pub use stream_event::StreamEvent;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,7 +226,10 @@ mod tests {
             TestEvent::decode(EventData::new(&generated.r#type, "alpha", &generated.content)).unwrap(),
             event
         );
-        assert_eq!(generated.headers.get("trace-id"), Some("trace-1"));
+        assert_eq!(
+            generated.headers.get("trace-id").map(HeaderValue::as_str),
+            Some("trace-1")
+        );
 
         let no_headers = encode_event(&event, &UuidV7Generator, &EventHeaders::empty()).unwrap();
         assert!(no_headers.headers.is_empty());
@@ -247,6 +252,13 @@ mod tests {
         let name = HeaderName::new("trace-id").unwrap();
         assert_eq!(name.as_str(), "trace-id");
 
+        let value = HeaderValue::new("trace-1").unwrap();
+        assert_eq!(value.as_str(), "trace-1");
+        assert_eq!(HeaderValue::from_str("trace-2").unwrap().as_str(), "trace-2");
+        let typed_headers = EventHeaders::one(HeaderName::new("typed").unwrap(), value.clone()).unwrap();
+        assert_eq!(typed_headers.get("typed").map(HeaderValue::as_str), Some("trace-1"));
+        assert_eq!(typed_headers.get_str("typed"), Some("trace-1"));
+
         assert_eq!(
             HeaderName::new("Nats-Expected-Last-Subject-Sequence").unwrap().as_str(),
             "Nats-Expected-Last-Subject-Sequence"
@@ -255,10 +267,19 @@ mod tests {
             HeaderName::new("Trogon-Event-Type").unwrap().as_str(),
             "Trogon-Event-Type"
         );
-        assert_eq!(HeaderName::new("").unwrap_err(), EventHeadersError::EmptyName);
-        assert!(matches!(
+        assert_eq!(HeaderName::new("").unwrap_err(), HeaderNameError);
+        assert_eq!(
             EventHeaders::one(HeaderName::new("trace-id").unwrap(), "line\r\nbreak"),
-            Err(EventHeadersError::InvalidValue { .. })
+            Err(HeaderValueError)
+        );
+        assert!(matches!(
+            EventHeaders::from_entries([("", "value")]),
+            Err(EventHeadersFromEntriesError::InvalidName { .. })
         ));
+        assert!(matches!(
+            EventHeaders::from_entries([("trace-id", "line\r\nbreak")]),
+            Err(EventHeadersFromEntriesError::InvalidValue { .. })
+        ));
+        assert!(HeaderValue::new("null\0break").is_err());
     }
 }

@@ -1,48 +1,72 @@
 use std::collections::BTreeMap;
 
-use super::{event_headers_error::EventHeadersError, header_name::HeaderName};
+use super::{
+    event_headers_from_entries_error::EventHeadersFromEntriesError,
+    header_name::HeaderName,
+    header_value::{HeaderValue, HeaderValueError},
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventHeaders {
-    entries: BTreeMap<HeaderName, String>,
+    entries: BTreeMap<HeaderName, HeaderValue>,
 }
 
 impl EventHeaders {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn empty() -> Self {
         Self::default()
     }
 
-    pub fn one(name: HeaderName, value: impl Into<String>) -> Result<Self, EventHeadersError> {
+    pub fn one<V>(name: HeaderName, value: V) -> Result<Self, HeaderValueError>
+    where
+        V: TryInto<HeaderValue>,
+        HeaderValueError: From<V::Error>,
+    {
         let mut headers = Self::empty();
         headers.insert(name, value)?;
         Ok(headers)
     }
 
-    pub fn from_entries<I, N, V>(entries: I) -> Result<Self, EventHeadersError>
+    pub fn from_entries<I, N, V>(entries: I) -> Result<Self, EventHeadersFromEntriesError>
     where
         I: IntoIterator<Item = (N, V)>,
         N: Into<String>,
-        V: Into<String>,
+        V: TryInto<HeaderValue>,
+        HeaderValueError: From<V::Error>,
     {
         let mut headers = Self::empty();
         for (name, value) in entries {
-            headers.insert(HeaderName::new(name)?, value)?;
+            let name = name.into();
+            let header_name =
+                HeaderName::new(name.clone()).map_err(|source| EventHeadersFromEntriesError::InvalidName {
+                    name: name.clone(),
+                    source,
+                })?;
+            headers
+                .insert(header_name, value)
+                .map_err(|source| EventHeadersFromEntriesError::InvalidValue { name, source })?;
         }
         Ok(headers)
     }
 
-    pub fn insert(&mut self, name: HeaderName, value: impl Into<String>) -> Result<Option<String>, EventHeadersError> {
-        let value = value.into();
-        if value.contains(['\r', '\n']) {
-            return Err(EventHeadersError::InvalidValue {
-                name: name.as_str().to_string(),
-            });
-        }
+    pub fn insert<V>(&mut self, name: HeaderName, value: V) -> Result<Option<HeaderValue>, HeaderValueError>
+    where
+        V: TryInto<HeaderValue>,
+        HeaderValueError: From<V::Error>,
+    {
+        let value = value.try_into().map_err(HeaderValueError::from)?;
         Ok(self.entries.insert(name, value))
     }
 
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.entries.get(name).map(String::as_str)
+    pub fn get(&self, name: &str) -> Option<&HeaderValue> {
+        self.entries.get(name)
+    }
+
+    pub fn get_str(&self, name: &str) -> Option<&str> {
+        self.get(name).map(HeaderValue::as_str)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -53,7 +77,7 @@ impl EventHeaders {
         self.entries.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&HeaderName, &str)> {
-        self.entries.iter().map(|(name, value)| (name, value.as_str()))
+    pub fn iter(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
+        self.entries.iter()
     }
 }

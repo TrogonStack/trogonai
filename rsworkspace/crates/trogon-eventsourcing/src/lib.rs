@@ -7,8 +7,9 @@ pub mod snapshot;
 mod stream;
 
 pub use event::{
-    EncodeEventError, Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventHeadersError,
-    EventId, EventIdentity, EventType, HeaderName, StreamEvent,
+    EncodeEventError, Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders,
+    EventHeadersFromEntriesError, EventId, EventIdentity, EventType, HeaderName, HeaderNameError, HeaderValue,
+    HeaderValueError, StreamEvent,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
