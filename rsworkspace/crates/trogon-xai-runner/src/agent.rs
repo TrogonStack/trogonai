@@ -1210,7 +1210,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
                                 prompt_tokens,
-                                completion_tokens,
+                                prompt_tokens + completion_tokens,
                             )),
                         );
                         self.notifier.notify(notif).await;
@@ -4340,8 +4340,8 @@ mod tests {
         };
         assert_eq!(update.used, 42, "UsageUpdate.used must equal prompt_tokens");
         assert_eq!(
-            update.size, 10,
-            "UsageUpdate.size must equal completion_tokens"
+            update.size, 52,
+            "UsageUpdate.size must equal prompt_tokens + completion_tokens"
         );
     }
 
