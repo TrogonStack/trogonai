@@ -7,7 +7,10 @@ const TIMEOUT: Duration = Duration::from_secs(120);
 pub async fn oneshot_call(api_key: &str, model: &str, prompt: &str) -> String {
     let base_url = std::env::var("XAI_BASE_URL")
         .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+    oneshot_call_with_url(api_key, model, prompt, &base_url).await
+}
 
+async fn oneshot_call_with_url(api_key: &str, model: &str, prompt: &str, base_url: &str) -> String {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
         .build()
@@ -41,5 +44,65 @@ pub async fn oneshot_call(api_key: &str, model: &str, prompt: &str) -> String {
         Ok(Ok(resp)) => format!("error: API returned {}", resp.status()),
         Ok(Err(e)) => format!("error: {e}"),
         Err(_) => format!("error: oneshot_call timed out after {}s", TIMEOUT.as_secs()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::routing::post;
+    use axum::response::IntoResponse;
+
+    async fn serve(router: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.ok();
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn returns_assistant_content_on_success() {
+        let app = Router::new().route("/chat/completions", post(|| async {
+            axum::Json(serde_json::json!({
+                "choices": [{"message": {"content": "hello from xai"}}]
+            }))
+            .into_response()
+        }));
+        let base = serve(app).await;
+        let result = oneshot_call_with_url("key", "grok-4", "hi", &base).await;
+        assert_eq!(result, "hello from xai");
+    }
+
+    #[tokio::test]
+    async fn returns_error_on_non_200() {
+        let app = Router::new().route("/chat/completions", post(|| async {
+            (axum::http::StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+        }));
+        let base = serve(app).await;
+        let result = oneshot_call_with_url("bad-key", "grok-4", "hi", &base).await;
+        assert!(result.starts_with("error: API returned 401"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn returns_error_on_invalid_json() {
+        let app = Router::new().route("/chat/completions", post(|| async {
+            (axum::http::StatusCode::OK, "not json at all").into_response()
+        }));
+        let base = serve(app).await;
+        let result = oneshot_call_with_url("key", "grok-4", "hi", &base).await;
+        assert!(result.starts_with("error parsing response:"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn returns_empty_string_when_content_missing() {
+        let app = Router::new().route("/chat/completions", post(|| async {
+            axum::Json(serde_json::json!({"choices": []})).into_response()
+        }));
+        let base = serve(app).await;
+        let result = oneshot_call_with_url("key", "grok-4", "hi", &base).await;
+        assert_eq!(result, "");
     }
 }
