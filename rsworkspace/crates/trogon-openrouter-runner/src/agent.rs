@@ -1140,8 +1140,40 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
-            "session/export" => { todo!("PR 7 — Dev A") }
-            "session/import" => { todo!("PR 7 — Dev A") }
+            "session/export" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params["sessionId"].as_str()
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let sessions = self.sessions.lock().await;
+                let s = sessions.get(session_id)
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+                let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
+                    .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content.clone() })
+                    .collect();
+                let raw = serde_json::to_string(&portable)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()))
+            }
+            "session/import" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params["sessionId"].as_str()
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                    serde_json::from_value(params["messages"].clone())
+                        .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+                let mut sessions = self.sessions.lock().await;
+                let s = sessions.get_mut(session_id)
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+                s.history = messages.into_iter()
+                    .map(|m| crate::client::Message { role: m.role, content: m.text, prompt_tokens: None, completion_tokens: None, tool_calls: None, tool_call_id: None })
+                    .collect();
+                Self::trim_history(&mut s.history, self.max_history);
+                let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+                Ok(ExtResponse::new(raw.into()))
+            }
             _ => Err(Error::new(ErrorCode::MethodNotFound.into(), args.method.to_string())),
         }
     }
@@ -1224,6 +1256,28 @@ async fn execute_bash_via_nats(
     match result {
         Ok(output) => output,
         Err(_elapsed) => "error: bash execution timed out".to_string(),
+    }
+}
+
+#[cfg(test)]
+impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::session_notifier::MockSessionNotifier> {
+    async fn test_insert_session_with_history(&self, id: &str, history: Vec<Message>) {
+        self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
+            cwd: "/tmp".to_string(),
+            model: None,
+            api_key: None,
+            history,
+            system_prompt: None,
+            enabled_tools: vec![],
+            created_at: std::time::Instant::now(),
+            created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+    }
+
+    async fn test_insert_session(&self, id: &str) {
+        self.test_insert_session_with_history(id, vec![]).await;
     }
 }
 
@@ -4266,5 +4320,199 @@ mod tests {
             );
         })
         .await;
+    }
+
+    // ── session/export and session/import ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_export_returns_portable_messages() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session_with_history(
+                "s1",
+                vec![Message::user("hello"), Message::assistant("world")],
+            ).await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "s1" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await
+                .unwrap();
+
+            let result_json = resp.0.get();
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(result_json).unwrap();
+
+            assert_eq!(portable.len(), 2);
+            assert_eq!(portable[0].role, "user");
+            assert_eq!(portable[0].text, "hello");
+            assert_eq!(portable[1].role, "assistant");
+            assert_eq!(portable[1].text, "world");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_replaces_session_history() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s2").await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "s2",
+                    "messages": [{ "role": "user", "text": "imported" }]
+                }).to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", params.into()))
+                .await
+                .unwrap();
+
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "s2" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+
+            let result_json = resp.0.get();
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(result_json).unwrap();
+
+            assert_eq!(portable.len(), 1);
+            assert_eq!(portable[0].text, "imported");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_unknown_session_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "no-such" }).to_string(),
+            ).unwrap();
+            let result = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await;
+            assert!(result.is_err(), "export of unknown session must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_missing_session_id_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            let result = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await;
+            assert!(result.is_err(), "export without sessionId must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_import_round_trip() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session_with_history(
+                "src",
+                vec![Message::user("q"), Message::assistant("a")],
+            ).await;
+            agent.test_insert_session("dst").await;
+
+            // Export from src
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "src" }).to_string(),
+            ).unwrap();
+            let src_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+            let exported_json = src_resp.0.get().to_string();
+
+            // Import the raw JSON array into dst
+            let import_body = serde_json::json!({
+                "sessionId": "dst",
+                "messages": serde_json::from_str::<serde_json::Value>(&exported_json).unwrap()
+            });
+            let import_params = serde_json::value::RawValue::from_string(
+                import_body.to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+                .unwrap();
+
+            // Export from dst and compare
+            let export_dst_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "dst" }).to_string(),
+            ).unwrap();
+            let dst_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
+                .await
+                .unwrap();
+
+            let src_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(&exported_json).unwrap();
+            let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(dst_resp.0.get()).unwrap();
+
+            assert_eq!(src_portable.len(), dst_portable.len());
+            for (s, d) in src_portable.iter().zip(dst_portable.iter()) {
+                assert_eq!(s.role, d.role);
+                assert_eq!(s.text, d.text);
+            }
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_trims_to_max_history() {
+        let agent = {
+            let _lock = env_lock();
+            unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
+            let a = make_agent();
+            unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
+            a
+        };
+        local().run_until(async move {
+            agent.test_insert_session("trim1").await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "trim1",
+                    "messages": [
+                        { "role": "user",      "text": "a" },
+                        { "role": "assistant", "text": "b" },
+                        { "role": "user",      "text": "c" },
+                        { "role": "assistant", "text": "d" },
+                        { "role": "user",      "text": "e" }
+                    ]
+                }).to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", params.into()))
+                .await
+                .unwrap();
+
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "trim1" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(resp.0.get()).unwrap();
+
+            assert!(
+                portable.len() <= 2,
+                "expected history trimmed to max_history=2, got {} messages",
+                portable.len()
+            );
+        }).await;
     }
 }
