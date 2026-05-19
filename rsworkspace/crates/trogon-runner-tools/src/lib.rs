@@ -13,3 +13,4 @@ pub mod wasm_bash_tool;
 pub use egress::EgressPolicy;
 pub use permission::{ChannelPermissionChecker, PermissionReq, PermissionTx, RulesPermissionChecker};
 pub use session_store::{NatsSessionStore, SessionState, SessionStore, StoredMcpServer, TodoItem};
+pub use trogon_md::{FsTrogonMdLoader, TrogonMdLoading};
