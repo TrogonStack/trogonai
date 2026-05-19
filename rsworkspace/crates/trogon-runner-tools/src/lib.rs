@@ -1,6 +1,7 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod egress;
+pub mod portable_session;
 pub mod nats_todo_tool;
 pub mod permission;
 pub mod permission_rules;

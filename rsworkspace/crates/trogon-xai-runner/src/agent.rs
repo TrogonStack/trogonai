@@ -1501,6 +1501,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/export" {
+            todo!("PR 7 — Dev A")
+        }
+        if args.method.as_ref() == "session/import" {
+            todo!("PR 7 — Dev A")
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
