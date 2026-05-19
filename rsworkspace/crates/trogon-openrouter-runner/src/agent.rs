@@ -44,6 +44,65 @@ fn not_found(msg: impl Into<String>) -> Error {
 
 const MAX_SESSIONS: usize = 100;
 
+/// Returns the context-window size (in tokens) for known models routed through OpenRouter.
+/// OpenRouter model IDs are typically `provider/model-name`; matching is done on the full
+/// ID lowercased so both full and short-form IDs work.
+/// Returns `None` for unknown models — callers should omit the percentage rather than guess.
+fn context_window_tokens(model_id: &str) -> Option<u64> {
+    let m = model_id.to_lowercase();
+    // Anthropic Claude (all current generations have 200k context)
+    if m.contains("claude") {
+        return Some(200_000);
+    }
+    // OpenAI
+    if m.contains("o1") || m.contains("o3") || m.contains("o4") {
+        return Some(200_000);
+    }
+    if m.contains("gpt-4o") || m.contains("gpt-4-turbo") || m.contains("gpt-4-1") {
+        return Some(128_000);
+    }
+    if m.contains("gpt-4") {
+        return Some(8_192);
+    }
+    if m.contains("gpt-3.5") {
+        return Some(16_385);
+    }
+    // Google Gemini
+    if m.contains("gemini-2") {
+        return Some(1_048_576);
+    }
+    if m.contains("gemini-1.5") {
+        return Some(1_000_000);
+    }
+    if m.contains("gemini") {
+        return Some(32_768);
+    }
+    // xAI (via OpenRouter)
+    if m.contains("grok-4") {
+        return Some(256_000);
+    }
+    if m.contains("grok") {
+        return Some(131_072);
+    }
+    // Meta Llama 3+
+    if m.contains("llama-3") || m.contains("llama3") {
+        return Some(128_000);
+    }
+    // Mistral / Mixtral
+    if m.contains("mistral") || m.contains("mixtral") {
+        return Some(32_768);
+    }
+    // Deepseek
+    if m.contains("deepseek") {
+        return Some(65_536);
+    }
+    // Qwen
+    if m.contains("qwen") {
+        return Some(131_072);
+    }
+    None
+}
+
 #[derive(serde::Serialize)]
 struct OpenRouterSession {
     cwd: String,
@@ -834,12 +893,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     completion_tokens,
                 } => {
                     usage = Some((prompt_tokens, completion_tokens));
+                    let ctx_window = context_window_tokens(&model).unwrap_or(0);
                     notifier
                         .notify(agent_client_protocol::SessionNotification::new(
                             notification_session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
                                 prompt_tokens,
-                                prompt_tokens + completion_tokens,
+                                ctx_window,
                             )),
                         ))
                         .await;

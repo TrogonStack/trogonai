@@ -57,6 +57,17 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_sea
 /// long-running deployments where clients never call `close_session`.
 const MAX_SESSIONS: usize = 100;
 
+/// Returns the context-window size (in tokens) for a known xAI model.
+/// Matched by prefix so that dated variants (e.g. `grok-3-mini-fast`) also resolve.
+fn context_window_tokens(model_id: &str) -> u64 {
+    if model_id.starts_with("grok-4") {
+        256_000
+    } else {
+        // grok-3, grok-3-mini, grok-3-mini-fast, grok-2, and any future variants
+        131_072
+    }
+}
+
 /// Per-session state held in memory.
 ///
 /// Unlike the Codex runner (which delegates state to the subprocess), xAI is a
@@ -1210,7 +1221,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
                                 prompt_tokens,
-                                prompt_tokens + completion_tokens,
+                                context_window_tokens(&model),
                             )),
                         );
                         self.notifier.notify(notif).await;
@@ -4340,8 +4351,8 @@ mod tests {
         };
         assert_eq!(update.used, 42, "UsageUpdate.used must equal prompt_tokens");
         assert_eq!(
-            update.size, 52,
-            "UsageUpdate.size must equal prompt_tokens + completion_tokens"
+            update.size, 131_072,
+            "UsageUpdate.size must equal the model context window (grok-3 = 131072)"
         );
     }
 
