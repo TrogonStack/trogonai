@@ -18,9 +18,9 @@ use trogon_eventsourcing::nats::{
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, EncodeEventError,
     Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventId, EventIdentity, EventType,
-    Events, FrequencySnapshot, HeaderName, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotRead,
-    SnapshotType, SnapshotWrite, Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
-    TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
+    Events, FrequencySnapshot, HeaderName, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot,
+    SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots, StreamAppend, StreamPosition,
+    StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
 use trogon_std::UuidV7Generator;
 use uuid::Uuid;
@@ -505,7 +505,7 @@ async fn assert_missing_append_succeeds(stream_write_precondition: StreamWritePr
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -523,7 +523,7 @@ async fn assert_missing_append_conflicts(stream_write_precondition: StreamWriteP
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, None);
@@ -541,7 +541,7 @@ async fn existing_fixture() -> TestResult<(JetStreamFixture, StreamPosition)> {
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -558,7 +558,7 @@ async fn assert_existing_append_succeeds(stream_write_precondition: StreamWriteP
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(next_position));
@@ -576,7 +576,7 @@ async fn assert_existing_append_conflicts(stream_write_precondition: StreamWrite
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(current_position));
@@ -622,7 +622,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(4)));
@@ -645,12 +645,11 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
     assert_eq!(third.decode::<TestEvent>()?.value, "alpha-three");
 
     let third_stream_position = third.stream_position;
-    let third_stream_position_value = third_stream_position.as_u64();
     let read_from_third = fixture
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: third_stream_position_value,
+            from: ReadFrom::Position(third_stream_position),
         })
         .await?;
     assert_eq!(read_from_third.current_position, Some(third_stream_position));
@@ -661,7 +660,7 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: third_stream_position_value + 1,
+            from: ReadFrom::after(third_stream_position)?,
         })
         .await?;
     assert_eq!(read_after_third.current_position, Some(third_stream_position));
@@ -684,21 +683,11 @@ async fn jetstream_store_read_ranges_keep_current_position() -> TestResult {
     )
     .await?;
 
-    let read_from_zero = fixture
-        .store
-        .read_stream(ReadStreamRequest {
-            stream_id: "alpha",
-            from_sequence: 0,
-        })
-        .await?;
-    assert_eq!(read_from_zero.current_position, Some(position(3)));
-    assert!(read_from_zero.events.is_empty());
-
     let read_from_two = fixture
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 2,
+            from: ReadFrom::Position(position(2)),
         })
         .await?;
     assert_eq!(read_from_two.current_position, Some(position(3)));
@@ -710,7 +699,7 @@ async fn jetstream_store_read_ranges_keep_current_position() -> TestResult {
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 4,
+            from: ReadFrom::Position(position(4)),
         })
         .await?;
     assert_eq!(read_after_end.current_position, Some(position(3)));
@@ -757,11 +746,15 @@ async fn jetstream_store_reads_subject_suffixes_from_global_offsets() -> TestRes
     ];
 
     for (from_sequence, expected_positions, expected_values) in cases {
+        let from = match from_sequence {
+            1 => ReadFrom::Beginning,
+            value => ReadFrom::Position(position(value)),
+        };
         let read = fixture
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "alpha",
-                from_sequence,
+                from,
             })
             .await?;
         assert_eq!(read.current_position, Some(position(5)));
@@ -817,7 +810,7 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(alpha.current_position, Some(alpha_batch.stream_position));
@@ -833,7 +826,7 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "beta",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(beta.current_position, Some(beta_two.stream_position));
@@ -874,7 +867,7 @@ async fn jetstream_store_skips_deleted_messages_inside_read_range() -> TestResul
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(3)));
@@ -903,7 +896,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read_after_delete.current_position, Some(position(1)));
@@ -923,7 +916,7 @@ async fn jetstream_store_uses_previous_subject_sequence_after_latest_message_del
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read_after_append.current_position, Some(position(3)));
@@ -963,7 +956,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "alpha",
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await,
     )?;
@@ -989,7 +982,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "beta",
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await,
     )?;
@@ -1016,7 +1009,7 @@ async fn jetstream_store_read_rejects_messages_missing_event_envelope_headers() 
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "gamma",
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await,
     )?;
@@ -1050,7 +1043,7 @@ async fn jetstream_store_ignores_corrupt_messages_from_other_subjects() -> TestR
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -1062,7 +1055,7 @@ async fn jetstream_store_ignores_corrupt_messages_from_other_subjects() -> TestR
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "beta",
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await,
     )?;
@@ -1097,7 +1090,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
             .store
             .read_stream(ReadStreamRequest {
                 stream_id: "alpha",
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await,
     )?;
@@ -1106,7 +1099,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 2,
+            from: ReadFrom::Position(position(2)),
         })
         .await?;
     assert_eq!(read_from_valid.current_position, Some(position(2)));
@@ -1118,7 +1111,7 @@ async fn jetstream_store_read_from_sequence_skips_earlier_corrupt_same_subject_m
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 3,
+            from: ReadFrom::Position(position(3)),
         })
         .await?;
     assert_eq!(read_after_valid.current_position, Some(position(2)));
@@ -1138,7 +1131,7 @@ async fn jetstream_store_requires_atomic_publish_stream_support() -> TestResult 
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, None);
@@ -1178,7 +1171,7 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "beta",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(missing.current_position, None);
@@ -1203,7 +1196,7 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "beta",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(beta_read.current_position, Some(position(2)));
@@ -1215,7 +1208,7 @@ async fn jetstream_store_uses_subject_occ_for_new_streams_after_global_history()
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "gamma",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(gamma_read.current_position, Some(position(3)));
@@ -1260,7 +1253,7 @@ async fn jetstream_store_stream_exists_uses_subject_sequence_after_interleaving(
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(alpha.current_position, Some(position(5)));
@@ -1286,7 +1279,7 @@ async fn jetstream_store_any_can_start_new_subject_after_global_history() -> Tes
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "gamma",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(gamma_read.current_position, Some(position(3)));
@@ -1320,7 +1313,7 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.events.len(), 1);
@@ -1375,7 +1368,7 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "counter",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(2)));
@@ -1578,7 +1571,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(alpha.current_position, Some(position(3)));
@@ -1601,7 +1594,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "beta",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(beta.current_position, Some(position(4)));
@@ -1712,7 +1705,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "counter",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -1754,7 +1747,7 @@ async fn jetstream_command_execution_ignores_corrupt_events_from_other_subjects(
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "counter",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(2)));
@@ -1766,7 +1759,7 @@ async fn jetstream_command_execution_ignores_corrupt_events_from_other_subjects(
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "missing",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(missing.current_position, None);
@@ -1819,10 +1812,10 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await;
-    let Err(CommandError::SnapshotAheadOfStream {
+    let Err(CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
         snapshot_position,
         stream_position,
-    }) = result
+    })) = result
     else {
         panic!("expected snapshot ahead of stream");
     };
@@ -1855,10 +1848,10 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await;
-    let Err(CommandError::SnapshotAheadOfStream {
+    let Err(CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
         snapshot_position,
         stream_position,
-    }) = result
+    })) = result
     else {
         panic!("expected snapshot ahead of stream");
     };
@@ -1899,7 +1892,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_append() -> TestRe
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -1940,7 +1933,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_precondition_appen
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -1981,7 +1974,7 @@ async fn jetstream_store_allows_only_one_concurrent_no_stream_batch_append() -> 
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(events_per_attempt)));
@@ -2016,7 +2009,7 @@ async fn jetstream_store_any_allows_concurrent_appends_without_occ_guard() -> Te
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(attempts as u64)));
@@ -2043,7 +2036,7 @@ async fn jetstream_store_any_concurrent_appends_preserve_every_event_once() -> T
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(attempts as u64)));
@@ -2094,7 +2087,7 @@ async fn jetstream_store_any_allows_concurrent_multiple_events() -> TestResult {
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(
@@ -2149,7 +2142,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -2191,7 +2184,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_append() -> T
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(2)));
@@ -2236,7 +2229,7 @@ async fn jetstream_store_allows_only_one_concurrent_exact_revision_batch_append(
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1 + events_per_attempt)));
@@ -2272,7 +2265,7 @@ async fn jetstream_store_allows_concurrent_stream_exists_appends() -> TestResult
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.events.len(), 1 + attempts);
@@ -2312,7 +2305,7 @@ async fn jetstream_store_allows_concurrent_stream_exists_batch_appends() -> Test
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.events.len(), 1 + attempts * events_per_attempt);
@@ -2353,7 +2346,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -2391,7 +2384,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -2445,7 +2438,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));
@@ -2478,7 +2471,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_new_atomic_batch_with
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, None);
@@ -2515,7 +2508,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(alpha.current_position, Some(position(1)));
@@ -2524,7 +2517,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "beta",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(beta.current_position, None);
@@ -2574,7 +2567,7 @@ async fn jetstream_store_uses_last_subject_sequence_for_occ_after_interleaved_su
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(4)));
@@ -2610,7 +2603,7 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(4)));
@@ -2642,7 +2635,7 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
         .store
         .read_stream(ReadStreamRequest {
             stream_id: "alpha",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await?;
     assert_eq!(read.current_position, Some(position(1)));

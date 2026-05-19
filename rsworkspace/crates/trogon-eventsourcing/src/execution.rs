@@ -1,8 +1,8 @@
 use crate::event::encode_event;
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead,
-    StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflow, ReadFrom, ReadStreamRequest, StreamAppend,
+    StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
     Decider, EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType, Events,
@@ -207,10 +207,15 @@ pub enum CommandError<
     /// A stored event could not be converted back into a domain event.
     DecodeEvent(DecodeError),
     /// The loaded snapshot claims a position newer than the stream can prove.
-    SnapshotAheadOfStream {
-        snapshot_position: StreamPosition,
-        stream_position: Option<StreamPosition>,
-    },
+    SnapshotAheadOfStream(SnapshotAheadOfStream),
+    /// The snapshot's recorded position cannot be advanced (u64 overflow).
+    ReadAfterOverflow(ReadAfterOverflow),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotAheadOfStream {
+    pub snapshot_position: StreamPosition,
+    pub stream_position: Option<StreamPosition>,
 }
 
 enum ReplayStreamError<EvolveError, DecodeError> {
@@ -226,7 +231,8 @@ enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeErro
 }
 
 impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-    CommandError<
+    From<ReplayStreamError<EvolveError, DecodeError>>
+    for CommandError<
         DecideError,
         EvolveError,
         ReadSnapshotError,
@@ -236,16 +242,27 @@ impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamE
         DecodeError,
     >
 {
-    fn from_replay_stream(error: ReplayStreamError<EvolveError, DecodeError>) -> Self {
+    fn from(error: ReplayStreamError<EvolveError, DecodeError>) -> Self {
         match error {
             ReplayStreamError::Evolve(error) => Self::Evolve(error),
             ReplayStreamError::DecodeEvent(error) => Self::DecodeEvent(error),
         }
     }
+}
 
-    fn from_append_decision(
-        error: AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>,
-    ) -> Self {
+impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
+    From<AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>>
+    for CommandError<
+        DecideError,
+        EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        EncodeError,
+        DecodeError,
+    >
+{
+    fn from(error: AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>) -> Self {
         match error {
             AppendDecisionError::Decide(error) => Self::Decide(error),
             AppendDecisionError::Evolve(error) => Self::Evolve(error),
@@ -284,20 +301,21 @@ where
             Self::Append(source) => write!(f, "command stream append failed: {source}"),
             Self::EncodeEvent(source) => write!(f, "command event encoding failed: {source}"),
             Self::DecodeEvent(source) => write!(f, "command event decoding failed: {source}"),
-            Self::SnapshotAheadOfStream {
+            Self::SnapshotAheadOfStream(SnapshotAheadOfStream {
                 snapshot_position,
                 stream_position: Some(stream_position),
-            } => write!(
+            }) => write!(
                 f,
                 "snapshot position {snapshot_position} is ahead of current stream position {stream_position}"
             ),
-            Self::SnapshotAheadOfStream {
+            Self::SnapshotAheadOfStream(SnapshotAheadOfStream {
                 snapshot_position,
                 stream_position: None,
-            } => write!(
+            }) => write!(
                 f,
                 "snapshot position {snapshot_position} exists but the stream has no current position"
             ),
+            Self::ReadAfterOverflow(source) => write!(f, "{source}"),
         }
     }
 }
@@ -331,7 +349,8 @@ where
             Self::Append(source) => Some(source),
             Self::EncodeEvent(source) => Some(source),
             Self::DecodeEvent(source) => Some(source),
-            Self::SnapshotAheadOfStream { .. } => None,
+            Self::SnapshotAheadOfStream(_) => None,
+            Self::ReadAfterOverflow(source) => Some(source),
         }
     }
 }
@@ -541,17 +560,13 @@ where
             .event_store
             .read_stream(ReadStreamRequest {
                 stream_id,
-                from_sequence: 1,
+                from: ReadFrom::Beginning,
             })
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
-        let state = replay_stream_events::<C>(C::initial_state(), stream_read.events)
-            .map_err(CommandError::from_replay_stream)?;
-        let (append_outcome, events, state) = self
-            .append_decision(current_position, stream_id, state)
-            .await
-            .map_err(CommandError::from_append_decision)?;
+        let state = replay_stream_events::<C>(C::initial_state(), stream_read.events)?;
+        let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -591,15 +606,13 @@ where
         let state = snapshot
             .map(|snapshot| snapshot.payload)
             .unwrap_or_else(C::initial_state);
-        let start_sequence = snapshot_position
-            .map(|position| position.as_u64().saturating_add(1))
-            .unwrap_or(1);
+        let from = match snapshot_position {
+            Some(position) => ReadFrom::after(position).map_err(CommandError::ReadAfterOverflow)?,
+            None => ReadFrom::Beginning,
+        };
         let stream_read = self
             .event_store
-            .read_stream(ReadStreamRequest {
-                stream_id,
-                from_sequence: start_sequence,
-            })
+            .read_stream(ReadStreamRequest { stream_id, from })
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
@@ -608,20 +621,17 @@ where
             match current_position {
                 Some(stream_position) if snapshot_position <= stream_position => {}
                 stream_position => {
-                    return Err(CommandError::SnapshotAheadOfStream {
+                    return Err(CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
                         snapshot_position,
                         stream_position,
-                    });
+                    }));
                 }
             }
         }
 
         let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_stream_events::<C>(state, stream_read.events).map_err(CommandError::from_replay_stream)?;
-        let (append_outcome, events, state) = self
-            .append_decision(current_position, stream_id, state)
-            .await
-            .map_err(CommandError::from_append_decision)?;
+        let state = replay_stream_events::<C>(state, stream_read.events)?;
+        let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
         let events_since_snapshot = replayed_event_count + events.len() as u64;
 
         // Keep the policy decision inline: for frequency policies it is cheaper
@@ -870,7 +880,7 @@ mod tests {
         fail_read_stream: bool,
         fail_append: bool,
         loaded_stream_ids: Arc<Mutex<Vec<String>>>,
-        read_from_sequences: Arc<Mutex<Vec<u64>>>,
+        reads_from: Arc<Mutex<Vec<ReadFrom>>>,
         stream_write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         appended_events: Arc<Mutex<Vec<Event>>>,
         written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
@@ -888,7 +898,7 @@ mod tests {
                 fail_read_stream: false,
                 fail_append: false,
                 loaded_stream_ids: Arc::new(Mutex::new(Vec::new())),
-                read_from_sequences: Arc::new(Mutex::new(Vec::new())),
+                reads_from: Arc::new(Mutex::new(Vec::new())),
                 stream_write_preconditions: Arc::new(Mutex::new(Vec::new())),
                 appended_events: Arc::new(Mutex::new(Vec::new())),
                 written_snapshots: Arc::new(Mutex::new(Vec::new())),
@@ -1072,13 +1082,17 @@ mod tests {
             if self.fail_read_stream {
                 return Err(TestInfraError::ReadStream);
             }
-            self.read_from_sequences.lock().unwrap().push(request.from_sequence);
+            self.reads_from.lock().unwrap().push(request.from);
+            let from_sequence = match request.from {
+                ReadFrom::Beginning => 1,
+                ReadFrom::Position(position) => position.as_u64(),
+            };
             Ok(ReadStreamResponse {
                 current_position: self.current_position,
                 events: self
                     .stream_events
                     .iter()
-                    .filter(|event| event.stream_position.as_u64() >= request.from_sequence)
+                    .filter(|event| event.stream_position.as_u64() >= from_sequence)
                     .cloned()
                     .collect(),
             })
@@ -1178,7 +1192,7 @@ mod tests {
             runtime.stream_write_preconditions.lock().unwrap().as_slice(),
             &[StreamWritePrecondition::NoStream]
         );
-        assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[1]);
+        assert_eq!(runtime.reads_from.lock().unwrap().as_slice(), &[ReadFrom::Beginning]);
     }
 
     #[test]
@@ -1245,7 +1259,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(runtime.read_from_sequences.lock().unwrap().as_slice(), &[2]);
+        assert_eq!(
+            runtime.reads_from.lock().unwrap().as_slice(),
+            &[ReadFrom::Position(position(2))]
+        );
         assert_eq!(
             runtime.stream_write_preconditions.lock().unwrap().as_slice(),
             &[StreamWritePrecondition::At(position(2))]
@@ -1269,10 +1286,10 @@ mod tests {
         )
         .unwrap_err();
 
-        let CommandError::SnapshotAheadOfStream {
+        let CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
             snapshot_position,
             stream_position,
-        } = error
+        }) = error
         else {
             panic!("expected snapshot ahead of stream");
         };
@@ -1296,10 +1313,10 @@ mod tests {
         )
         .unwrap_err();
 
-        let CommandError::SnapshotAheadOfStream {
+        let CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
             snapshot_position,
             stream_position,
-        } = error
+        }) = error
         else {
             panic!("expected snapshot ahead of stream");
         };

@@ -14,8 +14,8 @@ pub use event::{
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
     CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
-    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, SnapshotTaskScheduler, Snapshots,
-    TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy,
+    SnapshotTaskScheduler, Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use nats::{
     StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
@@ -26,8 +26,8 @@ pub use snapshot::{
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
-    AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadStreamRequest, ReadStreamResponse,
-    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadAfterOverflow, ReadFrom, ReadStreamRequest,
+    ReadStreamResponse, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing;

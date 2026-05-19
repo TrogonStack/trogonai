@@ -10,7 +10,7 @@ use trogon_cron::{
     PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
     state_v1, v1,
 };
-use trogon_eventsourcing::{CommandExecution, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
+use trogon_eventsourcing::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
@@ -420,7 +420,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .event_store
         .read_stream(ReadStreamRequest {
             stream_id: "lifecycle",
-            from_sequence: 1,
+            from: ReadFrom::Beginning,
         })
         .await
         .unwrap();

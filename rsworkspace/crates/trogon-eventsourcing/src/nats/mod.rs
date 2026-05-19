@@ -11,8 +11,8 @@ use crate::snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, SnapshotType, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use crate::{
-    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
-    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
+    SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 pub use snapshot_store::{
     NatsSnapshotConfig, SnapshotChange, SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint,
@@ -167,7 +167,8 @@ where
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
         let current_position = subject_state.current_position;
-        let events = read_subject_stream(self.events_stream(), &subject_state.subject, request.from_sequence)
+        let from_sequence = stream_read_from_to_sequence(request.from);
+        let events = read_subject_stream(self.events_stream(), &subject_state.subject, from_sequence)
             .await
             .map_err(JetStreamStoreError::ReadStream)?
             .into_iter()
@@ -181,6 +182,13 @@ where
             current_position,
             events,
         })
+    }
+}
+
+fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
+    match from {
+        ReadFrom::Beginning => 1,
+        ReadFrom::Position(position) => position.as_u64(),
     }
 }
 

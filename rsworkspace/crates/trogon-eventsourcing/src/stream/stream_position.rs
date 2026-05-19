@@ -35,6 +35,10 @@ impl StreamPosition {
         self.0.get()
     }
 
+    pub const fn as_non_zero(self) -> NonZeroU64 {
+        self.0
+    }
+
     pub const fn try_new(value: u64) -> Result<Self, InvalidStreamPosition> {
         match NonZeroU64::new(value) {
             Some(value) => Ok(Self(value)),

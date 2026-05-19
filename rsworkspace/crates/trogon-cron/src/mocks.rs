@@ -14,8 +14,8 @@ use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, EncodeEventError, Event, EventData, EventDecode, EventEncode,
     EventEncodeError, EventHeaders, EventId, EventIdentity, EventType, ReadSnapshotRequest, ReadSnapshotResponse,
-    ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent,
-    StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    ReadFrom, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend,
+    StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::UuidV7Generator;
@@ -388,15 +388,12 @@ impl StreamRead<str> for MockCronStore {
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
-        let from_sequence = request.from_sequence;
+        let from_sequence = match request.from {
+            ReadFrom::Beginning => 1,
+            ReadFrom::Position(position) => position.as_u64(),
+        };
         let current_position = self.stream_positions.lock().unwrap().get(stream_id).copied();
         let stream_events = self.events.lock().unwrap().get(stream_id).cloned().unwrap_or_default();
-        if from_sequence == 0 {
-            return Ok(ReadStreamResponse {
-                current_position,
-                events: Vec::new(),
-            });
-        }
 
         let mut recorded = Vec::new();
         for (index, event) in stream_events.into_iter().enumerate() {
