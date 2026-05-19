@@ -7,13 +7,15 @@ pub mod snapshot;
 mod stream;
 
 pub use event::{
-    EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventHeadersError, EventId,
-    EventIdentity, EventType, HeaderName, StreamEvent,
+    EncodeEventError, Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventHeadersError,
+    EventId, EventIdentity, EventType, HeaderName, StreamEvent,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
-    BoxTask, CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
-    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots, WithoutSnapshotTaskScheduler,
-    WithoutSnapshots, run_task_immediately, spawn_on_tokio,
+    CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
+    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, SnapshotTaskScheduler, Snapshots,
+    TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use nats::{
     StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,

@@ -12,11 +12,13 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, Event, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamPosition, StreamRead,
-    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    AppendStreamRequest, AppendStreamResponse, EncodeEventError, Event, EventData, EventDecode, EventEncode,
+    EventEncodeError, EventHeaders, EventId, EventIdentity, EventType, ReadSnapshotRequest, ReadSnapshotResponse,
+    ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent,
+    StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
+use trogon_std::UuidV7Generator;
 
 use crate::{
     GetJobCommand, JobEventCase, ListJobsCommand, ResolvedJob,
@@ -152,6 +154,19 @@ fn stream_position(value: u64) -> Result<StreamPosition, CronError> {
         .map_err(|source| CronError::event_source("mock stream position must be non-zero", source))
 }
 
+fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+where
+    E: EventType + EventIdentity + EventEncode,
+{
+    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    Ok(Event {
+        id,
+        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
+        content: event.encode().map_err(EncodeEventError::EventEncode)?,
+        headers: EventHeaders::empty(),
+    })
+}
+
 impl MockCronStore {
     pub fn new() -> Self {
         Self::default()
@@ -176,7 +191,7 @@ impl MockCronStore {
         self.events
             .lock()
             .unwrap()
-            .insert(id.clone(), vec![Event::from_domain_event(&event).unwrap()]);
+            .insert(id.clone(), vec![encode_event(&event).unwrap()]);
         self.jobs.lock().unwrap().insert(id.clone(), job);
     }
 
@@ -389,16 +404,17 @@ impl StreamRead<str> for MockCronStore {
             if sequence < from_sequence {
                 continue;
             }
-            recorded.push(event.record(
-                stream_id,
-                stream_position(sequence)?,
-                DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
+            recorded.push(StreamEvent {
+                stream_id: stream_id.to_string(),
+                event,
+                stream_position: stream_position(sequence)?,
+                recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).ok_or_else(|| {
                     CronError::event_source(
                         "failed to build mocked recorded event timestamp",
                         std::io::Error::other(stream_id.to_string()),
                     )
                 })?,
-            ));
+            });
         }
         Ok(ReadStreamResponse {
             current_position,
@@ -448,9 +464,12 @@ impl StreamAppend<str> for MockCronStore {
         let mut raw_position = current_position.map(StreamPosition::as_u64).unwrap_or(0);
 
         for event_data in events {
-            let event = event_data
-                .decode::<v1::JobEvent>(stream_id.as_str())
-                .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
+            let event = v1::JobEvent::decode(EventData::new(
+                &event_data.r#type,
+                stream_id.as_str(),
+                &event_data.content,
+            ))
+            .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
             match &event.event {
@@ -546,7 +565,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{CommandError, CommandExecution, run_task_immediately};
+    use trogon_eventsourcing::{CommandError, CommandExecution, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain as command_domain;
@@ -653,7 +672,7 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
@@ -666,7 +685,7 @@ mod tests {
 
         CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
@@ -693,7 +712,7 @@ mod tests {
 
         CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
@@ -707,7 +726,7 @@ mod tests {
 
         let deleted_error = CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap_err();
@@ -735,13 +754,13 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
         let same_state_error = CommandExecution::new(&store, &ResumeJobCommand::new(command_job_id("alpha")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap_err();
@@ -752,7 +771,7 @@ mod tests {
 
         let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("missing")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap_err();

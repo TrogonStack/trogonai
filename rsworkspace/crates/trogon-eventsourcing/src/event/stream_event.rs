@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{Event, EventDecode, StreamPosition};
+use crate::{Event, EventData, EventDecode, StreamPosition};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamEvent {
@@ -19,6 +19,6 @@ impl StreamEvent {
     where
         E: EventDecode,
     {
-        self.event.decode(&self.stream_id)
+        E::decode(EventData::new(&self.event.r#type, &self.stream_id, &self.event.content))
     }
 }

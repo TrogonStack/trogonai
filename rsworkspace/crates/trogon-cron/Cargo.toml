@@ -15,7 +15,7 @@ panic = "deny"
 unwrap_used = "deny"
 
 [features]
-test-support = []
+test-support = ["trogon-eventsourcing/test-support"]
 
 [dependencies]
 trogon-telemetry = { workspace = true }

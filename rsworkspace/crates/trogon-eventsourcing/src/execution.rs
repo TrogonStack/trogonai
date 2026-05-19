@@ -1,3 +1,4 @@
+use crate::event::encode_event;
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead,
@@ -9,9 +10,7 @@ use crate::{
 };
 use trogon_decider::DecisionFailure;
 
-use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
-
-pub type BoxTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+use std::{borrow::Borrow, future::Future, num::NonZeroU64};
 type ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError> =
     CommandError<
         <C as Decider>::DecideError,
@@ -37,19 +36,55 @@ type CommandWithoutSnapshotsResult<E, C> =
 type CommandWithSnapshotsResult<E, S, C> =
     CommandResult<C, CommandReadSnapshotError<S, C>, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
 
-pub fn spawn_on_tokio(task: BoxTask) {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        tracing::warn!("failed to schedule background task without an active Tokio runtime");
-        return;
-    };
-
-    drop(handle.spawn(task));
+/// Schedules best-effort snapshot writes without erasing the task future type.
+///
+/// Snapshot execution owns the async block that writes the snapshot. A generic
+/// scheduler keeps that future concrete instead of forcing every runtime adapter
+/// through a boxed `dyn Future`.
+pub trait SnapshotTaskScheduler {
+    fn schedule<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static;
 }
 
-pub fn run_task_immediately(task: BoxTask) {
-    let handle = std::thread::spawn(move || futures::executor::block_on(task));
-    if handle.join().is_err() {
-        tracing::warn!("background task panicked");
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokioSnapshotTaskScheduler;
+
+impl SnapshotTaskScheduler for TokioSnapshotTaskScheduler {
+    fn schedule<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::error!("Tokio snapshot task scheduler requires an active Tokio runtime");
+            return;
+        };
+
+        drop(handle.spawn(task));
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+/// Runs snapshot tasks to completion before returning.
+///
+/// This scheduler is test support. It runs the task on a helper thread so sync
+/// tests can call `block_on(command.execute())` without entering the futures
+/// executor recursively. Tokio-backed stores should use
+/// `TokioSnapshotTaskScheduler` so their async I/O runs inside the runtime they
+/// require.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImmediateSnapshotTaskScheduler;
+
+#[cfg(any(test, feature = "test-support"))]
+impl SnapshotTaskScheduler for ImmediateSnapshotTaskScheduler {
+    fn schedule<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let handle = std::thread::spawn(move || futures::executor::block_on(task));
+        if handle.join().is_err() {
+            tracing::warn!("test snapshot task panicked");
+        }
     }
 }
 
@@ -520,7 +555,7 @@ where
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
     P: SnapshotPolicy<C::State, C::Event>,
-    Spawn: Fn(BoxTask) + Send + Sync,
+    Spawn: SnapshotTaskScheduler + Send + Sync,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
@@ -646,13 +681,13 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     State: SnapshotType + Send + 'static,
     StreamId: AsRef<str> + ToOwned + ?Sized,
     StreamId::Owned: Borrow<StreamId> + Send + 'static,
-    Spawn: Fn(BoxTask) + Send + Sync,
+    Spawn: SnapshotTaskScheduler + Send + Sync,
 {
     let snapshot_store = snapshot_store.clone();
     let stream_id_for_log = stream_id.as_ref().to_string();
     let stream_id = stream_id.to_owned();
 
-    schedule_snapshot_task(Box::pin(async move {
+    schedule_snapshot_task.schedule(async move {
         if let Err(source) = snapshot_store
             .write_snapshot(WriteSnapshotRequest {
                 stream_id: stream_id.borrow(),
@@ -662,7 +697,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
         {
             tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
         }
-    }));
+    });
 }
 
 fn replay_stream_events<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError>(
@@ -713,12 +748,8 @@ fn encode_events<E>(events: &Events<E>) -> Result<Events<Event>, EventEncodeErro
 where
     E: EventType + EventIdentity + EventEncode,
 {
-    let first = Event::from_domain_event(events.first())?;
-    let rest = events
-        .iter()
-        .skip(1)
-        .map(Event::from_domain_event)
-        .collect::<Result<Vec<_>, _>>()?;
+    let first = encode_event(events.first())?;
+    let rest = events.iter().skip(1).map(encode_event).collect::<Result<Vec<_>, _>>()?;
     Ok(Events::from_first(first, rest))
 }
 
@@ -735,8 +766,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        Decision, EventDecode, EventEncode, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
-        SnapshotType, StreamEvent, WriteSnapshotResponse,
+        Decision, EventData, EventDecode, EventEncode, EventIdentity, EventType, ReadSnapshotResponse,
+        ReadStreamResponse, SnapshotType, StreamEvent, WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -1044,13 +1075,16 @@ mod tests {
     impl EventDecode for TestEvent {
         type Error = serde_json::Error;
 
-        fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-            serde_json::from_slice(payload)
+        fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+            serde_json::from_slice(event.payload)
         }
     }
 
-    fn test_snapshots<P>(runtime: &FakeRuntime, policy: P) -> Snapshots<'_, FakeRuntime, P, fn(BoxTask)> {
-        Snapshots::new(runtime, policy).schedule_snapshot_tasks_with(run_task_immediately as fn(BoxTask))
+    fn test_snapshots<P>(
+        runtime: &FakeRuntime,
+        policy: P,
+    ) -> Snapshots<'_, FakeRuntime, P, ImmediateSnapshotTaskScheduler> {
+        Snapshots::new(runtime, policy).schedule_snapshot_tasks_with(ImmediateSnapshotTaskScheduler)
     }
 
     impl StreamRead<str> for FakeRuntime {
@@ -1136,11 +1170,12 @@ mod tests {
             | TestEvent::Removed { id }
             | TestEvent::Broken { id } => id.clone(),
         };
-        Event::from_domain_event(&event).unwrap().record(
+        StreamEvent {
             stream_id,
-            position(sequence),
-            DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
-        )
+            event: encode_event(&event).unwrap(),
+            stream_position: position(sequence),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
+        }
     }
 
     #[test]

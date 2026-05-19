@@ -7,7 +7,7 @@ use trogon_cron::{
     commands::domain as command_domain,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
-use trogon_eventsourcing::{CommandExecution, StreamPosition, run_task_immediately};
+use trogon_eventsourcing::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -54,7 +54,7 @@ async fn client_register_then_get() {
     let job = command_base_job("backup");
     CommandExecution::new(&store, &AddJobCommand::new(job))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -72,13 +72,13 @@ async fn client_pause_job_toggles_job() {
 
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("toggle")))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("toggle")))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -97,13 +97,13 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("alpha")))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store, &AddJobCommand::new(command_base_job("beta")))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -113,7 +113,7 @@ async fn client_remove_and_list_jobs_use_store_paths() {
 
     CommandExecution::new(&store, &RemoveJobCommand::new(command_job_id("beta")))
         .with_snapshot(&store)
-        .with_task_runtime(run_task_immediately)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();

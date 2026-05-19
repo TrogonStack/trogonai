@@ -1,5 +1,5 @@
 use buffa::Message as _;
-use trogon_eventsourcing::{EventDecode, EventEncode, EventIdentity, EventType, SnapshotType};
+use trogon_eventsourcing::{EventData, EventDecode, EventEncode, EventIdentity, EventType, SnapshotType};
 
 #[allow(clippy::all)]
 #[path = "gen/mod.rs"]
@@ -60,18 +60,18 @@ impl EventEncode for v1::JobEvent {
 impl EventDecode for v1::JobEvent {
     type Error = JobEventPayloadError;
 
-    fn decode(event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-        let event = match event_type {
-            JOB_ADDED_EVENT_TYPE => v1::JobAdded::decode_from_slice(payload).map(|event| v1::JobEvent {
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+        let event = match event.event_type {
+            JOB_ADDED_EVENT_TYPE => v1::JobAdded::decode_from_slice(event.payload).map(|event| v1::JobEvent {
                 event: Some(event.into()),
             }),
-            JOB_PAUSED_EVENT_TYPE => v1::JobPaused::decode_from_slice(payload).map(|event| v1::JobEvent {
+            JOB_PAUSED_EVENT_TYPE => v1::JobPaused::decode_from_slice(event.payload).map(|event| v1::JobEvent {
                 event: Some(event.into()),
             }),
-            JOB_RESUMED_EVENT_TYPE => v1::JobResumed::decode_from_slice(payload).map(|event| v1::JobEvent {
+            JOB_RESUMED_EVENT_TYPE => v1::JobResumed::decode_from_slice(event.payload).map(|event| v1::JobEvent {
                 event: Some(event.into()),
             }),
-            JOB_REMOVED_EVENT_TYPE => v1::JobRemoved::decode_from_slice(payload).map(|event| v1::JobEvent {
+            JOB_REMOVED_EVENT_TYPE => v1::JobRemoved::decode_from_slice(event.payload).map(|event| v1::JobEvent {
                 event: Some(event.into()),
             }),
             value => {
@@ -107,7 +107,9 @@ impl SnapshotType for state_v1::State {
 #[cfg(test)]
 mod tests {
     use buffa::{Message as _, MessageField};
-    use trogon_eventsourcing::{Event, EventDecode, EventEncode, StreamPosition};
+    use trogon_eventsourcing::{
+        Event, EventData, EventDecode, EventEncode, EventHeaders, EventId, EventType, StreamEvent, StreamPosition,
+    };
 
     use super::*;
 
@@ -185,22 +187,27 @@ mod tests {
         let removed = v1::JobEvent {
             event: Some(v1::JobRemoved {}.into()),
         };
-        let event = Event::from_domain_event(&removed).unwrap();
+        let event = Event {
+            id: "00000000-0000-7000-8000-000000000001".parse::<EventId>().unwrap(),
+            r#type: removed.event_type().unwrap().to_string(),
+            content: EventEncode::encode(&removed).unwrap(),
+            headers: EventHeaders::empty(),
+        };
         assert_eq!(event.r#type, JOB_REMOVED_EVENT_TYPE);
         assert!(v1::JobRemoved::decode_from_slice(&event.content).is_ok());
 
-        assert_eq!(event.decode::<v1::JobEvent>("cleanup").unwrap(), removed);
-
-        let recorded = event.record(
-            "cleanup",
-            StreamPosition::try_new(1).unwrap(),
-            chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
-        );
-        assert_eq!(recorded.stream_id(), "cleanup");
         assert_eq!(
-            recorded.subject_with_prefix("cron.jobs.events."),
-            "cron.jobs.events.cleanup"
+            <v1::JobEvent as EventDecode>::decode(EventData::new(&event.r#type, "cleanup", &event.content)).unwrap(),
+            removed
         );
+
+        let recorded = StreamEvent {
+            stream_id: "cleanup".to_string(),
+            event,
+            stream_position: StreamPosition::try_new(1).unwrap(),
+            recorded_at: chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
+        };
+        assert_eq!(recorded.stream_id(), "cleanup");
         let expected = v1::JobEvent {
             event: Some(v1::JobRemoved {}.into()),
         };
@@ -209,8 +216,13 @@ mod tests {
 
     #[test]
     fn invalid_payload_fails_decode() {
-        assert!(<v1::JobEvent as EventDecode>::decode(JOB_REMOVED_EVENT_TYPE, "cleanup", b"\0").is_err());
-        assert!(<v1::JobEvent as EventDecode>::decode("trogon.cron.jobs.v1.Unknown", "cleanup", &[]).is_err());
+        assert!(
+            <v1::JobEvent as EventDecode>::decode(EventData::new(JOB_REMOVED_EVENT_TYPE, "cleanup", b"\0")).is_err()
+        );
+        assert!(
+            <v1::JobEvent as EventDecode>::decode(EventData::new("trogon.cron.jobs.v1.Unknown", "cleanup", &[]))
+                .is_err()
+        );
     }
 
     #[test]
@@ -218,7 +230,8 @@ mod tests {
         let event = job_added_event(30);
 
         let encoded = EventEncode::encode(&event).unwrap();
-        let decoded = <v1::JobEvent as EventDecode>::decode(JOB_ADDED_EVENT_TYPE, "backup", &encoded).unwrap();
+        let decoded =
+            <v1::JobEvent as EventDecode>::decode(EventData::new(JOB_ADDED_EVENT_TYPE, "backup", &encoded)).unwrap();
 
         assert_eq!(decoded, event);
         assert!(matches!(decoded.event, Some(JobEventCase::JobAdded(_))));

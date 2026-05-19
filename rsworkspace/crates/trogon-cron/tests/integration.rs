@@ -10,7 +10,7 @@ use trogon_cron::{
     PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
     state_v1, v1,
 };
-use trogon_eventsourcing::{CommandExecution, ReadStreamRequest, StreamRead, spawn_on_tokio};
+use trogon_eventsourcing::{CommandExecution, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {
@@ -176,7 +176,7 @@ async fn controller_reconciles_one_time_job() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -207,7 +207,7 @@ async fn controller_reconciles_sampling_job() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -240,7 +240,7 @@ async fn controller_reconciles_cron_job_with_timezone() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -265,7 +265,7 @@ async fn disabling_job_removes_schedule_subject() {
     let job = base_job("disabled");
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -275,7 +275,7 @@ async fn disabling_job_removes_schedule_subject() {
 
     CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("disabled")))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -298,7 +298,7 @@ async fn removing_job_removes_schedule_subject() {
     let job = base_job("removed");
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -308,7 +308,7 @@ async fn removing_job_removes_schedule_subject() {
 
     CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_job_id("removed")))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -333,13 +333,13 @@ async fn event_store_rebuilds_current_state_for_new_client() {
 
     CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
     CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_job_id("eventful")))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -369,7 +369,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
 
     let added = CommandExecution::new(&store.event_store, &AddJobCommand::new(job))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -381,7 +381,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
 
     let paused = CommandExecution::new(&store.event_store, &PauseJobCommand::new(command_id.clone()))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -393,7 +393,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
 
     let resumed = CommandExecution::new(&store.event_store, &ResumeJobCommand::new(command_id.clone()))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
@@ -405,7 +405,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
 
     let removed = CommandExecution::new(&store.event_store, &RemoveJobCommand::new(command_id))
         .with_snapshot(&store.event_store)
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();

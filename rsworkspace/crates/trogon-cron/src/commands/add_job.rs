@@ -89,7 +89,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 #[cfg(test)]
 mod tests {
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::{CommandError, CommandExecution, Events, run_task_immediately};
+    use trogon_eventsourcing::{CommandError, CommandExecution, Events, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -184,7 +184,7 @@ mod tests {
 
         let outcome = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
@@ -210,14 +210,14 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
 
         let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap_err();
@@ -235,20 +235,20 @@ mod tests {
 
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
         CommandExecution::new(&store, &crate::RemoveJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
 
         let error = CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap_err();

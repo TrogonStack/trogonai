@@ -10,9 +10,7 @@ mod stream_event;
 
 use trogon_std::UuidV7Generator;
 
-use crate::StreamPosition;
-
-pub use codec::{EventDecode, EventEncode};
+pub use codec::{EventData, EventDecode, EventEncode};
 pub use encode_event_error::{EncodeEventError, EventEncodeError};
 pub use event_headers::EventHeaders;
 pub use event_headers_error::EventHeadersError;
@@ -30,51 +28,23 @@ pub struct Event {
     pub headers: EventHeaders,
 }
 
-impl Event {
-    pub fn from_domain_event<E>(event: &E) -> Result<Self, EventEncodeError<E>>
-    where
-        E: EventType + EventIdentity + EventEncode,
-    {
-        let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
-        Ok(Self {
-            id,
-            r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
-            content: event.encode().map_err(EncodeEventError::EventEncode)?,
-            headers: EventHeaders::empty(),
-        })
-    }
-
-    pub fn with_headers(mut self, headers: EventHeaders) -> Self {
-        self.headers = headers;
-        self
-    }
-
-    pub fn record(
-        self,
-        stream_id: impl Into<String>,
-        stream_position: StreamPosition,
-        recorded_at: chrono::DateTime<chrono::Utc>,
-    ) -> StreamEvent {
-        StreamEvent {
-            stream_id: stream_id.into(),
-            event: self,
-            stream_position,
-            recorded_at,
-        }
-    }
-
-    pub fn decode<E>(&self, stream_id: &str) -> Result<E, E::Error>
-    where
-        E: EventDecode,
-    {
-        E::decode(&self.r#type, stream_id, &self.content)
-    }
+pub(crate) fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+where
+    E: EventType + EventIdentity + EventEncode,
+{
+    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    Ok(Event {
+        id,
+        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
+        content: event.encode().map_err(EncodeEventError::EventEncode)?,
+        headers: EventHeaders::empty(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamPosition};
+    use crate::{EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamPosition};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
@@ -125,8 +95,8 @@ mod tests {
     impl EventDecode for TestEvent {
         type Error = serde_json::Error;
 
-        fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-            decode_json(payload)
+        fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+            decode_json(event.payload)
         }
     }
 
@@ -164,11 +134,16 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = Event::from_domain_event(&payload).unwrap();
+        let event = encode_event(&payload).unwrap();
 
         assert_eq!(event.id.as_uuid().get_version_num(), 7);
         assert_eq!(event.r#type, "TestEvent");
-        assert_eq!(event.decode::<TestEvent>("alpha").unwrap().value, "beta");
+        assert_eq!(
+            TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
+                .unwrap()
+                .value,
+            "beta"
+        );
     }
 
     #[test]
@@ -178,7 +153,7 @@ mod tests {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = Event::from_domain_event(&payload).unwrap();
+        let event = encode_event(&payload).unwrap();
 
         assert_eq!(event.id, event_id);
     }
@@ -194,13 +169,14 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = Event::from_domain_event(&payload).unwrap();
+        let event = encode_event(&payload).unwrap();
 
-        let recorded = event.record(
-            "alpha",
-            position(2),
-            DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
-        );
+        let recorded = StreamEvent {
+            stream_id: "alpha".to_string(),
+            event,
+            stream_position: position(2),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap(),
+        };
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.stream_position, position(2));
@@ -212,14 +188,20 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = Event::from_domain_event(&payload).unwrap();
-        assert_eq!(event.decode::<TestEvent>("alpha").unwrap().id, "alpha");
-
-        let recorded = event.record(
-            "alpha",
-            position(1),
-            DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
+        let event = encode_event(&payload).unwrap();
+        assert_eq!(
+            TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
+                .unwrap()
+                .id,
+            "alpha"
         );
+
+        let recorded = StreamEvent {
+            stream_id: "alpha".to_string(),
+            event,
+            stream_position: position(1),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
+        };
         assert_eq!(recorded.decode::<TestEvent>().unwrap().id, "alpha");
     }
 
@@ -231,11 +213,15 @@ mod tests {
         };
         let headers = EventHeaders::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
 
-        let generated = Event::from_domain_event(&event).unwrap().with_headers(headers.clone());
-        assert_eq!(generated.decode::<TestEvent>("alpha").unwrap(), event);
+        let mut generated = encode_event(&event).unwrap();
+        generated.headers = headers.clone();
+        assert_eq!(
+            TestEvent::decode(EventData::new(&generated.r#type, "alpha", &generated.content)).unwrap(),
+            event
+        );
         assert_eq!(generated.headers.get("trace-id"), Some("trace-1"));
 
-        let no_headers = Event::from_domain_event(&event).unwrap();
+        let no_headers = encode_event(&event).unwrap();
         assert!(no_headers.headers.is_empty());
 
         let recorded = StreamEvent {

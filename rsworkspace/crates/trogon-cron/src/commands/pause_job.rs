@@ -84,7 +84,7 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 mod tests {
     use buffa::MessageField;
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
+    use trogon_eventsourcing::{CommandExecution, Events, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -176,14 +176,14 @@ mod tests {
         let store = MockCronStore::new();
         CommandExecution::new(&store, &AddJobCommand::new(job("backup")))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
 
         let outcome = CommandExecution::new(&store, &PauseJobCommand::new(JobId::parse("backup").unwrap()))
             .with_snapshot(&store)
-            .with_task_runtime(run_task_immediately)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();

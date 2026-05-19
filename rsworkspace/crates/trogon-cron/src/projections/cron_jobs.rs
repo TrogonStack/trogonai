@@ -8,7 +8,7 @@ use async_nats::jetstream::{
     kv,
 };
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::{Event, StreamEvent, StreamPosition, record_stream_message};
+use trogon_eventsourcing::{Event, EventData, EventDecode, StreamEvent, StreamPosition, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
@@ -429,8 +429,7 @@ pub(crate) async fn project_appended_events(
     }
 
     for event in events {
-        let decoded = event
-            .decode::<v1::JobEvent>(job_id)
+        let decoded = v1::JobEvent::decode(EventData::new(&event.r#type, job_id, &event.content))
             .map_err(|source| CronError::event_source("failed to decode job event for cron jobs read model", source))?;
         if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
             apply_projection_change(bucket, &change).await?;

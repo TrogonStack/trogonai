@@ -16,12 +16,13 @@ use trogon_eventsourcing::nats::{
     write_checkpoint,
 };
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventDecode,
-    EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderName,
-    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots,
-    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, WriteSnapshotRequest,
-    spawn_on_tokio,
+    AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, EncodeEventError,
+    Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventId, EventIdentity, EventType,
+    Events, FrequencySnapshot, HeaderName, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotRead,
+    SnapshotType, SnapshotWrite, Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
+use trogon_std::UuidV7Generator;
 use uuid::Uuid;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -101,8 +102,8 @@ impl EventEncode for TestEvent {
 impl EventDecode for TestEvent {
     type Error = serde_json::Error;
 
-    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-        decode_json(payload)
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+        decode_json(event.payload)
     }
 }
 
@@ -138,8 +139,8 @@ impl EventEncode for IdentifiedTestEvent {
 impl EventDecode for IdentifiedTestEvent {
     type Error = serde_json::Error;
 
-    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-        decode_json(payload)
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+        decode_json(event.payload)
     }
 }
 
@@ -187,8 +188,8 @@ impl EventEncode for CounterIncreased {
 impl EventDecode for CounterIncreased {
     type Error = serde_json::Error;
 
-    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-        decode_json(payload)
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+        decode_json(event.payload)
     }
 }
 
@@ -224,8 +225,8 @@ impl EventEncode for IdentifiedCounterIncreased {
 impl EventDecode for IdentifiedCounterIncreased {
     type Error = serde_json::Error;
 
-    fn decode(_event_type: &str, _stream_id: &str, payload: &[u8]) -> Result<Self, Self::Error> {
-        decode_json(payload)
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+        decode_json(event.payload)
     }
 }
 
@@ -345,9 +346,22 @@ fn nats_test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://127.0.0.1:14222".to_string())
 }
 
+fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+where
+    E: EventType + EventIdentity + EventEncode,
+{
+    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    Ok(Event {
+        id,
+        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
+        content: event.encode().map_err(EncodeEventError::EventEncode)?,
+        headers: EventHeaders::empty(),
+    })
+}
+
 fn test_event(_stream_id: &str, value: impl Into<String>) -> Result<Event, JetStreamStoreError<std::io::Error>> {
     let event = TestEvent { value: value.into() };
-    Event::from_domain_event(&event).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    encode_event(&event).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<Event> {
@@ -355,7 +369,7 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
         event_id: Some(EventId::from(event_id)),
         value: value.into(),
     };
-    Ok(Event::from_domain_event(&event)?)
+    Ok(encode_event(&event)?)
 }
 
 fn events(events: Vec<Event>) -> TestResult<Events<Event>> {
@@ -1291,7 +1305,8 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         value: "headers".to_string(),
     };
     let event_headers = EventHeaders::one(HeaderName::new("trace-id")?, "trace-1")?;
-    let event = Event::from_domain_event(&header_payload)?.with_headers(event_headers.clone());
+    let mut event = encode_event(&header_payload)?;
+    event.headers = event_headers.clone();
     fixture
         .store
         .append_stream(AppendStreamRequest {
@@ -1323,7 +1338,7 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
 
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1341,7 +1356,7 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1382,7 +1397,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let first_command = IncreaseCounterCommand::new("counter", 1);
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1398,7 +1413,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let second_command = IncreaseCounterCommand::new("counter", 2);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1415,7 +1430,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let third_command = IncreaseCounterCommand::new("counter", 3);
     let third = CommandExecution::new(&fixture.store, &third_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1432,7 +1447,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     let fourth_command = IncreaseCounterCommand::new("counter", 4);
     let fourth = CommandExecution::new(&fixture.store, &fourth_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1458,7 +1473,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
     let first_command = IncreaseCounterCommand::new("counter", 2);
     let first = CommandExecution::new(&fixture.store, &first_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1470,7 +1485,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1488,7 +1503,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
     let third_command = IncreaseCounterCommand::new("counter", 1);
     let third = CommandExecution::new(&fixture.store, &third_command)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1507,7 +1522,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let alpha_one = IncreaseCounterCommand::new("alpha", 1);
     let alpha_one = CommandExecution::new(&fixture.store, &alpha_one)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1517,7 +1532,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let beta_one = IncreaseCounterCommand::new("beta", 10);
     let beta_one = CommandExecution::new(&fixture.store, &beta_one)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1527,7 +1542,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let alpha_two = IncreaseCounterCommand::new("alpha", 2);
     let alpha_two = CommandExecution::new(&fixture.store, &alpha_two)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1537,7 +1552,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
     let beta_two = IncreaseCounterCommand::new("beta", 5);
     let beta_two = CommandExecution::new(&fixture.store, &beta_two)
         .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1629,7 +1644,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         ))),
         amount: 5,
     };
-    let seed = Event::from_domain_event(&seed_payload)?;
+    let seed = encode_event(&seed_payload)?;
     let seed_outcome = fixture
         .store
         .append_stream(AppendStreamRequest {
@@ -1653,7 +1668,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         .await?;
     let snapshot = CommandExecution::new(&fixture.store, &command)
         .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await
         .map_err(debug_error)?;
@@ -1677,7 +1692,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
     let result = CommandExecution::new(&fixture.store, &second_command)
         .with_write_precondition(StreamWritePrecondition::NoStream)
         .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await;
     assert!(matches!(
@@ -1801,7 +1816,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command)
         .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await;
     let Err(CommandError::SnapshotAheadOfStream {
@@ -1837,7 +1852,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command)
         .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
-        .with_task_runtime(spawn_on_tokio)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
         .await;
     let Err(CommandError::SnapshotAheadOfStream {
@@ -2104,8 +2119,8 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
                 event_id: Some(EventId::from(event_id)),
                 value: format!("attempt-{index}"),
             };
-            let event = Event::from_domain_event(&payload)
-                .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
+            let event =
+                encode_event(&payload).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
                 .append_stream(AppendStreamRequest {
                     stream_id: "alpha",
