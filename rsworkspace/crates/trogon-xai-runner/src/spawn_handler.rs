@@ -50,9 +50,12 @@ async fn oneshot_call_with_url(api_key: &str, model: &str, prompt: &str, base_ur
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
     use axum::Router;
     use axum::routing::post;
     use axum::response::IntoResponse;
+    use axum::extract::{Json, State};
+    use axum::http::HeaderMap;
 
     async fn serve(router: Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -62,6 +65,14 @@ mod tests {
         });
         format!("http://{addr}")
     }
+
+    fn ok_response() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({
+            "choices": [{"message": {"content": "ok"}}]
+        }))
+    }
+
+    // ── response-side ─────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn returns_assistant_content_on_success() {
@@ -104,5 +115,52 @@ mod tests {
         let base = serve(app).await;
         let result = oneshot_call_with_url("key", "grok-4", "hi", &base).await;
         assert_eq!(result, "");
+    }
+
+    // ── request payload ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sends_correct_model_and_prompt() {
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let app = Router::new()
+            .route("/chat/completions", post(
+                |State(cap): State<Arc<Mutex<Option<serde_json::Value>>>>,
+                 Json(body): Json<serde_json::Value>| async move {
+                    *cap.lock().unwrap() = Some(body);
+                    ok_response().into_response()
+                }
+            ))
+            .with_state(captured.clone());
+        let base = serve(app).await;
+
+        oneshot_call_with_url("key", "grok-4", "explain recursion", &base).await;
+
+        let body = captured.lock().unwrap().take().unwrap();
+        assert_eq!(body["model"].as_str(), Some("grok-4"));
+        assert_eq!(body["messages"][0]["role"].as_str(), Some("user"));
+        assert_eq!(body["messages"][0]["content"].as_str(), Some("explain recursion"));
+    }
+
+    #[tokio::test]
+    async fn sends_bearer_auth_header() {
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let app = Router::new()
+            .route("/chat/completions", post(
+                |State(cap): State<Arc<Mutex<Option<String>>>>,
+                 headers: HeaderMap| async move {
+                    let auth = headers.get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    *cap.lock().unwrap() = auth;
+                    ok_response().into_response()
+                }
+            ))
+            .with_state(captured.clone());
+        let base = serve(app).await;
+
+        oneshot_call_with_url("my-secret-key", "grok-4", "hi", &base).await;
+
+        let auth = captured.lock().unwrap().take().unwrap();
+        assert_eq!(auth, "Bearer my-secret-key");
     }
 }

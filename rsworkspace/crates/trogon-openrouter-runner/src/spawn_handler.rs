@@ -63,9 +63,12 @@ async fn oneshot_call_with_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
     use axum::Router;
     use axum::routing::post;
     use axum::response::IntoResponse;
+    use axum::extract::{Json, State};
+    use axum::http::HeaderMap;
 
     async fn serve(router: Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -79,6 +82,14 @@ mod tests {
     async fn call(base: &str) -> String {
         oneshot_call_with_url("key", "claude-sonnet-4-6", "hi", base, "https://trogonai.com", "TrogonAI").await
     }
+
+    fn ok_response() -> axum::Json<serde_json::Value> {
+        axum::Json(serde_json::json!({
+            "choices": [{"message": {"content": "ok"}}]
+        }))
+    }
+
+    // ── response-side ─────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn returns_assistant_content_on_success() {
@@ -119,5 +130,81 @@ mod tests {
         }));
         let base = serve(app).await;
         assert_eq!(call(&base).await, "");
+    }
+
+    // ── request payload ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sends_correct_model_and_prompt() {
+        let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let app = Router::new()
+            .route("/chat/completions", post(
+                |State(cap): State<Arc<Mutex<Option<serde_json::Value>>>>,
+                 Json(body): Json<serde_json::Value>| async move {
+                    *cap.lock().unwrap() = Some(body);
+                    ok_response().into_response()
+                }
+            ))
+            .with_state(captured.clone());
+        let base = serve(app).await;
+
+        oneshot_call_with_url("key", "claude-sonnet-4-6", "explain recursion", &base, "https://trogonai.com", "TrogonAI").await;
+
+        let body = captured.lock().unwrap().take().unwrap();
+        assert_eq!(body["model"].as_str(), Some("claude-sonnet-4-6"));
+        assert_eq!(body["messages"][0]["role"].as_str(), Some("user"));
+        assert_eq!(body["messages"][0]["content"].as_str(), Some("explain recursion"));
+    }
+
+    #[tokio::test]
+    async fn sends_bearer_auth_header() {
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let app = Router::new()
+            .route("/chat/completions", post(
+                |State(cap): State<Arc<Mutex<Option<String>>>>,
+                 headers: HeaderMap| async move {
+                    let auth = headers.get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    *cap.lock().unwrap() = auth;
+                    ok_response().into_response()
+                }
+            ))
+            .with_state(captured.clone());
+        let base = serve(app).await;
+
+        oneshot_call_with_url("my-secret-key", "claude-sonnet-4-6", "hi", &base, "https://trogonai.com", "TrogonAI").await;
+
+        let auth = captured.lock().unwrap().take().unwrap();
+        assert_eq!(auth, "Bearer my-secret-key");
+    }
+
+    #[tokio::test]
+    async fn sends_site_headers() {
+        let captured: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
+        let app = Router::new()
+            .route("/chat/completions", post(
+                |State(cap): State<Arc<Mutex<Option<(String, String)>>>>,
+                 headers: HeaderMap| async move {
+                    let referer = headers.get("http-referer")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    let title = headers.get("x-title")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    *cap.lock().unwrap() = Some((referer, title));
+                    ok_response().into_response()
+                }
+            ))
+            .with_state(captured.clone());
+        let base = serve(app).await;
+
+        oneshot_call_with_url("key", "claude-sonnet-4-6", "hi", &base, "https://mysite.com", "MySite").await;
+
+        let (referer, title) = captured.lock().unwrap().take().unwrap();
+        assert_eq!(referer, "https://mysite.com");
+        assert_eq!(title, "MySite");
     }
 }
