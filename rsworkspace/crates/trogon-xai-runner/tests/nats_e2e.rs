@@ -10,14 +10,21 @@
 //! Run with:
 //!   cargo test -p trogon-xai-runner --test nats_e2e --features test-helpers
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
+use agent_client_protocol::{
+    Agent, CloseSessionRequest, ForkSessionRequest, LoadSessionRequest, NewSessionRequest,
+    SessionConfigKind, SetSessionConfigOptionRequest,
+};
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier, XaiAgent};
+use trogon_xai_runner::{
+    Message, MockXaiHttpClient, NatsSessionNotifier, NatsSessionStore, SessionStoring, XaiAgent,
+};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +113,355 @@ async fn e2e_nats_session_new_returns_session_id() {
     let response: Value = serde_json::from_slice(&msg.payload).unwrap();
     let session_id = response["sessionId"].as_str().unwrap_or("");
     assert!(!session_id.is_empty(), "must have non-empty sessionId: {response}");
+}
+
+/// Full end-to-end chain: new_session → set_config_option → close_session → KV save →
+/// fresh agent instance → load_session restores tool state from KV.
+#[tokio::test]
+async fn enabled_tools_persisted_to_kv_and_restored_on_load_session() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+    let store: Arc<dyn SessionStoring> =
+        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+
+    let session_id = {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+        let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store));
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("new_session must succeed");
+        let sid = new_resp.session_id.to_string();
+
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                sid.clone(),
+                "web_search",
+                "on",
+            ))
+            .await
+            .expect("set_config_option must succeed");
+
+        agent
+            .close_session(CloseSessionRequest::new(sid.clone()))
+            .await
+            .expect("close_session must succeed");
+
+        sid
+    };
+
+    // Verify the KV snapshot has web_search in tools.
+    let sessions_kv = js.get_key_value("SESSIONS").await.expect("open SESSIONS KV");
+    let kv_entry = sessions_kv
+        .entry(&format!("default.{session_id}"))
+        .await
+        .expect("KV get")
+        .expect("snapshot must exist after close_session");
+    let snap: serde_json::Value = serde_json::from_slice(&kv_entry.value).unwrap();
+    let empty_tools = vec![];
+    let tools: Vec<&str> = snap["tools"]
+        .as_array()
+        .unwrap_or(&empty_tools)
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        tools.contains(&"web_search"),
+        "KV snapshot must contain 'web_search' in tools, got: {tools:?}"
+    );
+
+    // Agent 2 — fresh instance with same store, empty sessions map.
+    {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+        let agent2 = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store));
+
+        let load_resp = agent2
+            .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
+            .await
+            .expect("load_session must succeed via KV fallback");
+
+        let opts = load_resp.config_options.unwrap_or_default();
+        let web_search_opt = opts
+            .iter()
+            .find(|o| o.id.to_string() == "web_search")
+            .expect("web_search must be present in config_options");
+        let web_val = match &web_search_opt.kind {
+            SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        };
+        assert_eq!(
+            web_val, "on",
+            "web_search must be 'on' after restoring from KV snapshot"
+        );
+    }
+}
+
+/// fork_session → KV save with inherited tools → fresh agent → load_session restores tools.
+#[tokio::test]
+async fn fork_session_tools_persisted_to_kv_and_restored_on_load_session() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+    let store: Arc<dyn SessionStoring> =
+        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+
+    let fork_id = {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+        let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store));
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("new_session must succeed");
+        let src_id = new_resp.session_id.to_string();
+
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                src_id.clone(),
+                "web_search",
+                "on",
+            ))
+            .await
+            .expect("set_config_option must succeed");
+
+        let fork_resp = agent
+            .fork_session(ForkSessionRequest::new(src_id, "/fork"))
+            .await
+            .expect("fork_session must succeed");
+
+        fork_resp.session_id.to_string()
+    };
+
+    // Verify the KV snapshot for the forked session has web_search.
+    let sessions_kv = js.get_key_value("SESSIONS").await.expect("open SESSIONS KV");
+    let kv_entry = sessions_kv
+        .entry(&format!("default.{fork_id}"))
+        .await
+        .expect("KV get")
+        .expect("fork snapshot must exist in KV");
+    let snap: serde_json::Value = serde_json::from_slice(&kv_entry.value).unwrap();
+    let empty_tools = vec![];
+    let tools: Vec<&str> = snap["tools"]
+        .as_array()
+        .unwrap_or(&empty_tools)
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        tools.contains(&"web_search"),
+        "fork KV snapshot must contain 'web_search' in tools, got: {tools:?}"
+    );
+
+    // Agent 2 — fresh instance, load fork from KV.
+    {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+        let agent2 = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store));
+
+        let load_resp = agent2
+            .load_session(LoadSessionRequest::new(fork_id.clone(), "/fork"))
+            .await
+            .expect("load_session of fork must succeed via KV fallback");
+
+        let opts = load_resp.config_options.unwrap_or_default();
+        let web_search_opt = opts
+            .iter()
+            .find(|o| o.id.to_string() == "web_search")
+            .expect("web_search must be present in config_options");
+        let web_val = match &web_search_opt.kind {
+            SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        };
+        assert_eq!(
+            web_val, "on",
+            "forked session must have web_search='on' after KV restore"
+        );
+    }
+}
+
+/// Full agent round-trip: history and model survive build_snapshot → real NATS KV → load_session.
+///
+/// This is the only test that exercises the complete chain:
+///   Message → SnapshotMessage (build_snapshot) → JSON → NATS KV (NatsSessionStore::save)
+///   → NATS KV → JSON → SessionSnapshot (NatsSessionStore::load)
+///   → Message (load_session KV fallback)
+#[tokio::test]
+async fn history_and_model_survive_kv_round_trip() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+    let store: Arc<dyn SessionStoring> =
+        Arc::new(NatsSessionStore::open(&js, 0).await.expect("open store"));
+
+    let session_id = {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let prefix = AcpPrefix::new("acp").unwrap();
+        let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+        let agent = XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store));
+
+        let new_resp = agent
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("new_session must succeed");
+        let sid = new_resp.session_id.to_string();
+
+        agent
+            .test_set_session_history(
+                &sid,
+                vec![
+                    Message {
+                        role: "user".to_string(),
+                        content: Some("What is 2+2?".to_string()),
+                        prompt_tokens: None,
+                        completion_tokens: None,
+                    },
+                    Message {
+                        role: "assistant".to_string(),
+                        content: Some("It is 4.".to_string()),
+                        prompt_tokens: Some(12),
+                        completion_tokens: Some(6),
+                    },
+                ],
+            )
+            .await;
+
+        agent
+            .close_session(CloseSessionRequest::new(sid.clone()))
+            .await
+            .expect("close_session must succeed");
+
+        sid
+    };
+
+    // Agent 2 — fresh instance, load from KV.
+    let mock_http = Arc::new(MockXaiHttpClient::new());
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent2 = XaiAgent::with_deps(notifier, "grok-3-mini", "test-key", mock_http)
+        .with_session_store(Arc::clone(&store));
+
+    let load_resp = agent2
+        .load_session(LoadSessionRequest::new(session_id.clone(), "/tmp"))
+        .await
+        .expect("load_session must succeed via KV fallback");
+
+    // Model must be restored.
+    assert_eq!(
+        load_resp.models.unwrap().current_model_id.to_string(),
+        "grok-3-mini",
+        "model must survive KV round-trip"
+    );
+
+    // History must be restored with content and token counts intact.
+    let history = agent2.test_session_history(&session_id).await;
+    assert_eq!(history.len(), 2, "history must have 2 messages after KV restore");
+    assert_eq!(history[0].role, "user");
+    assert_eq!(
+        history[0].content.as_deref(),
+        Some("What is 2+2?"),
+        "user message content must survive KV round-trip"
+    );
+    assert_eq!(history[1].role, "assistant");
+    assert_eq!(
+        history[1].content.as_deref(),
+        Some("It is 4."),
+        "assistant message content must survive KV round-trip"
+    );
+    assert_eq!(
+        history[1].prompt_tokens,
+        Some(12),
+        "prompt_tokens must survive KV round-trip"
+    );
+    assert_eq!(
+        history[1].completion_tokens,
+        Some(6),
+        "completion_tokens must survive KV round-trip"
+    );
+}
+
+/// Pre-fix snapshot (tools:[]) stored in real NATS KV → load_session restores trogon tools,
+/// not xAI tools.
+#[tokio::test]
+async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("open store");
+
+    // Write a pre-fix snapshot directly to NATS KV with tools:[].
+    let session_id = "pre-fix-session";
+    let tenant_id = "default";
+    let snap_json = serde_json::json!({
+        "id": session_id,
+        "tenant_id": tenant_id,
+        "name": "Old session",
+        "messages": [],
+        "tools": [],
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z"
+    });
+    let sessions_kv = js.get_key_value("SESSIONS").await.expect("open KV");
+    sessions_kv
+        .put(
+            &format!("{tenant_id}.{session_id}"),
+            serde_json::to_vec(&snap_json).unwrap().into(),
+        )
+        .await
+        .expect("put snapshot");
+
+    // Agent loads it — must restore trogon tools, not xAI tools.
+    let store: Arc<dyn SessionStoring> = Arc::new(store);
+    let mock_http = Arc::new(MockXaiHttpClient::new());
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent = XaiAgent::with_deps(notifier, "grok-3", "test-key", mock_http)
+        .with_session_store(Arc::clone(&store));
+
+    let load_resp = agent
+        .load_session(LoadSessionRequest::new(session_id, "/tmp"))
+        .await
+        .expect("load_session must succeed via KV fallback");
+
+    let tools = agent.test_session_enabled_tools(session_id).await;
+
+    // xAI tools must be off.
+    let opts = load_resp.config_options.unwrap_or_default();
+    let web_val = opts
+        .iter()
+        .find(|o| o.id.to_string() == "web_search")
+        .map(|o| match &o.kind {
+            SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        web_val, "off",
+        "web_search must be off after restoring pre-fix snapshot"
+    );
+
+    // Trogon tools must be present.
+    assert!(
+        !tools.is_empty(),
+        "enabled_tools must not be empty after restoring pre-fix snapshot"
+    );
+    assert!(
+        !tools.iter().any(|t| t == "web_search" || t == "x_search"),
+        "xAI tools must not be in enabled_tools after restoring pre-fix snapshot"
+    );
+    assert!(
+        tools.iter().any(|t| t == "read_file"),
+        "trogon tool 'read_file' must be in enabled_tools after restoring pre-fix snapshot"
+    );
 }
 
 /// Verifies the runner registration contract: the `acp_prefix` metadata stored

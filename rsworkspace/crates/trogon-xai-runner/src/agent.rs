@@ -386,7 +386,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
-            tools: vec![],
+            tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
             created_at: session.created_at_iso.clone(),
@@ -624,14 +624,79 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let sessions = self.sessions.lock().await;
-        match sessions.get(&session_id) {
-            Some(s) => Ok(LoadSessionResponse::new()
-                .modes(self.session_mode_state())
-                .models(self.session_model_state(s.model.as_deref()))
-                .config_options(Self::all_tool_config_options(&s.enabled_tools))),
-            None => Err(not_found(format!("session {session_id} not found"))),
+        let cwd = req.cwd.to_string_lossy().into_owned();
+
+        {
+            let sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get(&session_id) {
+                return Ok(LoadSessionResponse::new()
+                    .modes(self.session_mode_state())
+                    .models(self.session_model_state(s.model.as_deref()))
+                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+            }
         }
+
+        // Not in memory — try KV snapshot.
+        if let Some(store) = &self.session_store {
+            if let Some(snap) = store.load(&self.tenant_id, &session_id).await {
+                let enabled_tools = if snap.tools.is_empty() {
+                    // Pre-fix snapshot: trogon tools were always enabled and cannot
+                    // be disabled by users — restore them. xAI tools default to off.
+                    trogon_tools::all_tool_defs()
+                        .into_iter()
+                        .map(|d| d.name.to_string())
+                        .collect()
+                } else {
+                    snap.tools.clone()
+                };
+                let history: Vec<Message> = snap
+                    .messages
+                    .iter()
+                    .map(|m| Message {
+                        role: m.role.clone(),
+                        content: Some(
+                            m.content.iter().map(|b| b.text.clone()).collect::<Vec<_>>().join(""),
+                        ),
+                        prompt_tokens: m.usage.as_ref().map(|u| u.input_tokens as u64),
+                        completion_tokens: m.usage.as_ref().map(|u| u.output_tokens as u64),
+                    })
+                    .collect();
+                let model = snap.model.clone();
+                let created_at_iso = snap.created_at.clone();
+                let parent_session_id = snap.parent_session_id.clone();
+                let branched_at_index = snap.branched_at_index;
+                let api_key = self.global_api_key.clone();
+                let system_prompt = self.system_prompt.clone();
+
+                let mut sessions = self.sessions.lock().await;
+                Self::maybe_evict_oldest(&mut sessions);
+                sessions.insert(
+                    session_id.clone(),
+                    XaiSession {
+                        cwd,
+                        model,
+                        api_key,
+                        history,
+                        last_response_id: None,
+                        enabled_tools: enabled_tools.clone(),
+                        system_prompt,
+                        created_at: Instant::now(),
+                        created_at_iso,
+                        parent_session_id,
+                        branched_at_index,
+                    },
+                );
+                info!(session_id, "xai: load_session restored from KV snapshot");
+                return Ok(LoadSessionResponse::new()
+                    .modes(self.session_mode_state())
+                    .models(self.session_model_state(
+                        sessions.get(&session_id).and_then(|s| s.model.as_deref()),
+                    ))
+                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+            }
+        }
+
+        Err(not_found(format!("session {session_id} not found")))
     }
 
     async fn resume_session(
@@ -1908,6 +1973,273 @@ mod tests {
                 .load_session(LoadSessionRequest::new("missing", "/"))
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn load_session_no_store_returns_not_found() {
+        let agent = make_agent(); // no session_store attached
+        let err = agent
+            .load_session(LoadSessionRequest::new("ghost", "/"))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_fallback_restores_enabled_tools() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        // Pre-populate KV with a snapshot where only "web_search" is enabled.
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-kv".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: Some("grok-3".to_string()),
+            tools: vec!["web_search".to_string()],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![
+                SnapshotMessage {
+                    role: "user".to_string(),
+                    content: vec![TextBlock::new("Hello")],
+                    usage: None,
+                },
+            ],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+
+        let resp = agent
+            .load_session(LoadSessionRequest::new("sess-kv", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        let opts = resp.config_options.unwrap_or_default();
+        let web_search = opts.iter().find(|o| o.id.to_string() == "web_search").unwrap();
+        let x_search = opts.iter().find(|o| o.id.to_string() == "x_search").unwrap();
+        let web_val = match &web_search.kind {
+            agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        };
+        let x_val = match &x_search.kind {
+            agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        };
+        assert_eq!(web_val, "on", "web_search must be enabled after KV restore");
+        assert_eq!(x_val, "off", "x_search must be disabled (not in snapshot tools)");
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_fallback_inserts_session_into_memory() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-mem".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            tools: vec!["web_search".to_string()],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+
+        assert_eq!(agent.test_session_count().await, 0, "session must not be in memory before load");
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-mem", "/tmp"))
+            .await
+            .expect("must succeed");
+
+        assert_eq!(agent.test_session_count().await, 1, "session must be in memory after KV restore");
+        let tools = agent.test_session_enabled_tools("sess-mem").await;
+        assert_eq!(tools, vec!["web_search"], "restored session must have correct enabled_tools");
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_miss_returns_not_found() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::SessionStoring;
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new()); // loads is empty
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        let err = agent
+            .load_session(LoadSessionRequest::new("ghost", "/"))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_empty_tools_re_enables_all() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        // Snapshot with tools: [] (old pre-fix snapshot).
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-old".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Old".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-old", "/tmp"))
+            .await
+            .expect("must succeed");
+
+        let tools = agent.test_session_enabled_tools("sess-old").await;
+        let expected: Vec<String> = trogon_tools::all_tool_defs()
+            .into_iter()
+            .map(|d| d.name.to_string())
+            .collect();
+        assert_eq!(
+            tools, expected,
+            "pre-fix snapshot (tools:[]) must restore all trogon tools, not xAI tools"
+        );
+        // xAI tools must NOT be present — they default to off.
+        assert!(
+            !tools.iter().any(|t| t == "web_search" || t == "x_search"),
+            "web_search and x_search must be off when restoring a pre-fix snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_history() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-hist".to_string(),
+            tenant_id: "default".to_string(),
+            name: "History test".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![
+                SnapshotMessage {
+                    role: "user".to_string(),
+                    content: vec![TextBlock::new("What is 2+2?")],
+                    usage: None,
+                },
+                SnapshotMessage {
+                    role: "assistant".to_string(),
+                    content: vec![TextBlock::new("It is 4.")],
+                    usage: Some(MessageUsage {
+                        input_tokens: 12,
+                        output_tokens: 6,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    }),
+                },
+            ],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-hist", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        let history = agent.test_session_history("sess-hist").await;
+        assert_eq!(history.len(), 2, "restored session must have 2 history messages");
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].content.as_deref(), Some("What is 2+2?"));
+        assert_eq!(history[1].role, "assistant");
+        assert_eq!(history[1].content.as_deref(), Some("It is 4."));
+        assert_eq!(history[1].prompt_tokens, Some(12));
+        assert_eq!(history[1].completion_tokens, Some(6));
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_model() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-model".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Model test".to_string(),
+            model: Some("grok-3-mini".to_string()),
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+
+        let resp = agent
+            .load_session(LoadSessionRequest::new("sess-model", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        assert_eq!(
+            resp.models.unwrap().current_model_id.to_string(),
+            "grok-3-mini",
+            "load_session must restore model from KV snapshot"
+        );
+        assert_eq!(
+            agent.test_session_model("sess-model").await.as_deref(),
+            Some("grok-3-mini"),
+            "in-memory session must carry the restored model"
         );
     }
 
@@ -4903,6 +5235,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_snapshot_stores_enabled_tools() {
+        // Directly insert a session with a known tool set and verify that
+        // close_session saves exactly those tools in the snapshot.
+        let (agent, store) = make_agent_with_store();
+        agent
+            .test_insert_session_with_tools("snap-sess", "/tmp", vec!["web_search"])
+            .await;
+
+        agent
+            .close_session(CloseSessionRequest::new("snap-sess"))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let snap = saves.last().unwrap();
+        assert_eq!(
+            snap.tools,
+            vec!["web_search"],
+            "build_snapshot must store enabled_tools exactly"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_stores_empty_tools_when_none_enabled() {
+        let (agent, store) = make_agent_with_store();
+        agent
+            .test_insert_session_with_tools("snap-empty", "/tmp", vec![])
+            .await;
+
+        agent
+            .close_session(CloseSessionRequest::new("snap-empty"))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let snap = saves.last().unwrap();
+        assert!(
+            snap.tools.is_empty(),
+            "build_snapshot must store empty vec when no tools are enabled"
+        );
+    }
+
+    #[tokio::test]
     async fn close_session_with_store_saves_final_snapshot() {
         let (agent, store) = make_agent_with_store();
         let resp = agent
@@ -5042,6 +5417,29 @@ mod tests {
             fork_snap.branched_at_index,
             Some(3),
             "snapshot must record branched_at_index"
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_session_snapshot_inherits_enabled_tools() {
+        let (agent, store) = make_agent_with_store();
+
+        // Insert source session with web_search enabled.
+        agent
+            .test_insert_session_with_tools("src-fork", "/tmp", vec!["web_search"])
+            .await;
+
+        agent
+            .fork_session(ForkSessionRequest::new("src-fork", "/fork"))
+            .await
+            .unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let fork_snap = saves.last().unwrap();
+        assert_eq!(
+            fork_snap.tools,
+            vec!["web_search"],
+            "fork snapshot must inherit enabled_tools from source session"
         );
     }
 
