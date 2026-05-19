@@ -1,3 +1,5 @@
+mod spawn_handler;
+
 use std::sync::Arc;
 
 use acp_nats::acp_prefix::AcpPrefix;
@@ -105,6 +107,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    let spawn_key = api_key.clone();
+    let spawn_model = default_model.clone();
+    let spawn_pfx = prefix.clone();
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent);
@@ -137,6 +143,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     }
+
+    let spawn_nats = nats.clone();
+    tokio::spawn(async move {
+        use futures_util::StreamExt as _;
+        let mut sub = spawn_nats
+            .queue_subscribe(format!("{spawn_pfx}.agent.spawn"), "spawn-handlers".to_string())
+            .await
+            .expect("failed to subscribe to agent.spawn");
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let Ok(req) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else { continue };
+            let prompt = req["prompt"].as_str().unwrap_or("").to_string();
+            let nats2 = spawn_nats.clone();
+            let key2 = spawn_key.clone();
+            let model2 = spawn_model.clone();
+            tokio::spawn(async move {
+                let result = spawn_handler::oneshot_call(&key2, &model2, &prompt).await;
+                nats2.publish(reply, result.into()).await.ok();
+            });
+        }
+    });
 
     let local = tokio::task::LocalSet::new();
     let result = local
