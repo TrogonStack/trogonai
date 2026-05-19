@@ -607,6 +607,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 (self.system_prompt.clone(), None)
             };
 
+        let meta_system_prompt = req.meta
+            .as_ref()
+            .and_then(|m| m.get("systemPrompt"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let system_prompt = meta_system_prompt.or(session_system_prompt);
+
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         Self::maybe_evict_oldest(&mut sessions);
@@ -619,7 +626,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 history: Vec::new(),
                 last_response_id: None,
                 enabled_tools: Vec::new(),
-                system_prompt: session_system_prompt,
+                system_prompt,
                 created_at: Instant::now(),
                 created_at_iso,
                 parent_session_id: None,
@@ -4838,6 +4845,68 @@ mod tests {
         let session_id = resp.session_id.to_string();
         let sessions = agent.sessions.lock().await;
         assert!(sessions[&session_id].system_prompt.is_none());
+    }
+
+    // ── _meta.systemPrompt ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_sets_prompt() {
+        let agent = make_agent();
+        let mut meta = serde_json::Map::new();
+        meta.insert("systemPrompt".to_string(), serde_json::json!("injected prompt"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("injected prompt")
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_overrides_console_prompt() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            Some("console prompt".into()),
+            None,
+            None,
+        );
+        let mut meta = serde_json::Map::new();
+        meta.insert("systemPrompt".to_string(), serde_json::json!("meta wins"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("meta wins")
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_without_system_prompt_key_falls_back() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            Some("fallback prompt".into()),
+            None,
+            None,
+        );
+        let mut meta = serde_json::Map::new();
+        meta.insert("otherKey".to_string(), serde_json::json!("value"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("fallback prompt")
+        );
     }
 
     // ── with_session_store ────────────────────────────────────────────────────
