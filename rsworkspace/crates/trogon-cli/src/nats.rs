@@ -1,6 +1,9 @@
+use async_nats::HeaderMap;
 use bytes::Bytes;
 use futures::StreamExt;
 use tokio::sync::mpsc;
+
+const REQ_ID_HEADER: &str = "X-Req-Id";
 
 /// Abstraction over a NATS client. Allows injecting a mock in tests.
 ///
@@ -23,6 +26,13 @@ pub trait NatsClient: Send + Sync + 'static {
         &self,
         subject: String,
         reply: String,
+        payload: Bytes,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
+    fn publish_with_req_id_bytes(
+        &self,
+        subject: String,
+        req_id: String,
         payload: Bytes,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
@@ -52,6 +62,17 @@ impl NatsClient for async_nats::Client {
         payload: Bytes,
     ) -> anyhow::Result<()> {
         Ok(self.publish_with_reply(subject, reply, payload).await?)
+    }
+
+    async fn publish_with_req_id_bytes(
+        &self,
+        subject: String,
+        req_id: String,
+        payload: Bytes,
+    ) -> anyhow::Result<()> {
+        let mut headers = HeaderMap::new();
+        headers.insert(REQ_ID_HEADER, req_id.as_str());
+        Ok(self.publish_with_headers(subject, headers, payload).await?)
     }
 
     async fn subscribe_bytes(&self, subject: String) -> anyhow::Result<mpsc::Receiver<Bytes>> {
@@ -142,6 +163,16 @@ pub mod mock {
             &self,
             subject: String,
             _reply: String,
+            payload: Bytes,
+        ) -> anyhow::Result<()> {
+            self.published.lock().unwrap().push((subject, payload));
+            Ok(())
+        }
+
+        async fn publish_with_req_id_bytes(
+            &self,
+            subject: String,
+            _req_id: String,
             payload: Bytes,
         ) -> anyhow::Result<()> {
             self.published.lock().unwrap().push((subject, payload));

@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 const SESSION_NEW_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -94,21 +95,23 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let session_id = self.session_id.clone();
         let prefix = self.prefix.clone();
         async move {
+            let req_id = Uuid::now_v7().to_string();
             let notif_subject =
                 format!("{prefix}.session.{session_id}.client.session.update");
             let prompt_subject =
                 format!("{prefix}.session.{session_id}.agent.prompt");
+            let resp_subject =
+                format!("{prefix}.session.{session_id}.agent.prompt.response.{req_id}");
 
             let mut notif_rx = nats
                 .subscribe_bytes(notif_subject)
                 .await
                 .map_err(|e| anyhow::anyhow!("subscribe notifications: {e}"))?;
 
-            let inbox = nats.new_inbox();
             let mut resp_rx = nats
-                .subscribe_bytes(inbox.clone())
+                .subscribe_bytes(resp_subject)
                 .await
-                .map_err(|e| anyhow::anyhow!("subscribe inbox: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("subscribe response: {e}"))?;
 
             let req = PromptRequest::new(
                 session_id,
@@ -116,7 +119,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             );
             let payload = serde_json::to_vec(&req)?;
 
-            nats.publish_with_reply_bytes(prompt_subject, inbox, payload.into())
+            nats.publish_with_req_id_bytes(prompt_subject, req_id, payload.into())
                 .await
                 .map_err(|e| anyhow::anyhow!("publish prompt: {e}"))?;
 
