@@ -839,7 +839,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                             notification_session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
                                 prompt_tokens,
-                                completion_tokens,
+                                prompt_tokens + completion_tokens,
                             )),
                         ))
                         .await;

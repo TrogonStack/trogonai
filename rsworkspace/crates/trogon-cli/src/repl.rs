@@ -253,7 +253,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                                                 if session_context_size > 0 {
                                                     let pct = session_used_tokens * 100 / session_context_size;
                                                     eprintln!(
-                                                        "\x1b[2m[context: {}/{} tokens ({}%)]\x1b[0m",
+                                                        "\x1b[2m[tokens: {}/{} ({}%)]\x1b[0m",
                                                         fmt_tokens(session_used_tokens),
                                                         fmt_tokens(session_context_size),
                                                         pct,
