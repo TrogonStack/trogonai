@@ -13,8 +13,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, Event, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
-    WriteSnapshotRequest, WriteSnapshotResponse,
+    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamPosition, StreamRead,
+    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 
@@ -182,16 +182,15 @@ impl MockCronStore {
 
     pub(crate) fn read_command_snapshot<Payload>(
         &self,
-        config: trogon_eventsourcing::SnapshotStoreConfig,
         stream_id: &(impl AsRef<str> + ?Sized),
     ) -> Result<Option<Snapshot<Payload>>, CronError>
     where
-        Payload: DeserializeOwned,
+        Payload: DeserializeOwned + SnapshotType,
     {
         self.command_snapshots
             .lock()
             .unwrap()
-            .get(config.key_prefix())
+            .get(Payload::SNAPSHOT_STREAM_PREFIX)
             .and_then(|snapshots| snapshots.get(stream_id.as_ref()).cloned())
             .map(|snapshot| serde_json::from_str(&snapshot))
             .transpose()
@@ -511,7 +510,7 @@ impl StreamAppend<str> for MockCronStore {
 
 impl<Payload> SnapshotRead<Payload, str> for MockCronStore
 where
-    Payload: Serialize + DeserializeOwned + Send,
+    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
 {
     type Error = CronError;
 
@@ -519,14 +518,14 @@ where
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        self.read_command_snapshot(request.config, request.stream_id)
+        self.read_command_snapshot(request.stream_id)
             .map(|snapshot| ReadSnapshotResponse { snapshot })
     }
 }
 
 impl<Payload> SnapshotWrite<Payload, str> for MockCronStore
 where
-    Payload: Serialize + DeserializeOwned + Send,
+    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
 {
     type Error = CronError;
 
@@ -538,7 +537,7 @@ where
         self.command_snapshots
             .lock()
             .unwrap()
-            .entry(request.config.key_prefix().to_string())
+            .entry(Payload::SNAPSHOT_STREAM_PREFIX.to_string())
             .or_default()
             .insert(request.stream_id.to_string(), snapshot);
         Ok(WriteSnapshotResponse)

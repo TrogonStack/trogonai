@@ -1,5 +1,5 @@
 use buffa::Message as _;
-use trogon_eventsourcing::{EventDecode, EventEncode, EventIdentity, EventType, SnapshotSchema};
+use trogon_eventsourcing::{EventDecode, EventEncode, EventIdentity, EventType, SnapshotType};
 
 #[allow(clippy::all)]
 #[path = "gen/mod.rs"]
@@ -100,7 +100,7 @@ impl EventType for v1::JobEvent {
     }
 }
 
-impl SnapshotSchema for state_v1::State {
+impl SnapshotType for state_v1::State {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.snapshots.jobs.v1.";
 }
 

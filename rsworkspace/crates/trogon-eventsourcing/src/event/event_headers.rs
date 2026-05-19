@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use super::{event_headers_error::EventHeadersError, header_key::HeaderKey};
+use super::{event_headers_error::EventHeadersError, header_name::HeaderName};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventHeaders {
-    entries: BTreeMap<HeaderKey, String>,
+    entries: BTreeMap<HeaderName, String>,
 }
 
 impl EventHeaders {
@@ -12,9 +12,9 @@ impl EventHeaders {
         Self::default()
     }
 
-    pub fn one(key: HeaderKey, value: impl Into<String>) -> Result<Self, EventHeadersError> {
+    pub fn one(name: HeaderName, value: impl Into<String>) -> Result<Self, EventHeadersError> {
         let mut headers = Self::empty();
-        headers.insert(key, value)?;
+        headers.insert(name, value)?;
         Ok(headers)
     }
 
@@ -26,19 +26,19 @@ impl EventHeaders {
     {
         let mut headers = Self::empty();
         for (name, value) in entries {
-            headers.insert(HeaderKey::new(name)?, value)?;
+            headers.insert(HeaderName::new(name)?, value)?;
         }
         Ok(headers)
     }
 
-    pub fn insert(&mut self, key: HeaderKey, value: impl Into<String>) -> Result<Option<String>, EventHeadersError> {
+    pub fn insert(&mut self, name: HeaderName, value: impl Into<String>) -> Result<Option<String>, EventHeadersError> {
         let value = value.into();
         if value.contains(['\r', '\n']) {
             return Err(EventHeadersError::InvalidValue {
-                name: key.as_str().to_string(),
+                name: name.as_str().to_string(),
             });
         }
-        Ok(self.entries.insert(key, value))
+        Ok(self.entries.insert(name, value))
     }
 
     pub fn get(&self, name: &str) -> Option<&str> {
@@ -53,7 +53,7 @@ impl EventHeaders {
         self.entries.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&HeaderKey, &str)> {
-        self.entries.iter().map(|(key, value)| (key, value.as_str()))
+    pub fn iter(&self) -> impl Iterator<Item = (&HeaderName, &str)> {
+        self.entries.iter().map(|(name, value)| (name, value.as_str()))
     }
 }

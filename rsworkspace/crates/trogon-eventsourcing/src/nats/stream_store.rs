@@ -279,6 +279,11 @@ pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, Stre
 }
 
 fn event_header_name(name: &str) -> String {
+    // TODO: Use `async_nats::HeaderName::try_from` once nats-io/nats.rs#1587
+    // lands in a released async-nats version. `HeaderName` intentionally does
+    // not duplicate async-nats header-name validation; the adapter should
+    // validate the encoded `Trogon-Header-{name}` here with a fallible API
+    // instead of relying on `PublishMessage::header`'s panicking conversion.
     format!("{TROGON_EVENT_HEADER_PREFIX}{name}")
 }
 

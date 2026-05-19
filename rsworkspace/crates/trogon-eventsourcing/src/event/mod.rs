@@ -5,7 +5,7 @@ mod event_headers_error;
 mod event_id;
 mod event_identity;
 mod event_type;
-mod header_key;
+mod header_name;
 mod stream_event;
 
 use trogon_std::UuidV7Generator;
@@ -19,7 +19,7 @@ pub use event_headers_error::EventHeadersError;
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;
-pub use header_key::HeaderKey;
+pub use header_name::HeaderName;
 pub use stream_event::StreamEvent;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -229,7 +229,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let headers = EventHeaders::one(HeaderKey::new("trace-id").unwrap(), "trace-1").unwrap();
+        let headers = EventHeaders::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
 
         let generated = Event::from_domain_event(&event).unwrap().with_headers(headers.clone());
         assert_eq!(generated.decode::<TestEvent>("alpha").unwrap(), event);
@@ -252,21 +252,21 @@ mod tests {
     }
 
     #[test]
-    fn event_headers_validates_header_safe_names_and_values() {
-        let key = HeaderKey::new("trace-id").unwrap();
-        assert_eq!(key.as_str(), "trace-id");
+    fn event_headers_accepts_metadata_names_and_validates_values() {
+        let name = HeaderName::new("trace-id").unwrap();
+        assert_eq!(name.as_str(), "trace-id");
 
-        assert_eq!(HeaderKey::new("").unwrap_err(), EventHeadersError::EmptyName);
+        assert_eq!(
+            HeaderName::new("Nats-Expected-Last-Subject-Sequence").unwrap().as_str(),
+            "Nats-Expected-Last-Subject-Sequence"
+        );
+        assert_eq!(
+            HeaderName::new("Trogon-Event-Type").unwrap().as_str(),
+            "Trogon-Event-Type"
+        );
+        assert_eq!(HeaderName::new("").unwrap_err(), EventHeadersError::EmptyName);
         assert!(matches!(
-            HeaderKey::new("Nats-Expected-Last-Subject-Sequence"),
-            Err(EventHeadersError::ReservedName { .. })
-        ));
-        assert!(matches!(
-            HeaderKey::new("trace id"),
-            Err(EventHeadersError::InvalidName { .. })
-        ));
-        assert!(matches!(
-            EventHeaders::one(HeaderKey::new("trace-id").unwrap(), "line\r\nbreak"),
+            EventHeaders::one(HeaderName::new("trace-id").unwrap(), "line\r\nbreak"),
             Err(EventHeadersError::InvalidValue { .. })
         ));
     }

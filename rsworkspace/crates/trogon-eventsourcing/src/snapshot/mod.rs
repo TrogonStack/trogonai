@@ -1,19 +1,15 @@
 mod read_snapshot_request;
 mod read_snapshot_response;
-mod snapshot_change;
-mod snapshot_schema;
-mod snapshot_store_config;
-#[path = "snapshot.rs"]
 mod snapshot_type;
+#[path = "snapshot.rs"]
+mod snapshot_value;
 mod write_snapshot_request;
 mod write_snapshot_response;
 
 pub use read_snapshot_request::ReadSnapshotRequest;
 pub use read_snapshot_response::ReadSnapshotResponse;
-pub use snapshot_change::SnapshotChange;
-pub use snapshot_schema::SnapshotSchema;
-pub use snapshot_store_config::SnapshotStoreConfig;
-pub use snapshot_type::Snapshot;
+pub use snapshot_type::SnapshotType;
+pub use snapshot_value::Snapshot;
 pub use write_snapshot_request::WriteSnapshotRequest;
 pub use write_snapshot_response::WriteSnapshotResponse;
 

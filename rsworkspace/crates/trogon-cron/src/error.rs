@@ -1,4 +1,4 @@
-use trogon_eventsourcing::nats::jetstream::JetStreamStoreError;
+use trogon_eventsourcing::nats::{JetStreamStoreError, SnapshotStoreError};
 use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
 
 use crate::commands::domain::MessageHeadersError;
@@ -234,18 +234,18 @@ impl From<MessageHeadersError> for JobSpecError {
     }
 }
 
-impl From<trogon_eventsourcing::SnapshotStoreError> for CronError {
-    fn from(value: trogon_eventsourcing::SnapshotStoreError) -> Self {
+impl From<SnapshotStoreError> for CronError {
+    fn from(value: SnapshotStoreError) -> Self {
         match value {
-            trogon_eventsourcing::SnapshotStoreError::Kv { context, source } => Self::Kv { context, source },
-            trogon_eventsourcing::SnapshotStoreError::InvalidSnapshotKey { key } => {
+            SnapshotStoreError::Kv { context, source } => Self::Kv { context, source },
+            SnapshotStoreError::InvalidSnapshotKey { key } => {
                 Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
-            trogon_eventsourcing::SnapshotStoreError::MissingCheckpointName { key_prefix } => Self::event_source(
+            SnapshotStoreError::MissingCheckpointName { key_prefix } => Self::event_source(
                 "failed to resolve stream snapshot checkpoint key",
                 std::io::Error::other(key_prefix),
             ),
-            trogon_eventsourcing::SnapshotStoreError::Serde(source) => Self::Serde(source),
+            SnapshotStoreError::Serde(source) => Self::Serde(source),
         }
     }
 }

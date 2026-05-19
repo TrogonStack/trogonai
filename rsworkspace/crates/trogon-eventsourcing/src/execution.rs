@@ -1,7 +1,4 @@
-use crate::snapshot::{
-    ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotSchema, SnapshotStoreConfig, SnapshotWrite,
-    WriteSnapshotRequest,
-};
+use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead,
     StreamWritePrecondition,
@@ -64,18 +61,14 @@ pub trait SnapshotPolicy<State, Event> {
 
 pub trait CommandSnapshotPolicy: Decider
 where
-    Self::State: SnapshotSchema,
+    Self::State: SnapshotType,
 {
     type SnapshotPolicy: SnapshotPolicy<Self::State, Self::Event>;
 
     const SNAPSHOT_POLICY: Self::SnapshotPolicy;
 
     fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
-        Snapshots::new(
-            snapshot_store,
-            Self::State::snapshot_store_config(),
-            Self::SNAPSHOT_POLICY,
-        )
+        Snapshots::new(snapshot_store, Self::SNAPSHOT_POLICY)
     }
 }
 
@@ -149,16 +142,14 @@ pub struct WithoutSnapshotTaskScheduler;
 
 pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler> {
     snapshot_store: &'a S,
-    snapshot_config: SnapshotStoreConfig,
     policy: P,
     schedule_snapshot_task: Spawn,
 }
 
 impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler> {
-    pub fn new(snapshot_store: &'a S, snapshot_config: SnapshotStoreConfig, policy: P) -> Self {
+    pub fn new(snapshot_store: &'a S, policy: P) -> Self {
         Self {
             snapshot_store,
-            snapshot_config,
             policy,
             schedule_snapshot_task: WithoutSnapshotTaskScheduler,
         }
@@ -172,7 +163,6 @@ impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
     ) -> Snapshots<'a, S, P, NextSpawn> {
         Snapshots {
             snapshot_store: self.snapshot_store,
-            snapshot_config: self.snapshot_config,
             policy: self.policy,
             schedule_snapshot_task,
         }
@@ -206,7 +196,7 @@ where
 impl<'a, C, S> IntoSnapshots<'a, C> for &'a S
 where
     C: CommandSnapshotPolicy,
-    C::State: SnapshotSchema,
+    C::State: SnapshotType,
 {
     type Store = S;
     type Policy = C::SnapshotPolicy;
@@ -378,6 +368,7 @@ where
     <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
     <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
     <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
+    C::State: SnapshotType,
 {
     pub async fn execute(self) -> CommandResult<C, SErr> {
         self.execute_result().await
@@ -388,10 +379,7 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .read_snapshot(ReadSnapshotRequest {
-                config: self.snapshots.snapshot_config.clone(),
-                stream_id,
-            })
+            .read_snapshot(ReadSnapshotRequest { stream_id })
             .await
             .map_err(|source| CommandFailure::ReadSnapshot(source))?;
         let snapshot = snapshot.snapshot;
@@ -440,7 +428,6 @@ where
             schedule_snapshot_write(
                 &self.snapshots.schedule_snapshot_task,
                 self.snapshots.snapshot_store,
-                self.snapshots.snapshot_config.clone(),
                 stream_id,
                 Snapshot::new(append_outcome.stream_position, state.clone()),
             );
@@ -487,13 +474,12 @@ impl From<WritePrecondition> for StreamWritePrecondition {
 fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     schedule_snapshot_task: &Spawn,
     snapshot_store: &S,
-    snapshot_config: SnapshotStoreConfig,
     stream_id: &StreamId,
     snapshot: Snapshot<State>,
 ) where
     S: SnapshotWrite<State, StreamId> + Clone + Send + Sync + 'static,
     S::Error: std::fmt::Display + Send + 'static,
-    State: Send + 'static,
+    State: SnapshotType + Send + 'static,
     StreamId: AsRef<str> + ToOwned + ?Sized,
     StreamId::Owned: Borrow<StreamId> + Send + 'static,
     Spawn: Fn(BoxTask) + Send + Sync,
@@ -505,7 +491,6 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     schedule_snapshot_task(Box::pin(async move {
         if let Err(source) = snapshot_store
             .write_snapshot(WriteSnapshotRequest {
-                config: snapshot_config,
                 stream_id: stream_id.borrow(),
                 snapshot,
             })
@@ -574,7 +559,7 @@ mod tests {
     use super::*;
     use crate::{
         Decision, EventDecode, EventEncode, EventIdentity, EventType, ReadSnapshotResponse, ReadStreamResponse,
-        SnapshotSchema, StreamEvent, WriteSnapshotResponse,
+        SnapshotType, StreamEvent, WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -611,7 +596,7 @@ mod tests {
         Present { enabled: bool },
     }
 
-    impl SnapshotSchema for TestState {
+    impl SnapshotType for TestState {
         const SNAPSHOT_STREAM_PREFIX: &'static str = "test.command.v1.";
     }
 
@@ -887,13 +872,8 @@ mod tests {
         }
     }
 
-    fn test_snapshot_config() -> SnapshotStoreConfig {
-        TestState::snapshot_store_config()
-    }
-
     fn test_snapshots<P>(runtime: &FakeRuntime, policy: P) -> Snapshots<'_, FakeRuntime, P, fn(BoxTask)> {
-        Snapshots::new(runtime, test_snapshot_config(), policy)
-            .schedule_snapshot_tasks_with(run_task_immediately as fn(BoxTask))
+        Snapshots::new(runtime, policy).schedule_snapshot_tasks_with(run_task_immediately as fn(BoxTask))
     }
 
     impl StreamRead<str> for FakeRuntime {

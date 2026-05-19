@@ -8,24 +8,20 @@ mod stream;
 
 pub use event::{
     EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventHeadersError, EventId,
-    EventIdentity, EventType, HeaderKey, StreamEvent,
+    EventIdentity, EventType, HeaderName, StreamEvent,
 };
 pub use execution::{
     BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
     FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
     WithoutSnapshotTaskScheduler, WithoutSnapshots, run_task_immediately, spawn_on_tokio,
 };
-pub use nats::snapshot_store::{
-    SnapshotStoreError, checkpoint_key, list_snapshots, maybe_advance_checkpoint, persist_snapshot_change,
-    read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
-};
 pub use nats::{
     StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
     record_stream_message,
 };
 pub use snapshot::{
-    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotChange, SnapshotRead, SnapshotSchema,
-    SnapshotStoreConfig, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,
+    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite,
+    WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadStreamRequest, ReadStreamResponse,

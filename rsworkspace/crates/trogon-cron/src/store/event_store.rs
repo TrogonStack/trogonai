@@ -1,9 +1,9 @@
 use async_nats::jetstream::{self, kv};
 use serde::{Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::nats::jetstream::JetStreamStore;
+use trogon_eventsourcing::nats::{JetStreamStore, NatsSnapshotConfig};
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotWrite, StreamAppend, StreamRead, WriteSnapshotRequest,
+    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamRead, WriteSnapshotRequest,
     WriteSnapshotResponse,
 };
 
@@ -24,7 +24,13 @@ impl EventStore {
         cron_jobs_bucket: kv::Store,
     ) -> Self {
         Self {
-            inner: JetStreamStore::new(js, events_stream, command_snapshot_bucket, JobEventSubjectResolver),
+            inner: JetStreamStore::new(
+                js,
+                events_stream,
+                command_snapshot_bucket,
+                NatsSnapshotConfig::without_checkpoint(),
+                JobEventSubjectResolver,
+            ),
             cron_jobs_bucket,
         }
     }
@@ -64,7 +70,7 @@ impl StreamAppend<str> for EventStore {
 
 impl<Payload> SnapshotRead<Payload, str> for EventStore
 where
-    Payload: Serialize + DeserializeOwned + Send,
+    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
 {
     type Error = CronError;
 
@@ -78,7 +84,7 @@ where
 
 impl<Payload> SnapshotWrite<Payload, str> for EventStore
 where
-    Payload: Serialize + DeserializeOwned + Send,
+    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
 {
     type Error = CronError;
 

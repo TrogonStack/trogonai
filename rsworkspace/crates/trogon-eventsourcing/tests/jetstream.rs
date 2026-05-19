@@ -9,19 +9,18 @@ use async_nats::{
 };
 use futures::future::join_all;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::list_snapshots;
 use trogon_eventsourcing::nats::{
-    JetStreamStore, JetStreamStoreError, StreamSubjectResolver, SubjectState, subject_current_position,
+    JetStreamStore, JetStreamStoreError, NatsSnapshotConfig, SnapshotChange, SnapshotStoreError, StreamStoreError,
+    StreamSubjectResolver, SubjectState, checkpoint_key, list_snapshots, maybe_advance_checkpoint,
+    persist_snapshot_change, read_checkpoint, read_snapshot_map, snapshot_key, subject_current_position,
+    write_checkpoint,
 };
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CommandExecution, CommandFailure, Decider, Decision, Event, EventDecode,
-    EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderKey,
-    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotChange, SnapshotRead, SnapshotStoreConfig, SnapshotWrite,
-    Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, spawn_on_tokio,
-};
-use trogon_eventsourcing::{
-    SnapshotStoreError, StreamStoreError, TROGON_EVENT_TYPE, checkpoint_key, maybe_advance_checkpoint,
-    persist_snapshot_change, read_checkpoint, read_snapshot_map, snapshot_key, write_checkpoint,
+    EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderName,
+    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots,
+    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, WriteSnapshotRequest,
+    spawn_on_tokio,
 };
 use uuid::Uuid;
 
@@ -149,9 +148,17 @@ struct TestSnapshot {
     value: String,
 }
 
+impl SnapshotType for TestSnapshot {
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "snapshots.v1.";
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct CounterState {
     total: u64,
+}
+
+impl SnapshotType for CounterState {
+    const SNAPSHOT_STREAM_PREFIX: &'static str = "counter.snapshots.";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -308,6 +315,7 @@ impl JetStreamFixture {
             js.clone(),
             events_stream,
             snapshot_bucket,
+            NatsSnapshotConfig::without_checkpoint(),
             TestSubjectResolver {
                 prefix: subject_prefix.clone(),
             },
@@ -354,10 +362,6 @@ fn events(events: Vec<Event>) -> TestResult<Events<Event>> {
     Events::from_vec(events).ok_or_else(|| std::io::Error::other("events must be non-empty").into())
 }
 
-fn test_snapshot_config() -> SnapshotStoreConfig {
-    SnapshotStoreConfig::without_checkpoint("counter.snapshots.")
-}
-
 fn debug_error<E>(error: E) -> std::io::Error
 where
     E: std::fmt::Debug,
@@ -373,13 +377,7 @@ async fn read_counter_snapshot_until(
     let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
 
     loop {
-        let snapshot = store
-            .read_snapshot(ReadSnapshotRequest {
-                config: test_snapshot_config(),
-                stream_id,
-            })
-            .await?
-            .snapshot;
+        let snapshot = store.read_snapshot(ReadSnapshotRequest { stream_id }).await?.snapshot;
 
         let snapshot = match snapshot {
             Some(snapshot) if snapshot == expected => return Ok(snapshot),
@@ -1292,7 +1290,7 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
     let header_payload = TestEvent {
         value: "headers".to_string(),
     };
-    let event_headers = EventHeaders::one(HeaderKey::new("trace-id")?, "trace-1")?;
+    let event_headers = EventHeaders::one(HeaderName::new("trace-id")?, "trace-1")?;
     let event = Event::from_domain_event(&header_payload)?.with_headers(event_headers.clone());
     fixture
         .store
@@ -1324,7 +1322,7 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
     let first_command = IncreaseCounterCommand::new("counter", 2);
 
     let first = CommandExecution::new(&fixture.store, &first_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1342,7 +1340,7 @@ async fn jetstream_store_executes_commands_snapshots() -> TestResult {
 
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1383,7 +1381,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
 
     let first_command = IncreaseCounterCommand::new("counter", 1);
     let first = CommandExecution::new(&fixture.store, &first_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1392,17 +1390,14 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
     assert_eq!(first.state, CounterState { total: 1 });
     let first_snapshot: Option<Snapshot<CounterState>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: test_snapshot_config(),
-            stream_id: "counter",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "counter" })
         .await?
         .snapshot;
     assert_eq!(first_snapshot, None);
 
     let second_command = IncreaseCounterCommand::new("counter", 2);
     let second = CommandExecution::new(&fixture.store, &second_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1419,7 +1414,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
 
     let third_command = IncreaseCounterCommand::new("counter", 3);
     let third = CommandExecution::new(&fixture.store, &third_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1436,7 +1431,7 @@ async fn jetstream_command_execution_respects_snapshot_cadence() -> TestResult {
 
     let fourth_command = IncreaseCounterCommand::new("counter", 4);
     let fourth = CommandExecution::new(&fixture.store, &fourth_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1462,7 +1457,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
 
     let first_command = IncreaseCounterCommand::new("counter", 2);
     let first = CommandExecution::new(&fixture.store, &first_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1474,7 +1469,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
 
     let second_command = IncreaseCounterCommand::new("counter", 3);
     let second = CommandExecution::new(&fixture.store, &second_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1492,7 +1487,7 @@ async fn jetstream_command_execution_snapshots_use_stream_position_after_interle
 
     let third_command = IncreaseCounterCommand::new("counter", 1);
     let third = CommandExecution::new(&fixture.store, &third_command)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1511,7 +1506,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
 
     let alpha_one = IncreaseCounterCommand::new("alpha", 1);
     let alpha_one = CommandExecution::new(&fixture.store, &alpha_one)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1521,7 +1516,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
 
     let beta_one = IncreaseCounterCommand::new("beta", 10);
     let beta_one = CommandExecution::new(&fixture.store, &beta_one)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1531,7 +1526,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
 
     let alpha_two = IncreaseCounterCommand::new("alpha", 2);
     let alpha_two = CommandExecution::new(&fixture.store, &alpha_two)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1541,7 +1536,7 @@ async fn jetstream_command_execution_keeps_interleaved_stream_positions_isolated
 
     let beta_two = IncreaseCounterCommand::new("beta", 5);
     let beta_two = CommandExecution::new(&fixture.store, &beta_two)
-        .with_snapshot(Snapshots::new(&fixture.store, test_snapshot_config(), snapshot_policy))
+        .with_snapshot(Snapshots::new(&fixture.store, snapshot_policy))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1652,17 +1647,12 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: test_snapshot_config(),
             stream_id: "counter",
             snapshot: Snapshot::new(position(2), CounterState { total: 5 }),
         })
         .await?;
     let snapshot = CommandExecution::new(&fixture.store, &command)
-        .with_snapshot(Snapshots::new(
-            &fixture.store,
-            test_snapshot_config(),
-            FrequencySnapshot::new(NonZeroU64::MIN),
-        ))
+        .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await
@@ -1686,11 +1676,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
     let second_command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &second_command)
         .with_write_precondition(StreamWritePrecondition::NoStream)
-        .with_snapshot(Snapshots::new(
-            &fixture.store,
-            test_snapshot_config(),
-            FrequencySnapshot::new(NonZeroU64::MIN),
-        ))
+        .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
@@ -1703,10 +1689,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
 
     let snapshot: Option<Snapshot<CounterState>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: test_snapshot_config(),
-            stream_id: "counter",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "counter" })
         .await?
         .snapshot;
     assert_eq!(snapshot, None);
@@ -1810,7 +1793,6 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: test_snapshot_config(),
             stream_id: "counter",
             snapshot: Snapshot::new(position(10), CounterState { total: 10 }),
         })
@@ -1818,11 +1800,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command)
-        .with_snapshot(Snapshots::new(
-            &fixture.store,
-            test_snapshot_config(),
-            FrequencySnapshot::new(NonZeroU64::MIN),
-        ))
+        .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
@@ -1851,7 +1829,6 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: test_snapshot_config(),
             stream_id: "counter",
             snapshot: Snapshot::new(position(10), CounterState { total: 10 }),
         })
@@ -1859,11 +1836,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command)
-        .with_snapshot(Snapshots::new(
-            &fixture.store,
-            test_snapshot_config(),
-            FrequencySnapshot::new(NonZeroU64::MIN),
-        ))
+        .with_snapshot(Snapshots::new(&fixture.store, FrequencySnapshot::new(NonZeroU64::MIN)))
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
@@ -2668,14 +2641,11 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::with_checkpoint_name("snapshots.v1.", "last_event_sequence");
+    let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
 
     let missing: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot;
     assert_eq!(missing, None);
@@ -2683,7 +2653,6 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(2),
@@ -2696,7 +2665,6 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(1),
@@ -2709,7 +2677,6 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(3),
@@ -2722,7 +2689,6 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "beta",
             snapshot: Snapshot::new(
                 position(5),
@@ -2735,10 +2701,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 
     let loaded_alpha = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
@@ -2758,7 +2721,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .put("other.namespace", "ignored".into())
         .await?;
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshot_map.len(), 2);
     assert_eq!(snapshot_map.get("alpha"), Some(&loaded_alpha));
     assert_eq!(
@@ -2771,7 +2734,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         ))
     );
 
-    let snapshots: Vec<Snapshot<TestSnapshot>> = list_snapshots(fixture.store.snapshot_bucket(), &config).await?;
+    let snapshots: Vec<Snapshot<TestSnapshot>> = list_snapshots(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshots.len(), 2);
     assert!(snapshots.contains(&loaded_alpha));
     assert!(snapshots.contains(&Snapshot::new(
@@ -2781,30 +2744,21 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         }
     )));
 
-    persist_snapshot_change::<TestSnapshot>(
-        fixture.store.snapshot_bucket(),
-        &config,
-        SnapshotChange::delete("alpha"),
-    )
-    .await?;
+    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("alpha")).await?;
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot;
     assert_eq!(deleted_alpha, None);
 
     let snapshot_map_after_delete: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshot_map_after_delete.len(), 1);
     assert!(!snapshot_map_after_delete.contains_key("alpha"));
     assert!(snapshot_map_after_delete.contains_key("beta"));
 
-    let snapshots_after_delete: Vec<Snapshot<TestSnapshot>> =
-        list_snapshots(fixture.store.snapshot_bucket(), &config).await?;
+    let snapshots_after_delete: Vec<Snapshot<TestSnapshot>> = list_snapshots(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshots_after_delete.len(), 1);
     assert_eq!(
         snapshots_after_delete[0],
@@ -2819,7 +2773,6 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(4),
@@ -2831,10 +2784,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     let recreated_alpha = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist after recreate"))?;
@@ -2848,40 +2798,58 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         )
     );
 
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 0);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 2).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 0);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 1).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 1);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 3).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 1);
-    write_checkpoint(fixture.store.snapshot_bucket(), &config, 7).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 7);
-    fixture.store.snapshot_bucket().delete(checkpoint_key(&config)?).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 0);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 1).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 1);
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        0
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 2).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        0
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 1).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        1
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 3).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        1
+    );
+    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 7).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        7
+    );
+    fixture
+        .store
+        .snapshot_bucket()
+        .delete(checkpoint_key::<TestSnapshot>(&config)?)
+        .await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        0
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 1).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        1
+    );
 
     fixture
         .store
         .snapshot_bucket()
-        .put(snapshot_key(&config, "corrupt"), "not-json".into())
+        .put(snapshot_key::<TestSnapshot>("corrupt"), "not-json".into())
         .await?;
     assert_snapshot_error(
-        SnapshotRead::<TestSnapshot, str>::read_snapshot(
-            &fixture.store,
-            ReadSnapshotRequest {
-                config: config.clone(),
-                stream_id: "corrupt",
-            },
-        )
-        .await,
+        SnapshotRead::<TestSnapshot, str>::read_snapshot(&fixture.store, ReadSnapshotRequest { stream_id: "corrupt" })
+            .await,
     )?;
     assert_snapshot_error(
         fixture
             .store
             .write_snapshot(WriteSnapshotRequest {
-                config: config.clone(),
                 stream_id: "corrupt",
                 snapshot: Snapshot::new(
                     position(1),
@@ -2892,25 +2860,16 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
             })
             .await,
     )?;
-    persist_snapshot_change::<TestSnapshot>(
-        fixture.store.snapshot_bucket(),
-        &config,
-        SnapshotChange::delete("corrupt"),
-    )
-    .await?;
+    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("corrupt")).await?;
     let deleted_corrupt: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "corrupt",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "corrupt" })
         .await?
         .snapshot;
     assert_eq!(deleted_corrupt, None);
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "corrupt",
             snapshot: Snapshot::new(
                 position(2),
@@ -2922,10 +2881,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .await?;
     let recreated_corrupt = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "corrupt",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "corrupt" })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("corrupt snapshot key should be recreated"))?;
@@ -2942,11 +2898,18 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     fixture
         .store
         .snapshot_bucket()
-        .put(checkpoint_key(&config)?, "not-a-number".into())
+        .put(checkpoint_key::<TestSnapshot>(&config)?, "not-a-number".into())
         .await?;
-    assert!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await.is_err());
-    write_checkpoint(fixture.store.snapshot_bucket(), &config, 8).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 8);
+    assert!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config)
+            .await
+            .is_err()
+    );
+    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 8).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        8
+    );
 
     fixture.delete().await
 }
@@ -2955,14 +2918,11 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.concurrent.");
     let results = join_all((1..=32).map(|version| {
         let store = fixture.store.clone();
-        let config = config.clone();
         async move {
             store
                 .write_snapshot(WriteSnapshotRequest {
-                    config,
                     stream_id: "alpha",
                     snapshot: Snapshot::new(
                         position(version),
@@ -2982,10 +2942,7 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
 
     let loaded = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config,
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot
         .ok_or_else(|| std::io::Error::other("alpha snapshot should exist"))?;
@@ -3006,12 +2963,10 @@ async fn jetstream_snapshot_store_concurrent_upserts_keep_highest_version() -> T
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.consistency.");
 
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(1),
@@ -3024,7 +2979,6 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(2),
@@ -3037,7 +2991,6 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "beta",
             snapshot: Snapshot::new(
                 position(3),
@@ -3050,7 +3003,6 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "gamma",
             snapshot: Snapshot::new(
                 position(4),
@@ -3060,15 +3012,10 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
             ),
         })
         .await?;
-    persist_snapshot_change::<TestSnapshot>(
-        fixture.store.snapshot_bucket(),
-        &config,
-        SnapshotChange::delete("gamma"),
-    )
-    .await?;
+    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("gamma")).await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshot_map.len(), 2);
     assert_eq!(
         snapshot_map.get("alpha"),
@@ -3090,7 +3037,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     );
     assert!(!snapshot_map.contains_key("gamma"));
 
-    let mut listed = list_snapshots::<TestSnapshot>(fixture.store.snapshot_bucket(), &config)
+    let mut listed = list_snapshots::<TestSnapshot>(fixture.store.snapshot_bucket())
         .await?
         .into_iter()
         .map(|snapshot| (snapshot.position.as_u64(), snapshot.payload.value))
@@ -3105,11 +3052,9 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.delete.");
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(1),
@@ -3120,32 +3065,23 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
         })
         .await?;
 
-    let results =
-        join_all(
-            (0..24).map(|_| {
-                let bucket = fixture.store.snapshot_bucket().clone();
-                let config = config.clone();
-                async move {
-                    persist_snapshot_change::<TestSnapshot>(&bucket, &config, SnapshotChange::delete("alpha")).await
-                }
-            }),
-        )
-        .await;
+    let results = join_all((0..24).map(|_| {
+        let bucket = fixture.store.snapshot_bucket().clone();
+        async move { persist_snapshot_change::<TestSnapshot>(&bucket, SnapshotChange::delete("alpha")).await }
+    }))
+    .await;
     for result in results {
         result?;
     }
 
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
-        .read_snapshot(ReadSnapshotRequest {
-            config: config.clone(),
-            stream_id: "alpha",
-        })
+        .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
         .await?
         .snapshot;
     assert_eq!(deleted_alpha, None);
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await?;
     assert!(!snapshot_map.contains_key("alpha"));
 
     fixture.delete().await
@@ -3155,36 +3091,51 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_checkpoint_concurrent_advances_once_and_never_rewinds() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::with_checkpoint_name("snapshots.checkpoint.", "last_event_sequence");
+    let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
 
     let first_results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { maybe_advance_checkpoint(&bucket, &config, 1).await }
+        async move { maybe_advance_checkpoint::<TestSnapshot>(&bucket, &config, 1).await }
     }))
     .await;
     for result in first_results {
         result?;
     }
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 1);
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        1
+    );
 
     let second_results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { maybe_advance_checkpoint(&bucket, &config, 2).await }
+        async move { maybe_advance_checkpoint::<TestSnapshot>(&bucket, &config, 2).await }
     }))
     .await;
     for result in second_results {
         result?;
     }
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 2);
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        2
+    );
 
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 4).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 2);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 3).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 3);
-    maybe_advance_checkpoint(fixture.store.snapshot_bucket(), &config, 2).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 3);
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 4).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        2
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 3).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        3
+    );
+    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 2).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        3
+    );
 
     fixture.delete().await
 }
@@ -3193,23 +3144,36 @@ async fn jetstream_snapshot_checkpoint_concurrent_advances_once_and_never_rewind
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_checkpoint_concurrent_writes_are_idempotent() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::with_checkpoint_name("snapshots.write-checkpoint.", "last_event_sequence");
+    let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
 
     let results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { write_checkpoint(&bucket, &config, 9).await }
+        async move { write_checkpoint::<TestSnapshot>(&bucket, &config, 9).await }
     }))
     .await;
     for result in results {
         result?;
     }
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 9);
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        9
+    );
 
-    fixture.store.snapshot_bucket().delete(checkpoint_key(&config)?).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 0);
-    write_checkpoint(fixture.store.snapshot_bucket(), &config, 10).await?;
-    assert_eq!(read_checkpoint(fixture.store.snapshot_bucket(), &config).await?, 10);
+    fixture
+        .store
+        .snapshot_bucket()
+        .delete(checkpoint_key::<TestSnapshot>(&config)?)
+        .await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        0
+    );
+    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 10).await?;
+    assert_eq!(
+        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        10
+    );
 
     fixture.delete().await
 }
@@ -3218,12 +3182,12 @@ async fn jetstream_snapshot_checkpoint_concurrent_writes_are_idempotent() -> Tes
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_rejects_invalid_snapshot_key_from_live_bucket_listing() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.invalid");
+    let invalid_key = TestSnapshot::SNAPSHOT_STREAM_PREFIX;
     fixture
         .store
         .snapshot_bucket()
         .put(
-            config.key_prefix(),
+            invalid_key,
             serde_json::to_vec(&Snapshot::new(
                 position(1),
                 TestSnapshot {
@@ -3235,10 +3199,10 @@ async fn jetstream_snapshot_store_rejects_invalid_snapshot_key_from_live_bucket_
         .await?;
 
     let result: Result<std::collections::BTreeMap<String, Snapshot<TestSnapshot>>, SnapshotStoreError> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await;
     assert!(matches!(
         result,
-        Err(SnapshotStoreError::InvalidSnapshotKey { key }) if key == config.key_prefix()
+        Err(SnapshotStoreError::InvalidSnapshotKey { key }) if key == invalid_key
     ));
 
     fixture.delete().await
@@ -3248,11 +3212,9 @@ async fn jetstream_snapshot_store_rejects_invalid_snapshot_key_from_live_bucket_
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_listing() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.corrupt.");
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(1),
@@ -3265,11 +3227,11 @@ async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_list
     fixture
         .store
         .snapshot_bucket()
-        .put(snapshot_key(&config, "corrupt"), "not-json".into())
+        .put(snapshot_key::<TestSnapshot>("corrupt"), "not-json".into())
         .await?;
 
     let result: Result<std::collections::BTreeMap<String, Snapshot<TestSnapshot>>, SnapshotStoreError> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await;
     match result {
         Err(SnapshotStoreError::Kv { .. }) => {}
         other => return Err(std::io::Error::other(format!("expected corrupt snapshot error, got {other:?}")).into()),
@@ -3282,11 +3244,9 @@ async fn jetstream_snapshot_store_rejects_corrupt_snapshot_from_live_bucket_list
 #[ignore = "requires actual NATS JetStream"]
 async fn jetstream_snapshot_store_ignores_corrupt_entries_outside_snapshot_namespace() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
-    let config = SnapshotStoreConfig::without_checkpoint("snapshots.clean.");
     fixture
         .store
         .write_snapshot(WriteSnapshotRequest {
-            config: config.clone(),
             stream_id: "alpha",
             snapshot: Snapshot::new(
                 position(1),
@@ -3303,7 +3263,7 @@ async fn jetstream_snapshot_store_ignores_corrupt_entries_outside_snapshot_names
         .await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
-        read_snapshot_map(fixture.store.snapshot_bucket(), &config).await?;
+        read_snapshot_map(fixture.store.snapshot_bucket()).await?;
     assert_eq!(snapshot_map.len(), 1);
     assert_eq!(
         snapshot_map.get("alpha"),

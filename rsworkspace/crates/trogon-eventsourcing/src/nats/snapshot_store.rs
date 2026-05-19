@@ -2,9 +2,9 @@ use async_nats::jetstream::kv;
 use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Serialize, de::DeserializeOwned};
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
-use crate::snapshot::{Snapshot, SnapshotChange, SnapshotStoreConfig};
+use crate::snapshot::{Snapshot, SnapshotType};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -14,6 +14,59 @@ pub enum SnapshotStoreError {
     InvalidSnapshotKey { key: String },
     MissingCheckpointName { key_prefix: String },
     Serde(serde_json::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NatsSnapshotConfig {
+    checkpoint_name: Option<Cow<'static, str>>,
+}
+
+impl NatsSnapshotConfig {
+    pub const fn without_checkpoint() -> Self {
+        Self { checkpoint_name: None }
+    }
+
+    pub fn with_checkpoint_name(checkpoint_name: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            checkpoint_name: Some(checkpoint_name.into()),
+        }
+    }
+
+    pub fn checkpoint_name(&self) -> Option<&str> {
+        self.checkpoint_name.as_deref()
+    }
+}
+
+impl Default for NatsSnapshotConfig {
+    fn default() -> Self {
+        Self::without_checkpoint()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SnapshotChange<T> {
+    Upsert {
+        stream_id: String,
+        snapshot: Box<Snapshot<T>>,
+    },
+    Delete {
+        stream_id: String,
+    },
+}
+
+impl<T> SnapshotChange<T> {
+    pub fn upsert(stream_id: impl Into<String>, snapshot: Snapshot<T>) -> Self {
+        Self::Upsert {
+            stream_id: stream_id.into(),
+            snapshot: Box::new(snapshot),
+        }
+    }
+
+    pub fn delete(stream_id: impl Into<String>) -> Self {
+        Self::Delete {
+            stream_id: stream_id.into(),
+        }
+    }
 }
 
 impl SnapshotStoreError {
@@ -59,27 +112,36 @@ impl From<serde_json::Error> for SnapshotStoreError {
     }
 }
 
-pub fn snapshot_key(config: &SnapshotStoreConfig, id: &str) -> String {
-    format!("{}{}", config.key_prefix(), id)
+pub fn snapshot_key<T>(id: &str) -> String
+where
+    T: SnapshotType,
+{
+    format!("{}{}", T::SNAPSHOT_STREAM_PREFIX, id)
 }
 
-pub fn checkpoint_key(config: &SnapshotStoreConfig) -> Result<String, SnapshotStoreError> {
+pub fn checkpoint_key<T>(config: &NatsSnapshotConfig) -> Result<String, SnapshotStoreError>
+where
+    T: SnapshotType,
+{
     config
         .checkpoint_name()
         .map(|checkpoint_name| {
             format!(
                 "_snapshot.{}.{}",
-                config.key_prefix().trim_end_matches('.'),
+                T::SNAPSHOT_STREAM_PREFIX.trim_end_matches('.'),
                 checkpoint_name
             )
         })
         .ok_or_else(|| SnapshotStoreError::MissingCheckpointName {
-            key_prefix: config.key_prefix().to_string(),
+            key_prefix: T::SNAPSHOT_STREAM_PREFIX.to_string(),
         })
 }
 
-fn stream_id_from_snapshot_key(config: &SnapshotStoreConfig, key: &str) -> Result<Option<String>, SnapshotStoreError> {
-    let Some(stream_id) = key.strip_prefix(config.key_prefix()) else {
+fn stream_id_from_snapshot_key<T>(key: &str) -> Result<Option<String>, SnapshotStoreError>
+where
+    T: SnapshotType,
+{
+    let Some(stream_id) = key.strip_prefix(T::SNAPSHOT_STREAM_PREFIX) else {
         return Ok(None);
     };
 
@@ -90,12 +152,9 @@ fn stream_id_from_snapshot_key(config: &SnapshotStoreConfig, key: &str) -> Resul
     Ok(Some(stream_id.to_string()))
 }
 
-async fn read_snapshot_entries<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
+async fn read_snapshot_entries<T>(bucket: &kv::Store) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + SnapshotType,
 {
     let mut keys = bucket
         .keys()
@@ -106,7 +165,7 @@ where
     while let Some(result) = keys.next().await {
         let key =
             result.map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot key", source))?;
-        let Some(stream_id) = stream_id_from_snapshot_key(config, &key)? else {
+        let Some(stream_id) = stream_id_from_snapshot_key::<T>(&key)? else {
             continue;
         };
         let Some(value) = bucket
@@ -124,16 +183,12 @@ where
     Ok(snapshots)
 }
 
-pub async fn read_snapshot<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-    id: &str,
-) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot<T>(bucket: &kv::Store, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + SnapshotType,
 {
     let Some(value) = bucket
-        .get(snapshot_key(config, id))
+        .get(snapshot_key::<T>(id))
         .await
         .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot entry", source))?
     else {
@@ -145,67 +200,65 @@ where
         .map_err(|source| SnapshotStoreError::kv_source("failed to decode stream snapshot entry", source))
 }
 
-pub async fn write_snapshot<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-    id: &str,
-    snapshot: Snapshot<T>,
-) -> Result<(), SnapshotStoreError>
+pub async fn write_snapshot<T>(bucket: &kv::Store, id: &str, snapshot: Snapshot<T>) -> Result<(), SnapshotStoreError>
 where
-    T: Serialize + DeserializeOwned,
+    T: Serialize + DeserializeOwned + SnapshotType,
 {
-    persist_snapshot_change(bucket, config, SnapshotChange::upsert(id, snapshot)).await
+    persist_snapshot_change(bucket, SnapshotChange::upsert(id, snapshot)).await
 }
 
-pub async fn list_snapshots<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
+pub async fn list_snapshots<T>(bucket: &kv::Store) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + SnapshotType,
 {
-    read_snapshot_entries(bucket, config)
+    read_snapshot_entries(bucket)
         .await
         .map(|entries| entries.into_iter().map(|(_, snapshot)| snapshot).collect())
 }
 
-pub async fn read_snapshot_map<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot_map<T>(bucket: &kv::Store) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + SnapshotType,
 {
-    read_snapshot_entries(bucket, config)
+    read_snapshot_entries(bucket)
         .await
         .map(|entries| entries.into_iter().collect())
 }
 
-pub async fn read_checkpoint(bucket: &kv::Store, config: &SnapshotStoreConfig) -> Result<u64, SnapshotStoreError> {
-    let (_revision, sequence) = read_checkpoint_entry(bucket, config).await?;
+pub async fn read_checkpoint<T>(bucket: &kv::Store, config: &NatsSnapshotConfig) -> Result<u64, SnapshotStoreError>
+where
+    T: SnapshotType,
+{
+    let (_revision, sequence) = read_checkpoint_entry::<T>(bucket, config).await?;
     Ok(sequence)
 }
 
-pub async fn write_checkpoint(
+pub async fn write_checkpoint<T>(
     bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
+    config: &NatsSnapshotConfig,
     sequence: u64,
-) -> Result<(), SnapshotStoreError> {
-    write_kv_value(bucket, &checkpoint_key(config)?, checkpoint_value(sequence)).await
+) -> Result<(), SnapshotStoreError>
+where
+    T: SnapshotType,
+{
+    write_kv_value(bucket, &checkpoint_key::<T>(config)?, checkpoint_value(sequence)).await
 }
 
-pub async fn maybe_advance_checkpoint(
+pub async fn maybe_advance_checkpoint<T>(
     bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
+    config: &NatsSnapshotConfig,
     sequence: u64,
-) -> Result<(), SnapshotStoreError> {
+) -> Result<(), SnapshotStoreError>
+where
+    T: SnapshotType,
+{
     let expected_previous = sequence.saturating_sub(1);
-    let (revision, current_sequence) = read_checkpoint_entry(bucket, config).await?;
+    let (revision, current_sequence) = read_checkpoint_entry::<T>(bucket, config).await?;
     if current_sequence != expected_previous {
         return Ok(());
     }
 
-    let checkpoint_key = checkpoint_key(config)?;
+    let checkpoint_key = checkpoint_key::<T>(config)?;
     let value = checkpoint_value(sequence);
     match revision {
         Some(revision) => match bucket.update(&checkpoint_key, value.into(), revision).await {
@@ -227,22 +280,18 @@ pub async fn maybe_advance_checkpoint(
     }
 }
 
-pub async fn persist_snapshot_change<T>(
-    bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-    change: SnapshotChange<T>,
-) -> Result<(), SnapshotStoreError>
+pub async fn persist_snapshot_change<T>(bucket: &kv::Store, change: SnapshotChange<T>) -> Result<(), SnapshotStoreError>
 where
-    T: Serialize + DeserializeOwned,
+    T: Serialize + DeserializeOwned + SnapshotType,
 {
     match change {
         SnapshotChange::Upsert { stream_id, snapshot } => {
             let snapshot_position = snapshot.position;
             let value = serde_json::to_vec(snapshot.as_ref())?;
-            write_snapshot_value::<T>(bucket, &snapshot_key(config, &stream_id), snapshot_position, value).await?;
+            write_snapshot_value::<T>(bucket, &snapshot_key::<T>(&stream_id), snapshot_position, value).await?;
         }
         SnapshotChange::Delete { stream_id } => {
-            delete_kv_value(bucket, &snapshot_key(config, &stream_id)).await?;
+            delete_kv_value(bucket, &snapshot_key::<T>(&stream_id)).await?;
         }
     }
 
@@ -253,11 +302,14 @@ fn checkpoint_value(sequence: u64) -> Vec<u8> {
     sequence.to_string().into_bytes()
 }
 
-async fn read_checkpoint_entry(
+async fn read_checkpoint_entry<T>(
     bucket: &kv::Store,
-    config: &SnapshotStoreConfig,
-) -> Result<(Option<u64>, u64), SnapshotStoreError> {
-    let checkpoint_key = checkpoint_key(config)?;
+    config: &NatsSnapshotConfig,
+) -> Result<(Option<u64>, u64), SnapshotStoreError>
+where
+    T: SnapshotType,
+{
+    let checkpoint_key = checkpoint_key::<T>(config)?;
     let Some(entry) = bucket
         .entry(checkpoint_key.clone())
         .await
@@ -395,7 +447,7 @@ async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotSt
 mod tests {
     use super::*;
     use crate::StreamPosition;
-    use crate::snapshot::SnapshotSchema;
+    use crate::snapshot::SnapshotType;
     use serde::{Deserialize, Serialize};
 
     fn position(value: u64) -> StreamPosition {
@@ -407,53 +459,39 @@ mod tests {
         id: String,
     }
 
-    struct TestSchema;
-
-    impl SnapshotSchema for TestSchema {
+    impl SnapshotType for TestPayload {
         const SNAPSHOT_STREAM_PREFIX: &'static str = "snapshots.v2.";
-        const CHECKPOINT_NAME: Option<&'static str> = Some("last_event_sequence");
     }
 
     #[test]
-    fn snapshot_store_config_exposes_values() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
+    fn nats_snapshot_config_exposes_checkpoint_name() {
+        let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
 
-        assert_eq!(config.key_prefix(), "snapshots.v2.");
         assert_eq!(config.checkpoint_name(), Some("last_event_sequence"));
     }
 
     #[test]
-    fn snapshot_store_config_derives_keys_from_schema() {
-        let config = TestSchema::snapshot_store_config();
-
-        assert_eq!(config.key_prefix(), "snapshots.v2.");
-        assert_eq!(config.checkpoint_name(), Some("last_event_sequence"));
-    }
-
-    #[test]
-    fn snapshot_key_uses_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
-
-        assert_eq!(snapshot_key(&config, "backup"), "snapshots.v2.backup");
+    fn snapshot_key_uses_snapshot_type_prefix() {
+        assert_eq!(snapshot_key::<TestPayload>("backup"), "snapshots.v2.backup");
     }
 
     #[test]
     fn checkpoint_key_uses_nats_specific_format() {
-        let config = SnapshotStoreConfig::new("snapshots.v3.", Some("last_event_sequence"));
+        let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
 
         assert_eq!(
-            checkpoint_key(&config).unwrap(),
-            "_snapshot.snapshots.v3.last_event_sequence"
+            checkpoint_key::<TestPayload>(&config).unwrap(),
+            "_snapshot.snapshots.v2.last_event_sequence"
         );
     }
 
     #[test]
     fn checkpoint_key_requires_configured_name() {
-        let config = SnapshotStoreConfig::new("snapshots.v3.", None);
+        let config = NatsSnapshotConfig::without_checkpoint();
 
         assert_eq!(
-            checkpoint_key(&config).unwrap_err().to_string(),
-            "Missing checkpoint name for snapshot namespace: snapshots.v3."
+            checkpoint_key::<TestPayload>(&config).unwrap_err().to_string(),
+            "Missing checkpoint name for snapshot namespace: snapshots.v2."
         );
     }
 
@@ -522,24 +560,20 @@ mod tests {
 
     #[test]
     fn stream_id_from_snapshot_key_uses_configured_prefix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
-
         assert_eq!(
-            stream_id_from_snapshot_key(&config, "snapshots.v2.backup").unwrap(),
+            stream_id_from_snapshot_key::<TestPayload>("snapshots.v2.backup").unwrap(),
             Some("backup".to_string())
         );
         assert_eq!(
-            stream_id_from_snapshot_key(&config, "snapshots.v1.backup").unwrap(),
+            stream_id_from_snapshot_key::<TestPayload>("snapshots.v1.backup").unwrap(),
             None
         );
     }
 
     #[test]
     fn stream_id_from_snapshot_key_rejects_empty_suffix() {
-        let config = SnapshotStoreConfig::new("snapshots.v2.", Some("last_event_sequence"));
-
         assert_eq!(
-            stream_id_from_snapshot_key(&config, "snapshots.v2.")
+            stream_id_from_snapshot_key::<TestPayload>("snapshots.v2.")
                 .unwrap_err()
                 .to_string(),
             "Invalid stream snapshot key: snapshots.v2."

@@ -84,7 +84,6 @@ impl CommandSnapshotPolicy for PauseJobCommand {
 mod tests {
     use buffa::MessageField;
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::snapshot::SnapshotSchema;
     use trogon_eventsourcing::{CommandExecution, Events, run_task_immediately};
 
     use super::*;
@@ -199,10 +198,7 @@ mod tests {
         assert_eq!(job.status, JobEventStatus::Disabled);
 
         let command_snapshot = store
-            .read_command_snapshot::<state_v1::State>(
-                state_v1::State::snapshot_store_config(),
-                &JobId::parse("backup").unwrap(),
-            )
+            .read_command_snapshot::<state_v1::State>(&JobId::parse("backup").unwrap())
             .unwrap();
         assert!(command_snapshot.is_none());
     }
