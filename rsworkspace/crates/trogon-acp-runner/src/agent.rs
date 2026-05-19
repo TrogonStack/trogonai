@@ -1159,6 +1159,49 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client
                 .map_err(|e| internal_error(e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/export" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str()
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
+            let state = self.store.load(session_id).await
+                .map_err(|e| internal_error(e.to_string()))?;
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = state.messages.iter()
+                .map(|m| {
+                    let text = m.content.iter().filter_map(|b| match b {
+                        AgentContentBlock::Text { text } => Some(text.as_str()),
+                        AgentContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                        _ => None,
+                    }).collect::<Vec<_>>().join("\n");
+                    trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text }
+                })
+                .collect();
+            let raw = serde_json::to_string(&portable)
+                .map_err(|e| internal_error(e.to_string()))?;
+            return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
+                .map_err(|e| internal_error(e.to_string()))?.into()));
+        }
+        if args.method.as_ref() == "session/import" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str()
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
+            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_value(params["messages"].clone())
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let mut state = self.store.load(session_id).await.unwrap_or_default();
+            state.messages = messages.into_iter()
+                .map(|m| Message {
+                    role: m.role,
+                    content: vec![AgentContentBlock::Text { text: m.text }],
+                })
+                .collect();
+            state.updated_at = now_iso8601();
+            self.store.save(session_id, &state).await
+                .map_err(|e| internal_error(e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -1303,5 +1346,455 @@ mod tests {
         let threshold = budget * 85 / 100; // 85
         // estimate == threshold → condition false → no compact
         assert!(!(threshold > threshold), "strictly greater-than must be false at the boundary");
+    }
+
+    // ── ext_method: session/export and session/import ─────────────────────────
+
+    #[cfg(feature = "test-helpers")]
+    use agent_client_protocol::Agent as _;
+
+    #[cfg(feature = "test-helpers")]
+    fn make_export_params(session_id: &str) -> std::sync::Arc<serde_json::value::RawValue> {
+        serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId": session_id}).to_string(),
+        )
+        .unwrap()
+        .into()
+    }
+
+    #[cfg(feature = "test-helpers")]
+    fn make_import_params(
+        session_id: &str,
+        messages: serde_json::Value,
+    ) -> std::sync::Arc<serde_json::value::RawValue> {
+        serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId": session_id, "messages": messages}).to_string(),
+        )
+        .unwrap()
+        .into()
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_returns_portable_messages() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let state = SessionState {
+            messages: vec![
+                Message::user_text("hello"),
+                Message::assistant(vec![AgentContentBlock::Text {
+                    text: "world".into(),
+                }]),
+            ],
+            ..Default::default()
+        };
+        store_clone.save("s1", &state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("s1")))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 2);
+        assert_eq!(portable[0].role, "user");
+        assert_eq!(portable[0].text, "hello");
+        assert_eq!(portable[1].role, "assistant");
+        assert_eq!(portable[1].text, "world");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_import_saves_to_store() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let params = make_import_params(
+            "s1",
+            serde_json::json!([{"role": "user", "text": "imported"}]),
+        );
+
+        agent
+            .ext_method(ExtRequest::new("session/import", params))
+            .await
+            .unwrap();
+
+        let state = store_clone.load("s1").await.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        assert_eq!(state.messages[0].role, "user");
+        match &state.messages[0].content[0] {
+            AgentContentBlock::Text { text } => assert_eq!(text, "imported"),
+            _ => panic!("expected Text block"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_unknown_session_returns_empty_list() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new(
+                "session/export",
+                make_export_params("no-such"),
+            ))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 0);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_missing_session_id_returns_error() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let params: std::sync::Arc<serde_json::value::RawValue> =
+            serde_json::value::RawValue::from_string("{}".to_string())
+                .unwrap()
+                .into();
+
+        let result = agent
+            .ext_method(ExtRequest::new("session/export", params))
+            .await;
+
+        assert!(result.is_err(), "missing sessionId must return an error");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_import_round_trip() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        // Pre-populate "src"
+        let src_state = SessionState {
+            messages: vec![
+                Message::user_text("q"),
+                Message::assistant(vec![AgentContentBlock::Text { text: "a".into() }]),
+            ],
+            ..Default::default()
+        };
+        store_clone.save("src", &src_state).await.unwrap();
+
+        // Pre-populate empty "dst"
+        let dst_state = SessionState::default();
+        store_clone.save("dst", &dst_state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        // Export from "src"
+        let export_resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("src")))
+            .await
+            .unwrap();
+
+        let exported_messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(export_resp.0.get()).unwrap();
+
+        // Import into "dst"
+        let import_params = make_import_params(
+            "dst",
+            serde_json::to_value(&exported_messages).unwrap(),
+        );
+        agent
+            .ext_method(ExtRequest::new("session/import", import_params))
+            .await
+            .unwrap();
+
+        // Verify "dst" now has the same messages as "src"
+        let dst_loaded = store_clone.load("dst").await.unwrap();
+        assert_eq!(dst_loaded.messages.len(), 2);
+        assert_eq!(dst_loaded.messages[0].role, "user");
+        assert_eq!(dst_loaded.messages[1].role, "assistant");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_import_updates_updated_at() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        // Save session "ts1" with empty messages and empty updated_at
+        let initial_state = SessionState {
+            updated_at: String::new(),
+            ..Default::default()
+        };
+        store_clone.save("ts1", &initial_state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let params = make_import_params(
+            "ts1",
+            serde_json::json!([{"role": "user", "text": "hello"}]),
+        );
+
+        agent
+            .ext_method(ExtRequest::new("session/import", params))
+            .await
+            .unwrap();
+
+        let state = store_clone.load("ts1").await.unwrap();
+        assert!(
+            !state.updated_at.is_empty(),
+            "updated_at must be set after import"
+        );
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_includes_tool_result_content() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![AgentContentBlock::ToolResult {
+                    tool_use_id: "call-1".to_string(),
+                    content: "tool output here".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store_clone.save("tr1", &state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr1")))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 1);
+        assert_eq!(portable[0].role, "user");
+        assert_eq!(portable[0].text, "tool output here");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_mixed_text_and_tool_result() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![
+                    AgentContentBlock::Text { text: "before".to_string() },
+                    AgentContentBlock::ToolResult {
+                        tool_use_id: "c2".to_string(),
+                        content: "result".to_string(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        store_clone.save("tr2", &state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr2")))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 1);
+        assert_eq!(portable[0].text, "before\nresult");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_drops_tool_use_blocks() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::ToolUse {
+                    id: "call-x".to_string(),
+                    name: "read_file".to_string(),
+                    input: serde_json::json!({"path": "/tmp/foo"}),
+                    parent_tool_use_id: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        store_clone.save("tu1", &state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tu1")))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 1);
+        assert_eq!(portable[0].text, "", "ToolUse block must be dropped (empty text)");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_drops_thinking_blocks() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::Thinking {
+                    thinking: "internal reasoning".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store_clone.save("th1", &state).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("th1")))
+            .await
+            .unwrap();
+
+        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(portable.len(), 1);
+        assert_eq!(portable[0].text, "", "Thinking block must be dropped (empty text)");
     }
 }
