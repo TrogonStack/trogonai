@@ -500,3 +500,46 @@ async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
         })
         .await;
 }
+
+// ── PR 15: _meta.systemPrompt stored in session state ────────────────────────
+
+/// Verifies that _meta.systemPrompt set on new_session is stored in the
+/// in-memory session and readable via ext session/get_state.
+#[tokio::test]
+async fn new_session_meta_system_prompt_stored_in_session_state() {
+    use agent_client_protocol::ExtRequest;
+
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = make_agent(store);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+        let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+            serde_json::json!({ "systemPrompt": "act like a pirate" }),
+        )
+        .unwrap();
+        let resp = agent
+            .new_session(NewSessionRequest::new(PathBuf::from("/tmp")).meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": session_id }).to_string(),
+        )
+        .unwrap();
+        let ext_resp = agent
+            .ext_method(ExtRequest::new("session/get_state", raw_params.into()))
+            .await
+            .unwrap();
+        let state: serde_json::Value =
+            serde_json::from_str(ext_resp.0.get()).unwrap();
+        assert_eq!(
+            state["system_prompt"].as_str(),
+            Some("act like a pirate"),
+            "_meta.systemPrompt must be stored in the session state"
+        );
+        })
+        .await;
+}
