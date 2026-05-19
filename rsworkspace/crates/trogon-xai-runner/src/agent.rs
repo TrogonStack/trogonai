@@ -58,12 +58,16 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_sea
 const MAX_SESSIONS: usize = 100;
 
 /// Returns the context-window size (in tokens) for a known xAI model.
-/// Matched by prefix so that dated variants (e.g. `grok-3-mini-fast`) also resolve.
+/// More-specific prefixes are checked before broader ones.
 fn context_window_tokens(model_id: &str) -> u64 {
-    if model_id.starts_with("grok-4") {
+    // grok-4-fast variants (including grok-4-fast-reasoning, grok-4.1-fast, etc.) → 2M
+    if model_id.contains("grok-4-fast") || model_id.contains("grok-4.1") {
+        2_000_000
+    } else if model_id.starts_with("grok-4") {
+        // Plain grok-4 / grok-4-0709 → 256K
         256_000
     } else {
-        // grok-3, grok-3-mini, grok-3-mini-fast, grok-2, and any future variants
+        // grok-3, grok-3-mini, grok-3-mini-fast, grok-2, and any future variants → 131K
         131_072
     }
 }
