@@ -11,18 +11,6 @@ use crate::{
 use trogon_decider::DecisionFailure;
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64};
-type ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError> =
-    CommandError<
-        <C as Decider>::DecideError,
-        <C as Decider>::EvolveError,
-        ReadSnapshotError,
-        ReadStreamError,
-        AppendStreamError,
-        EncodeError,
-        DecodeError,
-    >;
-type ExecutionStep<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError, T> =
-    Result<T, ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>>;
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
 type CommandEventEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
@@ -223,6 +211,48 @@ pub enum CommandError<
         snapshot_position: StreamPosition,
         stream_position: Option<StreamPosition>,
     },
+}
+
+enum ReplayStreamError<EvolveError, DecodeError> {
+    Evolve(EvolveError),
+    DecodeEvent(DecodeError),
+}
+
+enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError> {
+    Decide(DecideError),
+    Evolve(EvolveError),
+    Append(AppendStreamError),
+    EncodeEvent(EncodeError),
+}
+
+impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
+    CommandError<
+        DecideError,
+        EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        EncodeError,
+        DecodeError,
+    >
+{
+    fn from_replay_stream(error: ReplayStreamError<EvolveError, DecodeError>) -> Self {
+        match error {
+            ReplayStreamError::Evolve(error) => Self::Evolve(error),
+            ReplayStreamError::DecodeEvent(error) => Self::DecodeEvent(error),
+        }
+    }
+
+    fn from_append_decision(
+        error: AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>,
+    ) -> Self {
+        match error {
+            AppendDecisionError::Decide(error) => Self::Decide(error),
+            AppendDecisionError::Evolve(error) => Self::Evolve(error),
+            AppendDecisionError::Append(error) => Self::Append(error),
+            AppendDecisionError::EncodeEvent(error) => Self::EncodeEvent(error),
+        }
+    }
 }
 
 impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
@@ -437,19 +467,19 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    async fn append_decision<ReadSnapshotError, ReadStreamError, DecodeError>(
+    async fn append_decision(
         &self,
         current_position: Option<StreamPosition>,
         stream_id: &C::StreamId,
         state: C::State,
-    ) -> ExecutionStep<
-        C,
-        ReadSnapshotError,
-        ReadStreamError,
-        CommandAppendStreamError<E, C>,
-        CommandEventEncodeFailure<C>,
-        DecodeError,
+    ) -> Result<
         (AppendStreamResponse, Events<C::Event>, C::State),
+        AppendDecisionError<
+            C::DecideError,
+            C::EvolveError,
+            CommandAppendStreamError<E, C>,
+            CommandEventEncodeFailure<C>,
+        >,
     >
     where
         C: Decider,
@@ -459,18 +489,12 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
         CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
         CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
-        let decision = C::decide(&state, self.command).map_err(CommandError::Decide)?;
-        let (state, events) = decision.handle(state, self.command).map_err(
-            decision_failure_to_command_failure::<
-                C,
-                ReadSnapshotError,
-                ReadStreamError,
-                CommandAppendStreamError<E, C>,
-                CommandEventEncodeFailure<C>,
-                DecodeError,
-            >,
-        )?;
-        let encoded_events = encode_events(&events).map_err(CommandError::EncodeEvent)?;
+        let decision = C::decide(&state, self.command).map_err(AppendDecisionError::Decide)?;
+        let (state, events) = decision.handle(state, self.command).map_err(|failure| match failure {
+            DecisionFailure::Decide(error) => AppendDecisionError::Decide(error),
+            DecisionFailure::Evolve(error) => AppendDecisionError::Evolve(error),
+        })?;
+        let encoded_events = encode_events(&events).map_err(AppendDecisionError::EncodeEvent)?;
         let stream_write_precondition =
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -481,7 +505,7 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
                 events: encoded_events,
             })
             .await
-            .map_err(CommandError::Append)?;
+            .map_err(AppendDecisionError::Append)?;
 
         Ok((append_outcome, events, state))
     }
@@ -522,20 +546,12 @@ where
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
-        let state = replay_stream_events::<
-            C,
-            std::convert::Infallible,
-            CommandReadStreamError<E, C>,
-            CommandAppendStreamError<E, C>,
-            CommandEventEncodeFailure<C>,
-        >(C::initial_state(), stream_read.events)?;
+        let state = replay_stream_events::<C>(C::initial_state(), stream_read.events)
+            .map_err(CommandError::from_replay_stream)?;
         let (append_outcome, events, state) = self
-            .append_decision::<std::convert::Infallible, CommandReadStreamError<E, C>, CommandEventDecodeError<C>>(
-                current_position,
-                stream_id,
-                state,
-            )
-            .await?;
+            .append_decision(current_position, stream_id, state)
+            .await
+            .map_err(CommandError::from_append_decision)?;
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -601,24 +617,11 @@ where
         }
 
         let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_stream_events::<
-            C,
-            CommandReadSnapshotError<S, C>,
-            CommandReadStreamError<E, C>,
-            CommandAppendStreamError<E, C>,
-            CommandEventEncodeFailure<C>,
-        >(state, stream_read.events)?;
+        let state = replay_stream_events::<C>(state, stream_read.events).map_err(CommandError::from_replay_stream)?;
         let (append_outcome, events, state) = self
-            .append_decision::<
-                CommandReadSnapshotError<S, C>,
-                CommandReadStreamError<E, C>,
-                CommandEventDecodeError<C>,
-            >(
-                current_position,
-                stream_id,
-                state,
-            )
-            .await?;
+            .append_decision(current_position, stream_id, state)
+            .await
+            .map_err(CommandError::from_append_decision)?;
         let events_since_snapshot = replayed_event_count + events.len() as u64;
 
         // Keep the policy decision inline: for frequency policies it is cheaper
@@ -700,48 +703,23 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     });
 }
 
-fn replay_stream_events<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError>(
+fn replay_stream_events<C>(
     mut state: C::State,
     stream_events: Vec<StreamEvent>,
-) -> ExecutionStep<
-    C,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EncodeError,
-    CommandEventDecodeError<C>,
-    C::State,
->
+) -> Result<C::State, ReplayStreamError<C::EvolveError, CommandEventDecodeError<C>>>
 where
     C: Decider,
     C::Event: EventDecode,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     for stream_event in stream_events {
-        let event = stream_event.decode::<C::Event>().map_err(CommandError::DecodeEvent)?;
-        state = C::evolve(state, &event).map_err(CommandError::Evolve)?;
+        let event = stream_event
+            .decode::<C::Event>()
+            .map_err(ReplayStreamError::DecodeEvent)?;
+        state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
     }
 
     Ok(state)
-}
-
-fn decision_failure_to_command_failure<
-    C,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EncodeError,
-    DecodeError,
->(
-    failure: DecisionFailure<C::DecideError, C::EvolveError>,
-) -> ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-where
-    C: Decider,
-{
-    match failure {
-        DecisionFailure::Decide(error) => CommandError::Decide(error),
-        DecisionFailure::Evolve(error) => CommandError::Evolve(error),
-    }
 }
 
 fn encode_events<E>(events: &Events<E>) -> Result<Events<Event>, EventEncodeError<E>>
