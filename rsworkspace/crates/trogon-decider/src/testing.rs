@@ -143,7 +143,7 @@
 
 use std::{fmt::Debug, marker::PhantomData, mem::ManuallyDrop, ptr};
 
-use crate::{Decider, DecisionFailure, Events};
+use crate::{Decider, DecisionFailure, Events, evaluate_decision};
 
 /// Prior events used to rebuild decider state in tests.
 ///
@@ -692,8 +692,7 @@ fn decide_events<C>(state: C::State, command: &C) -> DecisionEvaluation<C>
 where
     C: Decider,
 {
-    let decision = C::decide(&state, command).map_err(DecisionEvaluationFailure::Decide)?;
-    let (_, events) = decision.handle(state, command).map_err(|failure| match failure {
+    let (_, events) = evaluate_decision(state, command).map_err(|failure| match failure {
         DecisionFailure::Decide(error) => DecisionEvaluationFailure::Decide(error),
         DecisionFailure::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
     })?;

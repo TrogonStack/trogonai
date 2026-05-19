@@ -112,7 +112,7 @@ pub use act::{Act, ActBuilder};
 pub use act::{ActChain, ActRun, First, Steps, Then};
 pub use decision::Decision;
 #[doc(hidden)]
-pub use decision::{DecisionFailure, DecisionResult};
+pub use decision::{DecisionFailure, DecisionResult, evaluate_decision};
 pub use events::Events;
 #[cfg(feature = "test-support")]
 pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
@@ -286,8 +286,7 @@ mod tests {
     #[test]
     fn decider_trait_exposes_initial_state_and_decision() {
         let command = TestCommand;
-        let decision = TestCommand::decide(&TestCommand::initial_state(), &command).unwrap();
-        let (state, events) = decision.handle(TestCommand::initial_state(), &command).unwrap();
+        let (state, events) = evaluate_decision::<TestCommand>(TestCommand::initial_state(), &command).unwrap();
 
         assert_eq!(state, 1);
         assert_eq!(events.as_slice(), &["updated"]);
