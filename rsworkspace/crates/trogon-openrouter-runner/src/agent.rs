@@ -28,6 +28,7 @@ use crate::http_client::OpenRouterHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
+use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -58,9 +59,10 @@ struct OpenRouterSession {
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
-pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
+pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = FsTrogonMdLoader> {
     notifier: Arc<N>,
     client: Arc<H>,
+    md_loader: M,
     sessions: Arc<Mutex<HashMap<String, OpenRouterSession>>>,
     cancel_senders: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
     default_model: String,
@@ -78,7 +80,7 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
     tenant_id: String,
 }
 
-impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier> {
+impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
     pub fn new(
         notifier: NatsSessionNotifier,
         default_model: impl Into<String>,
@@ -88,7 +90,7 @@ impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier> {
     }
 }
 
-impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
+impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogonMdLoader> {
     pub fn with_deps(
         notifier: N,
         default_model: impl Into<String>,
@@ -173,6 +175,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         Self {
             notifier: Arc::new(notifier),
             client: Arc::new(client),
+            md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -188,6 +191,33 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
             skill_loader: None,
             session_store: None,
             tenant_id,
+        }
+    }
+}
+
+impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouterAgent<H, N, M> {
+    /// Replace the TROGON.md loader. Used in tests to inject a mock that
+    /// returns a fixed string without touching the real filesystem.
+    pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> OpenRouterAgent<H, N, M2> {
+        OpenRouterAgent {
+            md_loader: loader,
+            notifier: self.notifier,
+            client: self.client,
+            sessions: self.sessions,
+            cancel_senders: self.cancel_senders,
+            default_model: self.default_model,
+            prompt_timeout: self.prompt_timeout,
+            available_models: self.available_models,
+            global_api_key: self.global_api_key,
+            pending_api_key: self.pending_api_key,
+            system_prompt: self.system_prompt,
+            max_history: self.max_history,
+            max_response_bytes: self.max_response_bytes,
+            agent_id: self.agent_id,
+            agent_loader: self.agent_loader,
+            skill_loader: self.skill_loader,
+            session_store: self.session_store,
+            tenant_id: self.tenant_id,
         }
     }
 
@@ -321,8 +351,8 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
 }
 
 #[async_trait(?Send)]
-impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
-    agent_client_protocol::Agent for OpenRouterAgent<H, N>
+impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoading + 'static>
+    agent_client_protocol::Agent for OpenRouterAgent<H, N, M>
 {
     async fn initialize(
         &self,
@@ -692,7 +722,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             )
         };
 
-        let trogon_md = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await;
+        let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = match (trogon_md, session_system_prompt) {
             (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
             (Some(md), None) => Some(md),
@@ -919,6 +949,17 @@ mod tests {
     static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    }
+
+    /// Mock TROGON.md loader that returns a fixed string (or None) without
+    /// touching the real filesystem.
+    struct MockTrogonMdLoader(Option<String>);
+
+    #[async_trait(?Send)]
+    impl TrogonMdLoading for MockTrogonMdLoader {
+        async fn load(&self, _cwd: &str) -> Option<String> {
+            self.0.clone()
+        }
     }
 
     // ── Test helpers ──────────────────────────────────────────────────────────
@@ -3152,15 +3193,12 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
-        let dir = std::env::temp_dir().join("or_trogon_md_inject");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("TROGON.md"), "openrouter project rules").await.unwrap();
-
-        let agent = make_agent_with_key("k");
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("openrouter project rules".to_string())));
         agent.client.push_response(vec![]);
         local().run_until(async move {
             let sid = agent
-                .new_session(NewSessionRequest::new(dir.clone()))
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
                 .await
                 .unwrap()
                 .session_id;
@@ -3178,21 +3216,17 @@ mod tests {
                 "TROGON.md content must appear in system prompt, got: {}",
                 system_msg.content
             );
-            tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
         }).await;
     }
 
     #[tokio::test]
     async fn prompt_without_trogon_md_sends_no_system_message() {
-        let dir = std::env::temp_dir().join("or_trogon_md_absent");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
-
-        let agent = make_agent_with_key("k");
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(None));
         agent.client.push_response(vec![]);
         local().run_until(async move {
             let sid = agent
-                .new_session(NewSessionRequest::new(dir.clone()))
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
                 .await
                 .unwrap()
                 .session_id;
@@ -3210,21 +3244,18 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
-        let dir = std::env::temp_dir().join("or_trogon_md_passthrough");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
-
         let agent = OpenRouterAgent::with_deps(
             MockSessionNotifier::new(),
             "test-model",
             "k",
             MockOpenRouterHttpClient::new(),
         )
-        .with_system_prompt("session-only prompt".to_string());
+        .with_system_prompt("session-only prompt".to_string())
+        .with_md_loader(MockTrogonMdLoader(None));
         agent.client.push_response(vec![]);
         local().run_until(async move {
             let sid = agent
-                .new_session(NewSessionRequest::new(dir.clone()))
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
                 .await
                 .unwrap()
                 .session_id;
@@ -3250,22 +3281,18 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_trogon_md_prepended_before_session_system_prompt() {
-        let dir = std::env::temp_dir().join("or_trogon_md_combine");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("TROGON.md"), "from trogon md").await.unwrap();
-
-        // Insert agent with a pre-set system prompt
         let agent = OpenRouterAgent::with_deps(
             MockSessionNotifier::new(),
             "test-model",
             "k",
             MockOpenRouterHttpClient::new(),
         )
-        .with_system_prompt("from session prompt".to_string());
+        .with_system_prompt("from session prompt".to_string())
+        .with_md_loader(MockTrogonMdLoader(Some("from trogon md".to_string())));
         agent.client.push_response(vec![]);
         local().run_until(async move {
             let sid = agent
-                .new_session(NewSessionRequest::new(dir.clone()))
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
                 .await
                 .unwrap()
                 .session_id;
@@ -3281,7 +3308,6 @@ mod tests {
             let trogon_pos = system_msg.content.find("from trogon md").expect("TROGON.md content missing");
             let session_pos = system_msg.content.find("from session prompt").expect("session prompt missing");
             assert!(trogon_pos < session_pos, "TROGON.md must be prepended before session system prompt");
-            tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
         }).await;
     }
 }

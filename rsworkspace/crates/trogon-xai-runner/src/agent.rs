@@ -30,6 +30,7 @@ use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
+use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -114,9 +115,10 @@ struct XaiSession {
 ///
 /// Production uses `XaiAgent<XaiClient, NatsSessionNotifier>` (the defaults).
 /// Tests inject `MockXaiHttpClient` and `MockSessionNotifier` without any network.
-pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
+pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader> {
     notifier: Arc<N>,
     client: Arc<H>,
+    md_loader: M,
     sessions: Arc<Mutex<HashMap<String, XaiSession>>>,
     /// In-flight cancel channels, one per active prompt. Sending `()` stops the
     /// streaming loop and causes `prompt()` to return early.
@@ -159,7 +161,7 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     execution_nats: Option<async_nats::Client>,
 }
 
-impl XaiAgent<XaiClient, NatsSessionNotifier> {
+impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
     /// Create a new `XaiAgent` backed by the real xAI HTTP API and NATS notifications.
     ///
     /// Environment variables read at construction:
@@ -178,7 +180,7 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     }
 }
 
-impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
     /// Create an `XaiAgent` with explicit dependencies. Used in tests to inject mocks.
     pub fn with_deps(
         notifier: N,
@@ -264,6 +266,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         Self {
             notifier: Arc::new(notifier),
             client: Arc::new(client),
+            md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -281,6 +284,45 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             tenant_id,
             registry: None,
             execution_nats: None,
+        }
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn new_in_memory(
+        notifier: N,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        client: H,
+    ) -> Self {
+        Self::with_deps(notifier, default_model, api_key, client)
+    }
+}
+
+impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M> {
+    /// Replace the TROGON.md loader. Used in tests to inject a mock that
+    /// returns a fixed string without touching the real filesystem.
+    pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> XaiAgent<H, N, M2> {
+        XaiAgent {
+            md_loader: loader,
+            notifier: self.notifier,
+            client: self.client,
+            sessions: self.sessions,
+            cancel_senders: self.cancel_senders,
+            default_model: self.default_model,
+            prompt_timeout: self.prompt_timeout,
+            available_models: self.available_models,
+            global_api_key: self.global_api_key,
+            pending_api_key: self.pending_api_key,
+            system_prompt: self.system_prompt,
+            max_history: self.max_history,
+            max_turns: self.max_turns,
+            agent_id: self.agent_id,
+            agent_loader: self.agent_loader,
+            skill_loader: self.skill_loader,
+            session_store: self.session_store,
+            tenant_id: self.tenant_id,
+            registry: self.registry,
+            execution_nats: self.execution_nats,
         }
     }
 
@@ -317,20 +359,6 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         self.execution_nats = Some(nats);
         self.registry = Some(Arc::new(registry));
         self
-    }
-
-    /// Create an `XaiAgent` with explicit dependencies and no session store.
-    /// Equivalent to `with_deps` with no external storage — used in tests that
-    /// don't need session persistence (the agent stores sessions in an in-memory
-    /// `HashMap`).
-    #[cfg(any(test, feature = "test-helpers"))]
-    pub fn new_in_memory(
-        notifier: N,
-        default_model: impl Into<String>,
-        api_key: impl Into<String>,
-        client: H,
-    ) -> Self {
-        Self::with_deps(notifier, default_model, api_key, client)
     }
 
     /// Build a `SessionSnapshot` from the given session for writing to the KV store.
@@ -453,8 +481,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
 }
 
 #[async_trait(?Send)]
-impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent
-    for XaiAgent<H, N>
+impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoading + 'static>
+    agent_client_protocol::Agent for XaiAgent<H, N, M>
 {
     async fn initialize(
         &self,
@@ -901,7 +929,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             )
         };
 
-        let trogon_md = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await;
+        let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = match (trogon_md, session_system_prompt) {
             (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
             (Some(md), None) => Some(md),
@@ -1590,7 +1618,7 @@ async fn execute_bash_via_nats(
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "test-helpers"))]
-impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M> {
     pub async fn test_insert_session(&self, id: &str, cwd: &str, model: Option<String>) {
         self.sessions.lock().await.insert(
             id.to_string(),
@@ -1821,6 +1849,17 @@ mod tests {
     use crate::session_notifier::MockSessionNotifier;
 
     type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, Arc<MockSessionNotifier>>;
+
+    /// Mock TROGON.md loader that returns a fixed string (or None) without
+    /// touching the real filesystem.
+    struct MockTrogonMdLoader(Option<String>);
+
+    #[async_trait(?Send)]
+    impl TrogonMdLoading for MockTrogonMdLoader {
+        async fn load(&self, _cwd: &str) -> Option<String> {
+            self.0.clone()
+        }
+    }
 
     fn make_agent() -> TestAgent {
         let mock_http = Arc::new(MockXaiHttpClient::new());
@@ -5361,19 +5400,17 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
-        let dir = std::env::temp_dir().join("xai_trogon_md_inject");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("TROGON.md"), "project rules here").await.unwrap();
-
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
+        let agent = XaiAgent::with_deps(
             Arc::clone(&mock_notifier),
             "grok-3",
             "test-key",
             Arc::clone(&mock_http),
-        );
-        agent.test_insert_session("t1", dir.to_str().unwrap(), None).await;
+        )
+        .with_md_loader(MockTrogonMdLoader(Some("project rules here".to_string())));
+
+        agent.test_insert_session("t1", "/tmp", None).await;
         mock_http.push_response(vec![XaiEvent::Done]);
 
         agent
@@ -5390,28 +5427,24 @@ mod tests {
             content.contains("project rules here"),
             "TROGON.md content must appear in system prompt, got: {content}"
         );
-
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
     }
 
     #[tokio::test]
     async fn prompt_without_trogon_md_uses_session_system_prompt_unchanged() {
-        let dir = std::env::temp_dir().join("xai_trogon_md_absent");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
-
-        // Hold env_lock so XAI_SYSTEM_PROMPT is unset while this agent is constructed.
         let _guard = env_lock().lock().await;
         unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
+        let agent = XaiAgent::with_deps(
             Arc::clone(&mock_notifier),
             "grok-3",
             "test-key",
             Arc::clone(&mock_http),
-        );
-        agent.test_insert_session("t2", dir.to_str().unwrap(), None).await;
+        )
+        .with_md_loader(MockTrogonMdLoader(None));
+
+        agent.test_insert_session("t2", "/tmp", None).await;
         mock_http.push_response(vec![XaiEvent::Done]);
 
         agent
@@ -5427,23 +5460,21 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
-        let dir = std::env::temp_dir().join("xai_trogon_md_passthrough");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
-
         let _guard = env_lock().lock().await;
         unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "agent system prompt") };
+
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
+        let agent = XaiAgent::with_deps(
             Arc::clone(&mock_notifier),
             "grok-3",
             "test-key",
             Arc::clone(&mock_http),
-        );
+        )
+        .with_md_loader(MockTrogonMdLoader(None));
         unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
 
-        agent.test_insert_session("t4", dir.to_str().unwrap(), None).await;
+        agent.test_insert_session("t4", "/tmp", None).await;
         mock_http.push_response(vec![XaiEvent::Done]);
 
         agent
@@ -5466,23 +5497,21 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_trogon_md_prepended_before_session_system_prompt() {
-        let dir = std::env::temp_dir().join("xai_trogon_md_combine");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        tokio::fs::write(dir.join("TROGON.md"), "from trogon md").await.unwrap();
-
         let _guard = env_lock().lock().await;
         unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "from env prompt") };
+
         let mock_http = Arc::new(MockXaiHttpClient::new());
         let mock_notifier = Arc::new(MockSessionNotifier::new());
-        let agent: TestAgent = XaiAgent::with_deps(
+        let agent = XaiAgent::with_deps(
             Arc::clone(&mock_notifier),
             "grok-3",
             "test-key",
             Arc::clone(&mock_http),
-        );
+        )
+        .with_md_loader(MockTrogonMdLoader(Some("from trogon md".to_string())));
         unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
 
-        agent.test_insert_session("t3", dir.to_str().unwrap(), None).await;
+        agent.test_insert_session("t3", "/tmp", None).await;
         mock_http.push_response(vec![XaiEvent::Done]);
 
         agent
@@ -5498,8 +5527,6 @@ mod tests {
         let trogon_pos = content.find("from trogon md").expect("TROGON.md content missing");
         let env_pos = content.find("from env prompt").expect("env prompt missing");
         assert!(trogon_pos < env_pos, "TROGON.md must be prepended before session system prompt");
-
-        tokio::fs::remove_file(dir.join("TROGON.md")).await.ok();
     }
 
     // ── MockSessionStore.remove ───────────────────────────────────────────────
