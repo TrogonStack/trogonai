@@ -193,6 +193,66 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                                 println!("model saved to config — takes effect on next session");
                             }
                         }
+                    } else if cmd == "/compact" {
+                        let subject = format!("{prefix}.compactor.compact");
+                        let payload = serde_json::to_vec(
+                            &serde_json::json!({ "sessionId": session.session_id() })
+                        ).unwrap_or_default();
+                        match nats.publish_bytes(subject, payload.into()).await {
+                            Ok(()) => {
+                                if session_context_size > 0 {
+                                    let pct = session_used_tokens * 100 / session_context_size;
+                                    println!(
+                                        "compaction triggered — context: {}/{} tokens ({}%)",
+                                        fmt_tokens(session_used_tokens),
+                                        fmt_tokens(session_context_size),
+                                        pct,
+                                    );
+                                } else {
+                                    println!("compaction triggered");
+                                }
+                            }
+                            Err(e) => eprintln!("error triggering compaction: {e}"),
+                        }
+                    } else if cmd == "/init" {
+                        let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
+                        let dest = root.join("TROGON.md");
+                        if fs.read_to_string(&dest).is_ok() {
+                            println!(
+                                "TROGON.md already exists at {}\nEdit it to update project context.",
+                                dest.display()
+                            );
+                        } else {
+                            eprintln!("analyzing project with AI...");
+                            let prompt = build_init_prompt(&root, &fs);
+                            match session.prompt(&prompt).await {
+                                Err(e) => eprintln!("error: {e}"),
+                                Ok(mut rx) => {
+                                    let mut content = String::new();
+                                    let mut stdout = std::io::stdout();
+                                    loop {
+                                        match rx.recv().await {
+                                            None => break,
+                                            Some(StreamEvent::Text(t)) => {
+                                                content.push_str(&t);
+                                                print!("{t}");
+                                                let _ = stdout.flush();
+                                            }
+                                            Some(StreamEvent::Done(_)) => {
+                                                println!();
+                                                break;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    let trogon_content = strip_code_fence(&content);
+                                    match fs.write(&dest, trogon_content.as_bytes()) {
+                                        Ok(()) => println!("created {}", dest.display()),
+                                        Err(e) => eprintln!("error writing TROGON.md: {e}"),
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         println!(
                             "{}",
@@ -294,7 +354,7 @@ fn handle_slash_command<F: Fs>(
     arg: &str,
     used_tokens: u64,
     context_size: u64,
-    cwd: &Path,
+    _cwd: &Path,
     fs: &F,
 ) -> String {
     match cmd {
@@ -303,10 +363,10 @@ Commands:
   /help               show this help
   /cost               show token usage for this session
   /clear              start a new session (clears conversation history)
-  /compact            show context usage and compaction status
+  /compact            force context compaction now
   /config             show config  |  /config set <key> <value>
   /model              show current model  |  /model <id> change model
-  /init               generate TROGON.md for this project
+  /init               analyze project with AI and generate TROGON.md
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
@@ -321,25 +381,6 @@ Ctrl+D    quit"
                 let cost = estimate_cost(used_tokens, fs);
                 format!(
                     "context: {}/{} tokens ({}%)  |  ~${cost}",
-                    fmt_tokens(used_tokens),
-                    fmt_tokens(context_size),
-                    pct,
-                )
-            }
-        }
-
-        "/compact" => {
-            if context_size == 0 {
-                "no context data yet — send a message first to see usage".to_string()
-            } else {
-                let pct = used_tokens * 100 / context_size;
-                let advice = if pct >= 85 {
-                    "context is nearly full — compaction will trigger automatically before the next message"
-                } else {
-                    "use /clear to start a fresh session if you need immediate relief"
-                };
-                format!(
-                    "context: {}/{} tokens ({}%)\nauto-compaction triggers at 85%\n{advice}",
                     fmt_tokens(used_tokens),
                     fmt_tokens(context_size),
                     pct,
@@ -367,8 +408,6 @@ Ctrl+D    quit"
                 }
             }
         }
-
-        "/init" => handle_init_cmd(cwd, fs),
 
         other => format!("unknown command: {other}  (type /help for a list)"),
     }
@@ -437,34 +476,85 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
     }
 }
 
-// ── /init ─────────────────────────────────────────────────────────────────────
+// ── /init helpers ─────────────────────────────────────────────────────────────
 
-fn handle_init_cmd<F: Fs>(cwd: &Path, fs: &F) -> String {
-    let root = find_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-    let dest = root.join("TROGON.md");
-
-    if fs.read_to_string(&dest).is_ok() {
-        return format!(
-            "TROGON.md already exists at {}\nEdit it to update project context.",
-            dest.display()
-        );
-    }
-
+fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
     let project_name = root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project".to_string());
 
-    let langs = detect_languages(&root);
-    let content = generate_trogon_md(&project_name, &langs);
+    let langs = detect_languages(root);
+    let lang_line = if langs.is_empty() {
+        String::new()
+    } else {
+        format!("Languages: {}\n", langs.join(", "))
+    };
 
-    match fs.write(&dest, content.as_bytes()) {
-        Ok(()) => format!(
-            "created {}\nEdit it to give Claude context about this project.",
-            dest.display()
-        ),
-        Err(e) => format!("error creating TROGON.md: {e}"),
-    }
+    let listing = list_top_level(root);
+
+    let readme_section = ["README.md", "README.rst", "README.txt", "README"]
+        .iter()
+        .find_map(|name| {
+            fs.read_to_string(&root.join(name)).ok().map(|content| {
+                let truncated = if content.len() > 3000 {
+                    format!("{}…(truncated)", &content[..3000])
+                } else {
+                    content
+                };
+                format!("{name}:\n{truncated}\n")
+            })
+        })
+        .unwrap_or_default();
+
+    format!(
+        "Analyze this software project and write a TROGON.md file.\n\
+         TROGON.md gives AI coding assistants context about the project.\n\
+         \n\
+         Project: {project_name}\n\
+         {lang_line}\
+         Top-level structure:\n{listing}\n\
+         \n\
+         {readme_section}\
+         Write a complete TROGON.md with these sections:\n\
+         # {project_name}\n\
+         ## Overview — purpose and goals\n\
+         ## Architecture — key components and how they interact\n\
+         ## Development — build, test, and run commands\n\
+         ## Notes — conventions and important context for an AI assistant\n\
+         \n\
+         Output ONLY the TROGON.md content starting with the # heading. No preamble."
+    )
+}
+
+fn list_top_level(root: &Path) -> String {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return "(unable to list directory)".to_string();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let suffix = if e.path().is_dir() { "/" } else { "" };
+            Some(format!("{name}{suffix}"))
+        })
+        .collect();
+    names.sort();
+    names.join("\n")
+}
+
+fn strip_code_fence(s: &str) -> String {
+    let s = s.trim();
+    let inner = s
+        .strip_prefix("```markdown\n")
+        .or_else(|| s.strip_prefix("```md\n"))
+        .or_else(|| s.strip_prefix("```\n"))
+        .map(|inner| inner.strip_suffix("```").unwrap_or(inner).trim_end())
+        .unwrap_or(s);
+    inner.to_string()
 }
 
 fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -501,26 +591,6 @@ fn detect_languages(root: &Path) -> Vec<&'static str> {
         }
     }
     found
-}
-
-fn generate_trogon_md(project_name: &str, langs: &[&str]) -> String {
-    let lang_line = if langs.is_empty() {
-        String::new()
-    } else {
-        format!("\nLanguages/frameworks: {}\n", langs.join(", "))
-    };
-    format!(
-        "# {project_name}\n\
-         {lang_line}\
-         \n## Overview\n\
-         <!-- Describe the project purpose and goals -->\n\
-         \n## Architecture\n\
-         <!-- Key components and their interactions -->\n\
-         \n## Development\n\
-         <!-- Build, test, and run commands -->\n\
-         \n## Notes\n\
-         <!-- Project-specific context for Claude -->\n"
-    )
 }
 
 // ── cost estimation ───────────────────────────────────────────────────────────
@@ -954,29 +1024,6 @@ mod tests {
     // ── slash commands ────────────────────────────────────────────────────────
 
     #[test]
-    fn slash_compact_no_data_explains() {
-        let fs = MockFs::new();
-        let out = handle_slash_command("/compact", "", 0, 0, Path::new("/tmp"), &fs);
-        assert!(out.contains("no context data"), "got: {out}");
-    }
-
-    #[test]
-    fn slash_compact_shows_usage_stats() {
-        let fs = MockFs::new();
-        let out = handle_slash_command("/compact", "", 100_000, 200_000, Path::new("/tmp"), &fs);
-        assert!(out.contains("50%"), "got: {out}");
-        assert!(out.contains("100,000"), "got: {out}");
-        assert!(out.contains("85%"), "auto-compaction threshold missing: {out}");
-    }
-
-    #[test]
-    fn slash_compact_nearly_full_shows_warning() {
-        let fs = MockFs::new();
-        let out = handle_slash_command("/compact", "", 175_000, 200_000, Path::new("/tmp"), &fs);
-        assert!(out.contains("nearly full") || out.contains("87%"), "got: {out}");
-    }
-
-    #[test]
     fn slash_unknown_suggests_help() {
         let fs = MockFs::new();
         let out = handle_slash_command("/nope", "", 0, 0, Path::new("/tmp"), &fs);
@@ -1009,35 +1056,6 @@ mod tests {
         let cost_out = handle_slash_command("/cost", "", 1_000_000, 2_000_000, Path::new("/tmp"), &fs);
         // haiku rate is 1.6 $/Mtok → 1M tokens ≈ $1.60
         assert!(cost_out.contains("1.60") || cost_out.contains("1.6"), "got: {cost_out}");
-    }
-
-    #[test]
-    fn slash_init_creates_trogon_md() {
-        let fs = MockFs::new();
-        let out = handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
-        assert!(out.contains("TROGON.md"), "got: {out}");
-        assert!(!out.contains("not yet implemented"), "should be implemented: {out}");
-    }
-
-    #[test]
-    fn slash_init_idempotent_if_file_exists() {
-        let fs = MockFs::new();
-        // First call creates it.
-        handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
-        // Second call should say it already exists.
-        let out = handle_slash_command("/init", "", 0, 0, Path::new("/tmp"), &fs);
-        assert!(out.contains("already exists"), "got: {out}");
-    }
-
-    #[test]
-    fn slash_init_content_has_required_sections() {
-        let md = generate_trogon_md("my-project", &["Rust", "Python"]);
-        assert!(md.contains("# my-project"), "missing title: {md}");
-        assert!(md.contains("Rust"), "missing lang: {md}");
-        assert!(md.contains("## Overview"), "missing section: {md}");
-        assert!(md.contains("## Architecture"), "missing section: {md}");
-        assert!(md.contains("## Development"), "missing section: {md}");
-        assert!(md.contains("## Notes"), "missing section: {md}");
     }
 
     #[test]
