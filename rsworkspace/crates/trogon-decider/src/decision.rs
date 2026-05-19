@@ -58,6 +58,16 @@ pub type DecisionResult<C> = Result<
     DecisionFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
 >;
 
+#[doc(hidden)]
+pub fn evaluate_decision<C>(state: C::State, command: &C) -> DecisionResult<C>
+where
+    C: Decider,
+{
+    C::decide(&state, command)
+        .map_err(DecisionFailure::Decide)?
+        .handle(state, command)
+}
+
 impl<C> Decision<C>
 where
     C: Decider,
