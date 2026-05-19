@@ -1,4 +1,22 @@
 use super::stream_position::StreamPosition;
+use crate::{Event, Events};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppendStreamRequest<'a, StreamId: ?Sized> {
+    pub stream_id: &'a StreamId,
+    pub stream_write_precondition: StreamWritePrecondition,
+    pub events: Events<Event>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppendStreamResponse {
+    /// The stream high-watermark after the append completed.
+    ///
+    /// This is the value to store in projections, snapshots, realtime messages,
+    /// and later `StreamWritePrecondition::At` preconditions. It is not a "next expected
+    /// version" and it is not safe to perform arithmetic on it.
+    pub stream_position: StreamPosition,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamWritePrecondition {
@@ -23,4 +41,13 @@ impl From<Option<StreamPosition>> for StreamWritePrecondition {
             None => Self::NoStream,
         }
     }
+}
+
+pub trait StreamAppend<StreamId: ?Sized>: Send + Sync {
+    type Error;
+
+    fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, StreamId>,
+    ) -> impl std::future::Future<Output = Result<AppendStreamResponse, Self::Error>> + Send;
 }
