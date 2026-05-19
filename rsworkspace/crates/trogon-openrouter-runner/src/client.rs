@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -10,6 +10,14 @@ use tracing::{debug, info, warn};
 
 use crate::http_client::OpenRouterHttpClient;
 
+/// An assistant tool call stored in a message, in OpenAI function-calling format.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ToolCallMessage {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
 /// A message in the OpenAI-compatible conversation format.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
@@ -19,6 +27,10 @@ pub struct Message {
     pub prompt_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallMessage>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -28,6 +40,8 @@ impl Message {
             content: text.into(),
             prompt_tokens: None,
             completion_tokens: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
@@ -37,6 +51,8 @@ impl Message {
             content: text.into(),
             prompt_tokens: None,
             completion_tokens: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
@@ -50,6 +66,8 @@ impl Message {
             content: text.into(),
             prompt_tokens: Some(prompt_tokens),
             completion_tokens: Some(completion_tokens),
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
@@ -59,8 +77,57 @@ impl Message {
             content: text.into(),
             prompt_tokens: None,
             completion_tokens: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
+
+    /// Build an assistant message that carries tool calls (no text content).
+    pub fn assistant_tool_calls(calls: &[AssembledToolCall]) -> Self {
+        let tool_calls = calls
+            .iter()
+            .map(|c| ToolCallMessage {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                arguments: c.arguments.clone(),
+            })
+            .collect();
+        Self {
+            role: "assistant".to_string(),
+            content: String::new(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+        }
+    }
+
+    /// Build a tool-result message (role = "tool") for a completed tool call.
+    pub fn tool_result(tool_call_id: String, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".to_string(),
+            content: content.into(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id),
+        }
+    }
+}
+
+/// Definition of a tool sent to OpenRouter in OpenAI function-calling format.
+pub struct ToolDef {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// A fully reassembled tool call after SSE fragment accumulation.
+#[derive(Debug, Clone)]
+pub struct AssembledToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
 /// Why the model stopped generating.
@@ -85,6 +152,7 @@ impl FinishReason {
 #[derive(Debug, Clone)]
 pub enum OpenRouterEvent {
     TextDelta { text: String },
+    ToolCallsReady { calls: Vec<AssembledToolCall> },
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
@@ -153,10 +221,11 @@ impl OpenRouterClient {
         model: &str,
         messages: &[Message],
         api_key: &str,
+        tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         debug!(model, messages_len = messages.len(), "openrouter: starting chat stream");
 
-        match self.start_request(model, messages, api_key).await {
+        match self.start_request(model, messages, api_key, tools).await {
             Ok(response) => parse_sse(response.bytes_stream()).boxed_local(),
             Err(e) => {
                 warn!(error = %e, "openrouter: request failed");
@@ -170,19 +239,30 @@ impl OpenRouterClient {
         model: &str,
         messages: &[Message],
         api_key: &str,
+        tools: &[ToolDef],
     ) -> Result<reqwest::Response, String> {
-        // Strip usage fields before sending — OpenRouter only accepts role + content.
-        let wire_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-            .collect();
+        let wire_messages: Vec<serde_json::Value> =
+            messages.iter().map(wire_message).collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": model,
             "messages": wire_messages,
             "stream": true,
             "stream_options": { "include_usage": true },
         });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::json!(
+                tools.iter().map(|t| serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    }
+                })).collect::<Vec<_>>()
+            );
+        }
 
         let site_url = std::env::var("OPENROUTER_SITE_URL")
             .unwrap_or_else(|_| "https://trogonai.com".to_string());
@@ -239,6 +319,31 @@ impl OpenRouterClient {
 
 const MAX_RETRIES: u32 = 3;
 
+pub(crate) fn wire_message(m: &Message) -> serde_json::Value {
+    if let Some(tool_calls) = &m.tool_calls {
+        serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": tool_calls.iter().map(|tc| serde_json::json!({
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+            })).collect::<Vec<_>>(),
+        })
+    } else if let Some(tool_call_id) = &m.tool_call_id {
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": m.content,
+        })
+    } else {
+        serde_json::json!({ "role": m.role, "content": m.content })
+    }
+}
+
 fn retry_delay(headers: &reqwest::header::HeaderMap, attempt: u32) -> Duration {
     headers
         .get("retry-after")
@@ -256,17 +361,25 @@ impl OpenRouterHttpClient for OpenRouterClient {
         model: &str,
         messages: &[Message],
         api_key: &str,
+        tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
-        self.do_chat_stream(model, messages, api_key).await
+        self.do_chat_stream(model, messages, api_key, tools).await
     }
 }
 
 // ── SSE parser (OpenAI chat completions format) ───────────────────────────────
 
+struct PartialToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 struct SseState {
     stream: LocalBoxStream<'static, Result<Bytes, reqwest::Error>>,
     buf: String,
     pending: VecDeque<OpenRouterEvent>,
+    tool_call_acc: HashMap<usize, PartialToolCall>,
 }
 
 fn parse_sse(
@@ -277,6 +390,7 @@ fn parse_sse(
             stream: bytes.boxed_local(),
             buf: String::new(),
             pending: VecDeque::new(),
+            tool_call_acc: HashMap::new(),
         },
         |mut state| async move {
             loop {
@@ -287,7 +401,7 @@ fn parse_sse(
                 if let Some(nl) = state.buf.find('\n') {
                     let line = state.buf[..nl].trim_end_matches('\r').to_string();
                     state.buf = state.buf[nl + 1..].to_string();
-                    process_sse_line(&line, &mut state.pending);
+                    process_sse_line(&line, &mut state.pending, &mut state.tool_call_acc);
                     continue;
                 }
 
@@ -307,7 +421,7 @@ fn parse_sse(
                         let line = remaining.trim();
                         if !line.is_empty() {
                             let mut tmp = VecDeque::new();
-                            process_sse_line(line, &mut tmp);
+                            process_sse_line(line, &mut tmp, &mut state.tool_call_acc);
                             state.pending.extend(tmp);
                         }
                         return state.pending.pop_front().map(|ev| (ev, state));
@@ -318,7 +432,11 @@ fn parse_sse(
     )
 }
 
-fn process_sse_line(line: &str, pending: &mut VecDeque<OpenRouterEvent>) {
+fn process_sse_line(
+    line: &str,
+    pending: &mut VecDeque<OpenRouterEvent>,
+    acc: &mut HashMap<usize, PartialToolCall>,
+) {
     let data = match line.strip_prefix("data: ") {
         Some(d) => d.trim(),
         None => return,
@@ -344,8 +462,43 @@ fn process_sse_line(line: &str, pending: &mut VecDeque<OpenRouterEvent>) {
             }
         }
 
+        if let Some(tool_calls) = delta["tool_calls"].as_array() {
+            for entry in tool_calls {
+                let index = entry["index"].as_u64().unwrap_or(0) as usize;
+                let partial = acc.entry(index).or_insert_with(|| PartialToolCall {
+                    id: String::new(),
+                    name: String::new(),
+                    arguments: String::new(),
+                });
+                if let Some(id) = entry["id"].as_str() {
+                    if !id.is_empty() {
+                        partial.id = id.to_string();
+                    }
+                }
+                if let Some(name) = entry["function"]["name"].as_str() {
+                    if !name.is_empty() {
+                        partial.name = name.to_string();
+                    }
+                }
+                if let Some(args) = entry["function"]["arguments"].as_str() {
+                    partial.arguments.push_str(args);
+                }
+            }
+        }
+
         if let Some(reason) = choice["finish_reason"].as_str() {
-            if !reason.is_empty() {
+            if reason == "tool_calls" {
+                let mut calls: Vec<AssembledToolCall> = acc
+                    .drain()
+                    .map(|(_, p)| AssembledToolCall {
+                        id: p.id,
+                        name: p.name,
+                        arguments: p.arguments,
+                    })
+                    .collect();
+                calls.sort_by_key(|c| c.id.clone());
+                pending.push_back(OpenRouterEvent::ToolCallsReady { calls });
+            } else if !reason.is_empty() {
                 pending.push_back(OpenRouterEvent::Finished {
                     reason: FinishReason::from_str(reason),
                 });
@@ -380,8 +533,9 @@ mod tests {
 
     fn events_from_lines(lines: &[&str]) -> Vec<OpenRouterEvent> {
         let mut pending = VecDeque::new();
+        let mut acc = HashMap::new();
         for line in lines {
-            process_sse_line(line, &mut pending);
+            process_sse_line(line, &mut pending, &mut acc);
         }
         pending.into_iter().collect()
     }
@@ -816,5 +970,158 @@ mod tests {
             r#"data: {"choices":[],"usage":null}"#,
         ]);
         assert!(events.is_empty(), "null usage must not emit Usage event");
+    }
+
+    // ── wire_message serialization ────────────────────────────────────────────
+
+    #[test]
+    fn wire_message_tool_calls_emits_openai_format() {
+        let msg = Message::assistant_tool_calls(&[AssembledToolCall {
+            id: "call_xyz".to_string(),
+            name: "read_file".to_string(),
+            arguments: r#"{"path":"/foo"}"#.to_string(),
+        }]);
+        let json = wire_message(&msg);
+        assert_eq!(json["role"], "assistant");
+        assert!(json["content"].is_null());
+        let tc = &json["tool_calls"][0];
+        assert_eq!(tc["id"], "call_xyz");
+        assert_eq!(tc["type"], "function");
+        assert_eq!(tc["function"]["name"], "read_file");
+        assert_eq!(tc["function"]["arguments"], r#"{"path":"/foo"}"#);
+    }
+
+    #[test]
+    fn wire_message_multiple_tool_calls_emits_all_entries() {
+        let msg = Message::assistant_tool_calls(&[
+            AssembledToolCall {
+                id: "call_first".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"/a"}"#.to_string(),
+            },
+            AssembledToolCall {
+                id: "call_second".to_string(),
+                name: "list_directory".to_string(),
+                arguments: r#"{"path":"/b"}"#.to_string(),
+            },
+        ]);
+        let json = wire_message(&msg);
+        assert_eq!(json["role"], "assistant");
+        assert!(json["content"].is_null());
+        let arr = json["tool_calls"].as_array().expect("tool_calls must be an array");
+        assert_eq!(arr.len(), 2, "must have exactly two tool calls");
+        assert_eq!(arr[0]["id"], "call_first");
+        assert_eq!(arr[0]["function"]["name"], "read_file");
+        assert_eq!(arr[0]["function"]["arguments"], r#"{"path":"/a"}"#);
+        assert_eq!(arr[1]["id"], "call_second");
+        assert_eq!(arr[1]["function"]["name"], "list_directory");
+        assert_eq!(arr[1]["function"]["arguments"], r#"{"path":"/b"}"#);
+    }
+
+    #[test]
+    fn wire_message_tool_result_emits_role_tool() {
+        let msg = Message::tool_result("call_xyz".to_string(), "file contents".to_string());
+        let json = wire_message(&msg);
+        assert_eq!(json["role"], "tool");
+        assert_eq!(json["tool_call_id"], "call_xyz");
+        assert_eq!(json["content"], "file contents");
+        assert!(json.get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn wire_message_regular_text_emits_role_and_content() {
+        let msg = Message::user("hello");
+        let json = wire_message(&msg);
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"], "hello");
+        assert!(json.get("tool_calls").is_none());
+        assert!(json.get("tool_call_id").is_none());
+    }
+
+    #[test]
+    fn wire_message_empty_tool_calls_list_emits_empty_array() {
+        let msg = Message::assistant_tool_calls(&[]);
+        let json = wire_message(&msg);
+        assert_eq!(json["role"], "assistant");
+        assert!(json["content"].is_null(), "content must be null when tool_calls is present");
+        let arr = json["tool_calls"].as_array().expect("tool_calls must be an array");
+        assert!(arr.is_empty(), "tool_calls array must be empty");
+    }
+
+    #[test]
+    fn sse_parser_assembles_single_tool_call_from_fragments() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"/foo\"}"}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            OpenRouterEvent::ToolCallsReady { calls } => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id, "call_abc");
+                assert_eq!(calls[0].name, "read_file");
+                assert_eq!(calls[0].arguments, "{\"path\":\"/foo\"}");
+            }
+            other => panic!("expected ToolCallsReady, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_parser_assembles_two_parallel_tool_calls() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}},{"index":1,"id":"call_2","type":"function","function":{"name":"list_dir","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"/a\"}"}},{"index":1,"function":{"arguments":"{\"path\":\"/b\"}"}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            OpenRouterEvent::ToolCallsReady { calls } => {
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "call_1");
+                assert_eq!(calls[0].name, "read_file");
+                assert_eq!(calls[0].arguments, "{\"path\":\"/a\"}");
+                assert_eq!(calls[1].id, "call_2");
+                assert_eq!(calls[1].name, "list_dir");
+                assert_eq!(calls[1].arguments, "{\"path\":\"/b\"}");
+            }
+            other => panic!("expected ToolCallsReady, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_finish_reason_tool_calls_with_empty_accumulator_emits_empty_ready() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        assert_eq!(events.len(), 1, "must emit exactly one event");
+        match &events[0] {
+            OpenRouterEvent::ToolCallsReady { calls } => {
+                assert!(calls.is_empty(), "empty accumulator must produce ToolCallsReady with no calls");
+            }
+            other => panic!("expected ToolCallsReady, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_text_delta_before_tool_calls_emits_both_events_in_order() {
+        let events = events_from_lines(&[
+            r#"data: {"choices":[{"delta":{"content":"thinking..."},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"/f\"}"}}]},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        assert_eq!(events.len(), 2, "must emit TextDelta then ToolCallsReady");
+        assert!(
+            matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "thinking..."),
+            "first event must be TextDelta with the partial text"
+        );
+        match &events[1] {
+            OpenRouterEvent::ToolCallsReady { calls } => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].name, "read_file");
+            }
+            other => panic!("expected ToolCallsReady, got {other:?}"),
+        }
     }
 }

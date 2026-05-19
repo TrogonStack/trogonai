@@ -5574,6 +5574,8 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-registry",
+ "trogon-runner-tools",
+ "trogon-tools",
  "uuid",
 ]
 

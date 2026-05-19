@@ -78,6 +78,11 @@ impl RunnerConfig {
 mod tests {
     use super::*;
 
+    static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    }
+
     fn clear_runner_env() {
         for var in &[
             "NATS_URL",
@@ -97,6 +102,7 @@ mod tests {
 
     #[test]
     fn defaults_when_no_env_vars_set() {
+        let _lock = env_lock();
         clear_runner_env();
         let cfg = RunnerConfig::from_env();
         assert_eq!(cfg.nats_url, "nats://localhost:4222");
@@ -112,6 +118,7 @@ mod tests {
 
     #[test]
     fn custom_string_values_are_read() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe {
             std::env::set_var("NATS_URL", "nats://my-server:4222");
@@ -129,6 +136,7 @@ mod tests {
 
     #[test]
     fn api_key_present_and_non_empty_is_some() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-test-123"); }
         let cfg = RunnerConfig::from_env();
@@ -138,6 +146,7 @@ mod tests {
 
     #[test]
     fn empty_api_key_becomes_none() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe { std::env::set_var("OPENROUTER_API_KEY", ""); }
         let cfg = RunnerConfig::from_env();
@@ -147,6 +156,7 @@ mod tests {
 
     #[test]
     fn system_prompt_set_flag_reflects_env() {
+        let _lock = env_lock();
         clear_runner_env();
         assert!(!RunnerConfig::from_env().system_prompt_set);
         unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", ""); }
@@ -156,6 +166,7 @@ mod tests {
 
     #[test]
     fn numeric_env_vars_parsed_correctly() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe {
             std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "50");
@@ -171,6 +182,7 @@ mod tests {
 
     #[test]
     fn zero_numeric_values_fall_back_to_defaults() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe {
             std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "0");
@@ -186,6 +198,7 @@ mod tests {
 
     #[test]
     fn non_numeric_env_vars_fall_back_to_defaults() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe {
             std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "not-a-number");
@@ -201,6 +214,7 @@ mod tests {
 
     #[test]
     fn models_str_is_read_verbatim() {
+        let _lock = env_lock();
         clear_runner_env();
         unsafe { std::env::set_var("OPENROUTER_MODELS", "x/y:Label"); }
         let cfg = RunnerConfig::from_env();
@@ -210,7 +224,7 @@ mod tests {
 
     #[test]
     fn negative_numeric_values_fall_back_to_defaults() {
-        // "-1" cannot parse as usize, so falls back to default.
+        let _lock = env_lock();
         clear_runner_env();
         unsafe {
             std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "-1");
@@ -226,7 +240,7 @@ mod tests {
 
     #[test]
     fn api_key_whitespace_only_is_some() {
-        // Only strictly empty string is filtered; whitespace is preserved.
+        let _lock = env_lock();
         clear_runner_env();
         unsafe { std::env::set_var("OPENROUTER_API_KEY", "   "); }
         let cfg = RunnerConfig::from_env();
