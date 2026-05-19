@@ -5,9 +5,15 @@
 //! Run with:
 //!   cargo test -p trogon-cli --test nats_startup_integration
 
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use testcontainers_modules::nats::Nats;
+
+static PATH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn path_lock() -> &'static Mutex<()> {
+    PATH_LOCK.get_or_init(|| Mutex::new(()))
+}
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_cli::connect_or_start_nats;
 
@@ -91,9 +97,11 @@ async fn connect_or_start_nats_with_path(
 ) -> anyhow::Result<(async_nats::Client, Option<trogon_cli::KillOnDrop>)> {
     // Temporarily replace PATH so Command::new("nats-server") resolves (or not)
     // as we control. Restore it afterward even if we panic.
+    let _guard = path_lock().lock().unwrap();
     let old_path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::set_var("PATH", path_dir);
+    // SAFETY: guarded by PATH_LOCK so no other test mutates PATH concurrently
+    unsafe { std::env::set_var("PATH", path_dir) };
     let result = connect_or_start_nats(url, timeout).await;
-    std::env::set_var("PATH", old_path);
+    unsafe { std::env::set_var("PATH", old_path) };
     result
 }

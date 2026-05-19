@@ -17,6 +17,12 @@ use std::time::{Duration, Instant};
 /// Wraps a child process and kills it when dropped.
 pub struct KillOnDrop(pub Child);
 
+impl std::fmt::Debug for KillOnDrop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("KillOnDrop").field(&self.0.id()).finish()
+    }
+}
+
 impl Drop for KillOnDrop {
     fn drop(&mut self) {
         let _ = self.0.kill();
