@@ -4067,4 +4067,190 @@ mod tests {
             assert!(has_usage, "UsageUpdate must be fired when usage arrives in the follow-up call after a tool round");
         }).await;
     }
+
+    // ── load_session KV restore edge cases ───────────────────────────────────────
+
+    fn stub_snapshot(id: &str, tools: Vec<String>) -> crate::session_store::SessionSnapshot {
+        crate::session_store::SessionSnapshot {
+            id: id.to_string(),
+            tenant_id: "default".to_string(),
+            name: "Stub".to_string(),
+            model: None,
+            tools,
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_empty_tools_re_enables_all() {
+        let snap = stub_snapshot("pre-fix", vec![]);
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent.load_session(LoadSessionRequest::new(SessionId::from("pre-fix"), "/"))
+                .await
+                .expect("load must succeed from KV");
+            let sessions = agent.sessions.lock().await;
+            let tools = &sessions["pre-fix"].enabled_tools;
+            let expected: Vec<String> = trogon_tools::all_tool_defs()
+                .iter()
+                .map(|d| d.name.clone())
+                .collect();
+            assert_eq!(*tools, expected, "pre-fix snapshot with tools:[] must restore all trogon tools");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_history() {
+        use crate::session_store::{MessageUsage, SnapshotMessage, TextBlock};
+        let mut snap = stub_snapshot("hist-sess", vec!["read_file".to_string()]);
+        snap.messages = vec![
+            SnapshotMessage {
+                role: "user".to_string(),
+                content: vec![TextBlock::new("Hello!")],
+                usage: None,
+            },
+            SnapshotMessage {
+                role: "assistant".to_string(),
+                content: vec![TextBlock::new("Hi there!")],
+                usage: Some(MessageUsage {
+                    input_tokens: 12,
+                    output_tokens: 4,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }),
+            },
+        ];
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent.load_session(LoadSessionRequest::new(SessionId::from("hist-sess"), "/"))
+                .await
+                .expect("load must succeed");
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions["hist-sess"].history;
+            assert_eq!(history.len(), 2, "both messages must be restored");
+            assert_eq!(history[0].role, "user");
+            assert_eq!(history[0].content, "Hello!");
+            assert_eq!(history[1].role, "assistant");
+            assert_eq!(history[1].content, "Hi there!");
+            assert_eq!(history[1].prompt_tokens, Some(12));
+            assert_eq!(history[1].completion_tokens, Some(4));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_model() {
+        let mut snap = stub_snapshot("model-sess", vec!["read_file".to_string()]);
+        snap.model = Some("openai/gpt-4o".to_string());
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            let resp = agent.load_session(LoadSessionRequest::new(SessionId::from("model-sess"), "/"))
+                .await
+                .expect("load must succeed");
+            let current_model = resp.models
+                .as_ref()
+                .map(|m| m.current_model_id.0.as_ref().to_string());
+            assert_eq!(
+                current_model.as_deref(),
+                Some("openai/gpt-4o"),
+                "load_session must report the snapshot model in response"
+            );
+            let sessions = agent.sessions.lock().await;
+            assert_eq!(
+                sessions["model-sess"].model.as_deref(),
+                Some("openai/gpt-4o"),
+                "in-memory session must have model from snapshot"
+            );
+        }).await;
+    }
+
+    struct SnapshotCapturingStore {
+        snapshots: Arc<std::sync::Mutex<Vec<crate::session_store::SessionSnapshot>>>,
+    }
+
+    impl SnapshotCapturingStore {
+        fn new() -> (Self, Arc<std::sync::Mutex<Vec<crate::session_store::SessionSnapshot>>>) {
+            let snaps = Arc::new(std::sync::Mutex::new(Vec::new()));
+            (Self { snapshots: Arc::clone(&snaps) }, snaps)
+        }
+    }
+
+    impl crate::session_store::SessionStoring for SnapshotCapturingStore {
+        fn save<'a>(
+            &'a self,
+            snapshot: &'a crate::session_store::SessionSnapshot,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            let snap = snapshot.clone();
+            let snaps = Arc::clone(&self.snapshots);
+            Box::pin(async move { snaps.lock().unwrap().push(snap); })
+        }
+
+        fn remove<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
+
+        fn load<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>> {
+            Box::pin(async move { None })
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_session_snapshot_inherits_enabled_tools() {
+        let (store, snaps) = SnapshotCapturingStore::new();
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_session_store(Arc::new(store));
+        local().run_until(async move {
+            let src_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    src_id.clone(),
+                    "read_file",
+                    "disabled",
+                ))
+                .await
+                .unwrap();
+            agent
+                .fork_session(ForkSessionRequest::new(src_id, PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            // new_session saves snapshot[0] (src); fork_session saves snapshot[1] (fork)
+            let recorded = snaps.lock().unwrap().clone();
+            let fork_snap = recorded.last().expect("fork must be saved to store");
+            assert!(
+                !fork_snap.tools.contains(&"read_file".to_string()),
+                "fork snapshot must inherit disabled read_file from source; tools: {:?}",
+                fork_snap.tools
+            );
+            assert!(
+                fork_snap.tools.contains(&"write_file".to_string()),
+                "fork snapshot must contain enabled tools from source"
+            );
+        })
+        .await;
+    }
 }
