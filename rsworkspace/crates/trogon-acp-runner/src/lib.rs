@@ -23,3 +23,13 @@ pub use trogon_runner_tools::session_store::{
 
 #[cfg(feature = "test-helpers")]
 pub use trogon_runner_tools::session_store;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::egress;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::wasm_bash_tool;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::nats_todo_tool;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::spawn_agent_tool;
+#[cfg(feature = "test-helpers")]
+pub use trogon_runner_tools::permission;

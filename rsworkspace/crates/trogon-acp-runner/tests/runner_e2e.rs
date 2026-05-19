@@ -438,23 +438,6 @@ fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value)
     .join("")
 }
 
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
-    })
-    .to_string()
-}
-
-fn max_tokens_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [{"type": "text", "text": "partial"}],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
-}
-
 fn end_turn_body(text: &str) -> String {
     sse_body(&[
         ("message_start", serde_json::json!({
@@ -2073,6 +2056,11 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
                 make_agent(&server.base_url()),
             )
             .await;
+
+            // Set token_budget = 1 so any non-empty message triggers the 85% threshold.
+            let mut seed_state = trogon_acp_runner::SessionState::default();
+            seed_state.token_budget = 1;
+            store.save(session_id, &seed_state).await.unwrap();
 
             let (mut notif_sub, mut resp_sub) =
                 send_text(&nats, prefix, session_id, "hello").await;

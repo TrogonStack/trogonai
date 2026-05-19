@@ -5414,6 +5414,7 @@ dependencies = [
  "trogon-acp-runner",
  "trogon-agent-core",
  "trogon-nats",
+ "trogon-openrouter-runner",
  "trogon-runner-tools",
  "trogon-xai-runner",
  "uuid",

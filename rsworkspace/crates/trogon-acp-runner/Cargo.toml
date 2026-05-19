@@ -55,6 +55,14 @@ name = "steer_integration"
 required-features = ["test-helpers"]
 
 [[test]]
+name = "runner_e2e"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "session_store_integration"
+required-features = ["test-helpers"]
+
+[[test]]
 name = "session_branching_nats"
 required-features = ["test-helpers"]
 

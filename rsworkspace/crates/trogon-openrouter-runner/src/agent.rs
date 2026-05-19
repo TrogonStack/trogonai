@@ -1259,9 +1259,9 @@ async fn execute_bash_via_nats(
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::session_notifier::MockSessionNotifier> {
-    async fn test_insert_session_with_history(&self, id: &str, history: Vec<Message>) {
+    pub async fn test_insert_session_with_history(&self, id: &str, history: Vec<Message>) {
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
@@ -1276,7 +1276,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
         });
     }
 
-    async fn test_insert_session(&self, id: &str) {
+    pub async fn test_insert_session(&self, id: &str) {
         self.test_insert_session_with_history(id, vec![]).await;
     }
 }
@@ -4513,6 +4513,31 @@ mod tests {
                 "expected history trimmed to max_history=2, got {} messages",
                 portable.len()
             );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_unknown_session_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
+            ).unwrap();
+            let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+            assert!(result.is_err(), "import of unknown session must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_malformed_messages_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string()
+            ).unwrap();
+            let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+            assert!(result.is_err(), "malformed messages must return Err");
         }).await;
     }
 }
