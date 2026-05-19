@@ -16,7 +16,7 @@ use trogon_eventsourcing::nats::{
     write_checkpoint,
 };
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, CommandExecution, CommandFailure, Decider, Decision, Event, EventDecode,
+    AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventDecode,
     EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, FrequencySnapshot, HeaderName,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots,
     StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, WriteSnapshotRequest,
@@ -1642,7 +1642,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let without_snapshot = CommandExecution::new(&fixture.store, &command).execute().await;
-    assert!(matches!(without_snapshot, Err(CommandFailure::ReadStream(_))));
+    assert!(matches!(without_snapshot, Err(CommandError::ReadStream(_))));
 
     fixture
         .store
@@ -1682,7 +1682,7 @@ async fn jetstream_command_execution_does_not_snapshot_failed_appends() -> TestR
         .await;
     assert!(matches!(
         result,
-        Err(CommandFailure::Append(
+        Err(CommandError::Append(
             JetStreamStoreError::OptimisticConcurrencyConflict { .. }
         ))
     ));
@@ -1781,7 +1781,7 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
 
     let command = IncreaseCounterCommand::new("counter", 1);
     let result = CommandExecution::new(&fixture.store, &command).execute().await;
-    assert!(matches!(result, Err(CommandFailure::DecodeEvent(_))));
+    assert!(matches!(result, Err(CommandError::DecodeEvent(_))));
 
     fixture.delete().await
 }
@@ -1804,7 +1804,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_stream() -> TestR
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
-    let Err(CommandFailure::SnapshotAheadOfStream {
+    let Err(CommandError::SnapshotAheadOfStream {
         snapshot_position,
         stream_position,
     }) = result
@@ -1840,7 +1840,7 @@ async fn jetstream_command_execution_rejects_snapshot_ahead_of_existing_stream()
         .with_task_runtime(spawn_on_tokio)
         .execute()
         .await;
-    let Err(CommandFailure::SnapshotAheadOfStream {
+    let Err(CommandError::SnapshotAheadOfStream {
         snapshot_position,
         stream_position,
     }) = result

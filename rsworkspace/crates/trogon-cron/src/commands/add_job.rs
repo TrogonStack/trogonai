@@ -89,7 +89,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 #[cfg(test)]
 mod tests {
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::{CommandExecution, CommandFailure, Events, run_task_immediately};
+    use trogon_eventsourcing::{CommandError, CommandExecution, Events, run_task_immediately};
 
     use super::*;
     use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};
@@ -224,7 +224,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(AddJobDecideError::AlreadyExists { ref id })
+            CommandError::Decide(AddJobDecideError::AlreadyExists { ref id })
                 if id.to_string() == "backup"
         ));
     }
@@ -255,7 +255,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(AddJobDecideError::JobDeleted { ref id })
+            CommandError::Decide(AddJobDecideError::JobDeleted { ref id })
                 if id.to_string() == "backup"
         ));
     }

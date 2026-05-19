@@ -4,18 +4,38 @@ use crate::stream::{
     StreamWritePrecondition,
 };
 use crate::{
-    Decider, Event, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType, Events, StreamEvent,
-    WritePrecondition,
+    Decider, EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType, Events,
+    StreamEvent, WritePrecondition,
 };
 use trogon_decider::DecisionFailure;
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64, pin::Pin};
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub type BoxTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-type ExecutionFailure<C, RuntimeError> =
-    CommandFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError, RuntimeError>;
-type ExecutionStep<C, RuntimeError, T> = Result<T, ExecutionFailure<C, RuntimeError>>;
+type ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError> =
+    CommandError<
+        <C as Decider>::DecideError,
+        <C as Decider>::EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        EncodeError,
+        DecodeError,
+    >;
+type ExecutionStep<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError, T> =
+    Result<T, ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>>;
+type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
+type CommandEventEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
+type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
+type CommandEventEncodeFailure<C> = EncodeEventError<CommandEventTypeError<C>, CommandEventEncodeError<C>>;
+type CommandReadStreamError<E, C> = <E as StreamRead<<C as Decider>::StreamId>>::Error;
+type CommandAppendStreamError<E, C> = <E as StreamAppend<<C as Decider>::StreamId>>::Error;
+type CommandReadSnapshotError<S, C> = <S as SnapshotRead<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
+type CommandWriteSnapshotError<S, C> = <S as SnapshotWrite<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
+type CommandWithoutSnapshotsResult<E, C> =
+    CommandResult<C, std::convert::Infallible, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
+type CommandWithSnapshotsResult<E, S, C> =
+    CommandResult<C, CommandReadSnapshotError<S, C>, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
 
 pub fn spawn_on_tokio(task: BoxTask) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
@@ -114,24 +134,141 @@ pub struct ExecutionResult<State, Event> {
     pub state: State,
 }
 
-pub type CommandResult<C, InfraError> = Result<
+/// Result returned by command execution.
+///
+/// Command execution is the first layer that knows which phase failed, so this
+/// type keeps phase information here instead of forcing storage traits to wrap
+/// their own errors. The operation errors stay concrete and separate to preserve
+/// compiler diagnostics and avoid boxing or a lossy shared infrastructure enum.
+pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError> = Result<
     ExecutionResult<<C as Decider>::State, <C as Decider>::Event>,
-    CommandFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError, InfraError>,
+    CommandError<
+        <C as Decider>::DecideError,
+        <C as Decider>::EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        CommandEventEncodeFailure<C>,
+        CommandEventDecodeError<C>,
+    >,
 >;
 
+/// Error taxonomy for a command execution attempt.
+///
+/// The command boundary normalizes failures by execution phase while preserving
+/// the exact source error type for each phase. Domain failures come from the
+/// decider, storage failures come from the concrete read/append/snapshot
+/// operation that failed, and codec failures stay tied to the event traits.
 #[derive(Debug)]
-pub enum CommandFailure<DecideError, EvolveError, RuntimeError> {
+pub enum CommandError<
+    DecideError,
+    EvolveError,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EncodeError,
+    DecodeError,
+> {
+    /// The command could not decide because the domain rejected it.
     Decide(DecideError),
+    /// The command or replay could not evolve state from an event.
     Evolve(EvolveError),
-    ReadSnapshot(RuntimeError),
-    ReadStream(RuntimeError),
-    Append(RuntimeError),
-    EncodeEvent(BoxError),
-    DecodeEvent(BoxError),
+    /// Snapshot loading failed before replaying stream history.
+    ReadSnapshot(ReadSnapshotError),
+    /// Stream history loading failed.
+    ReadStream(ReadStreamError),
+    /// Appending the decided events failed after the command was accepted.
+    Append(AppendStreamError),
+    /// A decided domain event could not be converted into a stored event.
+    EncodeEvent(EncodeError),
+    /// A stored event could not be converted back into a domain event.
+    DecodeEvent(DecodeError),
+    /// The loaded snapshot claims a position newer than the stream can prove.
     SnapshotAheadOfStream {
         snapshot_position: StreamPosition,
         stream_position: Option<StreamPosition>,
     },
+}
+
+impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
+    std::fmt::Display
+    for CommandError<
+        DecideError,
+        EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        EncodeError,
+        DecodeError,
+    >
+where
+    DecideError: std::fmt::Display,
+    EvolveError: std::fmt::Display,
+    ReadSnapshotError: std::fmt::Display,
+    ReadStreamError: std::fmt::Display,
+    AppendStreamError: std::fmt::Display,
+    EncodeError: std::fmt::Display,
+    DecodeError: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decide(source) => write!(f, "command decision failed: {source}"),
+            Self::Evolve(source) => write!(f, "command state evolution failed: {source}"),
+            Self::ReadSnapshot(source) => write!(f, "command snapshot read failed: {source}"),
+            Self::ReadStream(source) => write!(f, "command stream read failed: {source}"),
+            Self::Append(source) => write!(f, "command stream append failed: {source}"),
+            Self::EncodeEvent(source) => write!(f, "command event encoding failed: {source}"),
+            Self::DecodeEvent(source) => write!(f, "command event decoding failed: {source}"),
+            Self::SnapshotAheadOfStream {
+                snapshot_position,
+                stream_position: Some(stream_position),
+            } => write!(
+                f,
+                "snapshot position {snapshot_position} is ahead of current stream position {stream_position}"
+            ),
+            Self::SnapshotAheadOfStream {
+                snapshot_position,
+                stream_position: None,
+            } => write!(
+                f,
+                "snapshot position {snapshot_position} exists but the stream has no current position"
+            ),
+        }
+    }
+}
+
+impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
+    std::error::Error
+    for CommandError<
+        DecideError,
+        EvolveError,
+        ReadSnapshotError,
+        ReadStreamError,
+        AppendStreamError,
+        EncodeError,
+        DecodeError,
+    >
+where
+    DecideError: std::error::Error + 'static,
+    EvolveError: std::error::Error + 'static,
+    ReadSnapshotError: std::error::Error + 'static,
+    ReadStreamError: std::error::Error + 'static,
+    AppendStreamError: std::error::Error + 'static,
+    EncodeError: std::error::Error + 'static,
+    DecodeError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decide(source) => Some(source),
+            Self::Evolve(source) => Some(source),
+            Self::ReadSnapshot(source) => Some(source),
+            Self::ReadStream(source) => Some(source),
+            Self::Append(source) => Some(source),
+            Self::EncodeEvent(source) => Some(source),
+            Self::DecodeEvent(source) => Some(source),
+            Self::SnapshotAheadOfStream { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -265,25 +402,40 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
 }
 
 impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
-    async fn append_decision<SErr>(
+    async fn append_decision<ReadSnapshotError, ReadStreamError, DecodeError>(
         &self,
         current_position: Option<StreamPosition>,
         stream_id: &C::StreamId,
         state: C::State,
-    ) -> ExecutionStep<C, SErr, (AppendStreamResponse, Events<C::Event>, C::State)>
+    ) -> ExecutionStep<
+        C,
+        ReadSnapshotError,
+        ReadStreamError,
+        CommandAppendStreamError<E, C>,
+        CommandEventEncodeFailure<C>,
+        DecodeError,
+        (AppendStreamResponse, Events<C::Event>, C::State),
+    >
     where
         C: Decider,
         C::Event: Clone + EventType + EventIdentity + EventEncode,
         C::StreamId: AsRef<str>,
-        E: StreamAppend<C::StreamId, Error = SErr>,
-        <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-        <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
+        E: StreamAppend<C::StreamId>,
+        CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
+        CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
-        let decision = C::decide(&state, self.command).map_err(CommandFailure::Decide)?;
-        let (state, events) = decision
-            .handle(state, self.command)
-            .map_err(decision_failure_to_command_failure::<C, SErr>)?;
-        let encoded_events = encode_events(&events).map_err(|source| CommandFailure::EncodeEvent(box_error(source)))?;
+        let decision = C::decide(&state, self.command).map_err(CommandError::Decide)?;
+        let (state, events) = decision.handle(state, self.command).map_err(
+            decision_failure_to_command_failure::<
+                C,
+                ReadSnapshotError,
+                ReadStreamError,
+                CommandAppendStreamError<E, C>,
+                CommandEventEncodeFailure<C>,
+                DecodeError,
+            >,
+        )?;
+        let encoded_events = encode_events(&events).map_err(CommandError::EncodeEvent)?;
         let stream_write_precondition =
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -294,7 +446,7 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
                 events: encoded_events,
             })
             .await
-            .map_err(|source| CommandFailure::Append(source))?;
+            .map_err(CommandError::Append)?;
 
         Ok((append_outcome, events, state))
     }
@@ -314,21 +466,17 @@ impl<'a, E, S, C, P, Spawn> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn
     }
 }
 
-impl<E, C, SErr> CommandExecution<'_, E, C, WithoutSnapshots>
+impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
 where
     C: Decider,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
     C::StreamId: AsRef<str>,
-    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
-    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
+    E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
+    CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
-    pub async fn execute(self) -> CommandResult<C, SErr> {
-        self.execute_result().await
-    }
-
-    async fn execute_result(self) -> CommandResult<C, SErr> {
+    pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
         let stream_read = self
             .event_store
@@ -337,10 +485,22 @@ where
                 from_sequence: 1,
             })
             .await
-            .map_err(|source| CommandFailure::ReadStream(source))?;
+            .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
-        let state = replay_stream_events::<C, SErr>(C::initial_state(), stream_read.events)?;
-        let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
+        let state = replay_stream_events::<
+            C,
+            std::convert::Infallible,
+            CommandReadStreamError<E, C>,
+            CommandAppendStreamError<E, C>,
+            CommandEventEncodeFailure<C>,
+        >(C::initial_state(), stream_read.events)?;
+        let (append_outcome, events, state) = self
+            .append_decision::<std::convert::Infallible, CommandReadStreamError<E, C>, CommandEventDecodeError<C>>(
+                current_position,
+                stream_id,
+                state,
+            )
+            .await?;
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -350,38 +510,31 @@ where
     }
 }
 
-impl<E, S, C, P, Spawn, SErr> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>>
+impl<E, S, C, P, Spawn> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>>
 where
     C: Decider,
     C::State: Clone + Send + 'static,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
     C::StreamId: AsRef<str> + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    E: StreamRead<C::StreamId, Error = SErr> + StreamAppend<C::StreamId, Error = SErr>,
-    S: Clone
-        + SnapshotRead<C::State, C::StreamId, Error = SErr>
-        + SnapshotWrite<C::State, C::StreamId, Error = SErr>
-        + 'static,
+    E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
+    S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
     P: SnapshotPolicy<C::State, C::Event>,
     Spawn: Fn(BoxTask) + Send + Sync,
-    SErr: std::fmt::Display + Send + 'static,
-    <C::Event as EventType>::Error: std::error::Error + Send + Sync + 'static,
-    <C::Event as EventEncode>::Error: std::error::Error + Send + Sync + 'static,
-    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
+    CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
+    CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
     C::State: SnapshotType,
 {
-    pub async fn execute(self) -> CommandResult<C, SErr> {
-        self.execute_result().await
-    }
-
-    async fn execute_result(self) -> CommandResult<C, SErr> {
+    pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
         let snapshot = self
             .snapshots
             .snapshot_store
             .read_snapshot(ReadSnapshotRequest { stream_id })
             .await
-            .map_err(|source| CommandFailure::ReadSnapshot(source))?;
+            .map_err(CommandError::ReadSnapshot)?;
         let snapshot = snapshot.snapshot;
         let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
         let state = snapshot
@@ -397,14 +550,14 @@ where
                 from_sequence: start_sequence,
             })
             .await
-            .map_err(|source| CommandFailure::ReadStream(source))?;
+            .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
 
         if let Some(snapshot_position) = snapshot_position {
             match current_position {
                 Some(stream_position) if snapshot_position <= stream_position => {}
                 stream_position => {
-                    return Err(CommandFailure::SnapshotAheadOfStream {
+                    return Err(CommandError::SnapshotAheadOfStream {
                         snapshot_position,
                         stream_position,
                     });
@@ -413,10 +566,28 @@ where
         }
 
         let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_stream_events::<C, SErr>(state, stream_read.events)?;
-        let (append_outcome, events, state) = self.append_decision::<SErr>(current_position, stream_id, state).await?;
+        let state = replay_stream_events::<
+            C,
+            CommandReadSnapshotError<S, C>,
+            CommandReadStreamError<E, C>,
+            CommandAppendStreamError<E, C>,
+            CommandEventEncodeFailure<C>,
+        >(state, stream_read.events)?;
+        let (append_outcome, events, state) = self
+            .append_decision::<
+                CommandReadSnapshotError<S, C>,
+                CommandReadStreamError<E, C>,
+                CommandEventDecodeError<C>,
+            >(
+                current_position,
+                stream_id,
+                state,
+            )
+            .await?;
         let events_since_snapshot = replayed_event_count + events.len() as u64;
 
+        // Keep the policy decision inline: for frequency policies it is cheaper
+        // than spawning, and only the storage mutation needs to be best-effort.
         let snapshot_decision = self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
             stream_position: append_outcome.stream_position,
             events_since_snapshot,
@@ -439,13 +610,6 @@ where
             state,
         })
     }
-}
-
-fn box_error<E>(error: E) -> BoxError
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    Box::new(error)
 }
 
 fn resolve_stream_write_precondition<C>(
@@ -501,34 +665,47 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     }));
 }
 
-fn replay_stream_events<C, SErr>(
+fn replay_stream_events<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError>(
     mut state: C::State,
     stream_events: Vec<StreamEvent>,
-) -> ExecutionStep<C, SErr, C::State>
+) -> ExecutionStep<
+    C,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EncodeError,
+    CommandEventDecodeError<C>,
+    C::State,
+>
 where
     C: Decider,
     C::Event: EventDecode,
-    <C::Event as EventDecode>::Error: std::error::Error + Send + Sync + 'static,
+    CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     for stream_event in stream_events {
-        let event = stream_event
-            .decode::<C::Event>()
-            .map_err(|source| CommandFailure::DecodeEvent(box_error(source)))?;
-        state = C::evolve(state, &event).map_err(CommandFailure::Evolve)?;
+        let event = stream_event.decode::<C::Event>().map_err(CommandError::DecodeEvent)?;
+        state = C::evolve(state, &event).map_err(CommandError::Evolve)?;
     }
 
     Ok(state)
 }
 
-fn decision_failure_to_command_failure<C, RuntimeError>(
+fn decision_failure_to_command_failure<
+    C,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EncodeError,
+    DecodeError,
+>(
     failure: DecisionFailure<C::DecideError, C::EvolveError>,
-) -> ExecutionFailure<C, RuntimeError>
+) -> ExecutionFailure<C, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
 where
     C: Decider,
 {
     match failure {
-        DecisionFailure::Decide(error) => CommandFailure::Decide(error),
-        DecisionFailure::Evolve(error) => CommandFailure::Evolve(error),
+        DecisionFailure::Decide(error) => CommandError::Decide(error),
+        DecisionFailure::Evolve(error) => CommandError::Evolve(error),
     }
 }
 
@@ -974,7 +1151,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let result = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(result.stream_position, position(1));
         assert_eq!(result.state, TestState::Present { enabled: true });
@@ -999,7 +1176,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::RegisterThenDisable);
 
-        let result = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(result.stream_position, position(2));
         assert_eq!(result.state, TestState::Present { enabled: false });
@@ -1051,7 +1228,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1075,11 +1252,11 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap_err();
 
-        let CommandFailure::SnapshotAheadOfStream {
+        let CommandError::SnapshotAheadOfStream {
             snapshot_position,
             stream_position,
         } = error
@@ -1102,11 +1279,11 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap_err();
 
-        let CommandFailure::SnapshotAheadOfStream {
+        let CommandError::SnapshotAheadOfStream {
             snapshot_position,
             stream_position,
         } = error
@@ -1131,9 +1308,9 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
-        assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
     }
 
     #[test]
@@ -1144,9 +1321,9 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::EmitBroken);
 
-        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
-        assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
         assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
         assert!(runtime.appended_events.lock().unwrap().is_empty());
     }
@@ -1159,11 +1336,11 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::RegisterThenFail);
 
-        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(TestDecisionError::AlreadyDisabled)
+            CommandError::Decide(TestDecisionError::AlreadyDisabled)
         ));
         assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
         assert!(runtime.appended_events.lock().unwrap().is_empty());
@@ -1177,9 +1354,9 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::RegisterThenBroken);
 
-        let error = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap_err();
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
-        assert!(matches!(error, CommandFailure::Evolve(TestCommandError::BrokenEvent)));
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
         assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
         assert!(runtime.appended_events.lock().unwrap().is_empty());
     }
@@ -1196,13 +1373,13 @@ mod tests {
         let error = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap_err();
 
         assert!(matches!(
             error,
-            CommandFailure::Decide(TestDecisionError::AlreadyRegistered)
+            CommandError::Decide(TestDecisionError::AlreadyRegistered)
         ));
     }
 
@@ -1219,7 +1396,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
         let appended_events = runtime.appended_events.lock().unwrap();
@@ -1249,7 +1426,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Remove);
 
-        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(
             runtime.stream_write_preconditions.lock().unwrap().as_slice(),
@@ -1268,7 +1445,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_write_precondition(StreamWritePrecondition::Any)
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1289,7 +1466,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_write_precondition(StreamWritePrecondition::Any)
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1310,7 +1487,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1340,7 +1517,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_TWO_EVENTS)))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1362,7 +1539,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(EVERY_TWO_EVENTS)))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1380,7 +1557,7 @@ mod tests {
         let _ = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1399,7 +1576,7 @@ mod tests {
         let result = block_on(
             CommandExecution::new(&runtime, &command)
                 .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
-                .execute_result(),
+                .execute(),
         )
         .unwrap();
 
@@ -1416,7 +1593,7 @@ mod tests {
         };
         let command = TestCommand::new("alpha", TestAction::Register);
 
-        let _ = block_on(CommandExecution::new(&runtime, &command).execute_result()).unwrap();
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
 
         assert_eq!(command.stream_id_calls(), 1);
         assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());

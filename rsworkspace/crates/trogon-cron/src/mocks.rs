@@ -546,7 +546,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{CommandExecution, CommandFailure, run_task_immediately};
+    use trogon_eventsourcing::{CommandError, CommandExecution, run_task_immediately};
 
     use super::*;
     use crate::commands::domain as command_domain;
@@ -713,7 +713,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandFailure::Decide(crate::AddJobDecideError::JobDeleted { .. })
+            CommandError::Decide(crate::AddJobDecideError::JobDeleted { .. })
         ));
     }
 
@@ -747,7 +747,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandFailure::Decide(crate::ResumeJobDecideError::AlreadyActive { .. })
+            CommandError::Decide(crate::ResumeJobDecideError::AlreadyActive { .. })
         ));
 
         let missing_error = CommandExecution::new(&store, &PauseJobCommand::new(command_job_id("missing")))
@@ -758,7 +758,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandFailure::Decide(crate::PauseJobDecideError::JobNotFound { .. })
+            CommandError::Decide(crate::PauseJobDecideError::JobNotFound { .. })
         ));
     }
 

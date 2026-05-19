@@ -11,9 +11,9 @@ pub use event::{
     EventIdentity, EventType, HeaderName, StreamEvent,
 };
 pub use execution::{
-    BoxTask, CommandExecution, CommandFailure, CommandResult, CommandSnapshotPolicy, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots,
-    WithoutSnapshotTaskScheduler, WithoutSnapshots, run_task_immediately, spawn_on_tokio,
+    BoxTask, CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
+    NoSnapshot, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy, Snapshots, WithoutSnapshotTaskScheduler,
+    WithoutSnapshots, run_task_immediately, spawn_on_tokio,
 };
 pub use nats::{
     StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
