@@ -100,7 +100,10 @@ async fn main() -> anyhow::Result<()> {
         capabilities: vec!["chat".to_string(), "code_edit".to_string()],
         nats_subject: format!("{}.agent.>", acp_prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &acp_prefix, "models": [&model] }),
+        metadata: serde_json::json!({
+            "acp_prefix": &acp_prefix,
+            "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+        }),
     };
     registry.register(&cap).await
         .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
