@@ -1,11 +1,11 @@
 use super::stream_position::StreamPosition;
-use crate::{Event, Events};
+use crate::Event;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppendStreamRequest<'a, StreamId: ?Sized> {
     pub stream_id: &'a StreamId,
     pub stream_write_precondition: StreamWritePrecondition,
-    pub events: Events<Event>,
+    pub events: Vec<Event>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

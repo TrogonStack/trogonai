@@ -8,7 +8,7 @@ mod event_type;
 mod header_name;
 mod stream_event;
 
-use trogon_std::UuidV7Generator;
+use trogon_std::NowV7;
 
 pub use codec::{EventData, EventDecode, EventEncode};
 pub use encode_event_error::{EncodeEventError, EventEncodeError};
@@ -28,16 +28,21 @@ pub struct Event {
     pub headers: EventHeaders,
 }
 
-pub(crate) fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+pub(crate) fn encode_event<E, G>(
+    event: &E,
+    event_id_generator: &G,
+    headers: &EventHeaders,
+) -> Result<Event, EventEncodeError<E>>
 where
     E: EventType + EventIdentity + EventEncode,
+    G: NowV7 + ?Sized,
 {
-    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
     Ok(Event {
         id,
         r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
         content: event.encode().map_err(EncodeEventError::EventEncode)?,
-        headers: EventHeaders::empty(),
+        headers: headers.clone(),
     })
 }
 
@@ -48,6 +53,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
+    use trogon_std::UuidV7Generator;
     use uuid::Uuid;
 
     fn position(value: u64) -> StreamPosition {
@@ -134,7 +140,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
 
         assert_eq!(event.id.as_uuid().get_version_num(), 7);
         assert_eq!(event.r#type, "TestEvent");
@@ -153,7 +159,7 @@ mod tests {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
 
         assert_eq!(event.id, event_id);
     }
@@ -169,7 +175,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
 
         let recorded = StreamEvent {
             stream_id: "alpha".to_string(),
@@ -188,7 +194,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
         assert_eq!(
             TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
                 .unwrap()
@@ -213,15 +219,14 @@ mod tests {
         };
         let headers = EventHeaders::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
 
-        let mut generated = encode_event(&event).unwrap();
-        generated.headers = headers.clone();
+        let generated = encode_event(&event, &UuidV7Generator, &headers).unwrap();
         assert_eq!(
             TestEvent::decode(EventData::new(&generated.r#type, "alpha", &generated.content)).unwrap(),
             event
         );
         assert_eq!(generated.headers.get("trace-id"), Some("trace-1"));
 
-        let no_headers = encode_event(&event).unwrap();
+        let no_headers = encode_event(&event, &UuidV7Generator, &EventHeaders::empty()).unwrap();
         assert!(no_headers.headers.is_empty());
 
         let recorded = StreamEvent {

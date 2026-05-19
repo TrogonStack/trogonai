@@ -5,10 +5,11 @@ use crate::stream::{
     StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
-    Decider, EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventIdentity, EventType, Events,
-    StreamEvent, WritePrecondition,
+    Decider, EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventIdentity,
+    EventType, Events, StreamEvent, WritePrecondition,
 };
-use trogon_decider::DecisionFailure;
+use trogon_decider::{DecisionFailure, evaluate_decision};
+use trogon_std::{NowV7, UuidV7Generator};
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64};
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
@@ -83,7 +84,7 @@ pub enum SnapshotDecision {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SnapshotDecisionContext<'a, State, Event> {
+pub struct DecideSnapshot<'a, State, Event> {
     /// The stream high-watermark after the append that may trigger a snapshot.
     ///
     /// Use this as the checkpoint position if the policy decides to snapshot.
@@ -99,7 +100,7 @@ pub struct SnapshotDecisionContext<'a, State, Event> {
 }
 
 pub trait SnapshotPolicy<State, Event> {
-    fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision;
+    fn decide_snapshot(&self, context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision;
 }
 
 pub trait CommandSnapshotPolicy: Decider
@@ -119,7 +120,7 @@ where
 pub struct NoSnapshot;
 
 impl<State, Event> SnapshotPolicy<State, Event> for NoSnapshot {
-    fn snapshot_decision(&self, _context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision {
+    fn decide_snapshot(&self, _context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision {
         SnapshotDecision::Skip
     }
 }
@@ -140,7 +141,7 @@ impl FrequencySnapshot {
 }
 
 impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
-    fn snapshot_decision(&self, context: SnapshotDecisionContext<'_, State, Event>) -> SnapshotDecision {
+    fn decide_snapshot(&self, context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision {
         if context.events_since_snapshot >= self.frequency.get() {
             SnapshotDecision::Take
         } else {
@@ -428,26 +429,35 @@ where
     }
 }
 
-pub struct CommandExecution<'a, E, C, S = WithoutSnapshots> {
+pub struct CommandExecution<'a, E, C, S, G> {
     event_store: &'a E,
     command: &'a C,
     write_precondition: Option<StreamWritePrecondition>,
     snapshots: S,
+    headers: EventHeaders,
+    event_id_generator: G,
 }
 
-impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots>
+impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots, UuidV7Generator>
 where
     C: Decider,
 {
-    pub const fn new(event_store: &'a E, command: &'a C) -> Self {
+    pub fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
             event_store,
             command,
             write_precondition: None,
             snapshots: WithoutSnapshots,
+            headers: EventHeaders::empty(),
+            event_id_generator: UuidV7Generator,
         }
     }
+}
 
+impl<'a, E, C, G> CommandExecution<'a, E, C, WithoutSnapshots, G>
+where
+    C: Decider,
+{
     #[allow(clippy::type_complexity)]
     pub fn with_snapshot<I>(
         self,
@@ -462,6 +472,7 @@ where
             <I as IntoSnapshots<'a, C>>::Policy,
             <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
         >,
+        G,
     >
     where
         I: IntoSnapshots<'a, C>,
@@ -471,11 +482,13 @@ where
             command: self.command,
             write_precondition: self.write_precondition,
             snapshots: snapshots.into_snapshots(),
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
         }
     }
 }
 
-impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
+impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamWritePrecondition>>,
@@ -483,9 +496,31 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
         self.write_precondition = write_precondition.into();
         self
     }
+
+    pub fn with_headers(mut self, headers: EventHeaders) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    pub fn with_event_id_generator<NextG>(
+        self,
+        event_id_generator: NextG,
+    ) -> CommandExecution<'a, E, C, S, NextG>
+    where
+        NextG: NowV7,
+    {
+        CommandExecution {
+            event_store: self.event_store,
+            command: self.command,
+            write_precondition: self.write_precondition,
+            snapshots: self.snapshots,
+            headers: self.headers,
+            event_id_generator,
+        }
+    }
 }
 
-impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
+impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     async fn append_decision(
         &self,
         current_position: Option<StreamPosition>,
@@ -505,15 +540,16 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
         C::Event: Clone + EventType + EventIdentity + EventEncode,
         C::StreamId: AsRef<str>,
         E: StreamAppend<C::StreamId>,
+        G: NowV7,
         CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
         CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
-        let decision = C::decide(&state, self.command).map_err(AppendDecisionError::Decide)?;
-        let (state, events) = decision.handle(state, self.command).map_err(|failure| match failure {
+        let (state, events) = evaluate_decision(state, self.command).map_err(|failure| match failure {
             DecisionFailure::Decide(error) => AppendDecisionError::Decide(error),
             DecisionFailure::Evolve(error) => AppendDecisionError::Evolve(error),
         })?;
-        let encoded_events = encode_events(&events).map_err(AppendDecisionError::EncodeEvent)?;
+        let encoded_events =
+            encode_events(&events, &self.event_id_generator, &self.headers).map_err(AppendDecisionError::EncodeEvent)?;
         let stream_write_precondition =
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -530,26 +566,29 @@ impl<'a, E, C, S> CommandExecution<'a, E, C, S> {
     }
 }
 
-impl<'a, E, S, C, P, Spawn> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>> {
+impl<'a, E, S, C, P, Spawn, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>, G> {
     pub fn with_task_runtime<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>> {
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>, G> {
         CommandExecution {
             event_store: self.event_store,
             command: self.command,
             write_precondition: self.write_precondition,
             snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
         }
     }
 }
 
-impl<E, C> CommandExecution<'_, E, C, WithoutSnapshots>
+impl<E, C, G> CommandExecution<'_, E, C, WithoutSnapshots, G>
 where
     C: Decider,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
     C::StreamId: AsRef<str>,
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
+    G: NowV7,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
@@ -576,7 +615,7 @@ where
     }
 }
 
-impl<E, S, C, P, Spawn> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>>
+impl<E, S, C, P, Spawn, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>, G>
 where
     C: Decider,
     C::State: Clone + Send + 'static,
@@ -587,6 +626,7 @@ where
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
     P: SnapshotPolicy<C::State, C::Event>,
     Spawn: SnapshotTaskScheduler + Send + Sync,
+    G: NowV7,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
@@ -636,7 +676,7 @@ where
 
         // Keep the policy decision inline: for frequency policies it is cheaper
         // than spawning, and only the storage mutation needs to be best-effort.
-        let snapshot_decision = self.snapshots.policy.snapshot_decision(SnapshotDecisionContext {
+        let snapshot_decision = self.snapshots.policy.decide_snapshot(DecideSnapshot {
             stream_position: append_outcome.stream_position,
             events_since_snapshot,
             state: &state,
@@ -732,13 +772,19 @@ where
     Ok(state)
 }
 
-fn encode_events<E>(events: &Events<E>) -> Result<Events<Event>, EventEncodeError<E>>
+fn encode_events<E, G>(
+    events: &Events<E>,
+    event_id_generator: &G,
+    headers: &EventHeaders,
+) -> Result<Vec<Event>, EventEncodeError<E>>
 where
     E: EventType + EventIdentity + EventEncode,
+    G: NowV7 + ?Sized,
 {
-    let first = encode_event(events.first())?;
-    let rest = events.iter().skip(1).map(encode_event).collect::<Result<Vec<_>, _>>()?;
-    Ok(Events::from_first(first, rest))
+    events
+        .iter()
+        .map(|event| encode_event(event, event_id_generator, headers))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1113,7 +1159,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.stream_write_precondition);
-            self.appended_events.lock().unwrap().extend(request.events.into_vec());
+            self.appended_events.lock().unwrap().extend(request.events);
             Ok(AppendStreamResponse {
                 stream_position: self.stream_position,
             })
@@ -1164,7 +1210,7 @@ mod tests {
         };
         StreamEvent {
             stream_id,
-            event: encode_event(&event).unwrap(),
+            event: encode_event(&event, &UuidV7Generator, &EventHeaders::empty()).unwrap(),
             stream_position: position(sequence),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
         }

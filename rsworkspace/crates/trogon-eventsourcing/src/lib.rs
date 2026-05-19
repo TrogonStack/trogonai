@@ -14,7 +14,7 @@ pub use event::{
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
     CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
-    NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotDecisionContext, SnapshotPolicy,
+    DecideSnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotPolicy,
     SnapshotTaskScheduler, Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use nats::{

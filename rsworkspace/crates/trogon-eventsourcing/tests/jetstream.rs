@@ -18,7 +18,7 @@ use trogon_eventsourcing::nats::{
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, EncodeEventError,
     Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventId, EventIdentity, EventType,
-    Events, FrequencySnapshot, HeaderName, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot,
+    FrequencySnapshot, HeaderName, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot,
     SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots, StreamAppend, StreamPosition,
     StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
@@ -346,7 +346,7 @@ fn nats_test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://127.0.0.1:14222".to_string())
 }
 
-fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+fn encode_event<E>(event: &E, headers: &EventHeaders) -> Result<Event, EventEncodeError<E>>
 where
     E: EventType + EventIdentity + EventEncode,
 {
@@ -355,13 +355,13 @@ where
         id,
         r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
         content: event.encode().map_err(EncodeEventError::EventEncode)?,
-        headers: EventHeaders::empty(),
+        headers: headers.clone(),
     })
 }
 
 fn test_event(_stream_id: &str, value: impl Into<String>) -> Result<Event, JetStreamStoreError<std::io::Error>> {
     let event = TestEvent { value: value.into() };
-    encode_event(&event).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    encode_event(&event, &EventHeaders::empty()).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<Event> {
@@ -369,11 +369,7 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
         event_id: Some(EventId::from(event_id)),
         value: value.into(),
     };
-    Ok(encode_event(&event)?)
-}
-
-fn events(events: Vec<Event>) -> TestResult<Events<Event>> {
-    Events::from_vec(events).ok_or_else(|| std::io::Error::other("events must be non-empty").into())
+    Ok(encode_event(&event, &EventHeaders::empty())?)
 }
 
 fn debug_error<E>(error: E) -> std::io::Error
@@ -419,7 +415,7 @@ async fn append_one(
         .append_stream(AppendStreamRequest {
             stream_id,
             stream_write_precondition,
-            events: Events::one(test_event(stream_id, value)?),
+            events: vec![test_event(stream_id, value)?],
         })
         .await
 }
@@ -434,11 +430,6 @@ async fn append_many(
     for value in values {
         events.push(test_event(stream_id, value)?);
     }
-    let Some(events) = Events::from_vec(events) else {
-        return Err(JetStreamStoreError::Codec(std::io::Error::other(
-            "events must be non-empty",
-        )));
-    };
     store
         .append_stream(AppendStreamRequest {
             stream_id,
@@ -601,10 +592,10 @@ async fn jetstream_store_appends_reads_filters_and_preserves_event_envelope() ->
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: events(vec![
+            events: vec![
                 test_event_with_id("alpha", first_alpha_id, "alpha-one")?,
                 test_event_with_id("alpha", second_alpha_id, "alpha-two")?,
-            ])?,
+            ],
         })
         .await?;
     assert_eq!(outcome.stream_position, position(2));
@@ -787,10 +778,10 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(alpha_one.stream_position),
-            events: events(vec![
+            events: vec![
                 test_event("alpha", "alpha-two")?,
                 test_event("alpha", "alpha-three")?,
-            ])?,
+            ],
         })
         .await?;
     let beta_two = append_one(
@@ -1298,14 +1289,13 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         value: "headers".to_string(),
     };
     let event_headers = EventHeaders::one(HeaderName::new("trace-id")?, "trace-1")?;
-    let mut event = encode_event(&header_payload)?;
-    event.headers = event_headers.clone();
+    let event = encode_event(&header_payload, &event_headers)?;
     fixture
         .store
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(event),
+            events: vec![event],
         })
         .await?;
 
@@ -1637,13 +1627,13 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         ))),
         amount: 5,
     };
-    let seed = encode_event(&seed_payload)?;
+    let seed = encode_event(&seed_payload, &EventHeaders::empty())?;
     let seed_outcome = fixture
         .store
         .append_stream(AppendStreamRequest {
             stream_id: "counter",
             stream_write_precondition: StreamWritePrecondition::Any,
-            events: Events::one(seed),
+            events: vec![seed],
         })
         .await?;
     assert_eq!(seed_outcome.stream_position, position(2));
@@ -1783,7 +1773,7 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
         .append_stream(AppendStreamRequest {
             stream_id: "counter",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(corrupt_event),
+            events: vec![corrupt_event],
         })
         .await?;
 
@@ -2112,13 +2102,13 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
                 event_id: Some(EventId::from(event_id)),
                 value: format!("attempt-{index}"),
             };
-            let event =
-                encode_event(&payload).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
+            let event = encode_event(&payload, &EventHeaders::empty())
+                .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
                 .append_stream(AppendStreamRequest {
                     stream_id: "alpha",
                     stream_write_precondition: StreamWritePrecondition::Any,
-                    events: Events::one(event),
+                    events: vec![event],
                 })
                 .await
         }
@@ -2327,7 +2317,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(test_event_with_id("alpha", event_id, "first")?),
+            events: vec![test_event_with_id("alpha", event_id, "first")?],
         })
         .await?;
     assert_eq!(outcome.stream_position, position(1));
@@ -2337,7 +2327,7 @@ async fn jetstream_store_rejects_duplicate_event_id_without_advancing_stream() -
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(position(1)),
-            events: Events::one(test_event_with_id("alpha", event_id, "duplicate")?),
+            events: vec![test_event_with_id("alpha", event_id, "duplicate")?],
         })
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2366,7 +2356,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(test_event_with_id("alpha", event_id, "first")?),
+            events: vec![test_event_with_id("alpha", event_id, "first")?],
         })
         .await?;
 
@@ -2375,7 +2365,7 @@ async fn jetstream_store_rejects_duplicate_event_id_with_any_without_advancing_s
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::Any,
-            events: Events::one(test_event_with_id("alpha", event_id, "duplicate")?),
+            events: vec![test_event_with_id("alpha", event_id, "duplicate")?],
         })
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2404,7 +2394,7 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(test_event_with_id("alpha", event_id, "seed")?),
+            events: vec![test_event_with_id("alpha", event_id, "seed")?],
         })
         .await?;
 
@@ -2413,10 +2403,10 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(position(1)),
-            events: events(vec![
+            events: vec![
                 test_event_with_id("alpha", event_id, "duplicate-first")?,
                 test_event("alpha", "new-second")?,
-            ])?,
+            ],
         })
         .await;
     assert_append_publish_error(duplicate_first)?;
@@ -2426,10 +2416,10 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_atomic_batch_without_
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(position(1)),
-            events: events(vec![
+            events: vec![
                 test_event("alpha", "new-first")?,
                 test_event_with_id("alpha", event_id, "duplicate-last")?,
-            ])?,
+            ],
         })
         .await;
     assert_append_publish_error(duplicate_last)?;
@@ -2459,10 +2449,10 @@ async fn jetstream_store_rejects_duplicate_event_id_inside_new_atomic_batch_with
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: events(vec![
+            events: vec![
                 test_event_with_id("alpha", event_id, "first")?,
                 test_event_with_id("alpha", event_id, "second")?,
-            ])?,
+            ],
         })
         .await;
     assert_append_publish_error(duplicate_batch)?;
@@ -2491,7 +2481,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(test_event_with_id("alpha", event_id, "alpha")?),
+            events: vec![test_event_with_id("alpha", event_id, "alpha")?],
         })
         .await?;
     let duplicate = fixture
@@ -2499,7 +2489,7 @@ async fn jetstream_store_rejects_duplicate_event_id_across_streams_without_parti
         .append_stream(AppendStreamRequest {
             stream_id: "beta",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: Events::one(test_event_with_id("beta", event_id, "beta")?),
+            events: vec![test_event_with_id("beta", event_id, "beta")?],
         })
         .await;
     assert_append_publish_error(duplicate)?;
@@ -2591,10 +2581,10 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(position(1)),
-            events: events(vec![
+            events: vec![
                 test_event("alpha", "alpha-two")?,
                 test_event("alpha", "alpha-three")?,
-            ])?,
+            ],
         })
         .await?;
     assert_eq!(outcome.stream_position, position(4));
@@ -2626,7 +2616,7 @@ async fn jetstream_store_rejects_stale_atomic_batch_without_partial_write() -> T
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::NoStream,
-            events: events(vec![test_event("alpha", "one")?, test_event("alpha", "two")?])?,
+            events: vec![test_event("alpha", "one")?, test_event("alpha", "two")?],
         })
         .await;
     assert_occ_conflict(stale_batch, StreamWritePrecondition::NoStream, Some(position(1)))?;

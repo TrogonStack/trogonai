@@ -53,7 +53,7 @@ impl StreamAppend<str> for EventStore {
 
     async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
-        let projected_events = request.events.as_slice().to_vec();
+        let projected_events = request.events.clone();
         let outcome = self.inner.append_stream(request).await.map_err(CronError::from)?;
 
         project_appended_events(
