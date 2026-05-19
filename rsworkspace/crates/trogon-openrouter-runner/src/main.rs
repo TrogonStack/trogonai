@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .map_err(|e| format!("initial registry registration failed: {e}"))?;
     info!(agent_type = cfg.agent_type, prefix = cfg.prefix, "registered in agent registry");
+    let registry_for_agent = registry.clone();
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -79,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cfg.default_model,
         cfg.api_key.unwrap_or_default(),
     );
+    agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
 
     {
         let js = js_ctx;

@@ -5,12 +5,14 @@
 //! Run with:
 //!   cargo test -p trogon-openrouter-runner --test agent_nats_integration
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
 use std::path::PathBuf;
 
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ContentBlock, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, SessionNotification,
+    Agent as _, BlobResourceContents, CloseSessionRequest, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest, PromptRequest, ResourceLink,
+    SessionNotification, TextResourceContents,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -20,8 +22,9 @@ use testcontainers_modules::{
     testcontainers::{ImageExt, runners::AsyncRunner},
 };
 use trogon_openrouter_runner::{
-    AgentLoader, Message, OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient,
-    SessionNotifier, SkillLoader, session_store::NatsSessionStore,
+    AgentLoader, AssembledToolCall, Message, OpenRouterAgent, OpenRouterEvent,
+    OpenRouterHttpClient, SessionNotifier, SkillLoader, ToolDef,
+    session_store::NatsSessionStore,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -57,6 +60,7 @@ impl OpenRouterHttpClient for NoOpHttpClient {
         _model: &str,
         _messages: &[Message],
         _api_key: &str,
+        _tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::empty())
     }
@@ -65,6 +69,47 @@ impl OpenRouterHttpClient for NoOpHttpClient {
 /// Returns a fixed assistant reply ("Hello back!") then ends.
 struct ReplyHttpClient;
 
+/// First call returns a bash tool call; second call returns final text.
+struct ToolRoundHttpClient {
+    call_count: Arc<Mutex<u32>>,
+}
+
+impl ToolRoundHttpClient {
+    fn new() -> Self {
+        Self { call_count: Arc::new(Mutex::new(0)) }
+    }
+}
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for ToolRoundHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        let mut n = self.call_count.lock().unwrap();
+        *n += 1;
+        let call = *n;
+        drop(n);
+
+        if call == 1 {
+            Box::pin(stream::iter(vec![OpenRouterEvent::ToolCallsReady {
+                calls: vec![AssembledToolCall {
+                    id: "call_1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }],
+            }]))
+        } else {
+            Box::pin(stream::iter(vec![OpenRouterEvent::TextDelta {
+                text: "answer".to_string(),
+            }]))
+        }
+    }
+}
+
 #[async_trait(?Send)]
 impl OpenRouterHttpClient for ReplyHttpClient {
     async fn chat_stream(
@@ -72,11 +117,94 @@ impl OpenRouterHttpClient for ReplyHttpClient {
         _model: &str,
         _messages: &[Message],
         _api_key: &str,
+        _tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
             OpenRouterEvent::TextDelta {
                 text: "Hello back!".to_string(),
             },
+        ]))
+    }
+}
+
+/// Returns text reply + usage event (10 prompt / 5 completion tokens).
+struct UsageHttpClient;
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for UsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        Box::pin(stream::iter(vec![
+            OpenRouterEvent::TextDelta { text: "reply".to_string() },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+        ]))
+    }
+}
+
+/// First call: emits partial text then a tool call. Second call: emits final text.
+struct ThinkThenToolHttpClient {
+    call_count: Arc<Mutex<u32>>,
+}
+
+impl ThinkThenToolHttpClient {
+    fn new() -> Self {
+        Self { call_count: Arc::new(Mutex::new(0)) }
+    }
+}
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for ThinkThenToolHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        let mut n = self.call_count.lock().unwrap();
+        *n += 1;
+        let call = *n;
+        drop(n);
+
+        if call == 1 {
+            Box::pin(stream::iter(vec![
+                OpenRouterEvent::TextDelta { text: "thinking...".to_string() },
+                OpenRouterEvent::ToolCallsReady {
+                    calls: vec![AssembledToolCall {
+                        id: "call_t".to_string(),
+                        name: "list_directory".to_string(),
+                        arguments: r#"{"path":"."}"#.to_string(),
+                    }],
+                },
+            ]))
+        } else {
+            Box::pin(stream::iter(vec![
+                OpenRouterEvent::TextDelta { text: "done".to_string() },
+            ]))
+        }
+    }
+}
+
+/// Emits one partial TextDelta then an Error — simulates a mid-stream failure.
+struct PartialThenErrorHttpClient;
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for PartialThenErrorHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        Box::pin(stream::iter(vec![
+            OpenRouterEvent::TextDelta { text: "partial".to_string() },
+            OpenRouterEvent::Error { message: "upstream boom".to_string() },
         ]))
     }
 }
@@ -497,6 +625,837 @@ async fn prompt_with_assistant_response_persists_both_messages_to_nats() {
             assert_eq!(messages[0]["content"][0]["text"], "Hi");
             assert_eq!(messages[1]["role"], "assistant");
             assert_eq!(messages[1]["content"][0]["text"], "Hello back!");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn prompt_with_tool_calls_persists_only_text_messages_to_nats() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ToolRoundHttpClient::new())
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("list files".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist after prompt");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(
+                messages.len(),
+                2,
+                "snapshot must have exactly user + assistant text (tool_calls/tool_result filtered out): {messages:?}"
+            );
+            assert_eq!(messages[0]["role"], "user", "first message must be user");
+            assert_eq!(messages[1]["role"], "assistant", "second message must be assistant");
+            assert!(
+                messages[1].get("tool_calls").is_none() || messages[1]["tool_calls"].is_null(),
+                "assistant snapshot message must not contain tool_calls: {}", messages[1]
+            );
+            for msg in messages.iter() {
+                assert!(
+                    msg.get("tool_call_id").is_none() || msg["tool_call_id"].is_null(),
+                    "snapshot must not contain tool_result messages: {msg}"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn session_name_set_from_first_prompt_message() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // Before prompt the name defaults to "New Conversation".
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(v["name"], "New Conversation", "before prompt: default name expected");
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("What is the capital of France?".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["name"],
+                "What is the capital of France?",
+                "after first prompt: KV name must be derived from user message"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_with_branch_at_index_stores_truncated_messages_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            // Source gets a user + assistant message.
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Fork at index 0 — no messages should be carried over.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 0 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(
+                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
+                )
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork KV entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(
+                messages.len(),
+                0,
+                "fork with branchAtIndex=0 must store 0 messages in KV snapshot: {messages:?}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn resume_detection_skips_duplicate_user_message() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // First prompt — adds user message to history.
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id.clone(),
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Second prompt with identical content simulates reconnect after crash.
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            let user_msgs: Vec<_> = messages.iter().filter(|m| m["role"] == "user").collect();
+            assert_eq!(
+                user_msgs.len(),
+                1,
+                "duplicate user message on resume must be skipped; KV messages: {messages:?}"
+            );
+            assert_eq!(user_msgs[0]["content"][0]["text"], "hello");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn system_prompt_not_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+            .with_system_prompt("You are a helpful assistant.")
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            let system_msgs: Vec<_> = messages.iter().filter(|m| m["role"] == "system").collect();
+            assert_eq!(
+                system_msgs.len(),
+                0,
+                "system prompt must not be persisted to KV snapshot: {messages:?}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn resource_link_content_block_stored_formatted() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::ResourceLink(
+                        ResourceLink::new("readme", "file:///readme.md"),
+                    )],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 1, "one user message expected");
+            let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
+            assert_eq!(
+                content,
+                "[Resource: readme | file:///readme.md]",
+                "ResourceLink must be stored as formatted string in KV"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_inherits_model_from_source_in_kv() {
+    let (js, _c) = make_js().await;
+
+    kv_put(
+        &js,
+        "CONSOLE_AGENTS",
+        "agent-x",
+        r#"{"skill_ids":[],"model":{"id":"openai/gpt-4o"}}"#,
+    )
+    .await;
+
+    let agent_loader = AgentLoader::open(&js).await.expect("AgentLoader");
+    let skill_loader = SkillLoader::open(&js).await.expect("SkillLoader");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient)
+        .with_loaders("agent-x", Arc::new(agent_loader), Arc::new(skill_loader))
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src_resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src_resp.session_id.clone();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork KV entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["model"],
+                "openai/gpt-4o",
+                "fork must inherit source model in KV snapshot; got: {}",
+                v["model"]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn embedded_text_resource_block_stored_verbatim() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::Resource(EmbeddedResource::new(
+                        EmbeddedResourceResource::TextResourceContents(
+                            TextResourceContents::new("fn main() {}", "file:///src/main.rs"),
+                        ),
+                    ))],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 1, "one user message expected");
+            let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
+            assert_eq!(
+                content, "fn main() {}",
+                "TextResourceContents text must be stored verbatim in KV"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn multiple_content_blocks_joined_with_newline_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![
+                        ContentBlock::from("first block".to_string()),
+                        ContentBlock::from("second block".to_string()),
+                    ],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 1, "one user message expected");
+            let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
+            assert_eq!(
+                content, "first block\nsecond block",
+                "multiple ContentBlock::Text must be joined with newline in KV"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn usage_tokens_stored_in_kv_assistant_message() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            let asst = messages.iter().find(|m| m["role"] == "assistant")
+                .expect("assistant message must exist in KV");
+            assert_eq!(
+                asst["usage"]["input_tokens"], 10,
+                "assistant message must store prompt_tokens as usage.input_tokens"
+            );
+            assert_eq!(
+                asst["usage"]["output_tokens"], 5,
+                "assistant message must store completion_tokens as usage.output_tokens"
+            );
+        })
+        .await;
+}
+
+// env var tests share a mutex to avoid parallel mutation races
+static ENV_MUTEX: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+
+#[tokio::test]
+async fn history_trimmed_to_max_history_in_kv() {
+    let _lock = ENV_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap();
+
+    unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store));
+    unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // Send 3 prompts: each adds user + assistant = 2 messages.
+            // With max_history=2, only the last turn (2 messages) survives.
+            for i in 0..3u32 {
+                agent
+                    .prompt(PromptRequest::new(
+                        resp.session_id.clone(),
+                        vec![ContentBlock::from(format!("turn {i}"))],
+                    ))
+                    .await
+                    .unwrap();
+            }
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert!(
+                messages.len() <= 2,
+                "history must be trimmed to max_history=2 in KV; got {} messages: {messages:?}",
+                messages.len()
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn new_session_with_loaders_stores_agent_id_in_kv() {
+    let (js, _c) = make_js().await;
+
+    kv_put(
+        &js,
+        "CONSOLE_AGENTS",
+        "agent-x",
+        r#"{"skill_ids":[],"model":{"id":"openai/gpt-4o"}}"#,
+    )
+    .await;
+
+    let agent_loader = AgentLoader::open(&js).await.expect("AgentLoader");
+    let skill_loader = SkillLoader::open(&js).await.expect("SkillLoader");
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "", NoOpHttpClient)
+        .with_loaders("agent-x", Arc::new(agent_loader), Arc::new(skill_loader))
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                v["agent_id"],
+                "agent-x",
+                "KV snapshot must include agent_id when agent uses loaders"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn partial_text_before_error_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", PartialThenErrorHttpClient)
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("q".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(
+                messages.len(),
+                2,
+                "partial text before error must produce user + assistant messages in KV: {messages:?}"
+            );
+            assert_eq!(messages[0]["role"].as_str().unwrap_or(""), "user");
+            assert_eq!(messages[1]["role"].as_str().unwrap_or(""), "assistant");
+            assert_eq!(
+                messages[1]["content"][0]["text"].as_str().unwrap_or(""),
+                "partial",
+                "assistant message must contain the partial text collected before the error"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fork_with_branch_index_beyond_history_copies_full_history_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = new_resp.session_id.clone();
+
+            // Prompt so source has [user, assistant] in history (2 messages).
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // Fork with branchAtIndex=999 — beyond history length, so full copy.
+            let meta = serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(
+                serde_json::json!({ "branchAtIndex": 999 }),
+            )
+            .unwrap();
+            let fork_resp = agent
+                .fork_session(
+                    ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")).meta(meta),
+                )
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork KV entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(
+                messages.len(),
+                2,
+                "fork with branchAtIndex beyond history length must copy all messages: {messages:?}"
+            );
+            assert_eq!(messages[0]["role"].as_str().unwrap_or(""), "user");
+            assert_eq!(messages[1]["role"].as_str().unwrap_or(""), "assistant");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn blob_resource_content_block_stored_formatted_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let blob = BlobResourceContents::new("base64data==", "file:///img.png")
+                .mime_type("image/png");
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::Resource(EmbeddedResource::new(
+                        EmbeddedResourceResource::BlobResourceContents(blob),
+                    ))],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 1, "one user message expected");
+            let content = messages[0]["content"][0]["text"].as_str().unwrap_or("");
+            assert_eq!(
+                content,
+                "[Binary resource: file:///img.png (image/png)]",
+                "BlobResourceContents must be stored as a binary placeholder in KV"
+
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn empty_assistant_response_not_stored_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // HTTP client returns nothing — no TextDelta, just empty stream.
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", NoOpHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("hello".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+            assert_eq!(
+                messages.len(),
+                1,
+                "only the user message must be stored; no empty assistant message: {messages:?}"
+            );
+            assert_eq!(
+                messages[0]["role"].as_str().unwrap_or(""),
+                "user",
+                "the single stored message must be the user message"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn partial_text_before_tool_calls_not_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", ThinkThenToolHttpClient::new())
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("q".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("entry must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let messages = v["messages"].as_array().unwrap();
+
+            // Must have user + final assistant("done"), not a standalone "thinking..." message.
+            assert_eq!(
+                messages.len(),
+                2,
+                "KV must have exactly user + final assistant message: {messages:?}"
+            );
+            assert_eq!(messages[0]["role"].as_str().unwrap_or(""), "user");
+            assert_eq!(messages[1]["role"].as_str().unwrap_or(""), "assistant");
+
+            let assistant_text = messages[1]["content"][0]["text"].as_str().unwrap_or("");
+            assert_eq!(
+                assistant_text, "done",
+                "assistant message must be the final text, not the pre-tool partial: {messages:?}"
+            );
+            let has_thinking = messages
+                .iter()
+                .any(|m| m["content"][0]["text"].as_str().unwrap_or("").contains("thinking"));
+            assert!(
+                !has_thinking,
+                "partial text emitted before tool calls must not appear in KV: {messages:?}"
+            );
         })
         .await;
 }

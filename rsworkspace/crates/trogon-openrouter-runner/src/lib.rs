@@ -8,7 +8,7 @@ pub mod skill_loader;
 
 pub use agent::OpenRouterAgent;
 pub use agent_loader::{AgentConfig, AgentLoader, AgentLoading};
-pub use client::{FinishReason, Message, OpenRouterClient, OpenRouterEvent};
+pub use client::{AssembledToolCall, FinishReason, Message, OpenRouterClient, OpenRouterEvent, ToolCallMessage, ToolDef};
 pub use http_client::OpenRouterHttpClient;
 pub use session_notifier::{NatsSessionNotifier, SessionNotifier};
 pub use session_store::{NatsSessionStore, SessionStoring};
