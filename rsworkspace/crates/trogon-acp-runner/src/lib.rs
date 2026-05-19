@@ -16,9 +16,10 @@ pub use agent_runner::AgentRunner;
 pub use egress::EgressPolicy;
 pub use elicitation::{ElicitationReq, ElicitationTx};
 pub use session_notifier::{NatsSessionNotifier, PromptEventClient, SessionNotifier};
+pub use trogon_runner_tools::permission;
 pub use trogon_runner_tools::{
-    ChannelPermissionChecker, NatsSessionStore, PermissionReq, PermissionTx, SessionState,
-    SessionStore, StoredMcpServer,
+    ChannelPermissionChecker, FsTrogonMdLoader, NatsSessionStore, PermissionReq, PermissionTx,
+    SessionState, SessionStore, StoredMcpServer, TrogonMdLoading,
 };
 
 #[cfg(feature = "test-helpers")]
