@@ -3094,6 +3094,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            agent
+                .set_session_model(SetSessionModelRequest::new(sid.clone(), "test-model"))
+                .await
+                .unwrap();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": &sid }).to_string(),
+            )
+            .unwrap();
+            let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+            let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            assert_eq!(
+                state["model"].as_str(),
+                Some("test-model"),
+                "model override must appear in get_state (needed by /model command)"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
     async fn ext_get_state_missing_session_id_returns_invalid_params() {
         use agent_client_protocol::Agent;
         let agent = make_agent();
