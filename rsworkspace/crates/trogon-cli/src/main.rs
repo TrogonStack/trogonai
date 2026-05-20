@@ -1,6 +1,7 @@
+use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::Parser;
 use std::time::Duration;
-use trogon_cli::{connect_or_start_nats, session::TrogonSession, OutputFormat, RealFs};
+use trogon_cli::{connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, OutputFormat, RealFs};
 
 #[derive(Parser)]
 #[command(name = "trogon", about = "Trogon AI CLI")]
@@ -54,7 +55,16 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     } else {
-        trogon_cli::repl::run(nats, &args.prefix, cwd, RealFs).await?;
+        let acp_prefix = AcpPrefix::new(&args.prefix)
+            .map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
+        let nats_config = NatsConfig::new(vec![args.nats_url.clone()], NatsAuth::None);
+        let acp_config = Config::new(acp_prefix, nats_config);
+        let js = async_nats::jetstream::new(nats.clone());
+        let reg_store = trogon_registry::provision(&js).await
+            .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
+        let registry = trogon_registry::Registry::new(reg_store);
+        let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config, registry);
+        trogon_cli::repl::run(nats, &args.prefix, cwd, RealFs, switcher).await?;
     }
 
     Ok(())

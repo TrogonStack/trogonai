@@ -50,6 +50,10 @@ impl<N: NatsClient> std::fmt::Debug for TrogonSession<N> {
 }
 
 impl<N: NatsClient> TrogonSession<N> {
+    pub fn from_existing(nats: N, prefix: &str, session_id: String) -> Self {
+        Self { nats, session_id, prefix: prefix.to_string() }
+    }
+
     pub async fn new(nats: N, prefix: &str, cwd: PathBuf) -> anyhow::Result<Self> {
         let subject = format!("{prefix}.agent.session.new");
         let req = NewSessionRequest::new(cwd);
