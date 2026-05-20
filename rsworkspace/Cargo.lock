@@ -5427,8 +5427,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-openrouter-runner",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-xai-runner",
  "uuid",
 ]
 
@@ -5498,17 +5500,31 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "acp-nats-agent",
+ "acp-nats-ws",
  "agent-client-protocol",
  "async-nats",
+ "axum 0.8.9",
  "bytes",
  "futures-util",
  "httpmock",
  "reqwest",
+ "serde",
  "serde_json",
+ "tempfile",
+ "testcontainers-modules",
  "tokio",
+ "tokio-tungstenite",
  "trogon-acp-runner",
+ "trogon-actor",
  "trogon-agent-core",
+ "trogon-cli",
+ "trogon-console",
  "trogon-nats",
+ "trogon-openrouter-runner",
+ "trogon-registry",
+ "trogon-runner-tools",
+ "trogon-transcript",
+ "trogon-xai-runner",
  "uuid",
 ]
 
@@ -5690,6 +5706,7 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-tools",
  "uuid",
 ]
 
@@ -6064,6 +6081,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "testcontainers-modules",
  "tokio",
  "tracing",
@@ -6071,6 +6089,7 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-tools",
  "uuid",
 ]
 
