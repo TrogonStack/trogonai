@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt, future::join_all};
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -821,91 +821,222 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
         content: &[ContentBlock],
         event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
     ) -> Vec<ToolResult> {
-        join_all(content.iter().filter_map(|block| {
-            let ContentBlock::ToolUse { id, name, input, parent_tool_use_id } = block else {
-                return None;
-            };
-            Some(self.run_tool_streaming(id, name, input, parent_tool_use_id.as_deref(), event_tx))
-        }))
-        .await
+        let tool_uses: Vec<(String, String, serde_json::Value, Option<String>)> = content
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::ToolUse { id, name, input, parent_tool_use_id } = b {
+                    Some((id.clone(), name.clone(), input.clone(), parent_tool_use_id.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if self.permission_checker.is_some() {
+            // Serial path: permission checks must not overlap (interactive).
+            let mut results = Vec::new();
+            for (id, name, input, parent_tool_use_id) in tool_uses {
+                debug!(tool = %name, "Executing tool (streaming, serial)");
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallStarted {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                        parent_tool_use_id,
+                    })
+                    .await;
+
+                let output = if name == "ask_user" {
+                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => answer,
+                            None => "The user declined or cancelled the request.".to_string(),
+                        },
+                        None => "ask_user tool is not available in this context.".to_string(),
+                    }
+                } else {
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(&id, &name, &input).await,
+                        None => true,
+                    };
+                    if !allowed {
+                        format!("Permission denied: user refused to run tool `{name}`")
+                    } else if let Some((_, original, client)) =
+                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                    {
+                        match client.call_tool(original, &input).await {
+                            Ok(out) => out,
+                            Err(e) => format!("Tool error: {e}"),
+                        }
+                    } else {
+                        dispatch_tool(&self.tool_context, &name, &input).await
+                    }
+                };
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolCallFinished {
+                        id: id.clone(),
+                        output: output.clone(),
+                        exit_code: None,
+                        signal: None,
+                    })
+                    .await;
+
+                results.push(ToolResult { tool_use_id: id, content: output });
+            }
+            results
+        } else {
+            // Parallel path: no interactive gate, run all tools concurrently.
+            let futures: Vec<_> = tool_uses
+                .into_iter()
+                .map(|(id, name, input, parent_tool_use_id)| {
+                    let event_tx = event_tx.clone();
+                    let tool_context = Arc::clone(&self.tool_context);
+                    let mcp_dispatch = self.mcp_dispatch.clone();
+                    let elicitation_provider = self.elicitation_provider.clone();
+                    async move {
+                        debug!(tool = %name, "Executing tool (streaming, parallel)");
+
+                        let _ = event_tx
+                            .send(AgentEvent::ToolCallStarted {
+                                id: id.clone(),
+                                name: name.clone(),
+                                input: input.clone(),
+                                parent_tool_use_id,
+                            })
+                            .await;
+
+                        let output = if name == "ask_user" {
+                            let question =
+                                input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                            match &elicitation_provider {
+                                Some(provider) => match provider.elicit(question).await {
+                                    Some(answer) => answer,
+                                    None => {
+                                        "The user declined or cancelled the request.".to_string()
+                                    }
+                                },
+                                None => "ask_user tool is not available in this context.".to_string(),
+                            }
+                        } else if let Some((_, original, client)) =
+                            mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&tool_context, &name, &input).await
+                        };
+
+                        let _ = event_tx
+                            .send(AgentEvent::ToolCallFinished {
+                                id: id.clone(),
+                                output: output.clone(),
+                                exit_code: None,
+                                signal: None,
+                            })
+                            .await;
+
+                        ToolResult { tool_use_id: id, content: output }
+                    }
+                })
+                .collect();
+            futures_util::future::join_all(futures).await
+        }
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn execute_tools(&self, content: &[ContentBlock]) -> Vec<ToolResult> {
-        join_all(content.iter().filter_map(|block| {
-            let ContentBlock::ToolUse { id, name, input, .. } = block else {
-                return None;
-            };
-            Some(self.run_tool(id, name, input))
-        }))
-        .await
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn run_tool_streaming(
-        &self,
-        id: &str,
-        name: &str,
-        input: &Value,
-        parent_tool_use_id: Option<&str>,
-        event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
-    ) -> ToolResult {
-        debug!(tool = %name, "Executing tool (streaming)");
-        let _ = event_tx
-            .send(AgentEvent::ToolCallStarted {
-                id: id.to_owned(),
-                name: name.to_owned(),
-                input: input.clone(),
-                parent_tool_use_id: parent_tool_use_id.map(String::from),
-            })
-            .await;
-        let output = self.tool_output(id, name, input).await;
-        let _ = event_tx
-            .send(AgentEvent::ToolCallFinished {
-                id: id.to_owned(),
-                output: output.clone(),
-                exit_code: None,
-                signal: None,
-            })
-            .await;
-        ToolResult { tool_use_id: id.to_owned(), content: output }
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn run_tool(&self, id: &str, name: &str, input: &Value) -> ToolResult {
-        debug!(tool = %name, "Executing tool");
-        let output = self.tool_output(id, name, input).await;
-        ToolResult { tool_use_id: id.to_owned(), content: output }
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn tool_output(&self, id: &str, name: &str, input: &Value) -> String {
-        if name == "ask_user" {
-            let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-            match &self.elicitation_provider {
-                Some(provider) => match provider.elicit(question).await {
-                    Some(answer) => answer,
-                    None => "The user declined or cancelled the request.".to_string(),
-                },
-                None => "ask_user tool is not available in this context.".to_string(),
-            }
-        } else {
-            let allowed = match &self.permission_checker {
-                Some(checker) => checker.check(id, name, input).await,
-                None => true,
-            };
-            if !allowed {
-                format!("Permission denied: user refused to run tool `{name}`")
-            } else if let Some((_, original, client)) =
-                self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == name)
-            {
-                match client.call_tool(original, input).await {
-                    Ok(out) => out,
-                    Err(e) => format!("Tool error: {e}"),
+        let tool_uses: Vec<(String, String, serde_json::Value)> = content
+            .iter()
+            .filter_map(|b| {
+                if let ContentBlock::ToolUse { id, name, input, .. } = b {
+                    Some((id.clone(), name.clone(), input.clone()))
+                } else {
+                    None
                 }
-            } else {
-                dispatch_tool(&self.tool_context, name, input).await
+            })
+            .collect();
+
+        if self.permission_checker.is_some() {
+            // Serial path: permission checks must not overlap (interactive).
+            let mut results = Vec::new();
+            for (id, name, input) in tool_uses {
+                debug!(tool = %name, "Executing tool (serial)");
+
+                let output = if name == "ask_user" {
+                    let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                    match &self.elicitation_provider {
+                        Some(provider) => match provider.elicit(question).await {
+                            Some(answer) => answer,
+                            None => "The user declined or cancelled the request.".to_string(),
+                        },
+                        None => "ask_user tool is not available in this context.".to_string(),
+                    }
+                } else {
+                    let allowed = match &self.permission_checker {
+                        Some(checker) => checker.check(&id, &name, &input).await,
+                        None => true,
+                    };
+                    if !allowed {
+                        format!("Permission denied: user refused to run tool `{name}`")
+                    } else if let Some((_, original, client)) =
+                        self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                    {
+                        match client.call_tool(original, &input).await {
+                            Ok(out) => out,
+                            Err(e) => format!("Tool error: {e}"),
+                        }
+                    } else {
+                        dispatch_tool(&self.tool_context, &name, &input).await
+                    }
+                };
+
+                results.push(ToolResult { tool_use_id: id, content: output });
             }
+            results
+        } else {
+            // Parallel path: no interactive gate, run all tools concurrently.
+            let futures: Vec<_> = tool_uses
+                .into_iter()
+                .map(|(id, name, input)| {
+                    let tool_context = Arc::clone(&self.tool_context);
+                    let mcp_dispatch = self.mcp_dispatch.clone();
+                    let elicitation_provider = self.elicitation_provider.clone();
+                    async move {
+                        debug!(tool = %name, "Executing tool (parallel)");
+
+                        let output = if name == "ask_user" {
+                            let question =
+                                input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                            match &elicitation_provider {
+                                Some(provider) => match provider.elicit(question).await {
+                                    Some(answer) => answer,
+                                    None => {
+                                        "The user declined or cancelled the request.".to_string()
+                                    }
+                                },
+                                None => "ask_user tool is not available in this context.".to_string(),
+                            }
+                        } else if let Some((_, original, client)) =
+                            mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                        {
+                            match client.call_tool(original, &input).await {
+                                Ok(out) => out,
+                                Err(e) => format!("Tool error: {e}"),
+                            }
+                        } else {
+                            dispatch_tool(&tool_context, &name, &input).await
+                        };
+
+                        ToolResult { tool_use_id: id, content: output }
+                    }
+                })
+                .collect();
+            futures_util::future::join_all(futures).await
         }
     }
 }
@@ -1235,7 +1366,6 @@ mod tests {
         }
     }
 
-
     /// Covers line 706: closing `}` of the if-let in execute_tools_streaming
     /// when content contains a ToolUse block with no matching MCP dispatch entry.
     #[tokio::test]
@@ -1356,6 +1486,7 @@ mod tests {
     }
 
     /// Covers: TextDelta emitted in the max_tokens path when text is non-empty.
+    /// Uses a MockStreamingClient that sends a text delta then stops with max_tokens.
     #[tokio::test]
     async fn run_chat_streaming_max_tokens_with_text_emits_text_delta() {
         struct MaxTokensMock;
@@ -1877,5 +2008,222 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             let dbg = format!("{ev:?}");
             assert!(!dbg.is_empty(), "Debug output must be non-empty");
         }
+    }
+
+    // ── PermissionChecker mocks ───────────────────────────────────────────────
+
+    struct DenyAllChecker;
+
+    impl PermissionChecker for DenyAllChecker {
+        fn check<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { false })
+        }
+    }
+
+    struct AllowAllChecker;
+
+    impl PermissionChecker for AllowAllChecker {
+        fn check<'a>(
+            &'a self,
+            _tool_call_id: &'a str,
+            _tool_name: &'a str,
+            _tool_input: &'a serde_json::Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { true })
+        }
+    }
+
+    // ── Parallel / serial tool execution ─────────────────────────────────────
+
+    /// Serial path: denied tool returns "Permission denied" message.
+    #[tokio::test]
+    async fn execute_tools_serial_permission_denied() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker) as Arc<dyn PermissionChecker>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path (streaming): denied tool returns "Permission denied" message.
+    #[tokio::test]
+    async fn execute_tools_streaming_serial_permission_denied() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(DenyAllChecker) as Arc<dyn PermissionChecker>);
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Permission denied"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path: allowed tool still dispatches normally.
+    #[tokio::test]
+    async fn execute_tools_serial_permission_allowed_calls_dispatch() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(AllowAllChecker) as Arc<dyn PermissionChecker>);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].content.contains("Unknown tool"),
+            "got: {}",
+            results[0].content
+        );
+    }
+
+    /// Serial path (streaming): allowed tool dispatches and emits events.
+    #[tokio::test]
+    async fn execute_tools_streaming_serial_permission_allowed_emits_events() {
+        let mut agent = make_test_agent();
+        agent.permission_checker = Some(Arc::new(AllowAllChecker) as Arc<dyn PermissionChecker>);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "some_tool".to_string(),
+            input: serde_json::json!({}),
+            parent_tool_use_id: None,
+        }];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("Unknown tool"), "got: {}", results[0].content);
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id, .. } if id == "t1")),
+            "ToolCallStarted missing: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id, .. } if id == "t1")),
+            "ToolCallFinished missing: {events:?}"
+        );
+    }
+
+    /// Parallel path: results preserve input order for multiple tools.
+    #[tokio::test]
+    async fn execute_tools_parallel_order_preserved() {
+        let agent = make_test_agent();
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "tool_a".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "t2".to_string(),
+                name: "tool_b".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool_use_id, "t1");
+        assert_eq!(results[1].tool_use_id, "t2");
+    }
+
+    /// Parallel path (streaming): results preserve input order and events are emitted for each tool.
+    #[tokio::test]
+    async fn execute_tools_streaming_parallel_order_and_events() {
+        let agent = make_test_agent();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let content = vec![
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "tool_a".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+            ContentBlock::ToolUse {
+                id: "t2".to_string(),
+                name: "tool_b".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].tool_use_id, "t1");
+        assert_eq!(results[1].tool_use_id, "t2");
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        for id in ["t1", "t2"] {
+            assert!(
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { id: eid, .. } if eid == id)),
+                "ToolCallStarted missing for {id}: {events:?}"
+            );
+            assert!(
+                events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { id: eid, .. } if eid == id)),
+                "ToolCallFinished missing for {id}: {events:?}"
+            );
+        }
+    }
+
+    /// Non-ToolUse content blocks are silently skipped by execute_tools.
+    #[tokio::test]
+    async fn execute_tools_skips_non_tool_use_blocks() {
+        let agent = make_test_agent();
+        let content = vec![
+            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "my_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools(&content).await;
+        assert_eq!(results.len(), 1, "text block must not produce a result");
+        assert_eq!(results[0].tool_use_id, "t1");
+    }
+
+    /// Non-ToolUse blocks are also skipped in the streaming path.
+    #[tokio::test]
+    async fn execute_tools_streaming_skips_non_tool_use_blocks() {
+        let agent = make_test_agent();
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let content = vec![
+            ContentBlock::Text { text: "ignore me".to_string() },
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "my_tool".to_string(),
+                input: serde_json::json!({}),
+                parent_tool_use_id: None,
+            },
+        ];
+        let results = agent.execute_tools_streaming(&content, &tx).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tool_use_id, "t1");
     }
 }

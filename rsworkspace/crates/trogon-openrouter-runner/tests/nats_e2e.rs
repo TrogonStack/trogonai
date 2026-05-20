@@ -137,6 +137,45 @@ async fn e2e_nats_session_new_returns_session_id() {
     assert!(!session_id.is_empty(), "must have non-empty sessionId: {response}");
 }
 
+/// session/get_state returns the stored session's cwd over real NATS.
+#[tokio::test]
+async fn e2e_ext_session_get_state_returns_cwd() {
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    let new_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/projects/myapp",
+        "mcpServers": []
+    }))
+    .unwrap();
+    let new_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", new_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/new")
+    .expect("NATS request failed");
+    let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
+    let session_id = new_resp["sessionId"].as_str().expect("session/new must return sessionId");
+
+    let ext_payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })).unwrap();
+    let ext_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.ext.session/get_state", ext_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/get_state")
+    .expect("NATS ext request failed");
+
+    let state: Value = serde_json::from_slice(&ext_msg.payload).unwrap();
+    assert_eq!(
+        state["cwd"].as_str(),
+        Some("/projects/myapp"),
+        "session/get_state must return the session's cwd: {state}"
+    );
+}
+
 #[tokio::test]
 async fn openrouter_runner_registers_with_correct_acp_prefix_metadata() {
     let (_container, nats) = start_nats().await;

@@ -20,6 +20,7 @@ agent-client-protocol = { version = "0.10.2", features = [
     "unstable_session_usage",
 ] }
 anyhow      = "1"
+reqwest     = { workspace = true }
 async-nats  = { workspace = true, features = ["jetstream", "kv"] }
 async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -37,7 +38,7 @@ trogon-tools = { path = "../trogon-tools" }
 async-nats             = { workspace = true }
 futures-util           = { version = "0.3", default-features = false, features = ["std"] }
 serde_json             = "1.0"
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 tokio                  = { version = "1", features = ["full"] }
 
 [features]

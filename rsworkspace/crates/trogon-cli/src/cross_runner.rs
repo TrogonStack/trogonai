@@ -7,6 +7,20 @@ use trogon_std::time::SystemClock;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
 
+// ── RunnerSwitcher trait ──────────────────────────────────────────────────────
+
+pub trait RunnerSwitcher {
+    fn switch_model<'a>(
+        &'a mut self,
+        current_prefix: &'a str,
+        current_session_id: &'a str,
+        model_id: &'a str,
+        cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a;
+}
+
+// ── CrossRunnerSwitcher ───────────────────────────────────────────────────────
+
 pub struct CrossRunnerSwitcher<S: RegistryStore> {
     nats: async_nats::Client,
     base_config: Config,
@@ -111,6 +125,54 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         );
         self.bridges.insert(prefix.to_string(), bridge);
         Ok(())
+    }
+}
+
+impl<S: RegistryStore> RunnerSwitcher for CrossRunnerSwitcher<S> {
+    fn switch_model<'a>(
+        &'a mut self,
+        current_prefix: &'a str,
+        current_session_id: &'a str,
+        model_id: &'a str,
+        cwd: &'a str,
+    ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a {
+        CrossRunnerSwitcher::switch_model(self, current_prefix, current_session_id, model_id, cwd)
+    }
+}
+
+// ── MockRunnerSwitcher (test support) ─────────────────────────────────────────
+
+#[cfg(test)]
+pub mod mock {
+    use super::RunnerSwitcher;
+
+    pub struct MockRunnerSwitcher {
+        result: Result<(String, String), String>,
+    }
+
+    impl MockRunnerSwitcher {
+        pub fn same_runner(prefix: &str, session_id: &str) -> Self {
+            Self { result: Ok((prefix.to_string(), session_id.to_string())) }
+        }
+        pub fn cross_runner(new_prefix: &str, new_session_id: &str) -> Self {
+            Self { result: Ok((new_prefix.to_string(), new_session_id.to_string())) }
+        }
+        pub fn error(msg: &str) -> Self {
+            Self { result: Err(msg.to_string()) }
+        }
+    }
+
+    impl RunnerSwitcher for MockRunnerSwitcher {
+        fn switch_model<'a>(
+            &'a mut self,
+            _current_prefix: &'a str,
+            _current_session_id: &'a str,
+            _model_id: &'a str,
+            _cwd: &'a str,
+        ) -> impl std::future::Future<Output = Result<(String, String), String>> + 'a {
+            let result = self.result.clone();
+            async move { result }
+        }
     }
 }
 

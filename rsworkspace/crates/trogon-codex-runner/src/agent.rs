@@ -51,6 +51,7 @@ fn internal_error(msg: impl Into<String>) -> Error {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
+#[derive(serde::Serialize)]
 struct CodexSession {
     thread_id: String,
     cwd: String,
@@ -679,6 +680,23 @@ where
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/get_state" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let state = sessions.get(session_id).ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "session not found")
+            })?;
+            let raw = serde_json::to_string(state)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string(raw)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         if args.method.as_ref() == "session/export" {
             let params: serde_json::Value =
                 serde_json::from_str(args.params.get()).unwrap_or_default();
@@ -703,12 +721,6 @@ where
             let mut sessions = self.sessions.lock().await;
             let s = sessions.get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-            // Write to both history and pending_history:
-            // - s.history: makes export consistent with other runners (returns imported
-            //   messages immediately, before any prompt)
-            // - s.pending_history: injects context into the codex subprocess on the
-            //   first turn as a "Prior conversation:" text prefix
-            // Without both, either export is wrong or the subprocess never sees the context.
             s.history = messages.clone();
             s.pending_history = Some(messages);
             s.first_turn = true;
@@ -1442,6 +1454,77 @@ mod tests {
 
         let children_c = parse(agent.ext_method(list_children(c.clone())).await.unwrap());
         assert!(children_c.is_empty(), "C must have no children");
+    }
+
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        let agent = make_agent().await;
+        agent.test_insert_session("gs1", "/projects/myapp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "gs1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match inserted session");
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_includes_thread_id() {
+        let agent = make_agent().await;
+        agent.test_insert_session("ti1", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ti1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["thread_id"].as_str(),
+            Some("thread-ti1"),
+            "thread_id must be present in get_state (test helper sets thread-{{id}})"
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        let agent = make_agent().await;
+        agent.test_insert_session("ms1", "/tmp", Some("o4-mini".to_string())).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ms1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["model"].as_str(),
+            Some("o4-mini"),
+            "model override must appear in get_state (needed by /model command)"
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+        )
+        .unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 
     // ── cancel ────────────────────────────────────────────────────────────────

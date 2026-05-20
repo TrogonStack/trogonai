@@ -1,5 +1,24 @@
 use std::path::PathBuf;
 
+use async_trait::async_trait;
+
+/// Abstraction over TROGON.md loading so runners can inject a mock in tests
+/// instead of hitting the real filesystem.
+#[async_trait(?Send)]
+pub trait TrogonMdLoading {
+    async fn load(&self, cwd: &str) -> Option<String>;
+}
+
+/// Production implementation — reads real files from disk.
+pub struct FsTrogonMdLoader;
+
+#[async_trait(?Send)]
+impl TrogonMdLoading for FsTrogonMdLoader {
+    async fn load(&self, cwd: &str) -> Option<String> {
+        load_trogon_md(cwd).await
+    }
+}
+
 /// Loads and concatenates all `TROGON.md` files relevant to `cwd`.
 ///
 /// Concatenation order (most general → most specific):

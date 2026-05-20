@@ -31,6 +31,7 @@ use crate::http_client::OpenRouterHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
+use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -46,6 +47,66 @@ fn not_found(msg: impl Into<String>) -> Error {
 
 const MAX_SESSIONS: usize = 100;
 
+/// Returns the context-window size (in tokens) for known models routed through OpenRouter.
+/// OpenRouter model IDs are typically `provider/model-name`; matching is done on the full
+/// ID lowercased so both full and short-form IDs work.
+/// Returns `None` for unknown models — callers should omit the percentage rather than guess.
+fn context_window_tokens(model_id: &str) -> Option<u64> {
+    let m = model_id.to_lowercase();
+    // Anthropic Claude (all current generations have 200k context)
+    if m.contains("claude") {
+        return Some(200_000);
+    }
+    // OpenAI
+    if m.contains("o1") || m.contains("o3") || m.contains("o4") {
+        return Some(200_000);
+    }
+    if m.contains("gpt-4o") || m.contains("gpt-4-turbo") || m.contains("gpt-4-1") {
+        return Some(128_000);
+    }
+    if m.contains("gpt-4") {
+        return Some(8_192);
+    }
+    if m.contains("gpt-3.5") {
+        return Some(16_385);
+    }
+    // Google Gemini
+    if m.contains("gemini-2") {
+        return Some(1_048_576);
+    }
+    if m.contains("gemini-1.5") {
+        return Some(1_000_000);
+    }
+    if m.contains("gemini") {
+        return Some(32_768);
+    }
+    // xAI (via OpenRouter)
+    if m.contains("grok-4") {
+        return Some(256_000);
+    }
+    if m.contains("grok") {
+        return Some(131_072);
+    }
+    // Meta Llama 3+
+    if m.contains("llama-3") || m.contains("llama3") {
+        return Some(128_000);
+    }
+    // Mistral / Mixtral
+    if m.contains("mistral") || m.contains("mixtral") {
+        return Some(32_768);
+    }
+    // Deepseek
+    if m.contains("deepseek") {
+        return Some(65_536);
+    }
+    // Qwen
+    if m.contains("qwen") {
+        return Some(131_072);
+    }
+    None
+}
+
+#[derive(serde::Serialize)]
 struct OpenRouterSession {
     cwd: String,
     model: Option<String>,
@@ -53,6 +114,7 @@ struct OpenRouterSession {
     history: Vec<Message>,
     system_prompt: Option<String>,
     enabled_tools: Vec<String>,
+    #[serde(skip)]
     created_at: Instant,
     created_at_iso: String,
     parent_session_id: Option<String>,
@@ -60,9 +122,10 @@ struct OpenRouterSession {
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
-pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
+pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = FsTrogonMdLoader> {
     notifier: Arc<N>,
     client: Arc<H>,
+    md_loader: M,
     sessions: Arc<Mutex<HashMap<String, OpenRouterSession>>>,
     cancel_senders: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
     default_model: String,
@@ -83,7 +146,7 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
     tool_http_client: reqwest::Client,
 }
 
-impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier> {
+impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
     pub fn new(
         notifier: NatsSessionNotifier,
         default_model: impl Into<String>,
@@ -93,7 +156,7 @@ impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier> {
     }
 }
 
-impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
+impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogonMdLoader> {
     pub fn with_deps(
         notifier: N,
         default_model: impl Into<String>,
@@ -178,6 +241,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         Self {
             notifier: Arc::new(notifier),
             client: Arc::new(client),
+            md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -196,6 +260,33 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
             registry: None,
             execution_nats: None,
             tool_http_client: reqwest::Client::new(),
+        }
+    }
+}
+
+impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouterAgent<H, N, M> {
+    /// Replace the TROGON.md loader. Used in tests to inject a mock that
+    /// returns a fixed string without touching the real filesystem.
+    pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> OpenRouterAgent<H, N, M2> {
+        OpenRouterAgent {
+            md_loader: loader,
+            notifier: self.notifier,
+            client: self.client,
+            sessions: self.sessions,
+            cancel_senders: self.cancel_senders,
+            default_model: self.default_model,
+            prompt_timeout: self.prompt_timeout,
+            available_models: self.available_models,
+            global_api_key: self.global_api_key,
+            pending_api_key: self.pending_api_key,
+            system_prompt: self.system_prompt,
+            max_history: self.max_history,
+            max_response_bytes: self.max_response_bytes,
+            agent_id: self.agent_id,
+            agent_loader: self.agent_loader,
+            skill_loader: self.skill_loader,
+            session_store: self.session_store,
+            tenant_id: self.tenant_id,
         }
     }
 
@@ -359,8 +450,8 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
 }
 
 #[async_trait(?Send)]
-impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
-    agent_client_protocol::Agent for OpenRouterAgent<H, N>
+impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoading + 'static>
+    agent_client_protocol::Agent for OpenRouterAgent<H, N, M>
 {
     async fn initialize(
         &self,
@@ -483,6 +574,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             .iter()
             .map(|t| t.name.clone())
             .collect();
+        let meta_system_prompt = req.meta
+            .as_ref()
+            .and_then(|m| m.get("systemPrompt"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let system_prompt = meta_system_prompt.or(session_system_prompt);
 
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
@@ -494,7 +591,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 model: session_model_override,
                 api_key,
                 history: Vec::new(),
-                system_prompt: session_system_prompt,
+                system_prompt,
                 enabled_tools: enabled_tools.clone(),
                 created_at: Instant::now(),
                 created_at_iso,
@@ -834,6 +931,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             )
         };
 
+        let trogon_md = self.md_loader.load(&cwd).await;
+        let session_system_prompt = match (trogon_md, session_system_prompt) {
+            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
+            (Some(md), None) => Some(md),
+            (None, sp) => sp,
+        };
+
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
         let api_key = api_key
             .or_else(|| self.global_api_key.clone())
@@ -1140,6 +1244,23 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
+            "session/get_state" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let sessions = self.sessions.lock().await;
+                let state = sessions.get(session_id).ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                })?;
+                let raw = serde_json::to_string(state)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                let raw = serde_json::value::RawValue::from_string(raw)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                Ok(ExtResponse::new(raw.into()))
+            }
             "session/export" => {
                 let params: serde_json::Value =
                     serde_json::from_str(args.params.get()).unwrap_or_default();
@@ -1301,6 +1422,17 @@ mod tests {
     static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    }
+
+    /// Mock TROGON.md loader that returns a fixed string (or None) without
+    /// touching the real filesystem.
+    struct MockTrogonMdLoader(Option<String>);
+
+    #[async_trait(?Send)]
+    impl TrogonMdLoading for MockTrogonMdLoader {
+        async fn load(&self, _cwd: &str) -> Option<String> {
+            self.0.clone()
+        }
     }
 
     // ── Test helpers ──────────────────────────────────────────────────────────
@@ -4085,6 +4217,59 @@ mod tests {
         }).await;
     }
 
+    // ── _meta.systemPrompt ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_sets_prompt() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("systemPrompt".to_string(), serde_json::json!("injected prompt"));
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")).meta(meta))
+                .await
+                .unwrap()
+                .session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref();
+            assert_eq!(sp, Some("injected prompt"));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_overrides_console_prompt() {
+        let agent = make_agent_with_loaders(Some("console prompt"), None, None);
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("systemPrompt".to_string(), serde_json::json!("meta wins"));
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")).meta(meta))
+                .await
+                .unwrap()
+                .session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref();
+            assert_eq!(sp, Some("meta wins"));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_without_system_prompt_key_falls_back() {
+        let agent = make_agent_with_loaders(Some("fallback prompt"), None, None);
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("otherKey".to_string(), serde_json::json!("value"));
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")).meta(meta))
+                .await
+                .unwrap()
+                .session_id;
+            let sessions = agent.sessions.lock().await;
+            let sp = sessions.get(&sid.to_string()).unwrap().system_prompt.as_deref();
+            assert_eq!(sp, Some("fallback prompt"));
+        }).await;
+    }
+
     // ── usage notification ────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -4320,6 +4505,207 @@ mod tests {
             );
         })
         .await;
+    }
+
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/projects/myapp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": &sid }).to_string(),
+            )
+            .unwrap();
+            let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+            let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match session");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+            agent
+                .set_session_model(SetSessionModelRequest::new(sid.clone(), "test-model"))
+                .await
+                .unwrap();
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": &sid }).to_string(),
+            )
+            .unwrap();
+            let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+            let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+            assert_eq!(
+                state["model"].as_str(),
+                Some("test-model"),
+                "model override must appear in get_state (needed by /model command)"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        local().run_until(async move {
+            let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidParams);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        local().run_until(async move {
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+            )
+            .unwrap();
+            let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+            assert_eq!(err.code, ErrorCode::InvalidParams);
+        }).await;
+    }
+
+    // ── TROGON.md injection ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("openrouter project rules".to_string())));
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages.iter().find(|m| m.role == "system")
+                .expect("system message must be present when TROGON.md exists");
+            assert!(
+                system_msg.content.contains("openrouter project rules"),
+                "TROGON.md content must appear in system prompt, got: {}",
+                system_msg.content
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_sends_no_system_message() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(None));
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let has_system = messages.iter().any(|m| m.role == "system");
+            assert!(!has_system, "no system message expected when no TROGON.md and no session prompt");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_system_prompt("session-only prompt".to_string())
+        .with_md_loader(MockTrogonMdLoader(None));
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages
+                .iter()
+                .find(|m| m.role == "system")
+                .expect("system message must be present when session has a system prompt, even without TROGON.md");
+            assert!(
+                system_msg.content.contains("session-only prompt"),
+                "session system prompt must pass through unchanged when no TROGON.md: {}",
+                system_msg.content
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn prompt_trogon_md_prepended_before_session_system_prompt() {
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_system_prompt("from session prompt".to_string())
+        .with_md_loader(MockTrogonMdLoader(Some("from trogon md".to_string())));
+        agent.client.push_response(vec![]);
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let messages = &calls.last().unwrap().messages;
+            let system_msg = messages.iter().find(|m| m.role == "system")
+                .expect("system message must be present");
+            let trogon_pos = system_msg.content.find("from trogon md").expect("TROGON.md content missing");
+            let session_pos = system_msg.content.find("from session prompt").expect("session prompt missing");
+            assert!(trogon_pos < session_pos, "TROGON.md must be prepended before session system prompt");
+        }).await;
     }
 
     // ── session/export and session/import ─────────────────────────────────────

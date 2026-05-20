@@ -66,7 +66,6 @@ pub struct TodoItem {
     pub status: String,
 }
 
-
 const BUCKET: &str = "ACP_SESSIONS";
 
 /// Persisted state for a single ACP session.

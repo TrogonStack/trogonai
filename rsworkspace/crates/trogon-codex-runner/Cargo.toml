@@ -40,6 +40,6 @@ uuid            = { workspace = true }
 
 [dev-dependencies]
 serde_json               = { workspace = true }
-testcontainers-modules   = { version = "0.15", features = ["nats"] }
+testcontainers-modules   = { workspace = true }
 trogon-xai-runner        = { path = "../trogon-xai-runner", features = ["test-helpers"] }
 trogon-openrouter-runner = { path = "../trogon-openrouter-runner", features = ["test-helpers"] }

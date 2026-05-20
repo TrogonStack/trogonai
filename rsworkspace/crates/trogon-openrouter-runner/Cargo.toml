@@ -25,8 +25,8 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_usage",
 ] }
 async-nats      = { workspace = true, features = ["jetstream", "kv"] }
-trogon-nats     = { workspace = true }
-trogon-registry = { workspace = true }
+trogon-nats         = { workspace = true }
+trogon-registry     = { workspace = true }
 trogon-runner-tools = { path = "../trogon-runner-tools" }
 trogon-tools        = { path = "../trogon-tools" }
 async-trait     = { workspace = true }

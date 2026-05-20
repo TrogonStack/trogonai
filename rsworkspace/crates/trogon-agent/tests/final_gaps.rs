@@ -62,6 +62,7 @@ fn make_tool_context_stores_all_fields() {
     let ctx: Arc<ToolContext> = make_tool_context(
         reqwest::Client::new(),
         "http://proxy:8080".to_string(),
+        String::new(),
         "tok_github_prod_abc".to_string(),
         "tok_linear_prod_abc".to_string(),
         String::new(),
@@ -77,6 +78,7 @@ fn dummy_ctx() -> ToolContext {
     ToolContext::new(
         reqwest::Client::new(),
         "http://localhost:9999".to_string(),
+        String::new(),
         String::new(),
         String::new(),
         String::new(),
@@ -177,6 +179,7 @@ async fn get_file_contents_missing_content_field_returns_error() {
     let ctx = ToolContext::new(
         reqwest::Client::new(),
         server.base_url(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         String::new(),
         String::new(),
@@ -202,6 +205,7 @@ async fn get_file_contents_invalid_base64_returns_error() {
     let ctx = ToolContext::new(
         reqwest::Client::new(),
         server.base_url(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         String::new(),
         String::new(),
@@ -231,6 +235,7 @@ async fn get_file_contents_non_utf8_bytes_returns_error() {
     let ctx = ToolContext::new(
         reqwest::Client::new(),
         server.base_url(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         String::new(),
         String::new(),
