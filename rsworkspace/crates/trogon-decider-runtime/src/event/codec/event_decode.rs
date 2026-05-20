@@ -15,57 +15,15 @@ impl<'a> EventData<'a> {
     }
 }
 
-/// Result of matching a stored event envelope against a domain event set.
-///
-/// Replay needs to distinguish an event this decider does not own from an event
-/// it owns but cannot decode. [`Skipped`](Self::Skipped) is the non-error path
-/// for the first case; the decoder's [`EventDecode::Error`] remains reserved
-/// for malformed payloads, unsupported schema revisions, or other failures
-/// inside the event set the decoder claims.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EventDecodeOutcome<E> {
-    /// The envelope belongs to this event set and decoded successfully.
-    Decoded(E),
-    /// The envelope is valid stream history, but not part of this event set.
-    Skipped,
-}
-
-impl<E> EventDecodeOutcome<E> {
-    /// Returns the decoded event, or `None` when the envelope was skipped.
-    pub fn into_decoded(self) -> Option<E> {
-        match self {
-            Self::Decoded(event) => Some(event),
-            Self::Skipped => None,
-        }
-    }
-
-    /// Borrows the decoded event, or returns `None` when the envelope was skipped.
-    pub const fn as_decoded(&self) -> Option<&E> {
-        match self {
-            Self::Decoded(event) => Some(event),
-            Self::Skipped => None,
-        }
-    }
-}
-
 /// Decodes a stored event payload back into a domain event.
 ///
 /// Decoders receive the event type as well as the payload so applications can
 /// support aliases, migrations, or upcasters without leaking those decisions
-/// into storage adapters. A decoder returns [`EventDecodeOutcome::Skipped`]
-/// when the envelope's event type is not part of the domain event set it owns.
-///
-/// The runtime keeps this ownership check at the codec boundary because only
-/// the application knows which event names are aliases, current variants, or
-/// historical variants of a decider. Storage adapters should persist and replay
-/// envelopes without embedding that domain-specific routing table.
+/// into storage adapters.
 pub trait EventDecode: Sized {
     /// Deserializer or migration error returned by the application-owned codec.
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Deserializes the stored event payload when the event type is supported.
-    fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error>;
+    /// Deserializes the stored event payload.
+    fn decode(event: EventData<'_>) -> Result<Self, Self::Error>;
 }
-
-#[cfg(test)]
-mod tests;

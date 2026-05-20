@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Valid use cases:
 /// - optimistic concurrency with `StreamWritePrecondition::At`
 /// - projection freshness checks
-/// - snapshot checkpoints
+/// - replay checkpoints
 /// - dropping stale realtime updates
 ///
 /// Invalid assumptions:
@@ -72,8 +72,7 @@ impl std::fmt::Display for StreamPosition {
 }
 
 /// Error returned when constructing an invalid [`StreamPosition`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("stream position must be greater than zero, got {value}")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidStreamPosition {
     value: u64,
 }
@@ -84,3 +83,11 @@ impl InvalidStreamPosition {
         self.value
     }
 }
+
+impl std::fmt::Display for InvalidStreamPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stream position must be greater than zero, got {}", self.value)
+    }
+}
+
+impl std::error::Error for InvalidStreamPosition {}
