@@ -16,11 +16,11 @@ use trogon_eventsourcing::nats::{
     write_checkpoint,
 };
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, EncodeEventError,
-    Event, EventData, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventId, EventIdentity, EventType,
-    FrequencySnapshot, HeaderName, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot,
-    SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots, StreamAppend, StreamPosition,
-    StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
+    AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventData,
+    EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, ReadFrom,
+    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite,
+    Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE,
+    TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
 use trogon_std::UuidV7Generator;
 use uuid::Uuid;
@@ -346,22 +346,25 @@ fn nats_test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://127.0.0.1:14222".to_string())
 }
 
-fn encode_event<E>(event: &E, headers: &EventHeaders) -> Result<Event, EventEncodeError<E>>
+fn encode_event<E>(event: &E, headers: &EventHeaders) -> TestResult<Event>
 where
     E: EventType + EventIdentity + EventEncode,
+    <E as EventType>::Error: Error + Send + Sync + 'static,
+    <E as EventEncode>::Error: Error + Send + Sync + 'static,
 {
     let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
     Ok(Event {
         id,
-        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
-        content: event.encode().map_err(EncodeEventError::EventEncode)?,
+        r#type: event.event_type()?.to_string(),
+        content: event.encode()?,
         headers: headers.clone(),
     })
 }
 
 fn test_event(_stream_id: &str, value: impl Into<String>) -> Result<Event, JetStreamStoreError<std::io::Error>> {
     let event = TestEvent { value: value.into() };
-    encode_event(&event, &EventHeaders::empty()).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    encode_event(&event, &EventHeaders::empty())
+        .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<Event> {

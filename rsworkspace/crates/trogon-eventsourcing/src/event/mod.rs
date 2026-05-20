@@ -1,5 +1,4 @@
 mod codec;
-mod encode_event_error;
 mod event_headers;
 mod event_headers_from_entries_error;
 mod event_id;
@@ -9,10 +8,7 @@ mod header_name;
 mod header_value;
 mod stream_event;
 
-use trogon_std::NowV7;
-
 pub use codec::{EventData, EventDecode, EventEncode};
-pub use encode_event_error::{EncodeEventError, EventEncodeError};
 pub use event_headers::EventHeaders;
 pub use event_headers_from_entries_error::EventHeadersFromEntriesError;
 pub use event_id::EventId;
@@ -30,24 +26,6 @@ pub struct Event {
     pub headers: EventHeaders,
 }
 
-pub(crate) fn encode_event<E, G>(
-    event: &E,
-    event_id_generator: &G,
-    headers: &EventHeaders,
-) -> Result<Event, EventEncodeError<E>>
-where
-    E: EventType + EventIdentity + EventEncode,
-    G: NowV7 + ?Sized,
-{
-    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
-    Ok(Event {
-        id,
-        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
-        content: event.encode().map_err(EncodeEventError::EventEncode)?,
-        headers: headers.clone(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,7 +33,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
-    use trogon_std::UuidV7Generator;
+    use trogon_std::{NowV7, UuidV7Generator};
     use uuid::Uuid;
 
     fn position(value: u64) -> StreamPosition {
@@ -74,6 +52,22 @@ mod tests {
         T: DeserializeOwned,
     {
         serde_json::from_slice(payload)
+    }
+
+    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &EventHeaders) -> Event
+    where
+        E: EventType + EventIdentity + EventEncode,
+        G: NowV7 + ?Sized,
+        <E as EventType>::Error: std::fmt::Debug,
+        <E as EventEncode>::Error: std::fmt::Debug,
+    {
+        let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
+        Event {
+            id,
+            r#type: event.event_type().unwrap().to_string(),
+            content: event.encode().unwrap(),
+            headers: headers.clone(),
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,7 +136,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
 
         assert_eq!(event.id.as_uuid().get_version_num(), 7);
         assert_eq!(event.r#type, "TestEvent");
@@ -161,7 +155,7 @@ mod tests {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
 
         assert_eq!(event.id, event_id);
     }
@@ -177,7 +171,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
 
         let recorded = StreamEvent {
             stream_id: "alpha".to_string(),
@@ -196,7 +190,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty()).unwrap();
+        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
         assert_eq!(
             TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
                 .unwrap()
@@ -221,7 +215,7 @@ mod tests {
         };
         let headers = EventHeaders::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
 
-        let generated = encode_event(&event, &UuidV7Generator, &headers).unwrap();
+        let generated = encode_event(&event, &UuidV7Generator, &headers);
         assert_eq!(
             TestEvent::decode(EventData::new(&generated.r#type, "alpha", &generated.content)).unwrap(),
             event
@@ -231,7 +225,7 @@ mod tests {
             Some("trace-1")
         );
 
-        let no_headers = encode_event(&event, &UuidV7Generator, &EventHeaders::empty()).unwrap();
+        let no_headers = encode_event(&event, &UuidV7Generator, &EventHeaders::empty());
         assert!(no_headers.headers.is_empty());
 
         let recorded = StreamEvent {

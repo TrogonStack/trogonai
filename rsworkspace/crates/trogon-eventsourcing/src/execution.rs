@@ -1,21 +1,19 @@
-use crate::event::encode_event;
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadAfterOverflow, ReadFrom, ReadStreamRequest, StreamAppend,
     StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
-    Decider, EncodeEventError, Event, EventDecode, EventEncode, EventEncodeError, EventHeaders, EventIdentity,
-    EventType, Events, StreamEvent, WritePrecondition,
+    Decider, Event, EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, StreamEvent,
+    WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use std::{borrow::Borrow, future::Future, num::NonZeroU64};
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
-type CommandEventEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
+type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
-type CommandEventEncodeFailure<C> = EncodeEventError<CommandEventTypeError<C>, CommandEventEncodeError<C>>;
 type CommandReadStreamError<E, C> = <E as StreamRead<<C as Decider>::StreamId>>::Error;
 type CommandAppendStreamError<E, C> = <E as StreamAppend<<C as Decider>::StreamId>>::Error;
 type CommandReadSnapshotError<S, C> = <S as SnapshotRead<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
@@ -172,7 +170,8 @@ pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError>
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
-        CommandEventEncodeFailure<C>,
+        CommandEventTypeError<C>,
+        CommandEventPayloadEncodeError<C>,
         CommandEventDecodeError<C>,
     >,
 >;
@@ -190,7 +189,8 @@ pub enum CommandError<
     ReadSnapshotError,
     ReadStreamError,
     AppendStreamError,
-    EncodeError,
+    EventTypeError,
+    PayloadEncodeError,
     DecodeError,
 > {
     /// The command could not decide because the domain rejected it.
@@ -203,8 +203,10 @@ pub enum CommandError<
     ReadStream(ReadStreamError),
     /// Appending the decided events failed after the command was accepted.
     Append(AppendStreamError),
-    /// A decided domain event could not be converted into a stored event.
-    EncodeEvent(EncodeError),
+    /// A decided domain event could not provide its stored event type.
+    EventType(EventTypeError),
+    /// A decided domain event could not encode its payload.
+    EventEncode(PayloadEncodeError),
     /// A stored event could not be converted back into a domain event.
     DecodeEvent(DecodeError),
     /// The loaded snapshot claims a position newer than the stream can prove.
@@ -224,22 +226,32 @@ enum ReplayStreamError<EvolveError, DecodeError> {
     DecodeEvent(DecodeError),
 }
 
-enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError> {
+enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError> {
     Decide(DecideError),
     Evolve(EvolveError),
     Append(AppendStreamError),
-    EncodeEvent(EncodeError),
+    EventType(EventTypeError),
+    EventEncode(PayloadEncodeError),
 }
 
-impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-    From<ReplayStreamError<EvolveError, DecodeError>>
+impl<
+    DecideError,
+    EvolveError,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EventTypeError,
+    PayloadEncodeError,
+    DecodeError,
+> From<ReplayStreamError<EvolveError, DecodeError>>
     for CommandError<
         DecideError,
         EvolveError,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
-        EncodeError,
+        EventTypeError,
+        PayloadEncodeError,
         DecodeError,
     >
 {
@@ -251,37 +263,58 @@ impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamE
     }
 }
 
-impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-    From<AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>>
+impl<
+    DecideError,
+    EvolveError,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EventTypeError,
+    PayloadEncodeError,
+    DecodeError,
+> From<AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError>>
     for CommandError<
         DecideError,
         EvolveError,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
-        EncodeError,
+        EventTypeError,
+        PayloadEncodeError,
         DecodeError,
     >
 {
-    fn from(error: AppendDecisionError<DecideError, EvolveError, AppendStreamError, EncodeError>) -> Self {
+    fn from(
+        error: AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError>,
+    ) -> Self {
         match error {
             AppendDecisionError::Decide(error) => Self::Decide(error),
             AppendDecisionError::Evolve(error) => Self::Evolve(error),
             AppendDecisionError::Append(error) => Self::Append(error),
-            AppendDecisionError::EncodeEvent(error) => Self::EncodeEvent(error),
+            AppendDecisionError::EventType(error) => Self::EventType(error),
+            AppendDecisionError::EventEncode(error) => Self::EventEncode(error),
         }
     }
 }
 
-impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-    std::fmt::Display
+impl<
+    DecideError,
+    EvolveError,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EventTypeError,
+    PayloadEncodeError,
+    DecodeError,
+> std::fmt::Display
     for CommandError<
         DecideError,
         EvolveError,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
-        EncodeError,
+        EventTypeError,
+        PayloadEncodeError,
         DecodeError,
     >
 where
@@ -290,7 +323,8 @@ where
     ReadSnapshotError: std::fmt::Display,
     ReadStreamError: std::fmt::Display,
     AppendStreamError: std::fmt::Display,
-    EncodeError: std::fmt::Display,
+    EventTypeError: std::fmt::Display,
+    PayloadEncodeError: std::fmt::Display,
     DecodeError: std::fmt::Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -300,7 +334,8 @@ where
             Self::ReadSnapshot(source) => write!(f, "command snapshot read failed: {source}"),
             Self::ReadStream(source) => write!(f, "command stream read failed: {source}"),
             Self::Append(source) => write!(f, "command stream append failed: {source}"),
-            Self::EncodeEvent(source) => write!(f, "command event encoding failed: {source}"),
+            Self::EventType(source) => write!(f, "command event type failed: {source}"),
+            Self::EventEncode(source) => write!(f, "command event encoding failed: {source}"),
             Self::DecodeEvent(source) => write!(f, "command event decoding failed: {source}"),
             Self::SnapshotAheadOfStream(SnapshotAheadOfStream {
                 snapshot_position,
@@ -321,15 +356,24 @@ where
     }
 }
 
-impl<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError, EncodeError, DecodeError>
-    std::error::Error
+impl<
+    DecideError,
+    EvolveError,
+    ReadSnapshotError,
+    ReadStreamError,
+    AppendStreamError,
+    EventTypeError,
+    PayloadEncodeError,
+    DecodeError,
+> std::error::Error
     for CommandError<
         DecideError,
         EvolveError,
         ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
-        EncodeError,
+        EventTypeError,
+        PayloadEncodeError,
         DecodeError,
     >
 where
@@ -338,7 +382,8 @@ where
     ReadSnapshotError: std::error::Error + 'static,
     ReadStreamError: std::error::Error + 'static,
     AppendStreamError: std::error::Error + 'static,
-    EncodeError: std::error::Error + 'static,
+    EventTypeError: std::error::Error + 'static,
+    PayloadEncodeError: std::error::Error + 'static,
     DecodeError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -348,7 +393,8 @@ where
             Self::ReadSnapshot(source) => Some(source),
             Self::ReadStream(source) => Some(source),
             Self::Append(source) => Some(source),
-            Self::EncodeEvent(source) => Some(source),
+            Self::EventType(source) => Some(source),
+            Self::EventEncode(source) => Some(source),
             Self::DecodeEvent(source) => Some(source),
             Self::SnapshotAheadOfStream(_) => None,
             Self::ReadAfterOverflow(source) => Some(source),
@@ -532,7 +578,8 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
             C::DecideError,
             C::EvolveError,
             CommandAppendStreamError<E, C>,
-            CommandEventEncodeFailure<C>,
+            CommandEventTypeError<C>,
+            CommandEventPayloadEncodeError<C>,
         >,
     >
     where
@@ -542,14 +589,24 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         E: StreamAppend<C::StreamId>,
         G: NowV7,
         CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
-        CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
+        CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
         let (state, events) = evaluate_decision(state, self.command).map_err(|failure| match failure {
             DecisionFailure::Decide(error) => AppendDecisionError::Decide(error),
             DecisionFailure::Evolve(error) => AppendDecisionError::Evolve(error),
         })?;
-        let encoded_events =
-            encode_events(&events, &self.event_id_generator, &self.headers).map_err(AppendDecisionError::EncodeEvent)?;
+        let mut encoded_events = Vec::with_capacity(events.len());
+        for event in events.iter() {
+            let id = event
+                .event_id()
+                .unwrap_or_else(|| EventId::now_v7(&self.event_id_generator));
+            encoded_events.push(Event {
+                id,
+                r#type: event.event_type().map_err(AppendDecisionError::EventType)?.to_string(),
+                content: event.encode().map_err(AppendDecisionError::EventEncode)?,
+                headers: self.headers.clone(),
+            });
+        }
         let stream_write_precondition =
             resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
         let append_outcome = self
@@ -590,7 +647,7 @@ where
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
     G: NowV7,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
-    CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
@@ -629,7 +686,7 @@ where
     G: NowV7,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
-    CommandEventEncodeError<C>: std::error::Error + Send + Sync + 'static,
+    CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
     C::State: SnapshotType,
 {
@@ -772,21 +829,6 @@ where
     Ok(state)
 }
 
-fn encode_events<E, G>(
-    events: &Events<E>,
-    event_id_generator: &G,
-    headers: &EventHeaders,
-) -> Result<Vec<Event>, EventEncodeError<E>>
-where
-    E: EventType + EventIdentity + EventEncode,
-    G: NowV7 + ?Sized,
-{
-    events
-        .iter()
-        .map(|event| encode_event(event, event_id_generator, headers))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -806,6 +848,22 @@ mod tests {
 
     fn position(value: u64) -> StreamPosition {
         StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
+
+    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &EventHeaders) -> Event
+    where
+        E: EventType + EventIdentity + EventEncode,
+        G: NowV7 + ?Sized,
+        <E as EventType>::Error: std::fmt::Debug,
+        <E as EventEncode>::Error: std::fmt::Debug,
+    {
+        let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
+        Event {
+            id,
+            r#type: event.event_type().unwrap().to_string(),
+            content: event.encode().unwrap(),
+            headers: headers.clone(),
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -830,6 +888,8 @@ mod tests {
         Disable,
         Remove,
         EmitBroken,
+        EmitUntyped,
+        EmitUnencodable,
     }
 
     #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -849,6 +909,8 @@ mod tests {
         StateChanged { id: String, enabled: bool },
         Removed { id: String },
         Broken { id: String },
+        Untyped { id: String },
+        Unencodable { id: String },
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -889,6 +951,8 @@ mod tests {
         ReadStream,
         Append,
         Json,
+        EventType,
+        EventEncode,
     }
 
     impl From<serde_json::Error> for TestInfraError {
@@ -985,6 +1049,7 @@ mod tests {
             TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled: *enabled }),
             TestEvent::Removed { .. } => Ok(TestState::Missing),
             TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
+            TestEvent::Untyped { .. } | TestEvent::Unencodable { .. } => Ok(TestState::Present { enabled: true }),
         }
     }
 
@@ -1033,6 +1098,10 @@ mod tests {
                     .execute(|_, command: &Self| Decision::event(TestEvent::Broken { id: command.id.clone() }))
                     .into(),
                 (_, TestAction::EmitBroken) => Ok(Decision::event(TestEvent::Broken { id: command.id.clone() })),
+                (_, TestAction::EmitUntyped) => Ok(Decision::event(TestEvent::Untyped { id: command.id.clone() })),
+                (_, TestAction::EmitUnencodable) => {
+                    Ok(Decision::event(TestEvent::Unencodable { id: command.id.clone() }))
+                }
                 (
                     TestState::Present { .. },
                     TestAction::Register
@@ -1086,23 +1155,29 @@ mod tests {
     impl EventIdentity for TestEvent {}
 
     impl EventType for TestEvent {
-        type Error = std::convert::Infallible;
+        type Error = TestInfraError;
 
         fn event_type(&self) -> Result<&'static str, Self::Error> {
-            Ok(match self {
+            let event_type = match self {
                 Self::Registered { .. } => "registered",
                 Self::StateChanged { .. } => "state_changed",
                 Self::Removed { .. } => "removed",
                 Self::Broken { .. } => "broken",
-            })
+                Self::Untyped { .. } => return Err(TestInfraError::EventType),
+                Self::Unencodable { .. } => "unencodable",
+            };
+            Ok(event_type)
         }
     }
 
     impl EventEncode for TestEvent {
-        type Error = serde_json::Error;
+        type Error = TestInfraError;
 
         fn encode(&self) -> Result<Vec<u8>, Self::Error> {
-            serde_json::to_vec(self)
+            if matches!(self, Self::Unencodable { .. }) {
+                return Err(TestInfraError::EventEncode);
+            }
+            serde_json::to_vec(self).map_err(Into::into)
         }
     }
 
@@ -1206,11 +1281,13 @@ mod tests {
             TestEvent::Registered { id }
             | TestEvent::StateChanged { id, .. }
             | TestEvent::Removed { id }
-            | TestEvent::Broken { id } => id.clone(),
+            | TestEvent::Broken { id }
+            | TestEvent::Untyped { id }
+            | TestEvent::Unencodable { id } => id.clone(),
         };
         StreamEvent {
             stream_id,
-            event: encode_event(&event, &UuidV7Generator, &EventHeaders::empty()).unwrap(),
+            event: encode_event(&event, &UuidV7Generator, &EventHeaders::empty()),
             stream_position: position(sequence),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
         }
@@ -1400,6 +1477,36 @@ mod tests {
         let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
         assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_event_type_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::EmitUntyped);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::EventType(TestInfraError::EventType)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_event_encode_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::EmitUnencodable);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::EventEncode(TestInfraError::EventEncode)));
         assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
         assert!(runtime.appended_events.lock().unwrap().is_empty());
     }

@@ -12,10 +12,10 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, EncodeEventError, Event, EventData, EventDecode, EventEncode,
-    EventEncodeError, EventHeaders, EventId, EventIdentity, EventType, ReadSnapshotRequest, ReadSnapshotResponse,
-    ReadFrom, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend,
-    StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventEncode, EventHeaders, EventId,
+    EventIdentity, EventType, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
+    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition,
+    StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::UuidV7Generator;
@@ -154,17 +154,19 @@ fn stream_position(value: u64) -> Result<StreamPosition, CronError> {
         .map_err(|source| CronError::event_source("mock stream position must be non-zero", source))
 }
 
-fn encode_event<E>(event: &E) -> Result<Event, EventEncodeError<E>>
+fn encode_event<E>(event: &E) -> Event
 where
     E: EventType + EventIdentity + EventEncode,
+    <E as EventType>::Error: std::fmt::Debug,
+    <E as EventEncode>::Error: std::fmt::Debug,
 {
     let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
-    Ok(Event {
+    Event {
         id,
-        r#type: event.event_type().map_err(EncodeEventError::EventType)?.to_string(),
-        content: event.encode().map_err(EncodeEventError::EventEncode)?,
+        r#type: event.event_type().unwrap().to_string(),
+        content: event.encode().unwrap(),
         headers: EventHeaders::empty(),
-    })
+    }
 }
 
 impl MockCronStore {
@@ -191,7 +193,7 @@ impl MockCronStore {
         self.events
             .lock()
             .unwrap()
-            .insert(id.clone(), vec![encode_event(&event).unwrap()]);
+            .insert(id.clone(), vec![encode_event(&event)]);
         self.jobs.lock().unwrap().insert(id.clone(), job);
     }
 
