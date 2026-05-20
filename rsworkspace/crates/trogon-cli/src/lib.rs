@@ -12,7 +12,7 @@ pub use session::Session;
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;
-pub use cross_runner::CrossRunnerSwitcher;
+pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};
 
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};

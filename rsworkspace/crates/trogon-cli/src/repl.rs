@@ -1,8 +1,7 @@
 use crate::fs::Fs;
 use crate::nats::NatsClient;
 use crate::session::{Session, StreamEvent, TrogonSession};
-use crate::CrossRunnerSwitcher;
-use trogon_registry::RegistryStore;
+use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -135,12 +134,12 @@ fn join_continuation(s: &str) -> String {
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
-pub async fn run<N: NatsClient + Clone, F: Fs, S: RegistryStore>(
+pub async fn run<N: NatsClient + Clone, F: Fs, SW: RunnerSwitcher>(
     nats: N,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
-    mut switcher: CrossRunnerSwitcher<S>,
+    mut switcher: SW,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let mut session = TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await?;
@@ -185,14 +184,14 @@ pub async fn run<N: NatsClient + Clone, F: Fs, S: RegistryStore>(
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = arg.trim().to_string();
                         let cwd_str = cwd.to_str().unwrap_or(".");
-                        match switcher.switch_model(&prefix, session.session_id(), &model_id, cwd_str).await {
-                            Ok((new_prefix, new_session_id)) => {
-                                if new_prefix == prefix {
+                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, cwd_str).await {
+                            Ok(outcome) => {
+                                if outcome.same_runner {
                                     println!("Already on a runner that supports {model_id}");
                                 } else {
                                     session.close().await;
-                                    session = TrogonSession::from_existing(nats.clone(), &new_prefix, new_session_id);
-                                    prefix = new_prefix;
+                                    session = TrogonSession::from_existing(nats.clone(), &outcome.new_prefix, outcome.new_session_id);
+                                    prefix = outcome.new_prefix;
                                     session_used_tokens = 0;
                                     session_context_size = 0;
                                     println!("Switched to {model_id}");
@@ -354,6 +353,31 @@ pub async fn run<N: NatsClient + Clone, F: Fs, S: RegistryStore>(
 
     let _ = rl.save_history(&history_path);
     Ok(())
+}
+
+// ── /model handler ────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub(crate) struct ModelSwitchOutcome {
+    pub same_runner: bool,
+    pub new_prefix: String,
+    pub new_session_id: String,
+}
+
+pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
+    switcher: &mut SW,
+    current_prefix: &str,
+    current_session_id: &str,
+    model_id: &str,
+    cwd: &str,
+) -> Result<ModelSwitchOutcome, String> {
+    let (new_prefix, new_session_id) =
+        switcher.switch_model(current_prefix, current_session_id, model_id, cwd).await?;
+    Ok(ModelSwitchOutcome {
+        same_runner: new_prefix == current_prefix,
+        new_prefix,
+        new_session_id,
+    })
 }
 
 fn handle_slash_command<F: Fs>(
@@ -1089,5 +1113,50 @@ mod tests {
     #[test]
     fn expand_tilde_bare_tilde_without_slash_is_unchanged() {
         assert_eq!(expand_tilde("~nodot"), PathBuf::from("~nodot"));
+    }
+
+    // ── apply_model_switch ────────────────────────────────────────────────────
+
+    use crate::cross_runner::mock::MockRunnerSwitcher;
+
+    #[tokio::test]
+    async fn model_switch_same_runner_sets_same_runner_flag() {
+        let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+            .await
+            .unwrap();
+        assert!(outcome.same_runner);
+        assert_eq!(outcome.new_prefix, "acp");
+        assert_eq!(outcome.new_session_id, "sess-1");
+    }
+
+    #[tokio::test]
+    async fn model_switch_cross_runner_returns_new_prefix_and_session() {
+        let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "new-sess-99");
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+            .await
+            .unwrap();
+        assert!(!outcome.same_runner);
+        assert_eq!(outcome.new_prefix, "acp.xai");
+        assert_eq!(outcome.new_session_id, "new-sess-99");
+    }
+
+    #[tokio::test]
+    async fn model_switch_error_propagates() {
+        let mut switcher = MockRunnerSwitcher::error("no runner found for model: unknown");
+        let err = apply_model_switch(&mut switcher, "acp", "sess-1", "unknown", "/ws")
+            .await
+            .unwrap_err();
+        assert!(err.contains("no runner found for model: unknown"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn model_switch_cross_runner_different_from_current_prefix() {
+        let mut switcher = MockRunnerSwitcher::cross_runner("acp.openrouter", "s-42");
+        let outcome = apply_model_switch(&mut switcher, "acp", "s-old", "gpt-4o", "/workspace")
+            .await
+            .unwrap();
+        assert!(!outcome.same_runner, "cross-runner must not be same_runner");
+        assert_ne!(outcome.new_prefix, "acp");
     }
 }
