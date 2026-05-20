@@ -16,8 +16,8 @@ pub enum ReadFrom {
 impl ReadFrom {
     /// Reads strictly after the given position.
     ///
-    /// Encapsulates the `+1` arithmetic that snapshot-resume requires when a
-    /// snapshot records the position of its last applied event. The result
+    /// Encapsulates the `+1` arithmetic that checkpoint-resume requires when a
+    /// checkpoint records the position of its last applied event. The result
     /// remains inclusive `Position(p + 1)`, but callers see intent, not math.
     pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflow> {
         let next = position
@@ -29,12 +29,19 @@ impl ReadFrom {
 }
 
 /// Error returned when `ReadFrom::after` would overflow `u64`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("cannot read after position {position}: u64 overflow")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadAfterOverflow {
     /// Position that could not be advanced.
     pub position: StreamPosition,
 }
+
+impl std::fmt::Display for ReadAfterOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cannot read after position {}: u64 overflow", self.position)
+    }
+}
+
+impl std::error::Error for ReadAfterOverflow {}
 
 /// Request to read events from one stream.
 #[derive(Debug, Clone, PartialEq)]
