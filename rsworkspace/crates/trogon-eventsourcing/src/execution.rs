@@ -599,7 +599,7 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         for event in events.iter() {
             let id = event
                 .event_id()
-                .unwrap_or_else(|| EventId::now_v7(&self.event_id_generator));
+                .unwrap_or_else(|| EventId::new(self.event_id_generator.now_v7()));
             encoded_events.push(Event {
                 id,
                 r#type: event.event_type().map_err(AppendDecisionError::EventType)?.to_string(),
@@ -857,7 +857,9 @@ mod tests {
         <E as EventType>::Error: std::fmt::Debug,
         <E as EventEncode>::Error: std::fmt::Debug,
     {
-        let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
+        let id = event
+            .event_id()
+            .unwrap_or_else(|| EventId::new(event_id_generator.now_v7()));
         Event {
             id,
             r#type: event.event_type().unwrap().to_string(),

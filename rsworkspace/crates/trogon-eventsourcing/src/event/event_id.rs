@@ -1,7 +1,6 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use trogon_std::NowV7;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -10,13 +9,6 @@ pub struct EventId(Uuid);
 impl EventId {
     pub fn new(value: Uuid) -> Self {
         Self(value)
-    }
-
-    pub fn now_v7<N>(now_v7: &N) -> Self
-    where
-        N: NowV7 + ?Sized,
-    {
-        Self(now_v7.now_v7())
     }
 
     pub fn as_uuid(self) -> Uuid {

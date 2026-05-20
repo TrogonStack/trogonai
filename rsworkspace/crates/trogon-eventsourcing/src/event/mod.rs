@@ -1,19 +1,19 @@
 mod codec;
 mod event_headers;
-mod event_headers_from_entries_error;
 mod event_id;
 mod event_identity;
 mod event_type;
+mod from_entries_error;
 mod header_name;
 mod header_value;
 mod stream_event;
 
 pub use codec::{EventData, EventDecode, EventEncode};
 pub use event_headers::EventHeaders;
-pub use event_headers_from_entries_error::EventHeadersFromEntriesError;
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;
+pub use from_entries_error::FromEntriesError;
 pub use header_name::{HeaderName, HeaderNameError};
 pub use header_value::{HeaderValue, HeaderValueError};
 pub use stream_event::StreamEvent;
@@ -61,7 +61,9 @@ mod tests {
         <E as EventType>::Error: std::fmt::Debug,
         <E as EventEncode>::Error: std::fmt::Debug,
     {
-        let id = event.event_id().unwrap_or_else(|| EventId::now_v7(event_id_generator));
+        let id = event
+            .event_id()
+            .unwrap_or_else(|| EventId::new(event_id_generator.now_v7()));
         Event {
             id,
             r#type: event.event_type().unwrap().to_string(),
@@ -141,7 +143,7 @@ mod tests {
         assert_eq!(event.id.as_uuid().get_version_num(), 7);
         assert_eq!(event.r#type, "TestEvent");
         assert_eq!(
-            TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
+            TestEvent::decode(EventData::new(&event.r#type, &event.content))
                 .unwrap()
                 .value,
             "beta"
@@ -192,7 +194,7 @@ mod tests {
         };
         let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
         assert_eq!(
-            TestEvent::decode(EventData::new(&event.r#type, "alpha", &event.content))
+            TestEvent::decode(EventData::new(&event.r#type, &event.content))
                 .unwrap()
                 .id,
             "alpha"
@@ -217,7 +219,7 @@ mod tests {
 
         let generated = encode_event(&event, &UuidV7Generator, &headers);
         assert_eq!(
-            TestEvent::decode(EventData::new(&generated.r#type, "alpha", &generated.content)).unwrap(),
+            TestEvent::decode(EventData::new(&generated.r#type, &generated.content)).unwrap(),
             event
         );
         assert_eq!(
@@ -268,11 +270,11 @@ mod tests {
         );
         assert!(matches!(
             EventHeaders::from_entries([("", "value")]),
-            Err(EventHeadersFromEntriesError::InvalidName { .. })
+            Err(crate::headers::FromEntriesError::InvalidName { .. })
         ));
         assert!(matches!(
             EventHeaders::from_entries([("trace-id", "line\r\nbreak")]),
-            Err(EventHeadersFromEntriesError::InvalidValue { .. })
+            Err(crate::headers::FromEntriesError::InvalidValue { .. })
         ));
         assert!(HeaderValue::new("null\0break").is_err());
     }

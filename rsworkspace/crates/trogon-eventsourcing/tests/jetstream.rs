@@ -22,7 +22,7 @@ use trogon_eventsourcing::{
     Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE,
     TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
-use trogon_std::UuidV7Generator;
+use trogon_std::{NowV7, UuidV7Generator};
 use uuid::Uuid;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -352,7 +352,9 @@ where
     <E as EventType>::Error: Error + Send + Sync + 'static,
     <E as EventEncode>::Error: Error + Send + Sync + 'static,
 {
-    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    let id = event
+        .event_id()
+        .unwrap_or_else(|| EventId::new(UuidV7Generator.now_v7()));
     Ok(Event {
         id,
         r#type: event.event_type()?.to_string(),

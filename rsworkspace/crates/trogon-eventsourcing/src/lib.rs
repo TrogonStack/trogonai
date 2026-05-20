@@ -6,9 +6,15 @@ pub mod nats;
 pub mod snapshot;
 mod stream;
 
+pub mod headers {
+    pub use crate::event::{
+        EventHeaders as Headers, FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError,
+    };
+}
+
 pub use event::{
-    Event, EventData, EventDecode, EventEncode, EventHeaders, EventHeadersFromEntriesError, EventId, EventIdentity,
-    EventType, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, StreamEvent,
+    Event, EventData, EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, HeaderName,
+    HeaderNameError, HeaderValue, HeaderValueError, StreamEvent,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;

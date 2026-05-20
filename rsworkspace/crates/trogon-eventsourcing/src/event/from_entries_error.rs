@@ -1,12 +1,12 @@
 use super::{header_name::HeaderNameError, header_value::HeaderValueError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EventHeadersFromEntriesError {
+pub enum FromEntriesError {
     InvalidName { name: String, source: HeaderNameError },
     InvalidValue { name: String, source: HeaderValueError },
 }
 
-impl std::fmt::Display for EventHeadersFromEntriesError {
+impl std::fmt::Display for FromEntriesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidName { name, .. } => write!(f, "event header name '{name}' is not valid"),
@@ -17,7 +17,7 @@ impl std::fmt::Display for EventHeadersFromEntriesError {
     }
 }
 
-impl std::error::Error for EventHeadersFromEntriesError {
+impl std::error::Error for FromEntriesError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidName { source, .. } => Some(source),

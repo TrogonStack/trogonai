@@ -19,6 +19,6 @@ impl StreamEvent {
     where
         E: EventDecode,
     {
-        E::decode(EventData::new(&self.event.r#type, &self.stream_id, &self.event.content))
+        E::decode(EventData::new(&self.event.r#type, &self.event.content))
     }
 }

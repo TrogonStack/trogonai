@@ -160,7 +160,9 @@ where
     <E as EventType>::Error: std::fmt::Debug,
     <E as EventEncode>::Error: std::fmt::Debug,
 {
-    let id = event.event_id().unwrap_or_else(|| EventId::now_v7(&UuidV7Generator));
+    let id = event
+        .event_id()
+        .unwrap_or_else(|| EventId::new(UuidV7Generator.now_v7()));
     Event {
         id,
         r#type: event.event_type().unwrap().to_string(),
@@ -463,12 +465,8 @@ impl StreamAppend<str> for MockCronStore {
         let mut raw_position = current_position.map(StreamPosition::as_u64).unwrap_or(0);
 
         for event_data in events {
-            let event = v1::JobEvent::decode(EventData::new(
-                &event_data.r#type,
-                stream_id.as_str(),
-                &event_data.content,
-            ))
-            .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
+            let event = v1::JobEvent::decode(EventData::new(&event_data.r#type, &event_data.content))
+                .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
             match &event.event {

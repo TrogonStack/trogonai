@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{
-    event_headers_from_entries_error::EventHeadersFromEntriesError,
+    from_entries_error::FromEntriesError,
     header_name::HeaderName,
     header_value::{HeaderValue, HeaderValueError},
 };
@@ -30,7 +30,7 @@ impl EventHeaders {
         Ok(headers)
     }
 
-    pub fn from_entries<I, N, V>(entries: I) -> Result<Self, EventHeadersFromEntriesError>
+    pub fn from_entries<I, N, V>(entries: I) -> Result<Self, FromEntriesError>
     where
         I: IntoIterator<Item = (N, V)>,
         N: Into<String>,
@@ -40,14 +40,13 @@ impl EventHeaders {
         let mut headers = Self::empty();
         for (name, value) in entries {
             let name = name.into();
-            let header_name =
-                HeaderName::new(name.clone()).map_err(|source| EventHeadersFromEntriesError::InvalidName {
-                    name: name.clone(),
-                    source,
-                })?;
+            let header_name = HeaderName::new(name.clone()).map_err(|source| FromEntriesError::InvalidName {
+                name: name.clone(),
+                source,
+            })?;
             headers
                 .insert(header_name, value)
-                .map_err(|source| EventHeadersFromEntriesError::InvalidValue { name, source })?;
+                .map_err(|source| FromEntriesError::InvalidValue { name, source })?;
         }
         Ok(headers)
     }
