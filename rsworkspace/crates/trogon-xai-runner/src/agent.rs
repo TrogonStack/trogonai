@@ -2522,9 +2522,10 @@ mod tests {
         // Both take &self — safe because XaiAgent uses Arc<Mutex<...>> internally.
         let prompt_fut = agent.prompt(PromptRequest::new("can1", vec![ContentBlock::from("hi")]));
         let cancel_fut = async {
-            // Yield enough times to let prompt() register its cancel sender and
-            // enter the select! loop waiting on the slow stream.
-            for _ in 0..10 {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             agent.cancel(CancelNotification::new("can1")).await.unwrap();
