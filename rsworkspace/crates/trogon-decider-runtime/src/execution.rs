@@ -12,158 +12,23 @@
 //! failure, codec failure, and storage failure without losing the concrete
 //! source error.
 
-use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflow, ReadFrom, ReadStreamRequest, StreamAppend,
-    StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, StreamAppend, StreamPosition, StreamRead,
+    StreamWritePrecondition,
 };
 use crate::{
-    Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
-    StreamEvent, WritePrecondition,
+    Decider, Event, EventDecode, EventEncode, EventId, EventIdentity, EventType, Events, Headers, StreamEvent,
+    WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
 use trogon_std::{NowV7, UuidV7Generator};
 
-use std::{borrow::Borrow, future::Future, num::NonZeroU64};
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
 type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
 type CommandReadStreamError<E, C> = <E as StreamRead<<C as Decider>::StreamId>>::Error;
 type CommandAppendStreamError<E, C> = <E as StreamAppend<<C as Decider>::StreamId>>::Error;
-type CommandReadSnapshotError<S, C> = <S as SnapshotRead<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
-type CommandWriteSnapshotError<S, C> = <S as SnapshotWrite<<C as Decider>::State, <C as Decider>::StreamId>>::Error;
-type CommandWithoutSnapshotsResult<E, C> =
-    CommandResult<C, std::convert::Infallible, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
-type CommandWithSnapshotsResult<E, S, C> =
-    CommandResult<C, CommandReadSnapshotError<S, C>, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
-
-/// Schedules best-effort snapshot writes without erasing the task future type.
-///
-/// Snapshot execution owns the async block that writes the snapshot. A generic
-/// scheduler keeps that future concrete instead of forcing every runtime adapter
-/// through a boxed `dyn Future`.
-pub trait SnapshotTaskScheduler {
-    fn schedule<F>(&self, task: F)
-    where
-        F: Future<Output = ()> + Send + 'static;
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct TokioSnapshotTaskScheduler;
-
-impl SnapshotTaskScheduler for TokioSnapshotTaskScheduler {
-    fn schedule<F>(&self, task: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            tracing::error!("Tokio snapshot task scheduler requires an active Tokio runtime");
-            return;
-        };
-
-        drop(handle.spawn(task));
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-/// Runs snapshot tasks to completion before returning.
-///
-/// This scheduler is test support. It runs the task on a helper thread so sync
-/// tests can call `block_on(command.execute())` without entering the futures
-/// executor recursively. Tokio-backed stores should use
-/// `TokioSnapshotTaskScheduler` so their async I/O runs inside the runtime they
-/// require.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ImmediateSnapshotTaskScheduler;
-
-#[cfg(any(test, feature = "test-support"))]
-impl SnapshotTaskScheduler for ImmediateSnapshotTaskScheduler {
-    fn schedule<F>(&self, task: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let handle = std::thread::spawn(move || futures::executor::block_on(task));
-        if handle.join().is_err() {
-            tracing::warn!("test snapshot task panicked");
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SnapshotDecision {
-    Skip,
-    Take,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DecideSnapshot<'a, C: Decider> {
-    /// The command that produced the execution result.
-    pub command: &'a C,
-    /// The stream high-watermark after the append that may trigger a snapshot.
-    ///
-    /// Use this as the position for a new snapshot if the policy decides to snapshot.
-    /// Do not use it as a gapless event count.
-    pub stream_position: StreamPosition,
-    /// Snapshot position before this execution replayed trailing events.
-    ///
-    /// `None` means execution started without a snapshot.
-    pub snapshot_position: Option<StreamPosition>,
-    pub state: &'a C::State,
-    pub events: &'a Events<C::Event>,
-    /// Number of persisted stream events read after the snapshot position.
-    pub replayed_event_count: u64,
-}
-
-pub trait SnapshotPolicy<C: Decider> {
-    fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision;
-}
-
-pub trait CommandSnapshotPolicy: Decider
-where
-    Self::State: SnapshotType,
-{
-    type SnapshotPolicy: SnapshotPolicy<Self>;
-
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy;
-
-    fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
-        Snapshots::new(snapshot_store, Self::SNAPSHOT_POLICY)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct NoSnapshot;
-
-impl<C: Decider> SnapshotPolicy<C> for NoSnapshot {
-    fn decide_snapshot(&self, _context: DecideSnapshot<'_, C>) -> SnapshotDecision {
-        SnapshotDecision::Skip
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FrequencySnapshot {
-    frequency: NonZeroU64,
-}
-
-impl FrequencySnapshot {
-    pub const fn new(frequency: NonZeroU64) -> Self {
-        Self { frequency }
-    }
-
-    pub const fn frequency(self) -> NonZeroU64 {
-        self.frequency
-    }
-}
-
-impl<C: Decider> SnapshotPolicy<C> for FrequencySnapshot {
-    fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision {
-        if context.replayed_event_count + context.events.len() as u64 >= self.frequency.get() {
-            SnapshotDecision::Take
-        } else {
-            SnapshotDecision::Skip
-        }
-    }
-}
+type CommandExecutionResult<E, C> = CommandResult<C, CommandReadStreamError<E, C>, CommandAppendStreamError<E, C>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionResult<State, Event> {
@@ -181,12 +46,11 @@ pub struct ExecutionResult<State, Event> {
 /// type keeps phase information here instead of forcing storage traits to wrap
 /// their own errors. The operation errors stay concrete and separate to preserve
 /// compiler diagnostics and avoid boxing or a lossy shared infrastructure enum.
-pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError> = Result<
+pub type CommandResult<C, ReadStreamError, AppendStreamError> = Result<
     ExecutionResult<<C as Decider>::State, <C as Decider>::Event>,
     CommandError<
         <C as Decider>::DecideError,
         <C as Decider>::EvolveError,
-        ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
         CommandEventTypeError<C>,
@@ -199,13 +63,12 @@ pub type CommandResult<C, ReadSnapshotError, ReadStreamError, AppendStreamError>
 ///
 /// The command boundary normalizes failures by execution phase while preserving
 /// the exact source error type for each phase. Domain failures come from the
-/// decider, storage failures come from the concrete read/append/snapshot
+/// decider, storage failures come from the concrete read/append
 /// operation that failed, and codec failures stay tied to the event traits.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum CommandError<
     DecideError,
     EvolveError,
-    ReadSnapshotError,
     ReadStreamError,
     AppendStreamError,
     EventTypeError,
@@ -213,96 +76,39 @@ pub enum CommandError<
     DecodeError,
 > {
     /// The command could not decide because the domain rejected it.
-    #[error("command decision failed: {0}")]
-    Decide(#[source] DecideError),
+    Decide(DecideError),
     /// The command or replay could not evolve state from an event.
-    #[error("command state evolution failed: {0}")]
-    Evolve(#[source] EvolveError),
-    /// Snapshot loading failed before replaying stream history.
-    #[error("command snapshot read failed: {0}")]
-    ReadSnapshot(#[source] ReadSnapshotError),
+    Evolve(EvolveError),
     /// Stream history loading failed.
-    #[error("command stream read failed: {0}")]
-    ReadStream(#[source] ReadStreamError),
+    ReadStream(ReadStreamError),
     /// Appending the decided events failed after the command was accepted.
-    #[error("command stream append failed: {0}")]
-    Append(#[source] AppendStreamError),
+    Append(AppendStreamError),
     /// A decided domain event could not provide its stored event type.
-    #[error("command event type failed: {0}")]
-    EventType(#[source] EventTypeError),
+    EventType(EventTypeError),
     /// A decided domain event could not encode its payload.
-    #[error("command event encoding failed: {0}")]
-    EventEncode(#[source] PayloadEncodeError),
+    EventEncode(PayloadEncodeError),
     /// A stored event could not be converted back into a domain event.
-    #[error("command event decoding failed: {0}")]
-    DecodeEvent(#[source] DecodeError),
-    /// The loaded snapshot claims a position newer than the stream can prove.
-    #[error("{0}")]
-    SnapshotAheadOfStream(SnapshotAheadOfStream),
-    /// The snapshot's recorded position cannot be advanced (u64 overflow).
-    #[error("{0}")]
-    ReadAfterOverflow(#[source] ReadAfterOverflow),
+    DecodeEvent(DecodeError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SnapshotAheadOfStream {
-    pub snapshot_position: StreamPosition,
-    pub stream_position: Option<StreamPosition>,
-}
-
-impl std::fmt::Display for SnapshotAheadOfStream {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.stream_position {
-            Some(stream_position) => write!(
-                f,
-                "snapshot position {} is ahead of current stream position {stream_position}",
-                self.snapshot_position
-            ),
-            None => write!(
-                f,
-                "snapshot position {} exists but the stream has no current position",
-                self.snapshot_position
-            ),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
 enum ReplayStreamError<EvolveError, DecodeError> {
-    #[error("{0}")]
-    Evolve(#[source] EvolveError),
-    #[error("{0}")]
-    DecodeEvent(#[source] DecodeError),
+    Evolve(EvolveError),
+    DecodeEvent(DecodeError),
 }
 
-#[derive(Debug, thiserror::Error)]
 enum AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError> {
-    #[error("{0}")]
-    Decide(#[source] DecideError),
-    #[error("{0}")]
-    Evolve(#[source] EvolveError),
-    #[error("{0}")]
-    Append(#[source] AppendStreamError),
-    #[error("{0}")]
-    EventType(#[source] EventTypeError),
-    #[error("{0}")]
-    EventEncode(#[source] PayloadEncodeError),
+    Decide(DecideError),
+    Evolve(EvolveError),
+    Append(AppendStreamError),
+    EventType(EventTypeError),
+    EventEncode(PayloadEncodeError),
 }
 
-impl<
-    DecideError,
-    EvolveError,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EventTypeError,
-    PayloadEncodeError,
-    DecodeError,
-> From<ReplayStreamError<EvolveError, DecodeError>>
+impl<DecideError, EvolveError, ReadStreamError, AppendStreamError, EventTypeError, PayloadEncodeError, DecodeError>
+    From<ReplayStreamError<EvolveError, DecodeError>>
     for CommandError<
         DecideError,
         EvolveError,
-        ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
         EventTypeError,
@@ -318,20 +124,11 @@ impl<
     }
 }
 
-impl<
-    DecideError,
-    EvolveError,
-    ReadSnapshotError,
-    ReadStreamError,
-    AppendStreamError,
-    EventTypeError,
-    PayloadEncodeError,
-    DecodeError,
-> From<AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError>>
+impl<DecideError, EvolveError, ReadStreamError, AppendStreamError, EventTypeError, PayloadEncodeError, DecodeError>
+    From<AppendDecisionError<DecideError, EvolveError, AppendStreamError, EventTypeError, PayloadEncodeError>>
     for CommandError<
         DecideError,
         EvolveError,
-        ReadSnapshotError,
         ReadStreamError,
         AppendStreamError,
         EventTypeError,
@@ -352,139 +149,106 @@ impl<
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct WithoutSnapshots;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct WithoutSnapshotTaskScheduler;
-
-pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler> {
-    snapshot_store: &'a S,
-    policy: P,
-    schedule_snapshot_task: Spawn,
-}
-
-impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler> {
-    pub fn new(snapshot_store: &'a S, policy: P) -> Self {
-        Self {
-            snapshot_store,
-            policy,
-            schedule_snapshot_task: WithoutSnapshotTaskScheduler,
+impl<DecideError, EvolveError, ReadStreamError, AppendStreamError, EventTypeError, PayloadEncodeError, DecodeError>
+    std::fmt::Display
+    for CommandError<
+        DecideError,
+        EvolveError,
+        ReadStreamError,
+        AppendStreamError,
+        EventTypeError,
+        PayloadEncodeError,
+        DecodeError,
+    >
+where
+    DecideError: std::fmt::Display,
+    EvolveError: std::fmt::Display,
+    ReadStreamError: std::fmt::Display,
+    AppendStreamError: std::fmt::Display,
+    EventTypeError: std::fmt::Display,
+    PayloadEncodeError: std::fmt::Display,
+    DecodeError: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decide(source) => write!(f, "command decision failed: {source}"),
+            Self::Evolve(source) => write!(f, "command state evolution failed: {source}"),
+            Self::ReadStream(source) => write!(f, "command stream read failed: {source}"),
+            Self::Append(source) => write!(f, "command stream append failed: {source}"),
+            Self::EventType(source) => write!(f, "command event type failed: {source}"),
+            Self::EventEncode(source) => write!(f, "command event encoding failed: {source}"),
+            Self::DecodeEvent(source) => write!(f, "command event decoding failed: {source}"),
         }
     }
 }
 
-impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
-    fn schedule_snapshot_tasks_with<NextSpawn>(
-        self,
-        schedule_snapshot_task: NextSpawn,
-    ) -> Snapshots<'a, S, P, NextSpawn> {
-        Snapshots {
-            snapshot_store: self.snapshot_store,
-            policy: self.policy,
-            schedule_snapshot_task,
+impl<DecideError, EvolveError, ReadStreamError, AppendStreamError, EventTypeError, PayloadEncodeError, DecodeError>
+    std::error::Error
+    for CommandError<
+        DecideError,
+        EvolveError,
+        ReadStreamError,
+        AppendStreamError,
+        EventTypeError,
+        PayloadEncodeError,
+        DecodeError,
+    >
+where
+    DecideError: std::error::Error + 'static,
+    EvolveError: std::error::Error + 'static,
+    ReadStreamError: std::error::Error + 'static,
+    AppendStreamError: std::error::Error + 'static,
+    EventTypeError: std::error::Error + 'static,
+    PayloadEncodeError: std::error::Error + 'static,
+    DecodeError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decide(source) => Some(source),
+            Self::Evolve(source) => Some(source),
+            Self::ReadStream(source) => Some(source),
+            Self::Append(source) => Some(source),
+            Self::EventType(source) => Some(source),
+            Self::EventEncode(source) => Some(source),
+            Self::DecodeEvent(source) => Some(source),
         }
     }
 }
 
-pub trait IntoSnapshots<'a, C>: Sized
-where
-    C: Decider,
-{
-    type Store;
-    type Policy;
-    type SnapshotTaskScheduler;
-
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler>;
-}
-
-impl<'a, C, S, P, Spawn> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn>
-where
-    C: Decider,
-{
-    type Store = S;
-    type Policy = P;
-    type SnapshotTaskScheduler = Spawn;
-
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
-        self
-    }
-}
-
-impl<'a, C, S> IntoSnapshots<'a, C> for &'a S
-where
-    C: CommandSnapshotPolicy,
-    C::State: SnapshotType,
-{
-    type Store = S;
-    type Policy = C::SnapshotPolicy;
-    type SnapshotTaskScheduler = WithoutSnapshotTaskScheduler;
-
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
-        C::snapshots(self)
-    }
-}
-
-pub struct CommandExecution<'a, E, C, S, G> {
+/// Builder for executing one decider command against one event stream.
+///
+/// The builder borrows the event store and command so execution can stay
+/// allocation-light and adapter-neutral. The event-id generator is part of the
+/// builder type because tests and deterministic runtimes need to replace the
+/// default UUIDv7 source without weakening the production default.
+pub struct CommandExecution<'a, E, C, G> {
     event_store: &'a E,
     command: &'a C,
     write_precondition: Option<StreamWritePrecondition>,
-    snapshots: S,
     headers: Headers,
     event_id_generator: G,
 }
 
-impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots, UuidV7Generator>
+impl<'a, E, C> CommandExecution<'a, E, C, UuidV7Generator>
 where
     C: Decider,
 {
+    /// Creates a command execution with default headers, precondition policy,
+    /// and UUIDv7 event id generation.
     pub fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
             event_store,
             command,
             write_precondition: None,
-            snapshots: WithoutSnapshots,
             headers: Headers::empty(),
             event_id_generator: UuidV7Generator,
         }
     }
 }
 
-impl<'a, E, C, G> CommandExecution<'a, E, C, WithoutSnapshots, G>
-where
-    C: Decider,
-{
-    #[allow(clippy::type_complexity)]
-    pub fn with_snapshot<I>(
-        self,
-        snapshots: I,
-    ) -> CommandExecution<
-        'a,
-        E,
-        C,
-        Snapshots<
-            'a,
-            <I as IntoSnapshots<'a, C>>::Store,
-            <I as IntoSnapshots<'a, C>>::Policy,
-            <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
-        >,
-        G,
-    >
-    where
-        I: IntoSnapshots<'a, C>,
-    {
-        CommandExecution {
-            event_store: self.event_store,
-            command: self.command,
-            write_precondition: self.write_precondition,
-            snapshots: snapshots.into_snapshots(),
-            headers: self.headers,
-            event_id_generator: self.event_id_generator,
-        }
-    }
-}
-
-impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
+impl<'a, E, C, G> CommandExecution<'a, E, C, G> {
+    /// Overrides the append precondition used when the decider does not define
+    /// a command-level [`WritePrecondition`].
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamWritePrecondition>>,
@@ -493,12 +257,18 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         self
     }
 
+    /// Adds metadata headers to every event emitted by this command.
     pub fn with_headers(mut self, headers: Headers) -> Self {
         self.headers = headers;
         self
     }
 
-    pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, S, NextG>
+    /// Replaces event id generation while preserving the rest of the builder.
+    ///
+    /// Returning a new `CommandExecution` type is intentional: the generator is
+    /// a generic parameter, so deterministic test generators do not need
+    /// dynamic dispatch or production-only wrapper types.
+    pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, NextG>
     where
         NextG: NowV7,
     {
@@ -506,14 +276,13 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
             event_store: self.event_store,
             command: self.command,
             write_precondition: self.write_precondition,
-            snapshots: self.snapshots,
             headers: self.headers,
             event_id_generator,
         }
     }
 }
 
-impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
+impl<'a, E, C, G> CommandExecution<'a, E, C, G> {
     async fn append_decision(
         &self,
         current_position: Option<StreamPosition>,
@@ -572,23 +341,7 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     }
 }
 
-impl<'a, E, S, C, P, Spawn, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>, G> {
-    pub fn with_task_runtime<NextSpawn>(
-        self,
-        schedule_snapshot_task: NextSpawn,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>, G> {
-        CommandExecution {
-            event_store: self.event_store,
-            command: self.command,
-            write_precondition: self.write_precondition,
-            snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
-            headers: self.headers,
-            event_id_generator: self.event_id_generator,
-        }
-    }
-}
-
-impl<E, C, G> CommandExecution<'_, E, C, WithoutSnapshots, G>
+impl<E, C, G> CommandExecution<'_, E, C, G>
 where
     C: Decider,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
@@ -599,18 +352,15 @@ where
     CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
-    pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
+    /// Executes the command by replaying stream history and appending the
+    /// events decided from the rebuilt state.
+    ///
+    /// The read starts from the beginning of the stream because this module is
+    /// the stable command boundary. Callers that want caching, projections, or
+    /// alternate loading policies should layer those behind the stream traits
+    /// without changing the command execution contract.
+    pub async fn execute(self) -> CommandExecutionResult<E, C> {
         let stream_id = self.command.stream_id();
-        if has_no_stream_write_precondition::<C>() {
-            let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
-
-            return Ok(ExecutionResult {
-                stream_position: append_outcome.stream_position,
-                events,
-                state,
-            });
-        }
-
         let stream_read = self
             .event_store
             .read_stream(ReadStreamRequest {
@@ -631,101 +381,6 @@ where
     }
 }
 
-impl<E, S, C, P, Spawn, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>, G>
-where
-    C: Decider,
-    C::State: Clone + Send + 'static,
-    C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
-    C::StreamId: AsRef<str> + ToOwned,
-    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
-    S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
-    P: SnapshotPolicy<C>,
-    Spawn: SnapshotTaskScheduler + Send + Sync,
-    G: NowV7,
-    CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
-    CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
-    CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
-    CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
-    C::State: SnapshotType,
-{
-    pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
-        let stream_id = self.command.stream_id();
-        if has_no_stream_write_precondition::<C>() {
-            let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
-
-            maybe_take_snapshot(
-                &self.snapshots,
-                stream_id,
-                DecideSnapshot {
-                    command: self.command,
-                    stream_position: append_outcome.stream_position,
-                    snapshot_position: None,
-                    state: &state,
-                    events: &events,
-                    replayed_event_count: 0,
-                },
-            );
-
-            return Ok(ExecutionResult {
-                stream_position: append_outcome.stream_position,
-                events,
-                state,
-            });
-        }
-
-        let snapshot = self
-            .snapshots
-            .snapshot_store
-            .read_snapshot(ReadSnapshotRequest { snapshot_id: stream_id })
-            .await
-            .map_err(CommandError::ReadSnapshot)?;
-        let snapshot = snapshot.snapshot;
-        let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
-        let state = snapshot
-            .map(|snapshot| snapshot.payload)
-            .unwrap_or_else(C::initial_state);
-        let from = match snapshot_position {
-            Some(position) => ReadFrom::after(position).map_err(CommandError::ReadAfterOverflow)?,
-            None => ReadFrom::Beginning,
-        };
-        let stream_read = self
-            .event_store
-            .read_stream(ReadStreamRequest { stream_id, from })
-            .await
-            .map_err(CommandError::ReadStream)?;
-        let current_position = stream_read.current_position;
-
-        if let Some(snapshot_position) = snapshot_position {
-            ensure_snapshot_not_ahead(snapshot_position, current_position)
-                .map_err(CommandError::SnapshotAheadOfStream)?;
-        }
-
-        let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
-        let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let replayed_event_count = stream_read.events.len() as u64;
-
-        maybe_take_snapshot(
-            &self.snapshots,
-            stream_id,
-            DecideSnapshot {
-                command: self.command,
-                stream_position: append_outcome.stream_position,
-                snapshot_position,
-                state: &state,
-                events: &events,
-                replayed_event_count,
-            },
-        );
-
-        Ok(ExecutionResult {
-            stream_position: append_outcome.stream_position,
-            events,
-            state,
-        })
-    }
-}
-
 impl From<WritePrecondition> for StreamWritePrecondition {
     fn from(value: WritePrecondition) -> Self {
         match value {
@@ -736,85 +391,6 @@ impl From<WritePrecondition> for StreamWritePrecondition {
     }
 }
 
-fn has_no_stream_write_precondition<C: Decider>() -> bool {
-    C::WRITE_PRECONDITION == Some(WritePrecondition::NoStream)
-}
-
-fn ensure_snapshot_not_ahead(
-    snapshot_position: StreamPosition,
-    current_position: Option<StreamPosition>,
-) -> Result<(), SnapshotAheadOfStream> {
-    match current_position {
-        Some(stream_position) if snapshot_position <= stream_position => Ok(()),
-        stream_position => Err(SnapshotAheadOfStream {
-            snapshot_position,
-            stream_position,
-        }),
-    }
-}
-
-fn maybe_take_snapshot<S, C, P, Spawn>(
-    snapshots: &Snapshots<'_, S, P, Spawn>,
-    stream_id: &C::StreamId,
-    context: DecideSnapshot<'_, C>,
-) where
-    C: Decider,
-    C::State: Clone + SnapshotType + Send + 'static,
-    C::StreamId: AsRef<str> + ToOwned,
-    <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
-    S: Clone + SnapshotWrite<C::State, C::StreamId> + 'static,
-    S::Error: std::fmt::Display + Send + 'static,
-    P: SnapshotPolicy<C>,
-    Spawn: SnapshotTaskScheduler + Send + Sync,
-{
-    let stream_position = context.stream_position;
-    let state = context.state;
-    let snapshot_decision = snapshots.policy.decide_snapshot(context);
-
-    if snapshot_decision == SnapshotDecision::Take {
-        schedule_snapshot_write(
-            &snapshots.schedule_snapshot_task,
-            snapshots.snapshot_store,
-            stream_id,
-            Snapshot::new(stream_position, state.clone()),
-        );
-    }
-}
-
-fn schedule_snapshot_write<S, State, StreamId, Spawn>(
-    schedule_snapshot_task: &Spawn,
-    snapshot_store: &S,
-    stream_id: &StreamId,
-    snapshot: Snapshot<State>,
-) where
-    S: SnapshotWrite<State, StreamId> + Clone + Send + Sync + 'static,
-    S::Error: std::fmt::Display + Send + 'static,
-    State: SnapshotType + Send + 'static,
-    StreamId: AsRef<str> + ToOwned + ?Sized,
-    StreamId::Owned: Borrow<StreamId> + Send + 'static,
-    Spawn: SnapshotTaskScheduler + Send + Sync,
-{
-    let snapshot_store = snapshot_store.clone();
-    let stream_id_for_log = stream_id.as_ref().to_string();
-    let stream_id = stream_id.to_owned();
-
-    schedule_snapshot_task.schedule(async move {
-        if let Err(source) = snapshot_store
-            .write_snapshot(WriteSnapshotRequest {
-                snapshot_id: stream_id.borrow(),
-                snapshot,
-            })
-            .await
-        {
-            tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
-        }
-    });
-}
-
-#[allow(
-    clippy::disallowed_methods,
-    reason = "decider runtime replay path; the disallowed_methods rule targets test code calling decide/evolve directly"
-)]
 fn evolve_state_from_stream_events<C>(
     mut state: C::State,
     stream_events: &[StreamEvent],
@@ -825,22 +401,909 @@ where
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     for stream_event in stream_events {
-        match stream_event
+        let event = stream_event
             .decode::<C::Event>()
-            .map_err(ReplayStreamError::DecodeEvent)?
-        {
-            EventDecodeOutcome::Decoded(event) => {
-                state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
-            }
-            // Shared or migrated streams may contain envelopes outside this
-            // decider's event set; those still count toward stream position,
-            // but they must not affect this decider's state.
-            EventDecodeOutcome::Skipped => {}
-        }
+            .map_err(ReplayStreamError::DecodeEvent)?;
+        state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
     }
 
     Ok(state)
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use chrono::{DateTime, Utc};
+    use futures::executor::block_on;
+    use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::{
+        Decision, EventData, EventDecode, EventEncode, EventIdentity, EventType, ReadStreamResponse, StreamEvent,
+    };
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
+
+    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &Headers) -> Event
+    where
+        E: EventType + EventIdentity + EventEncode,
+        G: NowV7 + ?Sized,
+        <E as EventType>::Error: std::fmt::Debug,
+        <E as EventEncode>::Error: std::fmt::Debug,
+    {
+        let id = event
+            .event_id()
+            .unwrap_or_else(|| EventId::new(event_id_generator.now_v7()));
+        Event {
+            id,
+            r#type: event.event_type().unwrap().to_string(),
+            content: event.encode().unwrap(),
+            headers: headers.clone(),
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestCommand {
+        id: String,
+        action: TestAction,
+        stream_id_calls: Arc<AtomicUsize>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct RequiredRegisterCommand {
+        id: String,
+        stream_id_calls: Arc<AtomicUsize>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestAction {
+        Register,
+        RegisterThenDisable,
+        RegisterThenFail,
+        RegisterThenBroken,
+        Disable,
+        Remove,
+        EmitBroken,
+        EmitUntyped,
+        EmitUnencodable,
+    }
+
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+    enum TestState {
+        Missing,
+        Present { enabled: bool },
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum TestEvent {
+        Registered { id: String },
+        StateChanged { id: String, enabled: bool },
+        Removed { id: String },
+        Broken { id: String },
+        Untyped { id: String },
+        Unencodable { id: String },
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestDecisionError {
+        AlreadyRegistered,
+        Missing,
+        AlreadyDisabled,
+    }
+
+    impl std::fmt::Display for TestDecisionError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestDecisionError {}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestCommandError {
+        BrokenEvent,
+        AlreadyRegistered,
+        Missing,
+        AlreadyDisabled,
+    }
+
+    impl std::fmt::Display for TestCommandError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestCommandError {}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestInfraError {
+        ReadStream,
+        Append,
+        EventType,
+        EventEncode,
+    }
+
+    impl std::fmt::Display for TestInfraError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for TestInfraError {}
+
+    impl From<TestDecisionError> for TestCommandError {
+        fn from(value: TestDecisionError) -> Self {
+            match value {
+                TestDecisionError::AlreadyRegistered => Self::AlreadyRegistered,
+                TestDecisionError::Missing => Self::Missing,
+                TestDecisionError::AlreadyDisabled => Self::AlreadyDisabled,
+            }
+        }
+    }
+
+    type TestExecutionError = CommandError<
+        TestDecisionError,
+        TestCommandError,
+        TestInfraError,
+        TestInfraError,
+        TestInfraError,
+        TestInfraError,
+        serde_json::Error,
+    >;
+
+    #[derive(Debug, Clone)]
+    struct FakeRuntime {
+        current_position: Option<StreamPosition>,
+        stream_events: Vec<StreamEvent>,
+        stream_position: StreamPosition,
+        fail_read_stream: bool,
+        fail_append: bool,
+        reads_from: Arc<Mutex<Vec<ReadFrom>>>,
+        stream_write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
+        appended_events: Arc<Mutex<Vec<Event>>>,
+    }
+
+    impl Default for FakeRuntime {
+        fn default() -> Self {
+            Self {
+                current_position: None,
+                stream_events: Vec::new(),
+                stream_position: position(1),
+                fail_read_stream: false,
+                fail_append: false,
+                reads_from: Arc::new(Mutex::new(Vec::new())),
+                stream_write_preconditions: Arc::new(Mutex::new(Vec::new())),
+                appended_events: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct FixedUuidGenerator(Uuid);
+
+    impl NowV7 for FixedUuidGenerator {
+        fn now_v7(&self) -> Uuid {
+            self.0
+        }
+    }
+
+    impl TestCommand {
+        fn new(id: &str, action: TestAction) -> Self {
+            Self {
+                id: id.to_string(),
+                action,
+                stream_id_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        fn stream_id_calls(&self) -> usize {
+            self.stream_id_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl RequiredRegisterCommand {
+        fn new(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                stream_id_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    fn initial_test_state() -> TestState {
+        TestState::Missing
+    }
+
+    fn evolve_test_state(_state: TestState, event: &TestEvent) -> Result<TestState, TestCommandError> {
+        match event {
+            TestEvent::Registered { .. } => Ok(TestState::Present { enabled: true }),
+            TestEvent::StateChanged { enabled, .. } => Ok(TestState::Present { enabled: *enabled }),
+            TestEvent::Removed { .. } => Ok(TestState::Missing),
+            TestEvent::Broken { .. } => Err(TestCommandError::BrokenEvent),
+            TestEvent::Untyped { .. } | TestEvent::Unencodable { .. } => Ok(TestState::Present { enabled: true }),
+        }
+    }
+
+    impl Decider for TestCommand {
+        type StreamId = str;
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestDecisionError;
+        type EvolveError = TestCommandError;
+
+        fn stream_id(&self) -> &Self::StreamId {
+            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
+            &self.id
+        }
+
+        fn initial_state() -> Self::State {
+            initial_test_state()
+        }
+
+        fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
+        }
+
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+            match (state, command.action) {
+                (TestState::Missing, TestAction::Register) => {
+                    Ok(Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                }
+                (TestState::Missing, TestAction::RegisterThenDisable) => Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|_, command: &Self| {
+                        Ok(Decision::event(TestEvent::StateChanged {
+                            id: command.id.clone(),
+                            enabled: false,
+                        }))
+                    })
+                    .into(),
+                (TestState::Missing, TestAction::RegisterThenFail) => Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|_, _| Err(TestDecisionError::AlreadyDisabled))
+                    .into(),
+                (TestState::Missing, TestAction::RegisterThenBroken) => Decision::<Self>::act()
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
+                    .execute(|_, command: &Self| Decision::event(TestEvent::Broken { id: command.id.clone() }))
+                    .into(),
+                (_, TestAction::EmitBroken) => Ok(Decision::event(TestEvent::Broken { id: command.id.clone() })),
+                (_, TestAction::EmitUntyped) => Ok(Decision::event(TestEvent::Untyped { id: command.id.clone() })),
+                (_, TestAction::EmitUnencodable) => {
+                    Ok(Decision::event(TestEvent::Unencodable { id: command.id.clone() }))
+                }
+                (
+                    TestState::Present { .. },
+                    TestAction::Register
+                    | TestAction::RegisterThenDisable
+                    | TestAction::RegisterThenFail
+                    | TestAction::RegisterThenBroken,
+                ) => Err(TestDecisionError::AlreadyRegistered),
+                (TestState::Present { enabled: false }, TestAction::Disable) => Err(TestDecisionError::AlreadyDisabled),
+                (TestState::Present { .. }, TestAction::Disable) => Ok(Decision::event(TestEvent::StateChanged {
+                    id: command.id.clone(),
+                    enabled: false,
+                })),
+                (TestState::Missing, TestAction::Disable | TestAction::Remove) => Err(TestDecisionError::Missing),
+                (TestState::Present { .. }, TestAction::Remove) => {
+                    Ok(Decision::event(TestEvent::Removed { id: command.id.clone() }))
+                }
+            }
+        }
+    }
+
+    impl Decider for RequiredRegisterCommand {
+        type StreamId = str;
+        type State = TestState;
+        type Event = TestEvent;
+        type DecideError = TestDecisionError;
+        type EvolveError = TestCommandError;
+
+        const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
+
+        fn stream_id(&self) -> &Self::StreamId {
+            self.stream_id_calls.fetch_add(1, Ordering::SeqCst);
+            &self.id
+        }
+
+        fn initial_state() -> Self::State {
+            initial_test_state()
+        }
+
+        fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+            evolve_test_state(state, event)
+        }
+
+        fn decide(state: &TestState, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+            match state {
+                TestState::Missing => Ok(Decision::event(TestEvent::Registered { id: command.id.clone() })),
+                TestState::Present { .. } => Err(TestDecisionError::AlreadyRegistered),
+            }
+        }
+    }
+
+    impl EventIdentity for TestEvent {}
+
+    impl EventType for TestEvent {
+        type Error = TestInfraError;
+
+        fn event_type(&self) -> Result<&'static str, Self::Error> {
+            let event_type = match self {
+                Self::Registered { .. } => "registered",
+                Self::StateChanged { .. } => "state_changed",
+                Self::Removed { .. } => "removed",
+                Self::Broken { .. } => "broken",
+                Self::Untyped { .. } => return Err(TestInfraError::EventType),
+                Self::Unencodable { .. } => "unencodable",
+            };
+            Ok(event_type)
+        }
+    }
+
+    impl EventEncode for TestEvent {
+        type Error = TestInfraError;
+
+        fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+            if matches!(self, Self::Unencodable { .. }) {
+                return Err(TestInfraError::EventEncode);
+            }
+            serde_json::to_vec(self).map_err(|_| TestInfraError::EventEncode)
+        }
+    }
+
+    impl EventDecode for TestEvent {
+        type Error = serde_json::Error;
+
+        fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+            serde_json::from_slice(event.payload)
+        }
+    }
+
+    impl StreamRead<str> for FakeRuntime {
+        type Error = TestInfraError;
+
+        async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+            if self.fail_read_stream {
+                return Err(TestInfraError::ReadStream);
+            }
+            self.reads_from.lock().unwrap().push(request.from);
+            assert_eq!(request.from, ReadFrom::Beginning);
+            Ok(ReadStreamResponse {
+                current_position: self.current_position,
+                events: self.stream_events.clone(),
+            })
+        }
+    }
+
+    impl StreamAppend<str> for FakeRuntime {
+        type Error = TestInfraError;
+
+        async fn append_stream(
+            &self,
+            request: AppendStreamRequest<'_, str>,
+        ) -> Result<AppendStreamResponse, Self::Error> {
+            if self.fail_append {
+                return Err(TestInfraError::Append);
+            }
+            self.stream_write_preconditions
+                .lock()
+                .unwrap()
+                .push(request.stream_write_precondition);
+            self.appended_events.lock().unwrap().extend(request.events);
+            Ok(AppendStreamResponse {
+                stream_position: self.stream_position,
+            })
+        }
+    }
+
+    fn stream_event(sequence: u64, event: TestEvent) -> StreamEvent {
+        StreamEvent {
+            stream_id: "alpha".to_string(),
+            event: encode_event(&event, &UuidV7Generator, &Headers::empty()),
+            stream_position: position(sequence),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
+        }
+    }
+
+    fn invalid_stream_event(sequence: u64) -> StreamEvent {
+        StreamEvent {
+            stream_id: "alpha".to_string(),
+            event: Event {
+                id: EventId::new(Uuid::from_u128(1)),
+                r#type: "registered".to_string(),
+                content: b"not-json".to_vec(),
+                headers: Headers::empty(),
+            },
+            stream_position: position(sequence),
+            recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn executes_from_initial_state_without_history() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+        assert_eq!(result.stream_position, position(1));
+        assert_eq!(result.state, TestState::Present { enabled: true });
+        assert_eq!(
+            result.events,
+            Events::one(TestEvent::Registered {
+                id: "alpha".to_string(),
+            })
+        );
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
+        assert_eq!(runtime.reads_from.lock().unwrap().as_slice(), &[ReadFrom::Beginning]);
+    }
+
+    #[test]
+    fn executes_act_decisions_with_evolved_step_state() {
+        let runtime = FakeRuntime {
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenDisable);
+
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+        assert_eq!(result.stream_position, position(2));
+        assert_eq!(result.state, TestState::Present { enabled: false });
+        assert_eq!(
+            result.events,
+            Events::from_vec(vec![
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ])
+            .unwrap()
+        );
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
+        assert_eq!(runtime.appended_events.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn applies_headers_and_event_id_generator_builder() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+        let headers = Headers::from_entries([("trace-id", "trace-1")]).unwrap();
+        let event_id = Uuid::from_u128(42);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_headers(headers)
+                .with_event_id_generator(FixedUuidGenerator(event_id))
+                .execute(),
+        )
+        .unwrap();
+        let appended_events = runtime.appended_events.lock().unwrap();
+
+        assert_eq!(appended_events[0].headers.get_str("trace-id"), Some("trace-1"));
+        assert_eq!(appended_events[0].id.as_uuid(), event_id);
+    }
+
+    #[test]
+    fn command_errors_preserve_display_and_sources() {
+        let decode_error = serde_json::from_slice::<TestEvent>(b"not-json").unwrap_err();
+        let cases = [
+            (
+                TestExecutionError::Decide(TestDecisionError::Missing),
+                "command decision failed: Missing",
+            ),
+            (
+                TestExecutionError::Evolve(TestCommandError::Missing),
+                "command state evolution failed: Missing",
+            ),
+            (
+                TestExecutionError::ReadStream(TestInfraError::ReadStream),
+                "command stream read failed: ReadStream",
+            ),
+            (
+                TestExecutionError::Append(TestInfraError::Append),
+                "command stream append failed: Append",
+            ),
+            (
+                TestExecutionError::EventType(TestInfraError::EventType),
+                "command event type failed: EventType",
+            ),
+            (
+                TestExecutionError::EventEncode(TestInfraError::EventEncode),
+                "command event encoding failed: EventEncode",
+            ),
+            (
+                TestExecutionError::DecodeEvent(decode_error),
+                "command event decoding failed: expected ident at line 1 column 2",
+            ),
+        ];
+
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+            assert!(std::error::Error::source(&error).is_some());
+        }
+    }
+
+    #[test]
+    fn test_error_helpers_cover_all_variants() {
+        assert_eq!(TestDecisionError::AlreadyRegistered.to_string(), "AlreadyRegistered");
+        assert_eq!(TestDecisionError::Missing.to_string(), "Missing");
+        assert_eq!(TestDecisionError::AlreadyDisabled.to_string(), "AlreadyDisabled");
+
+        assert_eq!(
+            TestCommandError::from(TestDecisionError::AlreadyRegistered),
+            TestCommandError::AlreadyRegistered
+        );
+        assert_eq!(
+            TestCommandError::from(TestDecisionError::Missing),
+            TestCommandError::Missing
+        );
+        assert_eq!(
+            TestCommandError::from(TestDecisionError::AlreadyDisabled),
+            TestCommandError::AlreadyDisabled
+        );
+    }
+
+    #[test]
+    fn propagates_replay_evolve_failures() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Broken {
+                    id: "alpha".to_string(),
+                },
+            )],
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
+    }
+
+    #[test]
+    fn propagates_stream_decode_failures() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![invalid_stream_event(1)],
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::DecodeEvent(_)));
+    }
+
+    #[test]
+    fn propagates_stream_read_failures() {
+        let runtime = FakeRuntime {
+            fail_read_stream: true,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::ReadStream(TestInfraError::ReadStream)));
+    }
+
+    #[test]
+    fn does_not_append_events_that_cannot_evolve() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::EmitBroken);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_event_type_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::EmitUntyped);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::EventType(TestInfraError::EventType)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_event_encode_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::EmitUnencodable);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::EventEncode(TestInfraError::EventEncode)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_act_decide_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenFail);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::Decide(TestDecisionError::AlreadyDisabled)
+        ));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_act_evolve_failures_without_append() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::RegisterThenBroken);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
+        assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+        assert!(runtime.appended_events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn propagates_append_failures() {
+        let runtime = FakeRuntime {
+            fail_append: true,
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::Append(TestInfraError::Append)));
+    }
+
+    #[test]
+    fn propagates_decision_failures() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::Decide(TestDecisionError::AlreadyRegistered)
+        ));
+    }
+
+    #[test]
+    fn propagates_missing_decision_failures() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(error, CommandError::Decide(TestDecisionError::Missing)));
+    }
+
+    #[test]
+    fn propagates_already_disabled_decision_failures() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            )],
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::Decide(TestDecisionError::AlreadyDisabled)
+        ));
+    }
+
+    #[test]
+    fn required_register_rejects_existing_state() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = RequiredRegisterCommand::new("alpha");
+
+        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CommandError::Decide(TestDecisionError::AlreadyRegistered)
+        ));
+    }
+
+    #[test]
+    fn encodes_emitted_events_and_returns_stream_position() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+        let appended_events = runtime.appended_events.lock().unwrap();
+
+        assert_eq!(result.stream_position, position(2));
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(1))]
+        );
+        assert_eq!(appended_events.len(), 1);
+        assert_eq!(appended_events[0].r#type, "state_changed");
+        assert_eq!(result.state, TestState::Present { enabled: false });
+    }
+
+    #[test]
+    fn falls_back_to_exact_current_position_when_command_has_no_required_rule() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(7)),
+            stream_events: vec![stream_event(
+                7,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(8),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Remove);
+
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(7))]
+        );
+    }
+
+    #[test]
+    fn explicit_write_precondition_overrides_exact_current_position_fallback() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_write_precondition(StreamWritePrecondition::Any)
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::Any]
+        );
+    }
+
+    #[test]
+    fn required_command_rule_uses_required_stream_write_precondition() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = RequiredRegisterCommand::new("alpha");
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_write_precondition(StreamWritePrecondition::Any)
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::NoStream]
+        );
+    }
+
+    #[test]
+    fn write_preconditions_convert_from_decider_metadata() {
+        assert_eq!(
+            StreamWritePrecondition::from(WritePrecondition::Any),
+            StreamWritePrecondition::Any
+        );
+        assert_eq!(
+            StreamWritePrecondition::from(WritePrecondition::StreamExists),
+            StreamWritePrecondition::StreamExists
+        );
+        assert_eq!(
+            StreamWritePrecondition::from(WritePrecondition::NoStream),
+            StreamWritePrecondition::NoStream
+        );
+    }
+
+    #[test]
+    fn resolves_stream_id_once() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+        assert_eq!(command.stream_id_calls(), 1);
+    }
+}
