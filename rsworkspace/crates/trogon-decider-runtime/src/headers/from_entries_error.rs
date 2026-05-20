@@ -1,8 +1,11 @@
 use super::{header_name::HeaderNameError, header_value::HeaderValueError};
 
+/// Error returned while converting raw header entries into [`Headers`](crate::Headers).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FromEntriesError {
+    /// A raw header name failed validation.
     InvalidName { name: String, source: HeaderNameError },
+    /// A raw header value failed validation.
     InvalidValue { name: String, source: HeaderValueError },
 }
 

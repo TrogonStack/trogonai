@@ -28,8 +28,10 @@ impl ReadFrom {
     }
 }
 
+/// Error returned when `ReadFrom::after` would overflow `u64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadAfterOverflow {
+    /// Position that could not be advanced.
     pub position: StreamPosition,
 }
 
@@ -41,12 +43,16 @@ impl std::fmt::Display for ReadAfterOverflow {
 
 impl std::error::Error for ReadAfterOverflow {}
 
+/// Request to read events from one stream.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadStreamRequest<'a, StreamId: ?Sized> {
+    /// Stream identity in the caller's domain-specific representation.
     pub stream_id: &'a StreamId,
+    /// Starting point for the stream read.
     pub from: ReadFrom,
 }
 
+/// Result of reading one stream.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadStreamResponse {
     /// The latest comparable stream high-watermark observed by the store.
@@ -56,12 +62,19 @@ pub struct ReadStreamResponse {
     /// same stream to answer freshness questions. Callers must not treat it as
     /// a gapless revision or event count.
     pub current_position: Option<StreamPosition>,
+    /// Events returned by the read in stream order.
     pub events: Vec<StreamEvent>,
 }
 
+/// Reads event envelopes from a stream.
+///
+/// Implementations should return events in stream order and preserve the
+/// inclusive semantics of [`ReadFrom::Position`].
 pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
-    type Error;
+    /// Backend-specific read error.
+    type Error: std::error::Error + Send + Sync + 'static;
 
+    /// Reads events from the requested stream.
     fn read_stream(
         &self,
         request: ReadStreamRequest<'_, StreamId>,

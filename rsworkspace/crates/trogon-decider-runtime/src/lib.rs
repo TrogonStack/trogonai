@@ -51,10 +51,15 @@
 //! ```
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+/// Event envelopes and codec traits used by stream storage adapters.
 pub mod event;
+/// Command execution policies and runtime orchestration.
 pub mod execution;
+/// Metadata header value objects carried alongside event payloads.
 pub mod headers;
+/// Snapshot read/write contracts and payload codec traits.
 pub mod snapshot;
+/// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
 pub use event::{Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamEvent};
@@ -65,7 +70,7 @@ pub use execution::{
     FrequencySnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotPolicy, SnapshotTaskScheduler,
     Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
-pub use headers::{HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
+pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 pub use snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData, SnapshotPayloadDecode,
     SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,

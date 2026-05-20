@@ -16,10 +16,6 @@ pub struct Headers {
 }
 
 impl Headers {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Creates an empty header map.
     pub fn new() -> Self {
         Self::default()

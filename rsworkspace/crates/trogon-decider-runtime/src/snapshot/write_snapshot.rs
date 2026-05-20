@@ -10,7 +10,7 @@ pub struct WriteSnapshotRequest<'a, SnapshotPayload, StreamId: ?Sized> {
 pub struct WriteSnapshotResponse;
 
 pub trait SnapshotWrite<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
-    type Error;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     fn write_snapshot(
         &self,

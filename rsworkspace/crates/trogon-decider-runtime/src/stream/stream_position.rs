@@ -27,18 +27,22 @@ use serde::{Deserialize, Serialize};
 pub struct StreamPosition(NonZeroU64);
 
 impl StreamPosition {
+    /// Wraps an already validated non-zero stream position.
     pub const fn new(value: NonZeroU64) -> Self {
         Self(value)
     }
 
+    /// Returns the position as a plain integer for adapter APIs.
     pub const fn as_u64(self) -> u64 {
         self.0.get()
     }
 
+    /// Returns the position as a non-zero integer.
     pub const fn as_non_zero(self) -> NonZeroU64 {
         self.0
     }
 
+    /// Creates a stream position after rejecting zero.
     pub const fn try_new(value: u64) -> Result<Self, InvalidStreamPosition> {
         match NonZeroU64::new(value) {
             Some(value) => Ok(Self(value)),
@@ -67,12 +71,14 @@ impl std::fmt::Display for StreamPosition {
     }
 }
 
+/// Error returned when constructing an invalid [`StreamPosition`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidStreamPosition {
     value: u64,
 }
 
 impl InvalidStreamPosition {
+    /// Returns the rejected position value.
     pub const fn value(self) -> u64 {
         self.value
     }
