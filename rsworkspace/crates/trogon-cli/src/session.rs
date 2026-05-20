@@ -29,7 +29,53 @@ pub trait Session: Send + Sync + 'static {
         model_id: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
+    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
+}
+
+// ── SessionFactory trait ──────────────────────────────────────────────────────
+
+pub trait SessionFactory {
+    type Sess: Session;
+
+    fn create_session<'a>(
+        &'a self,
+        prefix: &'a str,
+        cwd: PathBuf,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::Sess>> + 'a;
+
+    fn attach_session(&self, prefix: &str, session_id: String) -> Self::Sess;
+}
+
+// ── NatsSessionFactory (real implementation) ──────────────────────────────────
+
+pub struct NatsSessionFactory<N: NatsClient + Clone> {
+    nats: N,
+}
+
+impl<N: NatsClient + Clone> NatsSessionFactory<N> {
+    pub fn new(nats: N) -> Self {
+        Self { nats }
+    }
+}
+
+impl<N: NatsClient + Clone> SessionFactory for NatsSessionFactory<N> {
+    type Sess = TrogonSession<N>;
+
+    fn create_session<'a>(
+        &'a self,
+        prefix: &'a str,
+        cwd: PathBuf,
+    ) -> impl std::future::Future<Output = anyhow::Result<TrogonSession<N>>> + 'a {
+        let nats = self.nats.clone();
+        let prefix = prefix.to_string();
+        async move { TrogonSession::new(nats, &prefix, cwd).await }
+    }
+
+    fn attach_session(&self, prefix: &str, session_id: String) -> TrogonSession<N> {
+        TrogonSession::from_existing(self.nats.clone(), prefix, session_id)
+    }
 }
 
 // ── TrogonSession ─────────────────────────────────────────────────────────────
@@ -223,6 +269,18 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
+    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        let subject = format!("{}.compactor.compact", self.prefix);
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        async move {
+            let payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id }))?;
+            nats.publish_bytes(subject, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS error triggering compaction: {e}"))
+        }
+    }
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
         let subject = format!(
             "{}.session.{}.agent.close",
@@ -321,8 +379,10 @@ pub mod mock {
         turns: Mutex<VecDeque<Vec<StreamEvent>>>,
         cancelled: Mutex<Vec<String>>,
         closed: Mutex<u32>,
+        compacted: Mutex<u32>,
         model: Mutex<Option<String>>,
         set_model_error: Mutex<Option<String>>,
+        compact_error: Mutex<Option<String>>,
     }
 
     impl MockSession {
@@ -332,12 +392,13 @@ pub mod mock {
                 turns: Mutex::new(VecDeque::new()),
                 cancelled: Mutex::new(Vec::new()),
                 closed: Mutex::new(0),
+                compacted: Mutex::new(0),
                 model: Mutex::new(None),
                 set_model_error: Mutex::new(None),
+                compact_error: Mutex::new(None),
             }
         }
 
-        /// Queue one turn's worth of events to be returned by the next `prompt` call.
         pub fn queue_turn(&self, events: Vec<StreamEvent>) {
             self.turns.lock().unwrap().push_back(events);
         }
@@ -350,12 +411,20 @@ pub mod mock {
             *self.closed.lock().unwrap()
         }
 
+        pub fn compact_count(&self) -> u32 {
+            *self.compacted.lock().unwrap()
+        }
+
         pub fn last_model(&self) -> Option<String> {
             self.model.lock().unwrap().clone()
         }
 
         pub fn fail_set_model(&self, error: impl Into<String>) {
             *self.set_model_error.lock().unwrap() = Some(error.into());
+        }
+
+        pub fn fail_compact(&self, error: impl Into<String>) {
+            *self.compact_error.lock().unwrap() = Some(error.into());
         }
     }
 
@@ -406,6 +475,16 @@ pub mod mock {
             }
         }
 
+        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            async move {
+                if let Some(err) = self.compact_error.lock().unwrap().clone() {
+                    return Err(anyhow::anyhow!("{err}"));
+                }
+                *self.compacted.lock().unwrap() += 1;
+                Ok(())
+            }
+        }
+
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
             async move {
                 *self.closed.lock().unwrap() += 1;
@@ -438,8 +517,52 @@ pub mod mock {
             (**self).set_model(model_id)
         }
 
+        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            (**self).compact()
+        }
+
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
             (**self).close()
+        }
+    }
+
+    // ── MockSessionFactory ────────────────────────────────────────────────────
+
+    pub struct MockSessionFactory {
+        sessions: std::sync::Mutex<std::collections::VecDeque<std::sync::Arc<MockSession>>>,
+        default_id: String,
+    }
+
+    impl MockSessionFactory {
+        pub fn new(default_id: impl Into<String>) -> Self {
+            Self {
+                sessions: Default::default(),
+                default_id: default_id.into(),
+            }
+        }
+
+        pub fn push_session(&self, session: std::sync::Arc<MockSession>) {
+            self.sessions.lock().unwrap().push_back(session);
+        }
+    }
+
+    impl super::SessionFactory for MockSessionFactory {
+        type Sess = std::sync::Arc<MockSession>;
+
+        fn create_session<'a>(
+            &'a self,
+            _prefix: &'a str,
+            _cwd: PathBuf,
+        ) -> impl std::future::Future<Output = anyhow::Result<std::sync::Arc<MockSession>>> + 'a {
+            async move {
+                let session = self.sessions.lock().unwrap().pop_front()
+                    .unwrap_or_else(|| std::sync::Arc::new(MockSession::new(&self.default_id)));
+                Ok(session)
+            }
+        }
+
+        fn attach_session(&self, _prefix: &str, session_id: String) -> std::sync::Arc<MockSession> {
+            std::sync::Arc::new(MockSession::new(session_id))
         }
     }
 }
@@ -718,5 +841,105 @@ mod tests {
         let mut rx = session.prompt("anything").await.unwrap();
         let ev = rx.recv().await.unwrap();
         assert!(matches!(ev, StreamEvent::Done(_)));
+    }
+
+    // ── MockSession::compact ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_session_compact_increments_count() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        session.compact().await.unwrap();
+        session.compact().await.unwrap();
+        assert_eq!(session.compact_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn mock_session_compact_returns_error_when_configured() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        session.fail_compact("compactor unavailable");
+        let err = session.compact().await.unwrap_err();
+        assert!(err.to_string().contains("compactor unavailable"), "got: {err}");
+    }
+
+    // ── TrogonSession::compact via MockNatsClient ─────────────────────────────
+
+    #[tokio::test]
+    async fn compact_publishes_to_compactor_subject() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "s1"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+
+        let result = session.compact().await;
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+        let published = nats.published();
+        assert!(
+            published.iter().any(|(subj, _)| subj.contains("compactor.compact")),
+            "compact subject not published; got: {published:?}"
+        );
+    }
+
+    // ── NatsSessionFactory ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn nats_factory_create_session_returns_session_with_correct_id() {
+        let nats = MockNatsClient::new();
+        let resp = json!({"sessionId": "factory-created-session"});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+
+        let factory = NatsSessionFactory::new(nats);
+        let session = factory
+            .create_session("acp", std::path::PathBuf::from("/tmp"))
+            .await
+            .unwrap();
+        assert_eq!(session.session_id(), "factory-created-session");
+    }
+
+    #[tokio::test]
+    async fn nats_factory_attach_session_returns_session_with_given_id() {
+        let nats = MockNatsClient::new();
+        let factory = NatsSessionFactory::new(nats);
+        let session = factory.attach_session("acp", "pre-existing-id".to_string());
+        assert_eq!(session.session_id(), "pre-existing-id");
+    }
+
+    // ── MockSessionFactory ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_factory_create_returns_default_session_when_empty() {
+        use mock::MockSessionFactory;
+        let factory = MockSessionFactory::new("default-sess");
+        let session = factory
+            .create_session("acp", std::path::PathBuf::from("/tmp"))
+            .await
+            .unwrap();
+        assert_eq!(session.session_id(), "default-sess");
+    }
+
+    #[tokio::test]
+    async fn mock_factory_create_pops_queued_sessions_in_order() {
+        use mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+        let factory = MockSessionFactory::new("fallback");
+        factory.push_session(Arc::new(MockSession::new("first")));
+        factory.push_session(Arc::new(MockSession::new("second")));
+
+        let s1 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+        let s2 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+        let s3 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+        assert_eq!(s1.session_id(), "first");
+        assert_eq!(s2.session_id(), "second");
+        assert_eq!(s3.session_id(), "fallback");
+    }
+
+    #[tokio::test]
+    async fn mock_factory_attach_creates_session_with_given_id() {
+        use mock::MockSessionFactory;
+        let factory = MockSessionFactory::new("default");
+        let session = factory.attach_session("acp", "attached-id".to_string());
+        assert_eq!(session.session_id(), "attached-id");
     }
 }

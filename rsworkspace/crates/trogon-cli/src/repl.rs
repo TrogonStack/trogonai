@@ -1,6 +1,5 @@
 use crate::fs::Fs;
-use crate::nats::NatsClient;
-use crate::session::{Session, StreamEvent, TrogonSession};
+use crate::session::{Session, SessionFactory, StreamEvent};
 use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -134,15 +133,15 @@ fn join_continuation(s: &str) -> String {
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
-pub async fn run<N: NatsClient + Clone, F: Fs, SW: RunnerSwitcher>(
-    nats: N,
+pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
+    factory: SF,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
     mut switcher: SW,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
-    let mut session = TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await?;
+    let mut session = factory.create_session(&prefix, cwd.clone()).await?;
 
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
@@ -172,7 +171,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs, SW: RunnerSwitcher>(
                     let arg = parts.next().unwrap_or("");
                     if cmd == "/clear" {
                         session.close().await;
-                        match TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await {
+                        match factory.create_session(&prefix, cwd.clone()).await {
                             Ok(s) => {
                                 session = s;
                                 session_used_tokens = 0;
@@ -190,7 +189,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs, SW: RunnerSwitcher>(
                                     println!("Already on a runner that supports {model_id}");
                                 } else {
                                     session.close().await;
-                                    session = TrogonSession::from_existing(nats.clone(), &outcome.new_prefix, outcome.new_session_id);
+                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
                                     prefix = outcome.new_prefix;
                                     session_used_tokens = 0;
                                     session_context_size = 0;
@@ -200,11 +199,7 @@ pub async fn run<N: NatsClient + Clone, F: Fs, SW: RunnerSwitcher>(
                             Err(e) => eprintln!("Error switching model: {e}"),
                         }
                     } else if cmd == "/compact" {
-                        let subject = format!("{prefix}.compactor.compact");
-                        let payload = serde_json::to_vec(
-                            &serde_json::json!({ "sessionId": session.session_id() })
-                        ).unwrap_or_default();
-                        match nats.publish_bytes(subject, payload.into()).await {
+                        match session.compact().await {
                             Ok(()) => {
                                 if session_context_size > 0 {
                                     let pct = session_used_tokens * 100 / session_context_size;
