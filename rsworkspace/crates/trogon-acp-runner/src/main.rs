@@ -45,7 +45,7 @@ use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::{ElicitationReq, PermissionReq};
 
-use trogon_agent_core::agent_loop::{AgentLoop, NoopStreamingClient};
+use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
 
 #[cfg_attr(coverage, coverage(off))]
@@ -141,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
         anthropic_token,
         anthropic_base_url,
         anthropic_extra_headers: vec![],
-        streaming_client: Some(std::sync::Arc::new(NoopStreamingClient)),
+        streaming_client: None,
         model: model.clone(),
         max_iterations,
         tool_context,
@@ -205,8 +205,9 @@ async fn main() -> anyhow::Result<()> {
     let nats_for_elic = nats.clone();
     let prefix_for_perm = prefix.clone();
     let prefix_for_elic = prefix.clone();
+    let js_client = NatsJetStreamClient::new(js);
     let (_conn, io_task) =
-        AgentSideNatsConnection::new(agent, nats, acp_prefix_parsed, |fut| {
+        AgentSideNatsConnection::with_jetstream(agent, nats, js_client, acp_prefix_parsed, |fut| {
             tokio::task::spawn_local(fut);
         });
 
