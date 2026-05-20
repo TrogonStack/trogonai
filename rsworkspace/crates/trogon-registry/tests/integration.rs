@@ -367,3 +367,50 @@ async fn provision_returns_generic_error_when_nats_is_down() {
         "expected Provision error when NATS is down, got: {result:?}"
     );
 }
+
+// ── PR 6: find_by_model ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn find_by_model_returns_matching_agent() {
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    let mut xai = AgentCapability::new("xai", ["chat", "explore", "plan"], "acp.xai.agent.>");
+    xai.metadata = serde_json::json!({ "models": ["grok-4", "grok-3"] });
+    registry.register(&xai).await.unwrap();
+
+    let mut or_agent = AgentCapability::new("openrouter", ["chat", "explore", "plan"], "acp.or.agent.>");
+    or_agent.metadata = serde_json::json!({ "models": ["claude-3-5-sonnet", "llama-3"] });
+    registry.register(&or_agent).await.unwrap();
+
+    let found_xai = registry.find_by_model("grok-4").await.unwrap();
+    assert_eq!(found_xai.unwrap().agent_type, "xai", "grok-4 must resolve to xai runner");
+
+    let found_or = registry.find_by_model("claude-3-5-sonnet").await.unwrap();
+    assert_eq!(found_or.unwrap().agent_type, "openrouter", "claude-3-5-sonnet must resolve to openrouter runner");
+}
+
+#[tokio::test]
+async fn find_by_model_returns_none_for_unknown_model() {
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    let mut cap = AgentCapability::new("xai", ["chat"], "acp.xai.agent.>");
+    cap.metadata = serde_json::json!({ "models": ["grok-4"] });
+    registry.register(&cap).await.unwrap();
+
+    let found = registry.find_by_model("gpt-4o").await.unwrap();
+    assert!(found.is_none(), "unknown model must return None, got: {found:?}");
+}
+
+#[tokio::test]
+async fn find_by_model_returns_none_on_empty_registry() {
+    let (js, _container) = setup().await;
+    let store = provision(&js).await.unwrap();
+    let registry = Registry::new(store);
+
+    let found = registry.find_by_model("grok-4").await.unwrap();
+    assert!(found.is_none(), "empty registry must return None");
+}
