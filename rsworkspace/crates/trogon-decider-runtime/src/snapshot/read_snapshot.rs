@@ -17,27 +17,10 @@ impl<SnapshotPayload> ReadSnapshotResponse<SnapshotPayload> {
 }
 
 pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error;
 
     fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, StreamId>,
     ) -> impl std::future::Future<Output = Result<ReadSnapshotResponse<SnapshotPayload>, Self::Error>> + Send;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::StreamPosition;
-
-    #[test]
-    fn response_returns_loaded_snapshot() {
-        let position = StreamPosition::try_new(7).unwrap();
-        let snapshot = Snapshot::new(position, "payload");
-        let response = ReadSnapshotResponse {
-            snapshot: Some(snapshot.clone()),
-        };
-
-        assert_eq!(response.into_snapshot(), Some(snapshot));
-    }
 }

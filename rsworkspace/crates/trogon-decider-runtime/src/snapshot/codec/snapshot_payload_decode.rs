@@ -11,7 +11,7 @@ impl<'a> SnapshotPayloadData<'a> {
 }
 
 pub trait SnapshotPayloadDecode: Sized {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error;
 
     fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error>;
 }

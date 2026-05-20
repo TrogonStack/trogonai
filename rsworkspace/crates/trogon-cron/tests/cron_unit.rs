@@ -7,7 +7,7 @@ use trogon_cron::{
     commands::domain as command_domain,
     mocks::{MockCronStore, MockLeaderLock, MockSchedulePublisher},
 };
-use trogon_eventsourcing::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
+use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")

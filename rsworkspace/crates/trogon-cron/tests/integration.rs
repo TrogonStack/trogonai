@@ -10,7 +10,7 @@ use trogon_cron::{
     PauseJobCommand, RemoveJobCommand, ResumeJobCommand, commands::domain as command_domain, connect_store, get_job,
     state_v1, v1,
 };
-use trogon_eventsourcing::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
+use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 
 fn test_url() -> String {

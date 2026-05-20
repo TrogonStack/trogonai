@@ -9,13 +9,13 @@ use async_nats::{
 };
 use futures::future::join_all;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use trogon_eventsourcing::nats::{
+use trogon_decider_runtime::nats::{
     JetStreamStore, JetStreamStoreError, NatsSnapshotConfig, SnapshotChange, SnapshotStoreError, StreamStoreError,
     StreamSubjectResolver, SubjectState, checkpoint_key, list_snapshots, maybe_advance_checkpoint,
     persist_snapshot_change, read_checkpoint, read_snapshot_map, snapshot_key, subject_current_position,
     write_checkpoint,
 };
-use trogon_eventsourcing::{
+use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventData,
     EventDecode, EventEncode, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, Headers, ReadFrom,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotPayloadData,

@@ -1,5 +1,5 @@
 use buffa::Message as _;
-use trogon_eventsourcing::{
+use trogon_decider_runtime::{
     EventData, EventDecode, EventEncode, EventIdentity, EventType, SnapshotPayloadData, SnapshotPayloadDecode,
     SnapshotPayloadEncode, SnapshotType,
 };
@@ -141,7 +141,7 @@ impl SnapshotPayloadDecode for state_v1::State {
 #[cfg(test)]
 mod tests {
     use buffa::{Message as _, MessageField};
-    use trogon_eventsourcing::{
+    use trogon_decider_runtime::{
         Event, EventData, EventDecode, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition,
     };
 

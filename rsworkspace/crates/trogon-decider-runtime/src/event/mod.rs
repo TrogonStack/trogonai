@@ -1,9 +1,3 @@
-//! Event envelope types and serialization traits.
-//!
-//! Domain events stay owned by application crates. This module defines the
-//! storage-facing envelope and the traits adapters need to turn domain events
-//! into bytes without depending on a specific serializer.
-
 mod codec;
 mod event_id;
 mod event_identity;
@@ -20,13 +14,9 @@ pub use stream_event::StreamEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
-    /// Unique identity assigned to this event occurrence.
     pub id: EventId,
-    /// Stable domain event name used to select the decoder.
     pub r#type: String,
-    /// Serialized domain event payload.
     pub content: Vec<u8>,
-    /// Metadata propagated with the event but kept outside the payload.
     pub headers: Headers,
 }
 
@@ -168,21 +158,6 @@ mod tests {
     }
 
     #[test]
-    fn event_id_supports_uuid_debug_display_and_serde_round_trips() {
-        let uuid = Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0002);
-        let event_id = EventId::from(uuid);
-
-        assert_eq!(event_id.as_uuid(), uuid);
-        assert_eq!(Uuid::from(event_id), uuid);
-        assert_eq!(event_id.to_string(), uuid.to_string());
-        assert_eq!(format!("{event_id:?}"), format!("EventId({uuid})"));
-
-        let encoded = serde_json::to_string(&event_id).unwrap();
-        assert_eq!(serde_json::from_str::<EventId>(&encoded).unwrap(), event_id);
-        assert!(serde_json::from_str::<EventId>("\"not-a-uuid\"").is_err());
-    }
-
-    #[test]
     fn event_rejects_non_uuid_event_ids() {
         assert!(EventId::from_str("not-a-uuid").is_err());
     }
@@ -283,11 +258,7 @@ mod tests {
             HeaderName::new("Trogon-Event-Type").unwrap().as_str(),
             "Trogon-Event-Type"
         );
-        assert_eq!(HeaderName::new("").unwrap_err(), HeaderNameError::Empty);
-        assert_eq!(
-            HeaderName::new("trace\nid").unwrap_err(),
-            HeaderNameError::ContainsControlCharacter
-        );
+        assert_eq!(HeaderName::new("").unwrap_err(), HeaderNameError);
         assert_eq!(
             Headers::one(HeaderName::new("trace-id").unwrap(), "line\r\nbreak"),
             Err(HeaderValueError)

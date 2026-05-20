@@ -1,6 +1,6 @@
 use buffa::MessageField;
 use trogon_cron_jobs_proto::{state_v1, v1};
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 
 use super::domain::{Job, JobId};
 
@@ -89,7 +89,7 @@ impl CommandSnapshotPolicy for AddJobCommand {
 #[cfg(test)]
 mod tests {
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::{CommandError, CommandExecution, Events, ImmediateSnapshotTaskScheduler};
+    use trogon_decider_runtime::{CommandError, CommandExecution, Events, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain::{Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};

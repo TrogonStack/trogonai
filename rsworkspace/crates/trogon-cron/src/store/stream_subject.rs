@@ -1,5 +1,5 @@
 use async_nats::jetstream;
-use trogon_eventsourcing::nats::{StreamSubjectResolver, SubjectState, subject_current_position};
+use trogon_decider_runtime::nats::{StreamSubjectResolver, SubjectState, subject_current_position};
 
 use crate::{
     config::JobWriteState,

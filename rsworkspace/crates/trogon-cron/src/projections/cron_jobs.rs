@@ -8,7 +8,7 @@ use async_nats::jetstream::{
     kv,
 };
 use futures::{Stream, StreamExt};
-use trogon_eventsourcing::{Event, EventData, EventDecode, StreamEvent, StreamPosition, record_stream_message};
+use trogon_decider_runtime::{Event, EventData, EventDecode, StreamEvent, StreamPosition, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 

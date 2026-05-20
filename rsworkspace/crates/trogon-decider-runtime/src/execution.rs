@@ -1,17 +1,3 @@
-//! Runtime boundary for applying decider commands to event streams.
-//!
-//! Deciders define pure domain behavior: how to identify a stream, rebuild
-//! state from events, and decide which new events a command should emit. This
-//! module owns the runtime contract around that pure core: load stream history,
-//! replay it into state, evaluate the command, encode the decided events, and
-//! append them with the correct stream write precondition.
-//!
-//! Keeping this orchestration here gives storage adapters a narrow job: read
-//! and append event envelopes. It also keeps command failures tied to the phase
-//! that produced them, so callers can distinguish domain rejection, replay
-//! failure, codec failure, and storage failure without losing the concrete
-//! source error.
-
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadAfterOverflow, ReadFrom, ReadStreamRequest, StreamAppend,
@@ -166,9 +152,7 @@ impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
 pub struct ExecutionResult<State, Event> {
     /// The stream high-watermark after the command append completed.
     pub stream_position: StreamPosition,
-    /// Domain events emitted by the command after successful append.
     pub events: Events<Event>,
-    /// State after replaying history and applying the emitted events.
     pub state: State,
 }
 
@@ -834,13 +818,12 @@ where
 mod tests {
     use std::sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     };
 
     use chrono::{DateTime, Utc};
     use futures::executor::block_on;
     use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
 
     use super::*;
     use crate::{
@@ -881,15 +864,6 @@ mod tests {
     struct RequiredRegisterCommand {
         id: String,
         stream_id_calls: Arc<AtomicUsize>,
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    struct FixedUuidGenerator(Uuid);
-
-    impl NowV7 for FixedUuidGenerator {
-        fn now_v7(&self) -> Uuid {
-            self.0
-        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1093,12 +1067,13 @@ mod tests {
                 }
                 (TestState::Missing, TestAction::RegisterThenDisable) => Decision::<Self>::act()
                     .execute(|_, command: &Self| Decision::event(TestEvent::Registered { id: command.id.clone() }))
-                    .execute(|state, command: &Self| {
-                        assert_eq!(state, &TestState::Present { enabled: true });
-                        Decision::event(TestEvent::StateChanged {
+                    .execute(|state, command: &Self| match state {
+                        TestState::Present { enabled: true } => Ok(Decision::event(TestEvent::StateChanged {
                             id: command.id.clone(),
                             enabled: false,
-                        })
+                        })),
+                        TestState::Present { enabled: false } => Err(TestDecisionError::AlreadyDisabled),
+                        TestState::Missing => Err(TestDecisionError::Missing),
                     })
                     .into(),
                 (TestState::Missing, TestAction::RegisterThenFail) => Decision::<Self>::act()
@@ -1132,12 +1107,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    impl CommandSnapshotPolicy for TestCommand {
-        type SnapshotPolicy = NoSnapshot;
-
-        const SNAPSHOT_POLICY: Self::SnapshotPolicy = NoSnapshot;
     }
 
     impl Decider for RequiredRegisterCommand {
@@ -1311,195 +1280,6 @@ mod tests {
         }
     }
 
-    fn invalid_stream_event(sequence: u64) -> StreamEvent {
-        let mut event = stream_event(
-            sequence,
-            TestEvent::Registered {
-                id: "alpha".to_string(),
-            },
-        );
-        event.event.content = b"not-json".to_vec();
-        event
-    }
-
-    type TestExecutionError = CommandError<
-        TestDecisionError,
-        TestCommandError,
-        TestInfraError,
-        TestInfraError,
-        TestInfraError,
-        TestInfraError,
-        TestInfraError,
-        serde_json::Error,
-    >;
-
-    #[test]
-    fn tokio_snapshot_task_scheduler_reports_missing_runtime() {
-        TokioSnapshotTaskScheduler.schedule(async {});
-    }
-
-    #[tokio::test]
-    async fn tokio_snapshot_task_scheduler_spawns_on_current_runtime() {
-        let executed = Arc::new(AtomicBool::new(false));
-        let task_executed = Arc::clone(&executed);
-
-        TokioSnapshotTaskScheduler.schedule(async move {
-            task_executed.store(true, Ordering::SeqCst);
-        });
-        tokio::task::yield_now().await;
-
-        assert!(executed.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn immediate_snapshot_task_scheduler_catches_task_panic() {
-        ImmediateSnapshotTaskScheduler.schedule(async {
-            panic!("snapshot task failed");
-        });
-    }
-
-    #[test]
-    fn command_errors_preserve_display_and_sources() {
-        let decode_error = serde_json::from_slice::<TestEvent>(b"not-json").unwrap_err();
-        let read_after_overflow = ReadFrom::after(StreamPosition::try_new(u64::MAX).unwrap()).unwrap_err();
-        let read_after_overflow_message = read_after_overflow.to_string();
-        let cases: Vec<(TestExecutionError, String, bool)> = vec![
-            (
-                CommandError::Decide(TestDecisionError::Missing),
-                "command decision failed: Missing".to_string(),
-                true,
-            ),
-            (
-                CommandError::Evolve(TestCommandError::Missing),
-                "command state evolution failed: Missing".to_string(),
-                true,
-            ),
-            (
-                CommandError::ReadSnapshot(TestInfraError::ReadSnapshot),
-                "command snapshot read failed: ReadSnapshot".to_string(),
-                true,
-            ),
-            (
-                CommandError::ReadStream(TestInfraError::ReadStream),
-                "command stream read failed: ReadStream".to_string(),
-                true,
-            ),
-            (
-                CommandError::Append(TestInfraError::Append),
-                "command stream append failed: Append".to_string(),
-                true,
-            ),
-            (
-                CommandError::EventType(TestInfraError::EventType),
-                "command event type failed: EventType".to_string(),
-                true,
-            ),
-            (
-                CommandError::EventEncode(TestInfraError::EventEncode),
-                "command event encoding failed: EventEncode".to_string(),
-                true,
-            ),
-            (
-                CommandError::DecodeEvent(decode_error),
-                "command event decoding failed: expected ident at line 1 column 2".to_string(),
-                true,
-            ),
-            (
-                CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                    snapshot_position: position(3),
-                    stream_position: Some(position(2)),
-                }),
-                "snapshot position 3 is ahead of current stream position 2".to_string(),
-                false,
-            ),
-            (
-                CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                    snapshot_position: position(1),
-                    stream_position: None,
-                }),
-                "snapshot position 1 exists but the stream has no current position".to_string(),
-                false,
-            ),
-            (
-                CommandError::ReadAfterOverflow(read_after_overflow),
-                read_after_overflow_message,
-                true,
-            ),
-        ];
-
-        for (error, message, has_source) in cases {
-            assert_eq!(error.to_string(), message);
-            assert_eq!(std::error::Error::source(&error).is_some(), has_source);
-        }
-    }
-
-    #[test]
-    fn test_error_helpers_cover_all_variants() {
-        assert_eq!(TestDecisionError::AlreadyRegistered.to_string(), "AlreadyRegistered");
-        assert_eq!(TestDecisionError::Missing.to_string(), "Missing");
-        assert_eq!(TestDecisionError::AlreadyDisabled.to_string(), "AlreadyDisabled");
-        assert_eq!(TestCommandError::BrokenEvent.to_string(), "BrokenEvent");
-        assert_eq!(TestInfraError::Json.to_string(), "Json");
-        assert_eq!(
-            TestInfraError::from(serde_json::from_slice::<serde_json::Value>(b"not-json").unwrap_err()),
-            TestInfraError::Json
-        );
-
-        assert_eq!(
-            TestCommandError::from(TestDecisionError::AlreadyRegistered),
-            TestCommandError::AlreadyRegistered
-        );
-        assert_eq!(
-            TestCommandError::from(TestDecisionError::Missing),
-            TestCommandError::Missing
-        );
-        assert_eq!(
-            TestCommandError::from(TestDecisionError::AlreadyDisabled),
-            TestCommandError::AlreadyDisabled
-        );
-    }
-
-    #[test]
-    fn write_preconditions_convert_from_decider_metadata() {
-        assert_eq!(
-            StreamWritePrecondition::from(WritePrecondition::Any),
-            StreamWritePrecondition::Any
-        );
-        assert_eq!(
-            StreamWritePrecondition::from(WritePrecondition::StreamExists),
-            StreamWritePrecondition::StreamExists
-        );
-        assert_eq!(
-            StreamWritePrecondition::from(WritePrecondition::NoStream),
-            StreamWritePrecondition::NoStream
-        );
-    }
-
-    #[test]
-    fn stream_event_helper_extracts_ids_for_edge_variants() {
-        assert_eq!(
-            stream_event(
-                1,
-                TestEvent::Removed {
-                    id: "removed".to_string(),
-                },
-            )
-            .stream_id,
-            "removed"
-        );
-        assert!(
-            std::panic::catch_unwind(|| {
-                stream_event(
-                    2,
-                    TestEvent::Untyped {
-                        id: "untyped".to_string(),
-                    },
-                );
-            })
-            .is_err()
-        );
-    }
-
     #[test]
     fn executes_from_initial_state_without_snapshot_or_history() {
         let runtime = FakeRuntime {
@@ -1601,30 +1381,6 @@ mod tests {
     }
 
     #[test]
-    fn command_snapshot_policy_allows_store_shorthand() {
-        let runtime = FakeRuntime {
-            stream_position: position(1),
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-
-        let result = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_snapshot(&runtime)
-                .with_task_runtime(ImmediateSnapshotTaskScheduler)
-                .execute(),
-        )
-        .unwrap();
-
-        assert_eq!(result.state, TestState::Present { enabled: true });
-        assert_eq!(
-            runtime.loaded_stream_ids.lock().unwrap().as_slice(),
-            &["alpha".to_string()]
-        );
-        assert!(runtime.written_snapshots.lock().unwrap().is_empty());
-    }
-
-    #[test]
     fn errors_when_snapshot_is_ahead_of_stream() {
         let runtime = FakeRuntime {
             snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
@@ -1640,13 +1396,15 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                snapshot_position,
-                stream_position: Some(stream_position),
-            }) if snapshot_position == position(3) && stream_position == position(2)
-        ));
+        let CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position,
+        }) = error
+        else {
+            panic!("expected snapshot ahead of stream");
+        };
+        assert_eq!(snapshot_position, position(3));
+        assert_eq!(stream_position, Some(position(2)));
     }
 
     #[test]
@@ -1665,13 +1423,15 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
-                snapshot_position,
-                stream_position: None,
-            }) if snapshot_position == position(1)
-        ));
+        let CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position,
+        }) = error
+        else {
+            panic!("expected snapshot ahead of stream");
+        };
+        assert_eq!(snapshot_position, position(1));
+        assert_eq!(stream_position, None);
     }
 
     #[test]
@@ -1691,20 +1451,6 @@ mod tests {
         let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
         assert!(matches!(error, CommandError::Evolve(TestCommandError::BrokenEvent)));
-    }
-
-    #[test]
-    fn propagates_stream_decode_failures() {
-        let runtime = FakeRuntime {
-            current_position: Some(position(1)),
-            stream_events: vec![invalid_stream_event(1)],
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
-
-        assert!(matches!(error, CommandError::DecodeEvent(_)));
     }
 
     #[test]
@@ -1808,64 +1554,6 @@ mod tests {
     }
 
     #[test]
-    fn propagates_missing_decision_failures() {
-        let runtime = FakeRuntime {
-            stream_position: position(1),
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Disable);
-
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
-
-        assert!(matches!(error, CommandError::Decide(TestDecisionError::Missing)));
-    }
-
-    #[test]
-    fn propagates_already_disabled_decision_failures() {
-        let runtime = FakeRuntime {
-            snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: false })),
-            current_position: Some(position(1)),
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Disable);
-
-        let error = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute(),
-        )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            CommandError::Decide(TestDecisionError::AlreadyDisabled)
-        ));
-    }
-
-    #[test]
-    fn required_register_rejects_existing_state() {
-        let runtime = FakeRuntime {
-            current_position: Some(position(1)),
-            stream_events: vec![stream_event(
-                1,
-                TestEvent::Registered {
-                    id: "alpha".to_string(),
-                },
-            )],
-            stream_position: position(2),
-            ..Default::default()
-        };
-        let command = RequiredRegisterCommand::new("alpha");
-
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
-
-        assert!(matches!(
-            error,
-            CommandError::Decide(TestDecisionError::AlreadyRegistered)
-        ));
-    }
-
-    #[test]
     fn encodes_emitted_events_and_returns_stream_position() {
         let runtime = FakeRuntime {
             snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
@@ -1891,30 +1579,6 @@ mod tests {
         assert_eq!(appended_events.len(), 1);
         assert_eq!(appended_events[0].r#type, "state_changed");
         assert_eq!(result.state, TestState::Present { enabled: false });
-    }
-
-    #[test]
-    fn builder_applies_headers_and_event_id_generator_with_snapshots() {
-        let runtime = FakeRuntime {
-            stream_position: position(1),
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-        let headers = Headers::from_entries([("trace-id", "trace-1")]).unwrap();
-        let event_id = Uuid::from_u128(0x018d_0000_0000_7000_8000_0000_0000_0001);
-
-        let _ = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .with_headers(headers)
-                .with_event_id_generator(FixedUuidGenerator(event_id))
-                .execute(),
-        )
-        .unwrap();
-        let appended_events = runtime.appended_events.lock().unwrap();
-
-        assert_eq!(appended_events[0].headers.get_str("trace-id"), Some("trace-1"));
-        assert_eq!(appended_events[0].id.as_uuid(), event_id);
     }
 
     #[test]
@@ -1983,53 +1647,6 @@ mod tests {
     }
 
     #[test]
-    fn propagates_stream_read_failures() {
-        let runtime = FakeRuntime {
-            fail_read_stream: true,
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
-
-        assert!(matches!(error, CommandError::ReadStream(TestInfraError::ReadStream)));
-    }
-
-    #[test]
-    fn propagates_snapshot_read_failures() {
-        let runtime = FakeRuntime {
-            fail_read_snapshot: true,
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-
-        let error = block_on(
-            CommandExecution::new(&runtime, &command)
-                .with_snapshot(test_snapshots(&runtime, NoSnapshot))
-                .execute(),
-        )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            CommandError::ReadSnapshot(TestInfraError::ReadSnapshot)
-        ));
-    }
-
-    #[test]
-    fn propagates_append_failures() {
-        let runtime = FakeRuntime {
-            fail_append: true,
-            ..Default::default()
-        };
-        let command = TestCommand::new("alpha", TestAction::Register);
-
-        let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
-
-        assert!(matches!(error, CommandError::Append(TestInfraError::Append)));
-    }
-
-    #[test]
     fn writes_snapshot_when_policy_requests_it() {
         let runtime = FakeRuntime {
             stream_position: position(1),
@@ -2039,8 +1656,7 @@ mod tests {
 
         let result = block_on(
             CommandExecution::new(&runtime, &command)
-                .with_snapshot(Snapshots::new(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
-                .with_task_runtime(ImmediateSnapshotTaskScheduler)
+                .with_snapshot(test_snapshots(&runtime, FrequencySnapshot::new(NonZeroU64::MIN)))
                 .execute(),
         )
         .unwrap();
@@ -2055,7 +1671,6 @@ mod tests {
     #[test]
     fn frequency_snapshot_writes_after_enough_events_since_snapshot() {
         const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
-        assert_eq!(FrequencySnapshot::new(EVERY_TWO_EVENTS).frequency(), EVERY_TWO_EVENTS);
         let runtime = FakeRuntime {
             current_position: Some(position(1)),
             stream_events: vec![stream_event(

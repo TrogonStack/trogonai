@@ -1,11 +1,13 @@
 use async_nats::jetstream::kv;
 use bytes::Bytes;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::BTreeMap};
 
 use crate::StreamPosition;
-use crate::snapshot::{Snapshot, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType};
+use crate::snapshot::{
+    EncodedSnapshot, Snapshot, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, decode_snapshot,
+    encode_snapshot,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -15,12 +17,6 @@ pub enum SnapshotStoreError {
     Codec { context: &'static str, source: BoxError },
     InvalidSnapshotKey { key: String },
     MissingCheckpointName { key_prefix: String },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StoredSnapshot {
-    position: u64,
-    payload: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,41 +158,35 @@ where
     Ok(Some(stream_id.to_string()))
 }
 
-fn encode_snapshot<T>(snapshot: &Snapshot<T>) -> Result<Vec<u8>, SnapshotStoreError>
+fn snapshot_value<T>(snapshot: &Snapshot<T>) -> Result<Vec<u8>, SnapshotStoreError>
 where
     T: SnapshotPayloadEncode,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let payload = snapshot
-        .payload
-        .encode()
+    let encoded = encode_snapshot(snapshot)
         .map_err(|source| SnapshotStoreError::codec_source("failed to encode stream snapshot payload", source))?;
-    serde_json::to_vec(&StoredSnapshot {
-        position: snapshot.position.as_u64(),
-        payload,
-    })
-    .map_err(|source| SnapshotStoreError::codec_source("failed to encode stream snapshot envelope", source))
+
+    encoded
+        .into_bytes()
+        .map_err(|source| SnapshotStoreError::codec_source("failed to encode stream snapshot envelope", source))
 }
 
-fn decode_snapshot<T>(value: &[u8]) -> Result<Snapshot<T>, SnapshotStoreError>
+fn snapshot_from_value<T>(value: &[u8]) -> Result<Snapshot<T>, SnapshotStoreError>
 where
     T: SnapshotPayloadDecode,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let stored = serde_json::from_slice::<StoredSnapshot>(value)
+    let encoded = EncodedSnapshot::from_bytes(value)
         .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))?;
-    let position = StreamPosition::try_new(stored.position)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot position", source))?;
-    let payload = T::decode(SnapshotPayloadData::new(stored.payload.as_slice()))
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot payload", source))?;
-    Ok(Snapshot::new(position, payload))
+
+    decode_snapshot(encoded)
+        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot payload", source))
 }
 
-fn decode_snapshot_position(value: &[u8]) -> Result<StreamPosition, SnapshotStoreError> {
-    let stored = serde_json::from_slice::<StoredSnapshot>(value)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))?;
-    StreamPosition::try_new(stored.position)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot position", source))
+fn snapshot_position_from_value(value: &[u8]) -> Result<StreamPosition, SnapshotStoreError> {
+    EncodedSnapshot::from_bytes(value)
+        .map(|snapshot| snapshot.position)
+        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))
 }
 
 async fn read_snapshot_entries<T>(bucket: &kv::Store) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
@@ -223,7 +213,7 @@ where
         else {
             continue;
         };
-        let snapshot = decode_snapshot::<T>(&value)?;
+        let snapshot = snapshot_from_value::<T>(&value)?;
         snapshots.push((stream_id, snapshot));
     }
 
@@ -243,7 +233,7 @@ where
         return Ok(None);
     };
 
-    decode_snapshot::<T>(&value).map(Some)
+    snapshot_from_value::<T>(&value).map(Some)
 }
 
 pub async fn write_snapshot<T>(bucket: &kv::Store, id: &str, snapshot: Snapshot<T>) -> Result<(), SnapshotStoreError>
@@ -337,7 +327,7 @@ where
     match change {
         SnapshotChange::Upsert { stream_id, snapshot } => {
             let snapshot_position = snapshot.position;
-            let value = encode_snapshot(snapshot.as_ref())?;
+            let value = snapshot_value(snapshot.as_ref())?;
             write_snapshot_value(bucket, &snapshot_key::<T>(&stream_id), snapshot_position, value).await?;
         }
         SnapshotChange::Delete { stream_id } => {
@@ -441,7 +431,7 @@ async fn write_snapshot_value(
             continue;
         }
 
-        if decode_snapshot_position(&entry.value)? >= snapshot_position {
+        if snapshot_position_from_value(&entry.value)? >= snapshot_position {
             return Ok(());
         }
 
@@ -610,8 +600,8 @@ mod tests {
             },
         );
 
-        let json = String::from_utf8(encode_snapshot(&snapshot).unwrap()).unwrap();
-        let decoded = decode_snapshot::<TestPayload>(json.as_bytes()).unwrap();
+        let json = String::from_utf8(snapshot_value(&snapshot).unwrap()).unwrap();
+        let decoded = snapshot_from_value::<TestPayload>(json.as_bytes()).unwrap();
 
         assert!(json.contains("\"position\":7"));
         assert!(json.contains("\"payload\""));

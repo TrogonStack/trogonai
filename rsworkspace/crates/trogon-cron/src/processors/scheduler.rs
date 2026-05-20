@@ -9,7 +9,7 @@ use async_nats::jetstream::{
     context::ConsumerInfoErrorKind,
 };
 use futures::{Stream, StreamExt, future};
-use trogon_eventsourcing::{StreamEvent, record_stream_message};
+use trogon_decider_runtime::{StreamEvent, record_stream_message};
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseTtl, NatsKvLease, NatsKvLeaseConfig};
 use trogon_std::{NowV7, UuidV7Generator};

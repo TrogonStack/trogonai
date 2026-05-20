@@ -3,21 +3,14 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-/// Unique identity for one persisted event occurrence.
-///
-/// The wrapper keeps event identity distinct from stream identity and other
-/// UUID-backed values. It does not enforce a UUID version; callers choose the
-/// generator that matches their ordering and traceability requirements.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EventId(Uuid);
 
 impl EventId {
-    /// Wraps an already generated event UUID.
     pub fn new(value: Uuid) -> Self {
         Self(value)
     }
 
-    /// Returns the underlying UUID for storage adapters or external APIs.
     pub fn as_uuid(self) -> Uuid {
         self.0
     }

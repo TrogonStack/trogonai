@@ -215,7 +215,7 @@ fn validate_schedule_stream(stream: &jetstream::stream::Stream) -> Result<(), Cr
 mod tests {
     use super::*;
     use crate::config::JobWriteCondition;
-    use trogon_eventsourcing::StreamPosition;
+    use trogon_decider_runtime::StreamPosition;
 
     fn position(value: u64) -> StreamPosition {
         StreamPosition::try_new(value).expect("test stream position must be non-zero")

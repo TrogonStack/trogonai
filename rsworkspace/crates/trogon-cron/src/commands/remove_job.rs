@@ -1,5 +1,5 @@
 use trogon_cron_jobs_proto::{state_v1, v1};
-use trogon_eventsourcing::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
 use super::domain::JobId;
 
@@ -82,7 +82,7 @@ impl CommandSnapshotPolicy for RemoveJobCommand {
 mod tests {
     use buffa::MessageField;
     use trogon_decider::testing::TestCase;
-    use trogon_eventsourcing::{CommandExecution, Events, ImmediateSnapshotTaskScheduler};
+    use trogon_decider_runtime::{CommandExecution, Events, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain::{Delivery, Job, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule};

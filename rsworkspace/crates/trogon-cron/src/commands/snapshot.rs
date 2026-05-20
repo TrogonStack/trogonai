@@ -1,6 +1,6 @@
 use std::num::NonZeroU64;
 
-use trogon_eventsourcing::FrequencySnapshot;
+use trogon_decider_runtime::FrequencySnapshot;
 
 const COMMAND_SNAPSHOT_EVERY: NonZeroU64 = NonZeroU64::new(32).expect("command snapshot cadence must be non-zero");
 

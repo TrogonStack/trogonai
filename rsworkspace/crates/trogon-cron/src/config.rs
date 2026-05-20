@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
+use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 
 use crate::error::CronError;
 

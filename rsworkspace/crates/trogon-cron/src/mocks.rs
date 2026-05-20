@@ -9,8 +9,8 @@ use async_nats::jetstream::kv;
 use buffa::MessageField;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use trogon_eventsourcing::snapshot::Snapshot;
-use trogon_eventsourcing::{
+use trogon_decider_runtime::snapshot::Snapshot;
+use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventEncode, EventId, EventIdentity,
     EventType, Headers, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest, ReadStreamResponse,
     SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite,
@@ -581,7 +581,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_eventsourcing::{CommandError, CommandExecution, ImmediateSnapshotTaskScheduler};
+    use trogon_decider_runtime::{CommandError, CommandExecution, ImmediateSnapshotTaskScheduler};
 
     use super::*;
     use crate::commands::domain as command_domain;

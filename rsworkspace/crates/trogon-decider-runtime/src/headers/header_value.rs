@@ -1,14 +1,9 @@
 use std::{convert::Infallible, str::FromStr};
 
-/// Metadata header value safe for line-oriented transports.
-///
-/// Carriage returns, line feeds, and NUL bytes are rejected because several
-/// header transports treat them as delimiters or terminators rather than data.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HeaderValue(String);
 
 impl HeaderValue {
-    /// Creates a header value after rejecting transport-hostile characters.
     pub fn new(value: impl Into<String>) -> Result<Self, HeaderValueError> {
         let value = value.into();
         if value.contains(['\r', '\n', '\0']) {
@@ -17,12 +12,10 @@ impl HeaderValue {
         Ok(Self(value))
     }
 
-    /// Returns the value as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// Consumes the value and returns the owned string.
     pub fn into_string(self) -> String {
         self.0
     }
@@ -78,7 +71,6 @@ impl AsRef<str> for HeaderValue {
     }
 }
 
-/// Error returned when constructing an invalid [`HeaderValue`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeaderValueError;
 

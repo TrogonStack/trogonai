@@ -1,5 +1,5 @@
-use trogon_eventsourcing::nats::{JetStreamStoreError, SnapshotStoreError};
-use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
+use trogon_decider_runtime::nats::{JetStreamStoreError, SnapshotStoreError};
+use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 
 use crate::commands::domain::MessageHeadersError;
 
@@ -276,7 +276,7 @@ impl From<JetStreamStoreError<CronError>> for CronError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::{StreamPosition, StreamWritePrecondition};
+    use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
     use trogon_nats::SubjectTokenViolation;
 
     fn position(value: u64) -> StreamPosition {

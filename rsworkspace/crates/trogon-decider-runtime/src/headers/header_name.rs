@@ -1,27 +1,17 @@
 use std::{borrow::Borrow, str::FromStr};
 
-/// Non-empty metadata header name.
-///
-/// Header names are stored exactly as provided. Adapters may impose stricter
-/// backend-specific limits at their boundary, but empty names and control
-/// characters are never valid in the shared event envelope.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HeaderName(String);
 
 impl HeaderName {
-    /// Creates a header name after rejecting invalid input.
     pub fn new(name: impl Into<String>) -> Result<Self, HeaderNameError> {
         let name = name.into();
         if name.is_empty() {
-            return Err(HeaderNameError::Empty);
-        }
-        if name.chars().any(char::is_control) {
-            return Err(HeaderNameError::ContainsControlCharacter);
+            return Err(HeaderNameError);
         }
         Ok(Self(name))
     }
 
-    /// Returns the header name as stored.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -63,21 +53,12 @@ impl Borrow<str> for HeaderName {
     }
 }
 
-/// Error returned when constructing an invalid [`HeaderName`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HeaderNameError {
-    /// Header names cannot be empty.
-    Empty,
-    /// Header names cannot contain control characters.
-    ContainsControlCharacter,
-}
+pub struct HeaderNameError;
 
 impl std::fmt::Display for HeaderNameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => f.write_str("event header name cannot be empty"),
-            Self::ContainsControlCharacter => f.write_str("event header name cannot contain control characters"),
-        }
+        f.write_str("event header name cannot be empty")
     }
 }
 
