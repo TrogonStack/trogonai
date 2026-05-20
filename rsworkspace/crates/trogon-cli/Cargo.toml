@@ -7,11 +7,21 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-axum        = { workspace = true }
-serde_json  = { workspace = true }
-tokio       = { workspace = true, features = ["full"] }
-tracing     = { workspace = true }
+acp-nats               = { workspace = true }
+agent-client-protocol  = { workspace = true }
+async-nats             = { workspace = true, features = ["jetstream"] }
+axum                   = { workspace = true }
+opentelemetry          = { workspace = true }
+serde_json             = { workspace = true }
+tokio                  = { workspace = true, features = ["full"] }
+tracing                = { workspace = true }
+trogon-registry        = { workspace = true }
+trogon-std             = { workspace = true }
 
 [dev-dependencies]
-reqwest = { workspace = true }
-tokio  = { workspace = true, features = ["test-util"] }
+futures                = { workspace = true }
+reqwest                = { workspace = true }
+testcontainers-modules = { workspace = true, features = ["nats"] }
+tokio                  = { workspace = true, features = ["test-util"] }
+trogon-nats            = { workspace = true }
+trogon-registry        = { workspace = true, features = ["test-support"] }

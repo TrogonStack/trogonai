@@ -5307,11 +5307,20 @@ dependencies = [
 name = "trogon-cli"
 version = "0.1.0"
 dependencies = [
+ "acp-nats",
+ "agent-client-protocol",
+ "async-nats",
  "axum 0.8.9",
+ "futures",
+ "opentelemetry",
  "reqwest",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
  "tracing",
+ "trogon-nats",
+ "trogon-registry",
+ "trogon-std",
 ]
 
 [[package]]
