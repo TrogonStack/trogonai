@@ -658,12 +658,6 @@ impl From<&JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trogon_eventsourcing::{Snapshot, StreamPosition};
-
-    fn position(value: u64) -> StreamPosition {
-        StreamPosition::try_new(value).expect("test stream position must be non-zero")
-    }
-
     fn job_id(id: &str) -> JobId {
         JobId::parse(id).unwrap()
     }
@@ -740,32 +734,6 @@ mod tests {
 
         assert!(!json.contains("\"headers\""));
         assert!(json.contains("\"state\":\"enabled\""));
-    }
-
-    #[test]
-    fn snapshot_round_trips() {
-        let snapshot = Snapshot::new(
-            position(9),
-            Job {
-                id: job_id("compact"),
-                status: JobStatus::Enabled,
-                schedule: Schedule::every(30).unwrap(),
-                delivery: Delivery::NatsEvent {
-                    route: route("agent.run"),
-                    ttl_sec: None,
-                    source: None,
-                },
-                message: JobMessage {
-                    content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                    headers: JobHeaders::default(),
-                },
-            },
-        );
-
-        let json = serde_json::to_string(&snapshot).unwrap();
-        let decoded: Snapshot<Job> = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, snapshot);
     }
 
     #[test]

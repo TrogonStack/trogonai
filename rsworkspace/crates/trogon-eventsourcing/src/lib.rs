@@ -21,8 +21,8 @@ pub use nats::{
     record_stream_message,
 };
 pub use snapshot::{
-    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite,
-    WriteSnapshotRequest, WriteSnapshotResponse,
+    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData, SnapshotPayloadDecode,
+    SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadAfterOverflow, ReadFrom, ReadStreamRequest,

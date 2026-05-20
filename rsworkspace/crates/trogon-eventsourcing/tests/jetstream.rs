@@ -18,9 +18,10 @@ use trogon_eventsourcing::nats::{
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventData,
     EventDecode, EventEncode, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, Headers, ReadFrom,
-    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite,
-    Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE,
-    TokioSnapshotTaskScheduler, WriteSnapshotRequest,
+    ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotPayloadData,
+    SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots, StreamAppend,
+    StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler,
+    WriteSnapshotRequest,
 };
 use trogon_std::{NowV7, UuidV7Generator};
 use uuid::Uuid;
@@ -153,6 +154,22 @@ impl SnapshotType for TestSnapshot {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "snapshots.v1.";
 }
 
+impl SnapshotPayloadEncode for TestSnapshot {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl SnapshotPayloadDecode for TestSnapshot {
+    type Error = serde_json::Error;
+
+    fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        decode_json(payload.payload)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct CounterState {
     total: u64,
@@ -160,6 +177,22 @@ struct CounterState {
 
 impl SnapshotType for CounterState {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "counter.snapshots.";
+}
+
+impl SnapshotPayloadEncode for CounterState {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        encode_json(self)
+    }
+}
+
+impl SnapshotPayloadDecode for CounterState {
+    type Error = serde_json::Error;
+
+    fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        decode_json(payload.payload)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -3182,16 +3215,7 @@ async fn jetstream_snapshot_store_rejects_invalid_snapshot_key_from_live_bucket_
     fixture
         .store
         .snapshot_bucket()
-        .put(
-            invalid_key,
-            serde_json::to_vec(&Snapshot::new(
-                position(1),
-                TestSnapshot {
-                    value: "invalid".to_string(),
-                },
-            ))?
-            .into(),
-        )
+        .put(invalid_key, b"{}".to_vec().into())
         .await?;
 
     let result: Result<std::collections::BTreeMap<String, Snapshot<TestSnapshot>>, SnapshotStoreError> =

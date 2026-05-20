@@ -1,5 +1,8 @@
 use buffa::Message as _;
-use trogon_eventsourcing::{EventData, EventDecode, EventEncode, EventIdentity, EventType, SnapshotType};
+use trogon_eventsourcing::{
+    EventData, EventDecode, EventEncode, EventIdentity, EventType, SnapshotPayloadData, SnapshotPayloadDecode,
+    SnapshotPayloadEncode, SnapshotType,
+};
 
 #[allow(clippy::all)]
 #[path = "gen/mod.rs"]
@@ -24,6 +27,9 @@ pub enum JobEventPayloadError {
     UnknownEventType { value: String },
 }
 
+#[derive(Debug)]
+pub struct StateSnapshotPayloadError(buffa::DecodeError);
+
 impl std::fmt::Display for JobEventPayloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -40,6 +46,18 @@ impl std::error::Error for JobEventPayloadError {
             Self::Decode(source) => Some(source),
             Self::MissingEvent | Self::UnknownEventType { .. } => None,
         }
+    }
+}
+
+impl std::fmt::Display for StateSnapshotPayloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for StateSnapshotPayloadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
     }
 }
 
@@ -104,11 +122,27 @@ impl SnapshotType for state_v1::State {
     const SNAPSHOT_STREAM_PREFIX: &'static str = "cron.command.snapshots.jobs.v1.";
 }
 
+impl SnapshotPayloadEncode for state_v1::State {
+    type Error = std::convert::Infallible;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.encode_to_vec())
+    }
+}
+
+impl SnapshotPayloadDecode for state_v1::State {
+    type Error = StateSnapshotPayloadError;
+
+    fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+        Self::decode_from_slice(payload.payload).map_err(StateSnapshotPayloadError)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use buffa::{Message as _, MessageField};
     use trogon_eventsourcing::{
-        Event, EventData, EventDecode, EventEncode, EventHeaders, EventId, EventType, StreamEvent, StreamPosition,
+        Event, EventData, EventDecode, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition,
     };
 
     use super::*;
@@ -191,13 +225,13 @@ mod tests {
             id: "00000000-0000-7000-8000-000000000001".parse::<EventId>().unwrap(),
             r#type: removed.event_type().unwrap().to_string(),
             content: EventEncode::encode(&removed).unwrap(),
-            headers: EventHeaders::empty(),
+            headers: Headers::empty(),
         };
         assert_eq!(event.r#type, JOB_REMOVED_EVENT_TYPE);
         assert!(v1::JobRemoved::decode_from_slice(&event.content).is_ok());
 
         assert_eq!(
-            <v1::JobEvent as EventDecode>::decode(EventData::new(&event.r#type, "cleanup", &event.content)).unwrap(),
+            <v1::JobEvent as EventDecode>::decode(EventData::new(&event.r#type, &event.content)).unwrap(),
             removed
         );
 
@@ -216,13 +250,8 @@ mod tests {
 
     #[test]
     fn invalid_payload_fails_decode() {
-        assert!(
-            <v1::JobEvent as EventDecode>::decode(EventData::new(JOB_REMOVED_EVENT_TYPE, "cleanup", b"\0")).is_err()
-        );
-        assert!(
-            <v1::JobEvent as EventDecode>::decode(EventData::new("trogon.cron.jobs.v1.Unknown", "cleanup", &[]))
-                .is_err()
-        );
+        assert!(<v1::JobEvent as EventDecode>::decode(EventData::new(JOB_REMOVED_EVENT_TYPE, b"\0")).is_err());
+        assert!(<v1::JobEvent as EventDecode>::decode(EventData::new("trogon.cron.jobs.v1.Unknown", &[])).is_err());
     }
 
     #[test]
@@ -230,11 +259,24 @@ mod tests {
         let event = job_added_event(30);
 
         let encoded = EventEncode::encode(&event).unwrap();
-        let decoded =
-            <v1::JobEvent as EventDecode>::decode(EventData::new(JOB_ADDED_EVENT_TYPE, "backup", &encoded)).unwrap();
+        let decoded = <v1::JobEvent as EventDecode>::decode(EventData::new(JOB_ADDED_EVENT_TYPE, &encoded)).unwrap();
 
         assert_eq!(decoded, event);
         assert!(matches!(decoded.event, Some(JobEventCase::JobAdded(_))));
+    }
+
+    #[test]
+    fn state_round_trips_through_snapshot_codec() {
+        let state = state_v1::State {
+            state: Some(buffa::EnumValue::from(
+                state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED,
+            )),
+        };
+
+        let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
+        let decoded = <state_v1::State as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
+
+        assert_eq!(decoded, state);
     }
 
     #[test]

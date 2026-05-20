@@ -238,6 +238,7 @@ impl From<SnapshotStoreError> for CronError {
     fn from(value: SnapshotStoreError) -> Self {
         match value {
             SnapshotStoreError::Kv { context, source } => Self::Kv { context, source },
+            SnapshotStoreError::Codec { context, source } => Self::Event { context, source },
             SnapshotStoreError::InvalidSnapshotKey { key } => {
                 Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
@@ -245,7 +246,6 @@ impl From<SnapshotStoreError> for CronError {
                 "failed to resolve stream snapshot checkpoint key",
                 std::io::Error::other(key_prefix),
             ),
-            SnapshotStoreError::Serde(source) => Self::Serde(source),
         }
     }
 }

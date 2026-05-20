@@ -9,13 +9,13 @@ use async_nats::jetstream::kv;
 use buffa::MessageField;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventEncode, EventId, EventIdentity,
     EventType, Headers, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest, ReadStreamResponse,
-    SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition, StreamRead,
-    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite,
+    StreamAppend, StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
+    WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
@@ -146,7 +146,13 @@ pub struct MockCronStore {
     jobs: Arc<Mutex<HashMap<String, CronJob>>>,
     stream_positions: Arc<Mutex<HashMap<String, StreamPosition>>>,
     events: Arc<Mutex<HashMap<String, Vec<Event>>>>,
-    command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+    command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, EncodedSnapshot>>>>,
+}
+
+#[derive(Clone)]
+struct EncodedSnapshot {
+    position: StreamPosition,
+    payload: Vec<u8>,
 }
 
 fn stream_position(value: u64) -> Result<StreamPosition, CronError> {
@@ -204,16 +210,20 @@ impl MockCronStore {
         stream_id: &(impl AsRef<str> + ?Sized),
     ) -> Result<Option<Snapshot<Payload>>, CronError>
     where
-        Payload: DeserializeOwned + SnapshotType,
+        Payload: SnapshotPayloadDecode + SnapshotType,
+        Payload::Error: std::error::Error + Send + Sync + 'static,
     {
         self.command_snapshots
             .lock()
             .unwrap()
             .get(Payload::SNAPSHOT_STREAM_PREFIX)
             .and_then(|snapshots| snapshots.get(stream_id.as_ref()).cloned())
-            .map(|snapshot| serde_json::from_str(&snapshot))
+            .map(|snapshot| {
+                Payload::decode(SnapshotPayloadData::new(snapshot.payload.as_slice()))
+                    .map(|payload| Snapshot::new(snapshot.position, payload))
+                    .map_err(|source| CronError::event_source("failed to decode command snapshot payload", source))
+            })
             .transpose()
-            .map_err(CronError::from)
     }
 
     pub async fn get_job(&self, command: GetJobCommand) -> Result<Option<CronJob>, CronError> {
@@ -526,7 +536,8 @@ impl StreamAppend<str> for MockCronStore {
 
 impl<Payload> SnapshotRead<Payload, str> for MockCronStore
 where
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadDecode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = CronError;
 
@@ -541,7 +552,8 @@ where
 
 impl<Payload> SnapshotWrite<Payload, str> for MockCronStore
 where
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadEncode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = CronError;
 
@@ -549,7 +561,14 @@ where
         &self,
         request: WriteSnapshotRequest<'_, Payload, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
-        let snapshot = serde_json::to_string(&request.snapshot)?;
+        let snapshot = EncodedSnapshot {
+            position: request.snapshot.position,
+            payload: request
+                .snapshot
+                .payload
+                .encode()
+                .map_err(|source| CronError::event_source("failed to encode command snapshot payload", source))?,
+        };
         self.command_snapshots
             .lock()
             .unwrap()

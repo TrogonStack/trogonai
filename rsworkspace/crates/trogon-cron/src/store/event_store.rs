@@ -1,10 +1,9 @@
 use async_nats::jetstream::{self, kv};
-use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::nats::{JetStreamStore, NatsSnapshotConfig};
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamRead, WriteSnapshotRequest,
-    WriteSnapshotResponse,
+    ReadStreamResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite,
+    StreamAppend, StreamRead, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 
 use super::stream_subject::JobEventSubjectResolver;
@@ -70,7 +69,8 @@ impl StreamAppend<str> for EventStore {
 
 impl<Payload> SnapshotRead<Payload, str> for EventStore
 where
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadDecode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = CronError;
 
@@ -84,7 +84,8 @@ where
 
 impl<Payload> SnapshotWrite<Payload, str> for EventStore
 where
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadEncode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = CronError;
 

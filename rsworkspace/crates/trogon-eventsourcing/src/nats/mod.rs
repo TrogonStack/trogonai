@@ -4,11 +4,11 @@ pub mod stream_store;
 use std::fmt;
 
 use async_nats::jetstream::{self, kv};
-use serde::{Serialize, de::DeserializeOwned};
 
 use crate::nats::stream_store::{append_stream as append_subject_stream, read_subject_stream};
 use crate::snapshot::{
-    ReadSnapshotRequest, ReadSnapshotResponse, SnapshotType, WriteSnapshotRequest, WriteSnapshotResponse,
+    ReadSnapshotRequest, ReadSnapshotResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use crate::{
     AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
@@ -97,15 +97,6 @@ where
             Self::Codec(source) => Some(source),
             Self::OptimisticConcurrencyConflict { .. } => None,
         }
-    }
-}
-
-impl<Error> From<serde_json::Error> for JetStreamStoreError<Error>
-where
-    Error: From<serde_json::Error>,
-{
-    fn from(value: serde_json::Error) -> Self {
-        Self::Codec(value.into())
     }
 }
 
@@ -238,7 +229,8 @@ where
 impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadDecode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
@@ -257,7 +249,8 @@ where
 impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
-    Payload: Serialize + DeserializeOwned + SnapshotType + Send,
+    Payload: SnapshotPayloadEncode + SnapshotType + Send,
+    Payload::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
