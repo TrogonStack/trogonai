@@ -34,6 +34,7 @@ use crate::session_notifier::{PromptEventClient, SessionNotifier};
 use trogon_runner_tools::permission::{AuditBuf, ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
+use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 /// Gateway credentials that override the default proxy/token when set.
 #[derive(Debug, Clone)]
@@ -248,10 +249,12 @@ pub struct TrogonAgent<
     S = NatsSessionStore,
     A = trogon_agent_core::agent_loop::AgentLoop,
     N = crate::session_notifier::NatsSessionNotifier,
+    M = FsTrogonMdLoader,
 > {
     notifier: N,
     store: S,
     agent: Arc<A>,
+    md_loader: M,
     prefix: String,
     default_model: String,
     permission_tx: Option<PermissionTx>,
@@ -269,7 +272,9 @@ pub struct TrogonAgent<
     execution_nats: Option<async_nats::Client>,
 }
 
-impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<S, A, N> {
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
+    TrogonAgent<S, A, N, FsTrogonMdLoader>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         notifier: N,
@@ -285,6 +290,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             notifier,
             store,
             agent: Arc::new(agent),
+            md_loader: FsTrogonMdLoader,
             prefix: prefix.into(),
             default_model: default_model.into(),
             permission_tx,
@@ -295,6 +301,29 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
             http: reqwest::Client::new(),
             registry: None,
             execution_nats: None,
+        }
+    }
+}
+
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdLoading>
+    TrogonAgent<S, A, N, M>
+{
+    pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> TrogonAgent<S, A, N, M2> {
+        TrogonAgent {
+            md_loader: loader,
+            notifier: self.notifier,
+            store: self.store,
+            agent: self.agent,
+            prefix: self.prefix,
+            default_model: self.default_model,
+            permission_tx: self.permission_tx,
+            elicitation_tx: self.elicitation_tx,
+            gateway_config: self.gateway_config,
+            session_locks: self.session_locks,
+            compactor_nats: self.compactor_nats,
+            http: self.http,
+            registry: self.registry,
+            execution_nats: self.execution_nats,
         }
     }
 
@@ -503,7 +532,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
                     };
                     // Build static rules: TROGON.md base + session override merged.
                     let mut rules = if let Some(trogon_md) =
-                        crate::trogon_md::load_trogon_md(&state.cwd).await
+                        self.md_loader.load(&state.cwd).await
                     {
                         PermissionRules::parse(&trogon_md)
                     } else {
@@ -536,7 +565,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         let messages = state.messages.clone();
 
         // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
-        let trogon_md = crate::trogon_md::load_trogon_md(&state.cwd).await;
+        let trogon_md = self.md_loader.load(&state.cwd).await;
         let system_prompt = match (trogon_md, state.system_prompt.clone()) {
             (Some(tmd), Some(sp)) => Some(format!("{tmd}\n\n{sp}")),
             (Some(tmd), None) => Some(tmd),
@@ -707,21 +736,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> TrogonAgent<
         }
 
         if let Some(updated) = final_messages {
-            // Reload to pick up any concurrent writes (e.g., allow_always updating
-            // allowed_tools in the permission bridge) before saving back.
+            // Reload to pick up concurrent writes: allowed_tools (permission bridge),
+            // terminal_id (bash tool), etc.
             let in_memory_title = state.title.clone();
             if let Ok(fresh) = self.store.load(&session_id).await {
-                state = fresh;
+                state.allowed_tools = fresh.allowed_tools;
+                if state.terminal_id.is_none() {
+                    state.terminal_id = fresh.terminal_id;
+                }
             }
             // Title is set in-memory before the first save; preserve it across the reload.
             if state.title.is_empty() && !in_memory_title.is_empty() {
                 state.title = in_memory_title;
-            }
-            // Reload terminal_id in case the bash tool set it during this turn.
-            if state.terminal_id.is_none() {
-                if let Ok(live) = self.store.load(&session_id).await {
-                    state.terminal_id = live.terminal_id;
-                }
             }
             state.messages = updated;
             state.updated_at = now_iso8601();
@@ -755,8 +781,8 @@ async fn publish_via_converter(
 }
 
 #[async_trait(?Send)]
-impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier> agent_client_protocol::Agent
-    for TrogonAgent<S, A, N>
+impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdLoading + 'static>
+    agent_client_protocol::Agent for TrogonAgent<S, A, N, M>
 {
     #[cfg_attr(coverage, coverage(off))]
     async fn initialize(

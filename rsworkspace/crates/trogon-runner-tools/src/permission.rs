@@ -151,7 +151,6 @@ fn eval_tool_policies(
     Some(PolicyAction::RequireApproval)
 }
 
-
 /// `PermissionChecker` that first evaluates static [`PermissionRules`] before
 /// forwarding to the interactive [`ChannelPermissionChecker`].
 ///

@@ -459,4 +459,26 @@ mod tests {
         // exact match must work
         assert!(r.find_by_model("grok-3").await.unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_for_empty_models_array() {
+        let r = registry();
+        let mut cap = AgentCapability::new("empty-models", ["chat"], "agents.empty.>");
+        cap.metadata = serde_json::json!({ "models": [] });
+        r.register(&cap).await.unwrap();
+
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_none(), "empty models array must not match any model");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_when_models_value_is_not_an_array() {
+        let r = registry();
+        let mut cap = AgentCapability::new("bad-models", ["chat"], "agents.bad.>");
+        cap.metadata = serde_json::json!({ "models": "grok-4" });
+        r.register(&cap).await.unwrap();
+
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_none(), "non-array models value must not match");
+    }
 }

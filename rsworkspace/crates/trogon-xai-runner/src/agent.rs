@@ -30,6 +30,7 @@ use crate::http_client::XaiHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
+use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -56,12 +57,28 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_sea
 /// long-running deployments where clients never call `close_session`.
 const MAX_SESSIONS: usize = 100;
 
+/// Returns the context-window size (in tokens) for a known xAI model.
+/// More-specific prefixes are checked before broader ones.
+fn context_window_tokens(model_id: &str) -> u64 {
+    // grok-4-fast variants (including grok-4-fast-reasoning, grok-4.1-fast, etc.) → 2M
+    if model_id.contains("grok-4-fast") || model_id.contains("grok-4.1") {
+        2_000_000
+    } else if model_id.starts_with("grok-4") {
+        // Plain grok-4 / grok-4-0709 → 256K
+        256_000
+    } else {
+        // grok-3, grok-3-mini, grok-3-mini-fast, grok-2, and any future variants → 131K
+        131_072
+    }
+}
+
 /// Per-session state held in memory.
 ///
 /// Unlike the Codex runner (which delegates state to the subprocess), xAI is a
 /// stateless HTTP API. The runner must maintain conversation history locally and
 /// replay it on every turn — unless `last_response_id` is set, in which case
 /// the xAI server already holds the prior context and only the new message is sent.
+#[derive(serde::Serialize)]
 struct XaiSession {
     cwd: String,
     /// Per-session model override. None means use the agent default.
@@ -86,6 +103,7 @@ struct XaiSession {
     system_prompt: Option<String>,
     /// Wall-clock time at which this session was created. Used for LRU eviction
     /// when the session count reaches `MAX_SESSIONS`.
+    #[serde(skip)]
     created_at: Instant,
     /// ISO 8601 timestamp captured at session creation, written to the SESSIONS KV bucket.
     created_at_iso: String,
@@ -112,9 +130,10 @@ struct XaiSession {
 ///
 /// Production uses `XaiAgent<XaiClient, NatsSessionNotifier>` (the defaults).
 /// Tests inject `MockXaiHttpClient` and `MockSessionNotifier` without any network.
-pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
+pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader> {
     notifier: Arc<N>,
     client: Arc<H>,
+    md_loader: M,
     sessions: Arc<Mutex<HashMap<String, XaiSession>>>,
     /// In-flight cancel channels, one per active prompt. Sending `()` stops the
     /// streaming loop and causes `prompt()` to return early.
@@ -159,7 +178,7 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier> {
     tool_http_client: reqwest::Client,
 }
 
-impl XaiAgent<XaiClient, NatsSessionNotifier> {
+impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
     /// Create a new `XaiAgent` backed by the real xAI HTTP API and NATS notifications.
     ///
     /// Environment variables read at construction:
@@ -178,7 +197,7 @@ impl XaiAgent<XaiClient, NatsSessionNotifier> {
     }
 }
 
-impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
     /// Create an `XaiAgent` with explicit dependencies. Used in tests to inject mocks.
     pub fn with_deps(
         notifier: N,
@@ -264,6 +283,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         Self {
             notifier: Arc::new(notifier),
             client: Arc::new(client),
+            md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
             default_model,
@@ -282,6 +302,45 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
             registry: None,
             execution_nats: None,
             tool_http_client: reqwest::Client::new(),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn new_in_memory(
+        notifier: N,
+        default_model: impl Into<String>,
+        api_key: impl Into<String>,
+        client: H,
+    ) -> Self {
+        Self::with_deps(notifier, default_model, api_key, client)
+    }
+}
+
+impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M> {
+    /// Replace the TROGON.md loader. Used in tests to inject a mock that
+    /// returns a fixed string without touching the real filesystem.
+    pub fn with_md_loader<M2: TrogonMdLoading>(self, loader: M2) -> XaiAgent<H, N, M2> {
+        XaiAgent {
+            md_loader: loader,
+            notifier: self.notifier,
+            client: self.client,
+            sessions: self.sessions,
+            cancel_senders: self.cancel_senders,
+            default_model: self.default_model,
+            prompt_timeout: self.prompt_timeout,
+            available_models: self.available_models,
+            global_api_key: self.global_api_key,
+            pending_api_key: self.pending_api_key,
+            system_prompt: self.system_prompt,
+            max_history: self.max_history,
+            max_turns: self.max_turns,
+            agent_id: self.agent_id,
+            agent_loader: self.agent_loader,
+            skill_loader: self.skill_loader,
+            session_store: self.session_store,
+            tenant_id: self.tenant_id,
+            registry: self.registry,
+            execution_nats: self.execution_nats,
         }
     }
 
@@ -318,20 +377,6 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
         self.execution_nats = Some(nats);
         self.registry = Some(Arc::new(registry));
         self
-    }
-
-    /// Create an `XaiAgent` with explicit dependencies and no session store.
-    /// Equivalent to `with_deps` with no external storage — used in tests that
-    /// don't need session persistence (the agent stores sessions in an in-memory
-    /// `HashMap`).
-    #[cfg(any(test, feature = "test-helpers"))]
-    pub fn new_in_memory(
-        notifier: N,
-        default_model: impl Into<String>,
-        api_key: impl Into<String>,
-        client: H,
-    ) -> Self {
-        Self::with_deps(notifier, default_model, api_key, client)
     }
 
     /// Build a `SessionSnapshot` from the given session for writing to the KV store.
@@ -454,8 +499,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
 }
 
 #[async_trait(?Send)]
-impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_protocol::Agent
-    for XaiAgent<H, N>
+impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoading + 'static>
+    agent_client_protocol::Agent for XaiAgent<H, N, M>
 {
     async fn initialize(
         &self,
@@ -579,6 +624,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             } else {
                 (self.system_prompt.clone(), None)
             };
+
+        let meta_system_prompt = req.meta
+            .as_ref()
+            .and_then(|m| m.get("systemPrompt"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let system_prompt = meta_system_prompt.or(session_system_prompt);
 
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
@@ -970,6 +1022,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
             )
         };
 
+        let trogon_md = self.md_loader.load(&cwd).await;
+        let session_system_prompt = match (trogon_md, session_system_prompt) {
+            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
+            (Some(md), None) => Some(md),
+            (None, sp) => sp,
+        };
+
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
         let api_key = api_key
             .or_else(|| self.global_api_key.clone())
@@ -1250,7 +1309,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
                                 prompt_tokens,
-                                completion_tokens,
+                                context_window_tokens(&model),
                             )),
                         );
                         self.notifier.notify(notif).await;
@@ -1501,6 +1560,23 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static> agent_client_prot
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/get_state" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let state = sessions.get(session_id).ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "session not found")
+            })?;
+            let raw = serde_json::to_string(state)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string(raw)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         if args.method.as_ref() == "session/export" {
             let params: serde_json::Value =
                 serde_json::from_str(args.params.get()).unwrap_or_default();
@@ -1701,7 +1777,7 @@ async fn execute_bash_via_nats(
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 #[cfg(any(test, feature = "test-helpers"))]
-impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N> {
+impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M> {
     pub async fn test_insert_session(&self, id: &str, cwd: &str, model: Option<String>) {
         self.sessions.lock().await.insert(
             id.to_string(),
@@ -1951,6 +2027,17 @@ mod tests {
     use crate::session_notifier::MockSessionNotifier;
 
     type TestAgent = XaiAgent<Arc<MockXaiHttpClient>, Arc<MockSessionNotifier>>;
+
+    /// Mock TROGON.md loader that returns a fixed string (or None) without
+    /// touching the real filesystem.
+    struct MockTrogonMdLoader(Option<String>);
+
+    #[async_trait(?Send)]
+    impl TrogonMdLoading for MockTrogonMdLoader {
+        async fn load(&self, _cwd: &str) -> Option<String> {
+            self.0.clone()
+        }
+    }
 
     fn make_agent() -> TestAgent {
         let mock_http = Arc::new(MockXaiHttpClient::new());
@@ -2858,9 +2945,10 @@ mod tests {
         // Both take &self — safe because XaiAgent uses Arc<Mutex<...>> internally.
         let prompt_fut = agent.prompt(PromptRequest::new("can1", vec![ContentBlock::from("hi")]));
         let cancel_fut = async {
-            // Yield enough times to let prompt() register its cancel sender and
-            // enter the select! loop waiting on the slow stream.
-            for _ in 0..10 {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             agent.cancel(CancelNotification::new("can1")).await.unwrap();
@@ -4691,8 +4779,8 @@ mod tests {
         };
         assert_eq!(update.used, 42, "UsageUpdate.used must equal prompt_tokens");
         assert_eq!(
-            update.size, 10,
-            "UsageUpdate.size must equal completion_tokens"
+            update.size, 131_072,
+            "UsageUpdate.size must equal the model context window (grok-3 = 131072)"
         );
     }
 
@@ -5198,6 +5286,68 @@ mod tests {
         assert!(sessions[&session_id].system_prompt.is_none());
     }
 
+    // ── _meta.systemPrompt ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_sets_prompt() {
+        let agent = make_agent();
+        let mut meta = serde_json::Map::new();
+        meta.insert("systemPrompt".to_string(), serde_json::json!("injected prompt"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("injected prompt")
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_system_prompt_overrides_console_prompt() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            Some("console prompt".into()),
+            None,
+            None,
+        );
+        let mut meta = serde_json::Map::new();
+        meta.insert("systemPrompt".to_string(), serde_json::json!("meta wins"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("meta wins")
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_meta_without_system_prompt_key_falls_back() {
+        let agent = make_agent_with_loaders(
+            "agent1",
+            vec![],
+            Some("fallback prompt".into()),
+            None,
+            None,
+        );
+        let mut meta = serde_json::Map::new();
+        meta.insert("otherKey".to_string(), serde_json::json!("value"));
+        let resp = agent
+            .new_session(NewSessionRequest::new("/tmp").meta(meta))
+            .await
+            .unwrap();
+        let session_id = resp.session_id.to_string();
+        assert_eq!(
+            agent.test_session_system_prompt(&session_id).await.as_deref(),
+            Some("fallback prompt")
+        );
+    }
+
     // ── with_session_store ────────────────────────────────────────────────────
 
     fn make_agent_with_store() -> (TestAgent, Arc<crate::session_store::mock::MockSessionStore>) {
@@ -5515,7 +5665,10 @@ mod tests {
             vec![ContentBlock::from("hi".to_string())],
         ));
         let cancel_fut = async {
-            for _ in 0..10 {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             agent.cancel(CancelNotification::new(session_id)).await.unwrap();
@@ -5761,6 +5914,196 @@ mod tests {
 
         let children_c = parse(agent.ext_method(list_children(c.clone())).await.unwrap());
         assert!(children_c.is_empty(), "C must have no children");
+    }
+
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        agent.test_insert_session("gs1", "/projects/myapp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "gs1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match inserted session");
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        agent.test_insert_session("ms1", "/tmp", Some("grok-3-mini".to_string())).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ms1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["model"].as_str(),
+            Some("grok-3-mini"),
+            "model override must appear in get_state (needed by /model command)"
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        use agent_client_protocol::Agent;
+        let agent = make_agent();
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+        )
+        .unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    // ── TROGON.md injection ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn prompt_injects_trogon_md_from_cwd_into_system_prompt() {
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        )
+        .with_md_loader(MockTrogonMdLoader(Some("project rules here".to_string())));
+
+        agent.test_insert_session("t1", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t1", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input.iter().find(|item| item.role() == Some("system"))
+            .expect("system item must be present when TROGON.md exists");
+        let content = system_item.content().unwrap_or_default();
+        assert!(
+            content.contains("project rules here"),
+            "TROGON.md content must appear in system prompt, got: {content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_uses_session_system_prompt_unchanged() {
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        )
+        .with_md_loader(MockTrogonMdLoader(None));
+
+        agent.test_insert_session("t2", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t2", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let has_system = input.iter().any(|item| item.role() == Some("system"));
+        assert!(!has_system, "no system item expected when no TROGON.md and no session prompt");
+    }
+
+    #[tokio::test]
+    async fn prompt_without_trogon_md_passes_session_system_prompt_through() {
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "agent system prompt") };
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        )
+        .with_md_loader(MockTrogonMdLoader(None));
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("t4", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t4", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input
+            .iter()
+            .find(|item| item.role() == Some("system"))
+            .expect("system item must be present when session has a system prompt, even without TROGON.md");
+        let content = system_item.content().unwrap_or_default();
+        assert!(
+            content.contains("agent system prompt"),
+            "session system prompt must pass through unchanged when no TROGON.md: {content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_trogon_md_prepended_before_session_system_prompt() {
+        let _guard = env_lock().lock().await;
+        unsafe { std::env::set_var("XAI_SYSTEM_PROMPT", "from env prompt") };
+
+        let mock_http = Arc::new(MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(MockSessionNotifier::new());
+        let agent = XaiAgent::with_deps(
+            Arc::clone(&mock_notifier),
+            "grok-3",
+            "test-key",
+            Arc::clone(&mock_http),
+        )
+        .with_md_loader(MockTrogonMdLoader(Some("from trogon md".to_string())));
+        unsafe { std::env::remove_var("XAI_SYSTEM_PROMPT") };
+
+        agent.test_insert_session("t3", "/tmp", None).await;
+        mock_http.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new("t3", vec![ContentBlock::from("hi")]))
+            .await
+            .unwrap();
+
+        let calls = mock_http.calls.lock().unwrap();
+        let input = &calls.last().unwrap().input;
+        let system_item = input.iter().find(|item| item.role() == Some("system"))
+            .expect("system item must be present");
+        let content = system_item.content().unwrap_or_default();
+        let trogon_pos = content.find("from trogon md").expect("TROGON.md content missing");
+        let env_pos = content.find("from env prompt").expect("env prompt missing");
+        assert!(trogon_pos < env_pos, "TROGON.md must be prepended before session system prompt");
     }
 
     // ── MockSessionStore.remove ───────────────────────────────────────────────

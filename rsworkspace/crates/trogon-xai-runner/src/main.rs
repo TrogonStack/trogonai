@@ -105,6 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    let spawn_api_key = api_key.clone();
+    let spawn_model = default_model.clone();
+    let spawn_prefix = prefix.clone();
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent);
@@ -136,6 +140,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 warn!(error = %e, "xai: failed to open SESSIONS KV bucket — session persistence disabled");
             }
         }
+    }
+
+    {
+        use trogon_xai_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
+        let base_url = std::env::var("XAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+        tokio::spawn(run_spawn_subscriber(
+            nats.clone(),
+            spawn_prefix,
+            spawn_api_key,
+            spawn_model,
+            base_url,
+            Arc::new(ReqwestSpawnClient),
+        ));
     }
 
     let local = tokio::task::LocalSet::new();

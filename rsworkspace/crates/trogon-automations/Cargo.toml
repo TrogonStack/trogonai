@@ -23,7 +23,7 @@ uuid         = { version = "1", features = ["v4"] }
 [dev-dependencies]
 httpmock               = "0.7"
 reqwest                = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 trogon-std             = { path = "../trogon-std", features = ["test-support"] }
 trogon-nats            = { path = "../trogon-nats" }
 tokio                  = { version = "1.49.0", features = ["full"] }

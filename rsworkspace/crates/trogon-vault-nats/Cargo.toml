@@ -18,6 +18,6 @@ tracing      = { workspace = true }
 trogon-vault = { path = "../trogon-vault" }
 
 [dev-dependencies]
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 time                   = "0.3"
 tokio                  = { version = "1.49.0", features = ["macros", "rt-multi-thread", "time"] }

@@ -2,7 +2,7 @@
 
 pub mod agent;
 pub mod agent_runner;
-pub mod trogon_md;
+pub use trogon_runner_tools::trogon_md;
 pub mod elicitation;
 pub mod permission_bridge;
 pub mod prompt_converter;
@@ -14,8 +14,8 @@ pub use trogon_runner_tools::egress::EgressPolicy;
 pub use elicitation::{ElicitationReq, ElicitationTx};
 pub use session_notifier::{NatsSessionNotifier, PromptEventClient, SessionNotifier};
 pub use trogon_runner_tools::{
-    ChannelPermissionChecker, NatsSessionStore, PermissionReq, PermissionTx, SessionState,
-    SessionStore, StoredMcpServer,
+    ChannelPermissionChecker, FsTrogonMdLoader, NatsSessionStore, PermissionReq, PermissionTx,
+    SessionState, SessionStore, StoredMcpServer, TrogonMdLoading,
 };
 pub use trogon_runner_tools::session_store::{
     AuditEntry, AuditOutcome, append_audit_entries,

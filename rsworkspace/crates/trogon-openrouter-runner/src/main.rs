@@ -80,6 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
+    let spawn_api_key = cfg.api_key.clone().unwrap_or_default();
+    let spawn_model = cfg.default_model.clone();
+    let spawn_prefix = cfg.prefix.clone();
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = OpenRouterAgent::new(
         notifier,
@@ -112,6 +116,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 warn!(error = %e, "openrouter: failed to open SESSIONS KV bucket — session persistence disabled");
             }
         }
+    }
+
+    {
+        use trogon_openrouter_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
+        let base_url = std::env::var("OPENROUTER_BASE_URL")
+            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+        let site_url = std::env::var("OPENROUTER_SITE_URL")
+            .unwrap_or_else(|_| "https://trogonai.com".to_string());
+        let site_name = std::env::var("OPENROUTER_SITE_NAME")
+            .unwrap_or_else(|_| "TrogonAI".to_string());
+        tokio::spawn(run_spawn_subscriber(
+            nats.clone(),
+            spawn_prefix,
+            spawn_api_key,
+            spawn_model,
+            base_url,
+            site_url,
+            site_name,
+            Arc::new(ReqwestSpawnClient),
+        ));
     }
 
     let local = tokio::task::LocalSet::new();

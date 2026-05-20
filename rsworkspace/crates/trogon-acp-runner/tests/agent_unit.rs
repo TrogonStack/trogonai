@@ -16,12 +16,22 @@ use agent_client_protocol::{
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use trogon_acp_runner::{
-    GatewayConfig, SessionStore, TrogonAgent,
+    GatewayConfig, SessionStore, TrogonAgent, TrogonMdLoading,
     agent_runner::mock::MockAgentRunner,
     elicitation::ElicitationTx,
     session_notifier::mock::MockSessionNotifier,
     session_store::mock::MemorySessionStore,
 };
+use async_trait::async_trait;
+
+struct MockTrogonMdLoader(Option<String>);
+
+#[async_trait(?Send)]
+impl TrogonMdLoading for MockTrogonMdLoader {
+    async fn load(&self, _cwd: &str) -> Option<String> {
+        self.0.clone()
+    }
+}
 use trogon_agent_core::agent_loop::{AgentError, AgentEvent, ContentBlock as AgentContentBlock, Message};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1578,15 +1588,10 @@ async fn prompt_injects_elicitation_provider_when_elicitation_tx_is_some() {
 
 // ── TROGON.md injection ───────────────────────────────────────────────────────
 
-/// When the session cwd contains a TROGON.md, its content is prepended to the
-/// system_prompt passed to run_chat_streaming.
+/// When the md_loader returns content it is prepended to the system_prompt
+/// passed to run_chat_streaming.
 #[tokio::test]
 async fn prompt_injects_trogon_md_content_into_system_prompt() {
-    let dir = std::env::temp_dir().join("trogon_agent_unit_tmd_inject");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("TROGON.md"), "custom workspace instructions").unwrap();
-    let cwd = dir.to_str().unwrap().to_string();
-
     let runner = MockAgentRunner::new("claude-test");
     let agent = TrogonAgent::new(
         MockSessionNotifier::new(),
@@ -1597,20 +1602,18 @@ async fn prompt_injects_trogon_md_content_into_system_prompt() {
         None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
-    );
+    )
+    .with_md_loader(MockTrogonMdLoader(Some("custom workspace instructions".to_string())));
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent.new_session(NewSessionRequest::new(&cwd)).await.unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let session_id = resp.session_id.to_string();
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
 
             let sp = runner.captured_system_prompt();
-            assert!(sp.is_some(), "system_prompt must be set when TROGON.md is present");
+            assert!(sp.is_some(), "system_prompt must be set when TROGON.md loader returns content");
             assert!(
                 sp.unwrap().contains("custom workspace instructions"),
                 "system_prompt must contain TROGON.md content"
@@ -1619,15 +1622,10 @@ async fn prompt_injects_trogon_md_content_into_system_prompt() {
         .await;
 }
 
-/// When the session has its own system_prompt and a TROGON.md is present, both
-/// appear in the final system_prompt (TROGON.md first).
+/// When the session has its own system_prompt and the md_loader returns content,
+/// both appear in the final system_prompt (TROGON.md first).
 #[tokio::test]
 async fn prompt_prepends_trogon_md_before_session_system_prompt() {
-    let dir = std::env::temp_dir().join("trogon_agent_unit_tmd_prepend");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("TROGON.md"), "trogon instructions").unwrap();
-    let cwd = dir.to_str().unwrap().to_string();
-
     let store = MemorySessionStore::new();
     let runner = MockAgentRunner::new("claude-test");
     let agent = TrogonAgent::new(
@@ -1639,12 +1637,13 @@ async fn prompt_prepends_trogon_md_before_session_system_prompt() {
         None,
         None,
         Arc::new(RwLock::new(None::<GatewayConfig>)),
-    );
+    )
+    .with_md_loader(MockTrogonMdLoader(Some("trogon instructions".to_string())));
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let resp = agent.new_session(NewSessionRequest::new(&cwd)).await.unwrap();
+            let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
             let session_id = resp.session_id.to_string();
 
             // Set a session-level system_prompt directly in the store.
@@ -1652,10 +1651,7 @@ async fn prompt_prepends_trogon_md_before_session_system_prompt() {
             state.system_prompt = Some("session instructions".to_string());
             store.save(&session_id, &state).await.unwrap();
 
-            agent
-                .prompt(PromptRequest::new(session_id, vec![]))
-                .await
-                .unwrap();
+            agent.prompt(PromptRequest::new(session_id, vec![])).await.unwrap();
 
             let sp = runner.captured_system_prompt().unwrap();
             let trogon_pos = sp.find("trogon instructions").unwrap();
