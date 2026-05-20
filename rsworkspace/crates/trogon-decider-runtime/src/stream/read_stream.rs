@@ -16,8 +16,8 @@ pub enum ReadFrom {
 impl ReadFrom {
     /// Reads strictly after the given position.
     ///
-    /// Encapsulates the `+1` arithmetic that checkpoint-resume requires when a
-    /// checkpoint records the position of its last applied event. The result
+    /// Encapsulates the `+1` arithmetic that snapshot-resume requires when a
+    /// snapshot records the position of its last applied event. The result
     /// remains inclusive `Position(p + 1)`, but callers see intent, not math.
     pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflow> {
         let next = position
