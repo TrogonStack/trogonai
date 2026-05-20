@@ -5175,7 +5175,10 @@ mod tests {
             vec![ContentBlock::from("hi".to_string())],
         ));
         let cancel_fut = async {
-            for _ in 0..10 {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             agent.cancel(CancelNotification::new(session_id)).await.unwrap();
