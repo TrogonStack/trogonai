@@ -2,6 +2,17 @@
 //!
 //! Covers both AI providers and external API providers used by trogon-agent.
 
+/// Return the auth header `(name, value)` to use for a given upstream URL.
+///
+/// Anthropic uses `x-api-key`; all other providers use `Authorization: Bearer`.
+pub fn auth_header(url: &str, real_key: &str) -> (String, String) {
+    if url.contains("api.anthropic.com") {
+        ("x-api-key".to_string(), real_key.to_string())
+    } else {
+        ("Authorization".to_string(), format!("Bearer {real_key}"))
+    }
+}
+
 /// Return the HTTPS base URL for a provider name extracted from the request path.
 ///
 /// Returns `None` if the provider is not recognised.

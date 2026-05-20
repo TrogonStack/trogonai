@@ -144,7 +144,7 @@ EXPOSE 8086
 ENTRYPOINT ["acp-nats-server"]
 
 # ── Stage 13: trogon-acp-runner runtime ──────────────────────────────────────
-FROM debian:bookworm-slim AS trogon-acp-runner
+FROM debian:trixie-slim AS trogon-acp-runner
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-acp-runner /usr/local/bin/trogon-acp-runner
