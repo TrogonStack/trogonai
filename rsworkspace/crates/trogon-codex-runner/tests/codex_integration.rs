@@ -1944,6 +1944,192 @@ async fn ext_list_children_returns_empty_for_root_session_integration() {
         .await;
 }
 
+// ── session/export and session/import integration ────────────────────────────
+
+/// `ext_method("session/export")` must return the accumulated history after a
+/// real prompt: one user message and one assistant message (from text-delta events).
+#[tokio::test(flavor = "current_thread")]
+async fn ext_method_export_after_prompt_contains_history() {
+    let _guard = bin_env_lock().lock().await;
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let session_id = sess.session_id.to_string();
+
+            // Run a prompt — mock emits one text-delta ("event 0") then turn/completed.
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    session_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("question"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+            // Export must return user + assistant messages.
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": session_id }).to_string(),
+            )
+            .unwrap();
+            let export_resp = agent
+                .ext_method(ExtRequest::new("session/export", raw_params.into()))
+                .await
+                .expect("session/export must succeed after prompt");
+
+            let msgs: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export_resp.0.get())
+                    .expect("export response must be valid PortableMessage JSON");
+
+            assert_eq!(msgs.len(), 2, "export must have user + assistant messages");
+            assert_eq!(msgs[0].role, "user");
+            assert_eq!(msgs[0].text, "question");
+            assert_eq!(msgs[1].role, "assistant");
+            assert_eq!(msgs[1].text, "event 0", "assistant text must be the mock text-delta");
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
+/// Full export→import round-trip:
+///
+/// 1. new_session("src") → prompt → export (user + assistant messages)
+/// 2. new_session("dst") → import using src's export JSON → no error
+/// 3. export from "dst" before a prompt returns [] (pending_history not yet materialized)
+/// 4. prompt on "dst" consumes pending_history → export from "dst" shows new turn messages
+#[tokio::test(flavor = "current_thread")]
+async fn ext_method_export_import_round_trip() {
+    let _guard = bin_env_lock().lock().await;
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+
+            // ── Step 1: build history in "src" via a real prompt ──────────────
+            let src = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("q"))],
+                ))
+                .await
+                .unwrap();
+
+            // ── Step 2: export from src ───────────────────────────────────────
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": src_id }).to_string(),
+            )
+            .unwrap();
+            let export_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .expect("session/export from src must succeed");
+
+            let src_msgs: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export_resp.0.get())
+                    .expect("src export must be valid PortableMessage JSON");
+
+            assert_eq!(src_msgs.len(), 2, "src export must have user + assistant messages");
+            assert_eq!(src_msgs[0].role, "user");
+            assert_eq!(src_msgs[0].text, "q");
+            assert_eq!(src_msgs[1].role, "assistant");
+
+            // ── Step 3: create "dst" and import src's export ──────────────────
+            let dst = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let dst_id = dst.session_id.to_string();
+
+            let src_json = export_resp.0.get().to_string();
+            let import_params = serde_json::value::RawValue::from_string(
+                format!(r#"{{"sessionId":"{}","messages":{}}}"#, dst_id, src_json),
+            )
+            .unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+                .expect("session/import into dst must succeed");
+
+            // ── Step 3.5: export from dst before any prompt ───────────────────
+            // After import, export must return the imported messages immediately
+            // (consistent with xai/openrouter/acp — no prompt required).
+            let pre_prompt_export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": dst_id }).to_string(),
+            )
+            .unwrap();
+            let pre_prompt_export_resp = agent
+                .ext_method(ExtRequest::new("session/export", pre_prompt_export_params.into()))
+                .await
+                .expect("session/export from dst before prompt must succeed");
+            let pre_prompt_msgs: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(pre_prompt_export_resp.0.get())
+                    .expect("pre-prompt export must be valid JSON");
+            assert_eq!(
+                pre_prompt_msgs.len(),
+                src_msgs.len(),
+                "export before prompt must return imported messages"
+            );
+
+            // ── Step 4: prompt on dst to consume pending_history ──────────────
+            // pending_history is prepended to user_input for the codex subprocess.
+            let dst_resp = agent
+                .prompt(PromptRequest::new(
+                    dst_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("follow-up"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(dst_resp.stop_reason, StopReason::EndTurn);
+
+            // ── Step 5: export from dst after prompt ──────────────────────────
+            // History = imported messages + new user + assistant (4 total).
+            let export_dst_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": dst_id }).to_string(),
+            )
+            .unwrap();
+            let export_dst_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
+                .await
+                .expect("session/export from dst must succeed after prompt");
+
+            let dst_msgs: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export_dst_resp.0.get())
+                    .expect("dst export must be valid PortableMessage JSON");
+
+            assert_eq!(
+                dst_msgs.len(),
+                src_msgs.len() + 2,
+                "dst export must have imported messages + new user + assistant"
+            );
+            // First messages are the imported ones.
+            for (i, src) in src_msgs.iter().enumerate() {
+                assert_eq!(dst_msgs[i].role, src.role);
+                assert_eq!(dst_msgs[i].text, src.text);
+            }
+            // Last two are the new turn.
+            let new_user = &dst_msgs[src_msgs.len()];
+            let new_asst = &dst_msgs[src_msgs.len() + 1];
+            assert_eq!(new_user.role, "user");
+            assert_eq!(new_user.text, "follow-up");
+            assert_eq!(new_asst.role, "assistant");
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
 /// `ext_method("session/list_children")` must return only direct children,
 /// not grandchildren.  For a chain A→B→C, querying A returns [B] and B returns [C].
 #[tokio::test(flavor = "current_thread")]

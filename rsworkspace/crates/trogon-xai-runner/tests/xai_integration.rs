@@ -5206,3 +5206,223 @@ async fn bash_tool_spec_has_correct_parameters_schema() {
         panic!("bash tool must be ToolSpec::Function, not ServerSide");
     }
 }
+
+// ── ext_method / session/export and session/import (integration) ──────────────
+
+#[tokio::test]
+async fn ext_method_export_returns_session_history_as_portable_messages() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent
+        .test_insert_session_with_history(
+            "export-1",
+            "/tmp",
+            vec![
+                trogon_xai_runner::Message::user("hi"),
+                trogon_xai_runner::Message::assistant_text("hello"),
+            ],
+        )
+        .await;
+
+    let raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"export-1"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(raw)))
+        .await
+        .unwrap();
+
+    let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(resp.0.get()).unwrap();
+
+    assert_eq!(portable.len(), 2, "expected 2 messages; got: {portable:?}");
+    assert_eq!(portable[0].role, "user");
+    assert_eq!(portable[0].text, "hi");
+    assert_eq!(portable[1].role, "assistant");
+    assert_eq!(portable[1].text, "hello");
+}
+
+#[tokio::test]
+async fn ext_method_import_replaces_history_and_export_verifies() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent.test_insert_session("dst-1", "/tmp", None).await;
+
+    let import_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-1","messages":[{"role":"user","text":"imported msg"}]}"#.to_string(),
+    )
+    .unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    let export_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-1"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_raw),
+        ))
+        .await
+        .unwrap();
+
+    let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(resp.0.get()).unwrap();
+
+    assert_eq!(portable.len(), 1, "expected 1 imported message; got: {portable:?}");
+    assert_eq!(portable[0].text, "imported msg");
+}
+
+#[tokio::test]
+async fn ext_method_export_import_round_trip() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent
+        .test_insert_session_with_history(
+            "src-rt",
+            "/tmp",
+            vec![
+                trogon_xai_runner::Message::user("q"),
+                trogon_xai_runner::Message::assistant_text("a"),
+            ],
+        )
+        .await;
+    agent.test_insert_session("dst-rt", "/tmp", None).await;
+
+    // Export from "src-rt"
+    let export_src_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"src-rt"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_src_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Import into "dst-rt" using the raw JSON from export
+    let exported_json = resp.0.get().to_string();
+    let import_params_str = format!(r#"{{"sessionId":"dst-rt","messages":{exported_json}}}"#);
+    let import_raw = serde_json::value::RawValue::from_string(import_params_str).unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Export from "dst-rt"
+    let export_dst_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-rt"}"#.to_string(),
+    )
+    .unwrap();
+    let dst_resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_dst_raw),
+        ))
+        .await
+        .unwrap();
+
+    let src_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(&exported_json).unwrap();
+    let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(dst_resp.0.get()).unwrap();
+
+    assert_eq!(
+        src_portable.len(),
+        dst_portable.len(),
+        "round-trip must preserve message count"
+    );
+    for (i, (s, d)) in src_portable.iter().zip(dst_portable.iter()).enumerate() {
+        assert_eq!(s.role, d.role, "role mismatch at index {i}");
+        assert_eq!(s.text, d.text, "text mismatch at index {i}");
+    }
+}
+
+/// `session/import` must clear `last_response_id` so the next prompt sends the
+/// full imported history to xAI rather than using a stale `previous_response_id`
+/// that would reference the old conversation thread and silently ignore the import.
+#[tokio::test]
+async fn ext_method_import_clears_last_response_id() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Turn 1 response (gives the session a last_response_id).
+    mock.push_response(text_response_with_id("first reply", "resp_turn1"));
+    // Turn 2 response (after import; must use full history, not previous_response_id).
+    mock.push_response(text_response(&["second reply"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Turn 1: establishes last_response_id = "resp_turn1".
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("first question"))],
+        ))
+        .await
+        .unwrap();
+
+    // Import replaces history with new messages; must clear last_response_id.
+    let import_raw = serde_json::value::RawValue::from_string(format!(
+        r#"{{"sessionId":"{sid}","messages":[{{"role":"user","text":"imported user"}},{{"role":"assistant","text":"imported assistant"}}]}}"#,
+    ))
+    .unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Turn 2: must send full history (imported messages + new user), not previous_response_id.
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("follow-up"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected two recorded HTTP requests");
+
+    // Turn 2 must NOT send previous_response_id — import must have cleared it.
+    assert!(
+        calls[1].previous_response_id.is_none(),
+        "import must clear last_response_id; turn after import must not send previous_response_id"
+    );
+    // Turn 2 input must include the imported history + the new user message.
+    assert!(
+        calls[1].input.len() >= 3,
+        "turn after import must send imported messages + new user message, got {} items",
+        calls[1].input.len()
+    );
+    let last_input = calls[1].input.last().unwrap();
+    assert_eq!(last_input.role().unwrap(), "user");
+    assert_eq!(last_input.content().unwrap(), "follow-up");
+}
