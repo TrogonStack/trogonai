@@ -93,3 +93,41 @@ impl SessionNotifier for MockSessionNotifier {
         self.notifications.lock().unwrap().push(notification);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use agent_client_protocol::{SessionNotification, SessionUpdate, ContentChunk};
+    use super::SessionNotifier as _;
+    use super::MockSessionNotifier;
+
+    fn test_notification(session_id: impl Into<String>) -> SessionNotification {
+        SessionNotification::new(
+            session_id.into(),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new("hello".into())),
+        )
+    }
+
+    #[tokio::test]
+    async fn mock_notify_captures_notifications() {
+        let notifier = MockSessionNotifier::new();
+        assert!(notifier.notifications.lock().unwrap().is_empty());
+        notifier.notify(test_notification("sess-1")).await;
+        notifier.notify(test_notification("sess-2")).await;
+        let captured = notifier.notifications.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn arc_blanket_impl_delegates_to_inner() {
+        let notifier = Arc::new(MockSessionNotifier::new());
+        notifier.notify(test_notification("arc-sess")).await;
+        assert_eq!(notifier.notifications.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mock_default_starts_empty() {
+        let notifier = MockSessionNotifier::default();
+        assert!(notifier.notifications.lock().unwrap().is_empty());
+    }
+}
