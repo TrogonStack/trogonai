@@ -1115,6 +1115,157 @@ mod tests {
         assert_eq!(expand_tilde("~nodot"), PathBuf::from("~nodot"));
     }
 
+    // ── strip_code_fence ──────────────────────────────────────────────────────
+
+    #[test]
+    fn strip_code_fence_plain_fence() {
+        assert_eq!(strip_code_fence("```\n# Title\n```"), "# Title");
+    }
+
+    #[test]
+    fn strip_code_fence_markdown_lang() {
+        assert_eq!(strip_code_fence("```markdown\n# Title\n```"), "# Title");
+    }
+
+    #[test]
+    fn strip_code_fence_md_lang() {
+        assert_eq!(strip_code_fence("```md\n# Title\n```"), "# Title");
+    }
+
+    #[test]
+    fn strip_code_fence_no_fence_passthrough() {
+        assert_eq!(strip_code_fence("# Title\nsome text"), "# Title\nsome text");
+    }
+
+    #[test]
+    fn strip_code_fence_trims_trailing_whitespace() {
+        let input = "```\n# Title\n\n```";
+        let out = strip_code_fence(input);
+        assert_eq!(out, "# Title", "got: {out:?}");
+    }
+
+    #[test]
+    fn strip_code_fence_empty_string() {
+        assert_eq!(strip_code_fence(""), "");
+    }
+
+    // ── find_git_root ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn find_git_root_returns_none_when_no_git_dir() {
+        let dir = std::env::temp_dir().join("trogon_no_git");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(find_git_root(&dir).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_git_root_finds_direct_git_dir() {
+        let dir = std::env::temp_dir().join("trogon_has_git");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let root = find_git_root(&dir);
+        assert_eq!(root, Some(dir.clone()));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_git_root_traverses_up_to_git_dir() {
+        let base = std::env::temp_dir().join("trogon_git_traverse");
+        let child = base.join("a").join("b").join("c");
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(base.join(".git")).unwrap();
+        let root = find_git_root(&child);
+        assert_eq!(root, Some(base.clone()));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    // ── detect_languages ──────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_languages_empty_dir_returns_none() {
+        let dir = std::env::temp_dir().join("trogon_langs_empty");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(detect_languages(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detect_languages_cargo_toml_detected_as_rust() {
+        let dir = std::env::temp_dir().join("trogon_langs_rust");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "").unwrap();
+        let langs = detect_languages(&dir);
+        assert!(langs.contains(&"Rust"), "got: {langs:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detect_languages_multiple_indicators() {
+        let dir = std::env::temp_dir().join("trogon_langs_multi");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "").unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        let langs = detect_languages(&dir);
+        assert!(langs.contains(&"Rust"), "rust missing: {langs:?}");
+        assert!(langs.contains(&"JavaScript/TypeScript"), "js missing: {langs:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── build_init_prompt ─────────────────────────────────────────────────────
+
+    #[test]
+    fn build_init_prompt_contains_required_sections() {
+        let dir = std::env::temp_dir().join("trogon_init_prompt");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "").unwrap();
+
+        let fs = MockFs::new();
+        let prompt = build_init_prompt(&dir, &fs);
+
+        assert!(prompt.contains("TROGON.md"), "missing TROGON.md: {prompt}");
+        assert!(prompt.contains("Overview"), "missing Overview: {prompt}");
+        assert!(prompt.contains("Architecture"), "missing Architecture: {prompt}");
+        assert!(prompt.contains("Development"), "missing Development: {prompt}");
+        assert!(prompt.contains("Notes"), "missing Notes: {prompt}");
+        assert!(prompt.contains("Rust"), "missing detected language: {prompt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_init_prompt_includes_readme_when_present() {
+        let dir = std::env::temp_dir().join("trogon_init_readme");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let fs = MockFs::new();
+        let readme_path = dir.join("README.md");
+        fs.add_file(readme_path.to_str().unwrap(), "My special readme content.");
+
+        let prompt = build_init_prompt(&dir, &fs);
+        assert!(prompt.contains("My special readme content."), "readme not included: {prompt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_init_prompt_project_name_from_dir() {
+        let dir = std::env::temp_dir().join("my_cool_project");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let fs = MockFs::new();
+        let prompt = build_init_prompt(&dir, &fs);
+        assert!(prompt.contains("my_cool_project"), "project name missing: {prompt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // ── apply_model_switch ────────────────────────────────────────────────────
 
     use crate::cross_runner::mock::MockRunnerSwitcher;
