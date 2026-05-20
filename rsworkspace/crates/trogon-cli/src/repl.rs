@@ -1,6 +1,8 @@
 use crate::fs::Fs;
 use crate::nats::NatsClient;
 use crate::session::{Session, StreamEvent, TrogonSession};
+use crate::CrossRunnerSwitcher;
+use trogon_registry::RegistryStore;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -133,13 +135,14 @@ fn join_continuation(s: &str) -> String {
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
-pub async fn run<N: NatsClient + Clone, F: Fs>(
+pub async fn run<N: NatsClient + Clone, F: Fs, S: RegistryStore>(
     nats: N,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
+    mut switcher: CrossRunnerSwitcher<S>,
 ) -> anyhow::Result<()> {
-    let prefix = prefix.to_string();
+    let mut prefix = prefix.to_string();
     let mut session = TrogonSession::new(nats.clone(), &prefix, cwd.clone()).await?;
 
     let history_path = expand_tilde(HISTORY_PATH);
@@ -180,18 +183,22 @@ pub async fn run<N: NatsClient + Clone, F: Fs>(
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/model" && !arg.is_empty() {
-                        let model = arg.trim().to_string();
-                        let mut cfg = read_config(&fs);
-                        cfg["model"] = serde_json::Value::String(model.clone());
-                        if let Err(e) = write_config(&cfg, &fs) {
-                            eprintln!("error saving config: {e}");
-                        }
-                        match session.set_model(&model).await {
-                            Ok(()) => println!("model updated: {model}"),
-                            Err(e) => {
-                                eprintln!("error updating model on runner: {e}");
-                                println!("model saved to config — takes effect on next session");
+                        let model_id = arg.trim().to_string();
+                        let cwd_str = cwd.to_str().unwrap_or(".");
+                        match switcher.switch_model(&prefix, session.session_id(), &model_id, cwd_str).await {
+                            Ok((new_prefix, new_session_id)) => {
+                                if new_prefix == prefix {
+                                    println!("Already on a runner that supports {model_id}");
+                                } else {
+                                    session.close().await;
+                                    session = TrogonSession::from_existing(nats.clone(), &new_prefix, new_session_id);
+                                    prefix = new_prefix;
+                                    session_used_tokens = 0;
+                                    session_context_size = 0;
+                                    println!("Switched to {model_id}");
+                                }
                             }
+                            Err(e) => eprintln!("Error switching model: {e}"),
                         }
                     } else if cmd == "/compact" {
                         let subject = format!("{prefix}.compactor.compact");
