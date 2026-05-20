@@ -20,6 +20,7 @@ trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-decider = { path = "crates/trogon-decider" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
+trogon-decider-nats = { path = "crates/trogon-decider-nats" }
 trogon-cron-jobs-proto = { path = "crates/trogon-cron-jobs-proto" }
 trogon-std = { path = "crates/trogon-std" }
 

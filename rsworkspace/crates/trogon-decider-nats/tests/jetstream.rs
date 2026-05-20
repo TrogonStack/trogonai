@@ -9,9 +9,9 @@ use async_nats::{
 };
 use futures::future::join_all;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use trogon_decider_runtime::nats::{
+use trogon_decider_nats::{
     JetStreamStore, JetStreamStoreError, NatsSnapshotConfig, SnapshotChange, SnapshotStoreError, StreamStoreError,
-    StreamSubjectResolver, SubjectState, checkpoint_key, list_snapshots, maybe_advance_checkpoint,
+    StreamSubjectResolver, SubjectState, TROGON_EVENT_TYPE, checkpoint_key, list_snapshots, maybe_advance_checkpoint,
     persist_snapshot_change, read_checkpoint, read_snapshot_map, snapshot_key, subject_current_position,
     write_checkpoint,
 };
@@ -20,8 +20,7 @@ use trogon_decider_runtime::{
     EventDecode, EventEncode, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, Headers, ReadFrom,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotPayloadData,
     SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite, Snapshots, StreamAppend,
-    StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE, TokioSnapshotTaskScheduler,
-    WriteSnapshotRequest,
+    StreamPosition, StreamRead, StreamWritePrecondition, TokioSnapshotTaskScheduler, WriteSnapshotRequest,
 };
 use trogon_std::{NowV7, UuidV7Generator};
 use uuid::Uuid;
@@ -406,7 +405,7 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
         event_id: Some(EventId::from(event_id)),
         value: value.into(),
     };
-    Ok(encode_event(&event, &Headers::empty())?)
+    encode_event(&event, &Headers::empty())
 }
 
 fn debug_error<E>(error: E) -> std::io::Error

@@ -1,4 +1,4 @@
-use trogon_decider_runtime::nats::{JetStreamStoreError, SnapshotStoreError};
+use trogon_decider_nats::{JetStreamStoreError, SnapshotStoreError};
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
 
 use crate::commands::domain::MessageHeadersError;

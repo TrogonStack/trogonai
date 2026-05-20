@@ -35,6 +35,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 trogon-nats = { path = "../trogon-nats" }
+trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-cron-jobs-proto = { workspace = true }
 trogon-service-config = { workspace = true }

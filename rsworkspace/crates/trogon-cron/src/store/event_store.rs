@@ -1,5 +1,5 @@
 use async_nats::jetstream::{self, kv};
-use trogon_decider_runtime::nats::{JetStreamStore, NatsSnapshotConfig};
+use trogon_decider_nats::{JetStreamStore, NatsSnapshotConfig};
 use trogon_decider_runtime::{
     AppendStreamRequest, AppendStreamResponse, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
     ReadStreamResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite,
