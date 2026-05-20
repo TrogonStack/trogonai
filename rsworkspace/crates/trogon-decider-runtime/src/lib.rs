@@ -5,9 +5,22 @@
 //! semantics must stay stable across backends: event envelopes, metadata
 //! headers, stream reads, stream appends, and stream positions.
 //!
-//! The crate deliberately avoids choosing an execution loop, storage backend,
-//! or checkpoint strategy. Applications compose those policies around these
-//! primitives so adapters can remain thin translations to their native SDKs.
+//! The crate deliberately avoids choosing a storage backend or deployment
+//! topology. Applications compose those policies around these primitives so
+//! adapters can remain thin translations to their native SDKs.
+//!
+//! # Command Execution
+//!
+//! [`CommandExecution`] is the runtime boundary for applying one [`Decider`]
+//! command to one stream. It rebuilds command state from stream history, asks
+//! the decider for the next events, encodes those events into storage
+//! envelopes, and appends them through the [`StreamAppend`] contract.
+//!
+//! The execution API keeps domain errors, codec errors, stream-read errors, and
+//! stream-append errors separated by phase. That separation lets applications
+//! retry infrastructure failures without treating domain rejection as a storage
+//! problem, and it lets storage adapters stay focused on the backend-specific
+//! read and append operations.
 //!
 //! # Position Semantics
 //!
@@ -40,12 +53,15 @@
 
 /// Event envelopes and codec traits used by stream storage adapters.
 pub mod event;
+/// Command execution boundary for applying decider commands to streams.
+pub mod execution;
 /// Metadata header value objects carried alongside event payloads.
 pub mod headers;
 /// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
 pub use event::{Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamEvent};
+pub use execution::{CommandError, CommandExecution, CommandResult, ExecutionResult};
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadAfterOverflow, ReadFrom, ReadStreamRequest,
