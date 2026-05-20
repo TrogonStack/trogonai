@@ -4613,10 +4613,22 @@ async fn no_tools_omits_tools_from_http_request_via_nats() {
             h.expect_n_publishes(2).await;
 
             let call = h.http.last_call().unwrap();
+            // Server-side tools are omitted when none are enabled.
+            // The standard client-side tools (read_file, write_file, …) are
+            // always injected via all_tool_defs() regardless of enabled_tools.
+            let server_side: Vec<_> = call
+                .tools
+                .iter()
+                .filter(|t| matches!(t, trogon_xai_runner::ToolSpec::ServerSide(_)))
+                .collect();
             assert!(
-                call.tools.is_empty(),
-                "tools must be empty when no tools are enabled; got: {:?}",
-                call.tools.iter().map(|t| t.name()).collect::<Vec<_>>()
+                server_side.is_empty(),
+                "no server-side tools must be present when none are enabled; got: {:?}",
+                server_side.iter().map(|t| t.name()).collect::<Vec<_>>()
+            );
+            assert!(
+                !call.tools.is_empty(),
+                "standard client-side tools must always be present"
             );
         })
         .await;
@@ -5756,6 +5768,345 @@ async fn system_prompt_absent_when_env_var_not_set_via_nats() {
                 call.inputs[0].role(),
                 Some("user"),
                 "the single input item must have role 'user'"
+            );
+        })
+        .await;
+}
+
+// ── trogon-tools integration via NATS ─────────────────────────────────────────
+
+/// A new session must have all trogon-tools in the HTTP request tools list
+/// without any explicit set_session_config_option call.
+#[tokio::test]
+async fn new_session_has_trogon_tools_in_http_request_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![XaiEvent::Done]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read a file")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let call = h.http.last_call().unwrap();
+            let tool_names: Vec<_> = call.tools.iter().map(|t| t.name()).collect();
+            for expected in &["read_file", "write_file", "str_replace", "search_files", "git_status"] {
+                assert!(
+                    tool_names.contains(expected),
+                    "{expected} must be in HTTP request tools by default; got: {tool_names:?}"
+                );
+            }
+        })
+        .await;
+}
+
+/// When the model returns a FunctionCall for a trogon-tool (read_file), the
+/// agent must dispatch it and send a follow-up HTTP request with the tool
+/// output as a FunctionCallOutput item.
+#[tokio::test]
+async fn trogon_tool_dispatch_via_nats_sends_follow_up() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Round 1: model requests read_file (path may not exist — we only
+            // verify that dispatch happens and output is returned).
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-nats-1".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-rf-nats".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"/nonexistent_integration_test_file.txt"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            // Round 2: model replies after receiving tool output.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read that file")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up call after trogon-tool dispatch");
+            let follow_up_inputs = &calls[1].inputs;
+            assert!(
+                follow_up_inputs.iter().any(|item| matches!(
+                    item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-rf-nats"
+                )),
+                "follow-up must contain FunctionCallOutput for cid-rf-nats"
+            );
+        })
+        .await;
+}
+
+/// read_file with a relative path must resolve against the session's cwd.
+/// Creates a real file in a tempdir, opens a session with that dir as cwd,
+/// then asks the model to read the file by relative name — the follow-up must
+/// contain the file content.
+#[tokio::test]
+async fn trogon_tool_uses_session_cwd_for_relative_path_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use tempfile::TempDir;
+            let dir = TempDir::new().unwrap();
+            std::fs::write(dir.path().join("marker.txt"), "nats-cwd-content\n").unwrap();
+            let cwd = dir.path().to_str().unwrap().to_string();
+
+            let h = Harness::new();
+
+            // Create a session with the tempdir as cwd.
+            let before = h.nats.published_payloads().len();
+            h.global(
+                "acp.agent.session.new",
+                NewSessionRequest::new(&cwd),
+                "r.new_cwd",
+            );
+            let payloads = h.expect_n_publishes(before + 1).await;
+            let val: serde_json::Value =
+                serde_json::from_slice(payloads.last().unwrap()).unwrap();
+            let sid = val["sessionId"].as_str().unwrap().to_string();
+
+            // Round 1: model requests read_file with a relative path.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-cwd-nats".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-cwd-nats".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"marker.txt"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            // Round 2: model replies after tool output.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "done".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("read the marker")]),
+                "r.prompt_cwd",
+            );
+            h.expect_n_publishes(before + 2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up after read_file");
+            let output = calls[1].inputs.iter().find_map(|item| {
+                if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
+                    if call_id == "cid-cwd-nats" { Some(output.as_str()) } else { None }
+                } else {
+                    None
+                }
+            });
+            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-cwd-nats");
+            assert!(
+                output.unwrap().contains("nats-cwd-content"),
+                "tool output must contain file content resolved from session cwd, got: {:?}",
+                output
+            );
+        })
+        .await;
+}
+
+/// fetch_url targeting a link-local / metadata address must be blocked by the
+/// egress policy.  The agent must still send a follow-up with the error string.
+#[tokio::test]
+async fn fetch_url_egress_blocked_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "r-egress-nats".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "cid-fetch-nats".to_string(),
+                    name: "fetch_url".to_string(),
+                    arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
+                },
+                XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+                XaiEvent::Done,
+            ]);
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "blocked".to_string() },
+                XaiEvent::Done,
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("fetch metadata")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "agent must make a follow-up after blocked fetch_url");
+            let output = calls[1].inputs.iter().find_map(|item| {
+                if let InputItem::FunctionCallOutput { call_id, output, .. } = item {
+                    if call_id == "cid-fetch-nats" { Some(output.as_str()) } else { None }
+                } else {
+                    None
+                }
+            });
+            assert!(output.is_some(), "follow-up must contain FunctionCallOutput for cid-fetch-nats");
+            assert!(
+                output.unwrap().contains("blocked by egress policy"),
+                "output must contain egress block message, got: {:?}", output
+            );
+        })
+        .await;
+}
+
+// ── session/export returns history via NATS ───────────────────────────────────
+
+/// `session/export` dispatched through the NATS ext routing must return the
+/// session's accumulated history as portable messages.
+#[tokio::test]
+async fn export_via_nats_returns_session_history() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Prompt to build some history.
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-export-test".to_string() },
+                XaiEvent::TextDelta { text: "hello".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            // Export via global ext subject.
+            let params_json = serde_json::json!({ "sessionId": sid }).to_string();
+            let params = serde_json::value::RawValue::from_string(params_json).unwrap();
+            h.global(
+                "acp.agent.ext.session/export",
+                ExtRequest::new("session/export", params.into()),
+                "r.export",
+            );
+            let payloads = h.expect_n_publishes(3).await; // publishes: 3
+
+            let val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            assert!(
+                val.get("code").is_none(),
+                "session/export must not return an error; got: {val}"
+            );
+            let messages = val.as_array().expect("session/export must return a JSON array");
+            assert!(
+                !messages.is_empty(),
+                "export must return at least one message after a prompt"
+            );
+            let last = messages.last().unwrap();
+            assert_eq!(
+                last["role"].as_str(),
+                Some("assistant"),
+                "last exported message must be the assistant reply"
+            );
+            assert_eq!(
+                last["text"].as_str(),
+                Some("hello"),
+                "exported assistant text must match the prompt response"
+            );
+        })
+        .await;
+}
+
+// ── session/import clears last_response_id via NATS ──────────────────────────
+
+/// After a prompt sets `last_response_id`, a `session/import` via NATS must
+/// clear it so the next prompt sends the full history instead of using the
+/// stale stateful API thread.
+#[tokio::test]
+async fn import_via_nats_clears_last_response_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await; // publishes: 1
+
+            // Turn 1: prompt → sets last_response_id to "resp-turn1".
+            h.http.push(vec![
+                XaiEvent::ResponseId { id: "resp-turn1".to_string() },
+                XaiEvent::TextDelta { text: "two".to_string() },
+                XaiEvent::Done,
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("What is 1+1?")]),
+                "r.prompt1",
+            );
+            h.expect_n_publishes(2).await; // publishes: 2
+
+            let call1 = h.http.last_call().unwrap();
+            assert_eq!(
+                call1.previous_response_id, None,
+                "first prompt must not have a previous_response_id"
+            );
+
+            // Import new messages via global ext subject — must clear last_response_id.
+            let params_json = serde_json::json!({
+                "sessionId": sid,
+                "messages": [
+                    { "role": "user", "text": "imported user" },
+                    { "role": "assistant", "text": "imported assistant" }
+                ]
+            })
+            .to_string();
+            let params = serde_json::value::RawValue::from_string(params_json).unwrap();
+            h.global(
+                "acp.agent.ext.session/import",
+                ExtRequest::new("session/import", params.into()),
+                "r.import",
+            );
+            h.expect_n_publishes(3).await; // publishes: 3
+
+            // Turn 2: prompt after import — must NOT use previous_response_id.
+            h.http.push(vec![
+                XaiEvent::TextDelta { text: "four".to_string() },
+                XaiEvent::Done,
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("And 2+2?")]),
+                "r.prompt2",
+            );
+            h.expect_n_publishes(4).await; // publishes: 4
+
+            let calls = h.http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have made exactly two HTTP calls");
+            assert_eq!(
+                calls[1].previous_response_id, None,
+                "prompt after import must not carry last_response_id (import cleared it)"
+            );
+            // The second call must include the imported messages in the input.
+            assert!(
+                calls[1].input_len >= 3,
+                "second prompt must include imported messages + new user turn, got input_len={}",
+                calls[1].input_len
             );
         })
         .await;

@@ -138,8 +138,15 @@ impl<S: RegistryStore> Registry<S> {
         Ok(capabilities)
     }
 
-    pub async fn find_by_model(&self, _model_id: &str) -> Result<Option<AgentCapability>, String> {
-        todo!("PR 6 — Dev B")
+    pub async fn find_by_model(&self, model_id: &str) -> Result<Option<AgentCapability>, String> {
+        let all = self.list_all().await.map_err(|e| e.to_string())?;
+        Ok(all.into_iter().find(|cap| {
+            cap.metadata
+                .get("models")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().any(|m| m.as_str() == Some(model_id)))
+                .unwrap_or(false)
+        }))
     }
 }
 
@@ -372,5 +379,84 @@ mod tests {
             .unwrap();
         let result = r.get("BadAgent").await;
         assert!(result.is_err());
+    }
+
+    // ── find_by_model ─────────────────────────────────────────────────────────
+
+    fn agent_with_models(agent_type: &str, model_ids: &[&str]) -> AgentCapability {
+        let mut cap = AgentCapability::new(agent_type, ["chat"], format!("agents.{agent_type}.>"));
+        cap.metadata = serde_json::json!({ "models": model_ids });
+        cap
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_matching_agent() {
+        let r = registry();
+        r.register(&agent_with_models("xai", &["grok-4", "grok-3"])).await.unwrap();
+        r.register(&agent_with_models("openrouter", &["anthropic/claude-sonnet-4-6"])).await.unwrap();
+
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_some(), "must find agent advertising grok-4");
+        assert_eq!(found.unwrap().agent_type, "xai");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_when_no_agent_has_model() {
+        let r = registry();
+        r.register(&agent_with_models("xai", &["grok-4", "grok-3"])).await.unwrap();
+
+        let found = r.find_by_model("o4-mini").await.unwrap();
+        assert!(found.is_none(), "must return None for unknown model");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_when_registry_is_empty() {
+        let r = registry();
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_when_metadata_has_no_models_key() {
+        let r = registry();
+        let mut cap = AgentCapability::new("NoModels", ["chat"], "agents.nomodels.>");
+        cap.metadata = serde_json::json!({ "acp_prefix": "acp" });
+        r.register(&cap).await.unwrap();
+
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_none(), "agent without 'models' key must not match");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_returns_none_when_metadata_is_null() {
+        let r = registry();
+        let cap = AgentCapability::new("NullMeta", ["chat"], "agents.null.>");
+        // metadata defaults to serde_json::Value::Null
+        r.register(&cap).await.unwrap();
+
+        let found = r.find_by_model("grok-4").await.unwrap();
+        assert!(found.is_none(), "agent with null metadata must not match");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_matches_second_model_in_list() {
+        let r = registry();
+        r.register(&agent_with_models("codex", &["o4-mini", "o3", "gpt-4o"])).await.unwrap();
+
+        let found = r.find_by_model("o3").await.unwrap();
+        assert_eq!(found.unwrap().agent_type, "codex");
+    }
+
+    #[tokio::test]
+    async fn find_by_model_model_match_is_exact() {
+        let r = registry();
+        r.register(&agent_with_models("xai", &["grok-3"])).await.unwrap();
+
+        // "grok" is a prefix of "grok-3" but must not match
+        assert!(r.find_by_model("grok").await.unwrap().is_none());
+        // "grok-3-mini" shares prefix but must not match
+        assert!(r.find_by_model("grok-3-mini").await.unwrap().is_none());
+        // exact match must work
+        assert!(r.find_by_model("grok-3").await.unwrap().is_some());
     }
 }

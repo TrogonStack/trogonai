@@ -331,3 +331,72 @@ async fn session_store_key_format_is_tenant_dot_id() {
     let result = kv.get("my-tenant.my-session").await.unwrap();
     assert!(result.is_some(), "key 'my-tenant.my-session' must exist");
 }
+
+// ── NatsSessionStore::load ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn session_store_load_returns_none_for_missing_session() {
+    let (js, _c) = make_js().await;
+    let store = Store::open(&js, 0).await.expect("Store::open");
+    let result = store.load("acme", "nonexistent").await;
+    assert!(result.is_none(), "load must return None when key does not exist");
+}
+
+#[tokio::test]
+async fn session_store_load_returns_saved_snapshot() {
+    let (js, _c) = make_js().await;
+    let store = Store::open(&js, 0).await.expect("open");
+    let snap = sample_snapshot("sess-load", "acme");
+    store.save(&snap).await;
+
+    let loaded = store.load("acme", "sess-load").await.expect("must return snapshot");
+    assert_eq!(loaded.id, "sess-load");
+    assert_eq!(loaded.tenant_id, "acme");
+    assert_eq!(loaded.model.as_deref(), Some("anthropic/claude-sonnet-4-6"));
+    assert_eq!(loaded.messages.len(), 2);
+    assert_eq!(loaded.messages[0].role, "user");
+    assert_eq!(loaded.messages[1].role, "assistant");
+}
+
+#[tokio::test]
+async fn session_store_load_preserves_tools_field() {
+    let (js, _c) = make_js().await;
+    let store = Store::open(&js, 0).await.expect("open");
+    let mut snap = sample_snapshot("tool-sess", "acme");
+    snap.tools = vec!["bash".to_string(), "write_file".to_string(), "read_file".to_string()];
+    store.save(&snap).await;
+
+    let loaded = store.load("acme", "tool-sess").await.expect("must return snapshot");
+    assert_eq!(
+        loaded.tools,
+        vec!["bash", "write_file", "read_file"],
+        "load must preserve tools exactly as saved"
+    );
+}
+
+#[tokio::test]
+async fn session_store_load_returns_latest_after_overwrite() {
+    let (js, _c) = make_js().await;
+    let store = Store::open(&js, 0).await.expect("open");
+    let mut snap = sample_snapshot("sess-ow", "acme");
+    snap.tools = vec!["bash".to_string(), "write_file".to_string()];
+    store.save(&snap).await;
+
+    snap.tools = vec!["bash".to_string()];
+    store.save(&snap).await;
+
+    let loaded = store.load("acme", "sess-ow").await.expect("must return snapshot");
+    assert_eq!(loaded.tools, vec!["bash"], "load must return the overwritten value");
+}
+
+#[tokio::test]
+async fn session_store_load_returns_none_after_remove() {
+    let (js, _c) = make_js().await;
+    let store = Store::open(&js, 0).await.expect("open");
+    let snap = sample_snapshot("sess-rm", "acme");
+    store.save(&snap).await;
+    store.remove("acme", "sess-rm").await;
+
+    let result = store.load("acme", "sess-rm").await;
+    assert!(result.is_none(), "load after remove must return None");
+}

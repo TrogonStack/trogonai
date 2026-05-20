@@ -11,10 +11,13 @@ use agent_client_protocol::{
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse, ModelInfo,
     NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
     ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-    SessionCloseCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionValue,
+    SessionConfigSelectOption, SessionForkCapabilities, SessionId, SessionInfo,
     SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
-    SessionResumeCapabilities, SessionUpdate, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse, StopReason, UsageUpdate,
+    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -23,7 +26,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::agent_loader::{AgentConfig, AgentLoading};
-use crate::client::{Message, OpenRouterClient, OpenRouterEvent};
+use crate::client::{AssembledToolCall, Message, OpenRouterClient, OpenRouterEvent, ToolDef};
 use crate::http_client::OpenRouterHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
@@ -49,6 +52,7 @@ struct OpenRouterSession {
     api_key: Option<String>,
     history: Vec<Message>,
     system_prompt: Option<String>,
+    enabled_tools: Vec<String>,
     created_at: Instant,
     created_at_iso: String,
     parent_session_id: Option<String>,
@@ -74,6 +78,9 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier> {
     skill_loader: Option<Arc<dyn SkillLoading>>,
     session_store: Option<Arc<dyn SessionStoring>>,
     tenant_id: String,
+    registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
+    execution_nats: Option<async_nats::Client>,
+    tool_http_client: reqwest::Client,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier> {
@@ -186,6 +193,9 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
             skill_loader: None,
             session_store: None,
             tenant_id,
+            registry: None,
+            execution_nats: None,
+            tool_http_client: reqwest::Client::new(),
         }
     }
 
@@ -221,6 +231,34 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         self
     }
 
+    pub fn with_execution_backend(
+        mut self,
+        nats: async_nats::Client,
+        registry: trogon_registry::Registry<async_nats::jetstream::kv::Store>,
+    ) -> Self {
+        self.execution_nats = Some(nats);
+        self.registry = Some(Arc::new(registry));
+        self
+    }
+
+    fn all_tool_config_options(enabled_tools: &[String]) -> Vec<SessionConfigOption> {
+        trogon_tools::all_tool_defs()
+            .into_iter()
+            .map(|d| {
+                let enabled = enabled_tools.iter().any(|t| t == &d.name);
+                SessionConfigOption::select(
+                    d.name.clone(),
+                    d.name.clone(),
+                    if enabled { "enabled" } else { "disabled" }.to_string(),
+                    vec![
+                        SessionConfigSelectOption::new("enabled", "Enabled"),
+                        SessionConfigSelectOption::new("disabled", "Disabled"),
+                    ],
+                )
+            })
+            .collect()
+    }
+
     fn build_snapshot(&self, session_id: &str, session: &OpenRouterSession) -> SessionSnapshot {
         let name = session
             .history
@@ -245,6 +283,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         let messages = session
             .history
             .iter()
+            .filter(|m| m.tool_call_id.is_none() && m.tool_calls.is_none())
             .map(|m| SnapshotMessage {
                 role: m.role.clone(),
                 content: if m.content.is_empty() {
@@ -271,7 +310,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
-            tools: vec![],
+            tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
             created_at: session.created_at_iso.clone(),
@@ -309,11 +348,12 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N> {
         }
     }
 
-    /// Trim history to keep it within `max_history` entries.
-    /// Drops the oldest pairs (user + assistant) to preserve ordering.
     fn trim_history(history: &mut Vec<Message>, max: usize) {
         while history.len() > max {
             history.remove(0);
+            while history.first().map(|m| m.role != "user").unwrap_or(false) {
+                history.remove(0);
+            }
         }
     }
 }
@@ -439,6 +479,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 (self.system_prompt.clone(), None)
             };
 
+        let enabled_tools: Vec<String> = trogon_tools::all_tool_defs()
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
+
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         Self::maybe_evict_oldest(&mut sessions);
@@ -450,6 +495,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 api_key,
                 history: Vec::new(),
                 system_prompt: session_system_prompt,
+                enabled_tools: enabled_tools.clone(),
                 created_at: Instant::now(),
                 created_at_iso,
                 parent_session_id: None,
@@ -470,7 +516,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
             .models(self.session_model_state(None))
-            .config_options(vec![]))
+            .config_options(Self::all_tool_config_options(&enabled_tools)))
     }
 
     async fn load_session(
@@ -478,14 +524,73 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         req: agent_client_protocol::LoadSessionRequest,
     ) -> agent_client_protocol::Result<agent_client_protocol::LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let sessions = self.sessions.lock().await;
-        match sessions.get(&session_id) {
-            Some(s) => Ok(agent_client_protocol::LoadSessionResponse::new()
-                .modes(self.session_mode_state())
-                .models(self.session_model_state(s.model.as_deref()))
-                .config_options(vec![])),
-            None => Err(not_found(format!("session {session_id} not found"))),
+        let cwd = req.cwd.to_string_lossy().into_owned();
+
+        {
+            let sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get(&session_id) {
+                return Ok(agent_client_protocol::LoadSessionResponse::new()
+                    .modes(self.session_mode_state())
+                    .models(self.session_model_state(s.model.as_deref()))
+                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+            }
         }
+
+        // Not in memory — try KV snapshot.
+        if let Some(store) = &self.session_store {
+            if let Some(snap) = store.load(&self.tenant_id, &session_id).await {
+                let enabled_tools = if snap.tools.is_empty() {
+                    trogon_tools::all_tool_defs().iter().map(|t| t.name.clone()).collect()
+                } else {
+                    snap.tools.clone()
+                };
+                let history: Vec<crate::client::Message> = snap
+                    .messages
+                    .iter()
+                    .map(|m| crate::client::Message {
+                        role: m.role.clone(),
+                        content: m.content.iter().map(|b| b.text.clone()).collect::<Vec<_>>().join(""),
+                        prompt_tokens: m.usage.as_ref().map(|u| u.input_tokens as u64),
+                        completion_tokens: m.usage.as_ref().map(|u| u.output_tokens as u64),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    })
+                    .collect();
+                let model = snap.model.clone();
+                let created_at_iso = snap.created_at.clone();
+                let parent_session_id = snap.parent_session_id.clone();
+                let branched_at_index = snap.branched_at_index;
+                let api_key = self.global_api_key.clone();
+                let system_prompt = self.system_prompt.clone();
+
+                let mut sessions = self.sessions.lock().await;
+                Self::maybe_evict_oldest(&mut sessions);
+                sessions.insert(
+                    session_id.clone(),
+                    OpenRouterSession {
+                        cwd,
+                        model,
+                        api_key,
+                        history,
+                        system_prompt,
+                        enabled_tools: enabled_tools.clone(),
+                        created_at: Instant::now(),
+                        created_at_iso,
+                        parent_session_id,
+                        branched_at_index,
+                    },
+                );
+                info!(session_id, "openrouter: load_session restored from KV snapshot");
+                return Ok(agent_client_protocol::LoadSessionResponse::new()
+                    .modes(self.session_mode_state())
+                    .models(self.session_model_state(
+                        sessions.get(&session_id).and_then(|s| s.model.as_deref()),
+                    ))
+                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+            }
+        }
+
+        Err(not_found(format!("session {session_id} not found")))
     }
 
     async fn resume_session(
@@ -493,10 +598,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         req: ResumeSessionRequest,
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
-        if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(not_found(format!("session {session_id} not found")));
-        }
-        Ok(ResumeSessionResponse::new())
+        let sessions = self.sessions.lock().await;
+        let s = sessions
+            .get(&session_id)
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+        Ok(ResumeSessionResponse::new()
+            .config_options(Self::all_tool_config_options(&s.enabled_tools)))
     }
 
     async fn fork_session(
@@ -506,7 +613,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_system_prompt) = {
+        let (inherited_model, inherited_key, mut history, inherited_system_prompt, inherited_tools) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -516,6 +623,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 s.api_key.clone(),
                 s.history.clone(),
                 s.system_prompt.clone(),
+                s.enabled_tools.clone(),
             )
         };
 
@@ -540,6 +648,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 api_key: inherited_key,
                 history,
                 system_prompt: inherited_system_prompt,
+                enabled_tools: inherited_tools.clone(),
                 created_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
@@ -556,7 +665,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
             .models(self.session_model_state(inherited_model.as_deref()))
-            .config_options(vec![]))
+            .config_options(Self::all_tool_config_options(&inherited_tools)))
     }
 
     async fn close_session(
@@ -648,6 +757,40 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         }
     }
 
+    async fn set_session_config_option(
+        &self,
+        req: SetSessionConfigOptionRequest,
+    ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
+        let session_id = req.session_id.to_string();
+        let config_id = req.config_id.to_string();
+        let mut sessions = self.sessions.lock().await;
+        let s = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+
+        if let SessionConfigOptionValue::ValueId { value } = &req.value {
+            let val = value.to_string();
+            match val.as_str() {
+                "enabled" => {
+                    if !s.enabled_tools.contains(&config_id) {
+                        s.enabled_tools.push(config_id.clone());
+                    }
+                }
+                "disabled" => {
+                    s.enabled_tools.retain(|t| t != &config_id);
+                }
+                _ => {
+                    warn!(config_id = %config_id, "openrouter: set_session_config_option unknown option — ignored");
+                }
+            }
+        } else {
+            warn!(config_id = %config_id, "openrouter: set_session_config_option unknown option — ignored");
+        }
+
+        let config_options = Self::all_tool_config_options(&s.enabled_tools);
+        Ok(SetSessionConfigOptionResponse::new(config_options))
+    }
+
     async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
 
@@ -676,7 +819,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -686,6 +829,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                 s.api_key.clone(),
                 s.history.clone(),
                 s.system_prompt.clone(),
+                s.enabled_tools.clone(),
+                s.cwd.clone(),
             )
         };
 
@@ -697,6 +842,50 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                     "no API key for session — set OPENROUTER_API_KEY or authenticate first",
                 )
             })?;
+
+        let wasm_prefix: Option<String> = if let (Some(reg), Some(_)) =
+            (&self.registry, &self.execution_nats)
+        {
+            reg.discover("execution")
+                .await
+                .ok()
+                .and_then(|mut entries| entries.drain(..).next())
+                .and_then(|e| {
+                    e.metadata["acp_prefix"]
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| Some("acp.wasm".to_string()))
+                })
+        } else {
+            None
+        };
+
+        let mut tool_defs: Vec<ToolDef> = trogon_tools::all_tool_defs()
+            .into_iter()
+            .filter(|d| enabled_tools.contains(&d.name))
+            .map(|d| ToolDef {
+                name: d.name,
+                description: d.description,
+                parameters: d.input_schema,
+            })
+            .collect();
+
+        if wasm_prefix.is_some() {
+            tool_defs.push(ToolDef {
+                name: "bash".to_string(),
+                description: "Run a shell command in the session sandbox and return its output.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute."
+                        }
+                    },
+                    "required": ["command"]
+                }),
+            });
+        }
 
         // Skip duplicate user message on resume after crash.
         let resuming = messages
@@ -724,123 +913,210 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
         let client = Arc::clone(&self.client);
         let notifier = Arc::clone(&self.notifier);
         let mut assistant_text = String::new();
+        #[allow(unused_assignments)]
         let mut usage: Option<(u64, u64)> = None;
         let mut canceled = false;
 
         let notification_session_id = session_id.clone();
-        let stream_fut = client.chat_stream(&model, &wire_messages, &api_key);
 
-        let mut stream = tokio::select! {
-            s = stream_fut => s,
-            _ = &mut cancel_rx => {
-                canceled = true;
-                futures_util::stream::empty().boxed_local()
-            }
-        };
+        let mut tool_rounds: u32 = 0;
+        const MAX_TOOL_ROUNDS: u32 = 10;
 
-        loop {
-            if canceled {
-                break;
-            }
+        let stop_reason = 'outer: loop {
+            assistant_text.clear();
+            usage = None;
 
-            let next = tokio::time::timeout(self.prompt_timeout, stream.next());
-            let event = tokio::select! {
-                result = next => match result {
-                    Ok(Some(ev)) => ev,
-                    Ok(None) => break,
-                    Err(_) => {
-                        warn!(session_id, "openrouter: stream timed out (no chunk received)");
-                        OpenRouterEvent::Error {
-                            message: "stream timed out".to_string(),
-                        }
-                    }
-                },
+            let stream_fut = client.chat_stream(&model, &wire_messages, &api_key, &tool_defs);
+            let mut stream = tokio::select! {
+                s = stream_fut => s,
                 _ = &mut cancel_rx => {
                     canceled = true;
-                    break;
+                    futures_util::stream::empty().boxed_local()
                 }
             };
 
-            match event {
-                OpenRouterEvent::TextDelta { text } => {
-                    assistant_text.push_str(&text);
-                    notifier
-                        .notify(agent_client_protocol::SessionNotification::new(
-                            notification_session_id.clone(),
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
-                                ContentBlock::from(text),
-                            )),
-                        ))
-                        .await;
-                    if assistant_text.len() > self.max_response_bytes {
-                        warn!(
-                            session_id,
-                            limit = self.max_response_bytes,
-                            actual = assistant_text.len(),
-                            "openrouter: response exceeded size limit, stopping stream early"
-                        );
+            let mut assembled_calls: Vec<AssembledToolCall> = Vec::new();
+
+            loop {
+                if canceled {
+                    break;
+                }
+
+                let next = tokio::time::timeout(self.prompt_timeout, stream.next());
+                let event = tokio::select! {
+                    result = next => match result {
+                        Ok(Some(ev)) => ev,
+                        Ok(None) => break,
+                        Err(_) => {
+                            warn!(session_id, "openrouter: stream timed out (no chunk received)");
+                            OpenRouterEvent::Error {
+                                message: "stream timed out".to_string(),
+                            }
+                        }
+                    },
+                    _ = &mut cancel_rx => {
+                        canceled = true;
+                        break;
+                    }
+                };
+
+                match event {
+                    OpenRouterEvent::TextDelta { text } => {
+                        assistant_text.push_str(&text);
+                        notifier
+                            .notify(agent_client_protocol::SessionNotification::new(
+                                notification_session_id.clone(),
+                                SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::from(text),
+                                )),
+                            ))
+                            .await;
+                        if assistant_text.len() > self.max_response_bytes {
+                            warn!(
+                                session_id,
+                                limit = self.max_response_bytes,
+                                actual = assistant_text.len(),
+                                "openrouter: response exceeded size limit, stopping stream early"
+                            );
+                            break;
+                        }
+                    }
+                    OpenRouterEvent::ToolCallsReady { calls } => {
+                        assembled_calls = calls;
+                        break;
+                    }
+                    OpenRouterEvent::Usage {
+                        prompt_tokens,
+                        completion_tokens,
+                    } => {
+                        usage = Some((prompt_tokens, completion_tokens));
+                        notifier
+                            .notify(agent_client_protocol::SessionNotification::new(
+                                notification_session_id.clone(),
+                                SessionUpdate::UsageUpdate(UsageUpdate::new(
+                                    prompt_tokens,
+                                    completion_tokens,
+                                )),
+                            ))
+                            .await;
+                    }
+                    OpenRouterEvent::Finished {
+                        reason: crate::client::FinishReason::Stop | crate::client::FinishReason::Length,
+                    } => {
+                        drop(stream);
+                        break 'outer StopReason::EndTurn;
+                    }
+                    OpenRouterEvent::Finished { .. } => {}
+                    OpenRouterEvent::Done => {
+                        drop(stream);
+                        break 'outer StopReason::EndTurn;
+                    }
+                    OpenRouterEvent::Error { message } => {
+                        warn!(session_id, error = %message, "openrouter: stream error");
                         break;
                     }
                 }
-                OpenRouterEvent::Usage {
-                    prompt_tokens,
-                    completion_tokens,
-                } => {
-                    usage = Some((prompt_tokens, completion_tokens));
-                    notifier
-                        .notify(agent_client_protocol::SessionNotification::new(
-                            notification_session_id.clone(),
-                            SessionUpdate::UsageUpdate(UsageUpdate::new(
-                                prompt_tokens,
-                                completion_tokens,
-                            )),
-                        ))
-                        .await;
-                }
-                OpenRouterEvent::Finished { .. } => {}
-                OpenRouterEvent::Done => break,
-                OpenRouterEvent::Error { message } => {
-                    warn!(session_id, error = %message, "openrouter: stream error");
-                    break;
-                }
             }
-        }
 
-        // Drop the stream before any awaits so the HTTP connection to OpenRouter
-        // is closed immediately on cancellation, stopping token generation.
-        drop(stream);
+            drop(stream);
+
+            if canceled {
+                break StopReason::Cancelled;
+            }
+
+            if assembled_calls.is_empty() {
+                break StopReason::EndTurn;
+            }
+
+            if tool_rounds >= MAX_TOOL_ROUNDS {
+                warn!(session_id, "openrouter: max tool rounds reached");
+                break StopReason::Cancelled;
+            }
+
+            let tool_calls_msg = Message::assistant_tool_calls(&assembled_calls);
+            messages.push(tool_calls_msg.clone());
+            wire_messages.push(tool_calls_msg);
+
+            let ctx = trogon_tools::ToolContext {
+                proxy_url: String::new(),
+                cwd: cwd.clone(),
+                http_client: self.tool_http_client.clone(),
+            };
+
+            for call in &assembled_calls {
+                let kind = if call.name == "bash" { ToolKind::Execute } else { ToolKind::Other };
+                notifier.notify(agent_client_protocol::SessionNotification::new(
+                    notification_session_id.clone(),
+                    SessionUpdate::ToolCall(
+                        ToolCall::new(call.id.clone(), call.name.clone())
+                            .status(ToolCallStatus::InProgress)
+                            .kind(kind),
+                    ),
+                )).await;
+
+                let result = if call.name == "bash" {
+                    if let Some(nats) = &self.execution_nats {
+                        let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
+                        execute_bash_via_nats(nats, wasm, &session_id, &call.arguments).await
+                    } else {
+                        "bash not available: no execution backend configured".to_string()
+                    }
+                } else if call.name == "fetch_url" {
+                    let input = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .unwrap_or(serde_json::Value::Null);
+                    let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
+                        format!("fetch_url: URL blocked by egress policy: {url}")
+                    } else {
+                        trogon_tools::dispatch_tool(&ctx, &call.name, &input).await
+                    }
+                } else {
+                    let input = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .unwrap_or(serde_json::Value::Null);
+                    trogon_tools::dispatch_tool(&ctx, &call.name, &input).await
+                };
+
+                notifier.notify(agent_client_protocol::SessionNotification::new(
+                    notification_session_id.clone(),
+                    SessionUpdate::ToolCallUpdate(
+                        ToolCallUpdate::new(
+                            call.id.clone(),
+                            ToolCallUpdateFields::new()
+                                .status(ToolCallStatus::Completed)
+                                .raw_output(serde_json::Value::String(result.clone())),
+                        ),
+                    ),
+                )).await;
+
+                let result_msg = Message::tool_result(call.id.clone(), result);
+                messages.push(result_msg.clone());
+                wire_messages.push(result_msg);
+            }
+
+            tool_rounds += 1;
+        };
 
         self.cancel_senders.lock().await.remove(&session_id);
 
-        // Persist assistant turn and trim history.
         {
             let mut sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get_mut(&session_id) {
-                if !resuming {
-                    s.history.push(Message::user(user_input));
-                }
                 if !assistant_text.is_empty() {
                     let msg = if let Some((pt, ct)) = usage {
                         Message::assistant_with_usage(&assistant_text, pt, ct)
                     } else {
                         Message::assistant(&assistant_text)
                     };
-                    s.history.push(msg);
+                    messages.push(msg);
                 }
+                s.history = messages;
                 Self::trim_history(&mut s.history, self.max_history);
-
                 if let Some(store) = &self.session_store {
                     let snapshot = self.build_snapshot(&session_id, s);
                     store.save(&snapshot).await;
                 }
             }
         }
-
-        let stop_reason = if canceled {
-            StopReason::Cancelled
-        } else {
-            StopReason::EndTurn
-        };
 
         Ok(PromptResponse::new(stop_reason))
     }
@@ -864,12 +1140,145 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static>
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
-            "session/export" => { todo!("PR 7 — Dev A") }
-            "session/import" => { todo!("PR 7 — Dev A") }
+            "session/export" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params["sessionId"].as_str()
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let sessions = self.sessions.lock().await;
+                let s = sessions.get(session_id)
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+                let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
+                    .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content.clone() })
+                    .collect();
+                let raw = serde_json::to_string(&portable)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()))
+            }
+            "session/import" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params["sessionId"].as_str()
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                    serde_json::from_value(params["messages"].clone())
+                        .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+                let mut sessions = self.sessions.lock().await;
+                let s = sessions.get_mut(session_id)
+                    .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+                s.history = messages.into_iter()
+                    .map(|m| crate::client::Message { role: m.role, content: m.text, prompt_tokens: None, completion_tokens: None, tool_calls: None, tool_call_id: None })
+                    .collect();
+                Self::trim_history(&mut s.history, self.max_history);
+                let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+                Ok(ExtResponse::new(raw.into()))
+            }
             _ => Err(Error::new(ErrorCode::MethodNotFound.into(), args.method.to_string())),
         }
     }
 
+}
+
+async fn execute_bash_via_nats(
+    nats: &async_nats::Client,
+    wasm_prefix: &str,
+    session_id: &str,
+    arguments: &str,
+) -> String {
+    use std::time::Duration;
+    use agent_client_protocol::{
+        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
+        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    };
+
+    let command = match serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|v| v["command"].as_str().map(str::to_string))
+    {
+        Some(c) => c,
+        None => return "error: missing 'command' in bash arguments".to_string(),
+    };
+
+    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let session_id_owned = session_id.to_string();
+    let nats = nats.clone();
+
+    let result = tokio::time::timeout(Duration::from_secs(30), async move {
+        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
+            .args(vec!["-c".to_string(), command]);
+        let payload = match serde_json::to_vec(&create_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+            Ok(m) => m,
+            Err(e) => return format!("error: {e}"),
+        };
+        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => return format!("error: {e}"),
+        };
+        let tid = create_resp.terminal_id.clone();
+
+        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&wait_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
+            return format!("error: {e}");
+        }
+
+        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&out_req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
+            Ok(m) => m,
+            Err(e) => return format!("error: {e}"),
+        };
+        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
+            Ok(r) => r,
+            Err(e) => return format!("error: {e}"),
+        };
+
+        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
+        if let Ok(payload) = serde_json::to_vec(&rel_req) {
+            let _ = nats.request(format!("{base}.release"), payload.into()).await;
+        }
+
+        out.output
+    })
+    .await;
+
+    match result {
+        Ok(output) => output,
+        Err(_elapsed) => "error: bash execution timed out".to_string(),
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::session_notifier::MockSessionNotifier> {
+    pub async fn test_insert_session_with_history(&self, id: &str, history: Vec<Message>) {
+        self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
+            cwd: "/tmp".to_string(),
+            model: None,
+            api_key: None,
+            history,
+            system_prompt: None,
+            enabled_tools: vec![],
+            created_at: std::time::Instant::now(),
+            created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+        });
+    }
+
+    pub async fn test_insert_session(&self, id: &str) {
+        self.test_insert_session_with_history(id, vec![]).await;
+    }
 }
 
 #[cfg(test)]
@@ -880,8 +1289,8 @@ mod tests {
     use agent_client_protocol::{
         Agent as _, AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock,
         ForkSessionRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
-        PromptRequest, ResumeSessionRequest, SessionId, SetSessionModeRequest,
-        SetSessionModelRequest,
+        PromptRequest, ResumeSessionRequest, SessionId, SetSessionConfigOptionRequest,
+        SetSessionModeRequest, SetSessionModelRequest,
     };
     use super::*;
     use crate::http_client::mock::MockOpenRouterHttpClient;
@@ -921,16 +1330,60 @@ mod tests {
     // ── trim_history ──────────────────────────────────────────────────────────
 
     #[test]
-    fn trim_history_removes_from_front_when_over_limit() {
+    fn trim_history_removes_complete_turn_from_front() {
         let mut history = vec![
             Message::user("a"),
             Message::assistant("b"),
             Message::user("c"),
+            Message::assistant("d"),
         ];
         OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 2);
         assert_eq!(history.len(), 2);
-        assert_eq!(history[0].content, "b");
-        assert_eq!(history[1].content, "c");
+        assert_eq!(history[0].content, "c");
+        assert_eq!(history[1].content, "d");
+    }
+
+    #[test]
+    fn trim_history_skips_multiple_consecutive_non_user_messages() {
+        // Two tool rounds in one turn: user → [tool_calls, tool_result] × 2 → assistant
+        let mut history = vec![
+            Message::user("q1"),
+            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
+                id: "c1".to_string(), name: "read_file".to_string(), arguments: "{}".to_string(),
+            }]),
+            Message::tool_result("c1".to_string(), "r1".to_string()),
+            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
+                id: "c2".to_string(), name: "list_directory".to_string(), arguments: "{}".to_string(),
+            }]),
+            Message::tool_result("c2".to_string(), "r2".to_string()),
+            Message::assistant("a1"),
+            Message::user("q2"),
+            Message::assistant("a2"),
+        ];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 3);
+        assert_eq!(history.len(), 2, "must skip all non-user messages between turns");
+        assert_eq!(history[0].content, "q2");
+        assert_eq!(history[1].content, "a2");
+    }
+
+    #[test]
+    fn trim_history_removes_tool_round_complete_turn() {
+        let mut history = vec![
+            Message::user("q1"),
+            Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
+                id: "call_1".to_string(),
+                name: "read_file".to_string(),
+                arguments: "{}".to_string(),
+            }]),
+            Message::tool_result("call_1".to_string(), "file contents".to_string()),
+            Message::assistant("answer"),
+            Message::user("q2"),
+            Message::assistant("reply2"),
+        ];
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 3);
+        assert_eq!(history.len(), 2, "must trim entire tool round turn");
+        assert_eq!(history[0].content, "q2");
+        assert_eq!(history[1].content, "reply2");
     }
 
     #[test]
@@ -1008,6 +1461,7 @@ mod tests {
             api_key: None,
             history: vec![],
             system_prompt: None,
+            enabled_tools: vec![],
             created_at: Instant::now(),
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
@@ -1136,6 +1590,23 @@ mod tests {
         let snap = agent.build_snapshot("s", &session);
         assert_eq!(snap.parent_session_id.as_deref(), Some("parent-id"));
         assert_eq!(snap.branched_at_index, Some(3));
+    }
+
+    #[test]
+    fn build_snapshot_stores_enabled_tools() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.enabled_tools = vec!["read_file".to_string(), "write_file".to_string()];
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.tools, vec!["read_file", "write_file"]);
+    }
+
+    #[test]
+    fn build_snapshot_empty_enabled_tools_stored_as_empty_vec() {
+        let agent = make_agent();
+        let session = make_session(); // enabled_tools: vec![]
+        let snap = agent.build_snapshot("s", &session);
+        assert!(snap.tools.is_empty());
     }
 
     // ── authenticate ──────────────────────────────────────────────────────────
@@ -1292,6 +1763,55 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test]
+    async fn load_session_restores_from_kv_snapshot_when_not_in_memory() {
+        let snap = crate::session_store::SessionSnapshot {
+            id: "kv-session".to_string(),
+            tenant_id: "default".to_string(),
+            name: "KV Session".to_string(),
+            model: None,
+            tools: vec!["read_file".to_string(), "write_file".to_string()],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        };
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            let resp = agent
+                .load_session(LoadSessionRequest::new(SessionId::from("kv-session"), "/"))
+                .await
+                .expect("load from KV must succeed");
+            let opts = resp.config_options.unwrap_or_default();
+            let enabled: Vec<String> = opts
+                .iter()
+                .filter(|o| {
+                    matches!(
+                        &o.kind,
+                        agent_client_protocol::SessionConfigKind::Select(s)
+                            if s.current_value.to_string() == "enabled"
+                    )
+                })
+                .map(|o| o.id.to_string())
+                .collect();
+            assert!(enabled.contains(&"read_file".to_string()), "read_file must be enabled");
+            assert!(enabled.contains(&"write_file".to_string()), "write_file must be enabled");
+            assert_eq!(enabled.len(), 2, "only the 2 tools from snapshot must be enabled");
+
+            // Session must now be in memory.
+            let sessions = agent.sessions.lock().await;
+            assert!(sessions.contains_key("kv-session"), "session must be in memory after load");
+            assert_eq!(
+                sessions["kv-session"].enabled_tools,
+                vec!["read_file", "write_file"]
+            );
+        }).await;
+    }
+
     // ── list_sessions ─────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1415,6 +1935,511 @@ mod tests {
         let agent = make_agent();
         local().run_until(async move {
             assert!(agent.set_session_model(SetSessionModelRequest::new(SessionId::from("ghost"), "test-model")).await.is_err());
+        }).await;
+    }
+
+    // ── set_session_config_option ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_config_option_enables_tool() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            {
+                let mut sessions = agent.sessions.lock().await;
+                sessions.get_mut(&sid.to_string()).unwrap().enabled_tools.retain(|t| t != "read_file");
+            }
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "enabled");
+            agent.set_session_config_option(req).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            assert!(sessions.get(&sid.to_string()).unwrap().enabled_tools.contains(&"read_file".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_disables_tool() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled");
+            agent.set_session_config_option(req).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            assert!(!sessions.get(&sid.to_string()).unwrap().enabled_tools.contains(&"read_file".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_nonexistent_session_fails() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let req = SetSessionConfigOptionRequest::new(SessionId::from("ghost"), "read_file", "enabled");
+            assert!(agent.set_session_config_option(req).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_unknown_value_id_is_ignored() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let before: Vec<String> = agent.sessions.lock().await
+                .get(&sid.to_string()).unwrap().enabled_tools.clone();
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "maybe");
+            let result = agent.set_session_config_option(req).await;
+            assert!(result.is_ok(), "unknown value_id must not fail");
+            let after: Vec<String> = agent.sessions.lock().await
+                .get(&sid.to_string()).unwrap().enabled_tools.clone();
+            assert_eq!(before, after, "unknown value_id must leave enabled_tools unchanged");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_boolean_value_is_ignored() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            {
+                let mut sessions = agent.sessions.lock().await;
+                sessions.get_mut(&sid.to_string()).unwrap().enabled_tools.retain(|t| t != "read_file");
+            }
+            let mut req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "enabled");
+            req.value = agent_client_protocol::SessionConfigOptionValue::Boolean { value: true };
+            let result = agent.set_session_config_option(req).await;
+            assert!(result.is_ok(), "boolean value must not fail");
+            let sessions = agent.sessions.lock().await;
+            assert!(
+                !sessions.get(&sid.to_string()).unwrap().enabled_tools.contains(&"read_file".to_string()),
+                "boolean value must leave enabled_tools unchanged (read_file must still be disabled)"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn partial_text_before_tool_calls_not_stored_in_history() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "thinking...".to_string() },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_t".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path": "."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions.get(&sid.to_string()).unwrap().history;
+            assert!(
+                !history.iter().any(|m| m.content.contains("thinking")),
+                "partial text before tool_calls must not be stored as a history message"
+            );
+            assert!(
+                history.iter().any(|m| m.tool_calls.is_some()),
+                "tool_calls message must still be stored in history"
+            );
+        }).await;
+    }
+
+    // ── tool config options ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_session_has_all_tool_defs_in_config_options() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
+            let config_options = resp.config_options.unwrap_or_default();
+            let all_defs = trogon_tools::all_tool_defs();
+            assert_eq!(config_options.len(), all_defs.len(), "config_options must have one entry per trogon-tool");
+            for def in &all_defs {
+                assert!(
+                    config_options.iter().any(|opt| opt.id.to_string() == def.name),
+                    "tool '{}' must appear in config_options",
+                    def.name
+                );
+            }
+            for opt in &config_options {
+                let current = match &opt.kind {
+                    agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+                    _ => String::new(),
+                };
+                assert_eq!(current, "enabled", "all tools must be enabled by default");
+            }
+        }).await;
+    }
+
+    #[test]
+    fn all_tool_config_options_shows_disabled_for_excluded_tool() {
+        type A = OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier>;
+        let all_names: Vec<String> = trogon_tools::all_tool_defs().into_iter().map(|d| d.name).collect();
+        // Exclude read_file from enabled list
+        let enabled: Vec<String> = all_names.iter().filter(|n| n.as_str() != "read_file").cloned().collect();
+        let opts = A::all_tool_config_options(&enabled);
+        let read_file_opt = opts.iter().find(|o| o.id.to_string() == "read_file").unwrap();
+        let current = match &read_file_opt.kind {
+            agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+            _ => String::new(),
+        };
+        assert_eq!(current, "disabled", "excluded tool must show 'disabled' as current_value");
+        // All other tools must still show 'enabled'
+        for opt in opts.iter().filter(|o| o.id.to_string() != "read_file") {
+            let val = match &opt.kind {
+                agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+                _ => String::new(),
+            };
+            assert_eq!(val, "enabled", "tool '{}' must be enabled", opt.id);
+        }
+    }
+
+    #[test]
+    fn all_tool_config_options_has_enabled_and_disabled_select_values() {
+        type A = OpenRouterAgent<MockOpenRouterHttpClient, MockSessionNotifier>;
+        let opts = A::all_tool_config_options(&[]);
+        let first = opts.first().unwrap();
+        let values: Vec<String> = match &first.kind {
+            agent_client_protocol::SessionConfigKind::Select(s) => {
+                match &s.options {
+                    agent_client_protocol::SessionConfigSelectOptions::Ungrouped(v) => {
+                        v.iter().map(|o| o.value.to_string()).collect()
+                    }
+                    _ => vec![],
+                }
+            }
+            _ => vec![],
+        };
+        assert!(values.contains(&"enabled".to_string()), "select must include 'enabled' option");
+        assert!(values.contains(&"disabled".to_string()), "select must include 'disabled' option");
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_response_includes_updated_config_options() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled");
+            let resp = agent.set_session_config_option(req).await.unwrap();
+            let read_file_opt = resp.config_options.iter().find(|o| o.id.to_string() == "read_file").unwrap();
+            let current = match &read_file_opt.kind {
+                agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+                _ => String::new(),
+            };
+            assert_eq!(current, "disabled", "response config_options must reflect the updated state");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn empty_tool_calls_ready_breaks_with_end_turn() {
+        let agent = make_agent_with_key("k");
+        // finish_reason: "tool_calls" but accumulator empty → ToolCallsReady { calls: [] }
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![] },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::from("q".to_string())],
+            )).await.unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "empty ToolCallsReady must resolve to EndTurn, not cycle into tool dispatch"
+            );
+            // no tool_calls message must be stored in history
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions.get(&sid.to_string()).unwrap().history;
+            assert!(
+                !history.iter().any(|m| m.tool_calls.is_some()),
+                "empty tool_calls must not produce a tool_calls history entry"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn tool_defs_sent_in_request_when_enabled() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            assert!(!calls[0].tools.is_empty(), "tools must be sent in the request when enabled");
+            let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name.as_str()).collect();
+            assert!(tool_names.contains(&"read_file"), "read_file must be in the sent tools");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn disabled_tool_not_sent_in_request() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled");
+            agent.set_session_config_option(req).await.unwrap();
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name.as_str()).collect();
+            assert!(!tool_names.contains(&"read_file"), "disabled tool must not be sent in request");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn reenabled_tool_reappears_in_request() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.set_session_config_option(
+                SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled")
+            ).await.unwrap();
+            agent.set_session_config_option(
+                SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "enabled")
+            ).await.unwrap();
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name.as_str()).collect();
+            assert!(tool_names.contains(&"read_file"), "re-enabled tool must reappear in the next request");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn tool_call_dispatched_and_follow_up_sent() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path": "."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must send a second request with tool results");
+            let has_tool_result = calls[1].messages.iter().any(|m| m.tool_call_id.is_some());
+            assert!(has_tool_result, "second request must contain a tool result message");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn tool_call_notifies_in_progress_and_completed() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path": "."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let notes = agent.notifier.notifications.lock().unwrap();
+            let has_tool_call = notes.iter().any(|n| matches!(&n.update, SessionUpdate::ToolCall(_)));
+            let has_tool_call_update = notes.iter().any(|n| matches!(&n.update, SessionUpdate::ToolCallUpdate(_)));
+            assert!(has_tool_call, "must emit ToolCall notification");
+            assert!(has_tool_call_update, "must emit ToolCallUpdate notification");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn tool_result_stored_in_history() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path": "."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions.get(&sid.to_string()).unwrap().history;
+            let has_tool_calls_msg = history.iter().any(|m| m.tool_calls.is_some());
+            let has_tool_result_msg = history.iter().any(|m| m.tool_call_id.is_some());
+            assert!(has_tool_calls_msg, "history must contain assistant tool_calls message");
+            assert!(has_tool_result_msg, "history must contain tool result message");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_with_malformed_json_arguments_does_not_crash() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_bad".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: "NOT_VALID_JSON".to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            // Must not panic even with malformed JSON arguments
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions.get(&sid.to_string()).unwrap().history;
+            // Tool result must still be stored in history (dispatched with Value::Null)
+            assert!(
+                history.iter().any(|m| m.tool_call_id.as_deref() == Some("call_bad")),
+                "tool result for malformed-args call must be stored in history"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn max_tool_rounds_returns_cancelled() {
+        let agent = make_agent_with_key("k");
+        for _ in 0..=10 {
+            agent.client.push_response(vec![
+                OpenRouterEvent::ToolCallsReady { calls: vec![
+                    crate::client::AssembledToolCall {
+                        id: "call_x".to_string(),
+                        name: "list_directory".to_string(),
+                        arguments: r#"{"path": "."}"#.to_string(),
+                    }
+                ]},
+            ]);
+        }
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
+                "must return Cancelled after max tool rounds"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fetch_url_blocked_by_egress_policy() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_egress".to_string(),
+                    name: "fetch_url".to_string(),
+                    arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("fetch metadata")])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let tool_result = calls[1].messages.iter().find(|m| m.tool_call_id.is_some()).unwrap();
+            assert!(
+                tool_result.content.contains("blocked by egress policy"),
+                "egress must block link-local URLs, got: {}",
+                tool_result.content
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn bash_not_injected_without_execution_backend() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "hi".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("hello")])).await.unwrap();
+            let calls = agent.client.calls.lock().unwrap();
+            let has_bash = calls[0].tools.iter().any(|t| t.name == "bash");
+            assert!(!has_bash, "bash must not be injected when no execution backend is configured");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_inherits_enabled_tools() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let req = SetSessionConfigOptionRequest::new(sid.clone(), "read_file", "disabled");
+            agent.set_session_config_option(req).await.unwrap();
+            let fork_resp = agent.fork_session(
+                ForkSessionRequest::new(sid, PathBuf::from("/fork"))
+            ).await.unwrap();
+            let config_options = fork_resp.config_options.unwrap_or_default();
+            let read_file_opt = config_options.iter().find(|o| o.id.to_string() == "read_file").unwrap();
+            let current = match &read_file_opt.kind {
+                agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
+                _ => String::new(),
+            };
+            assert_eq!(current, "disabled", "forked session must inherit disabled read_file from source");
+        }).await;
+    }
+
+    #[test]
+    fn build_snapshot_skips_tool_messages() {
+        let agent = make_agent();
+        let mut session = make_session();
+        session.history.push(Message::user("q"));
+        session.history.push(Message::assistant_tool_calls(&[crate::client::AssembledToolCall {
+            id: "c1".to_string(),
+            name: "read_file".to_string(),
+            arguments: "{}".to_string(),
+        }]));
+        session.history.push(Message::tool_result("c1".to_string(), "contents".to_string()));
+        session.history.push(Message::assistant("answer"));
+        let snap = agent.build_snapshot("s", &session);
+        assert_eq!(snap.messages.len(), 2, "snapshot must only include user and assistant text messages");
+        assert_eq!(snap.messages[0].role, "user");
+        assert_eq!(snap.messages[1].role, "assistant");
+    }
+
+    #[tokio::test]
+    async fn load_session_returns_config_options() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.load_session(LoadSessionRequest::new(sid, "/")).await.unwrap();
+            let config_options = resp.config_options.unwrap_or_default();
+            assert!(!config_options.is_empty(), "load_session must return tool config options");
+            assert!(config_options.iter().any(|o| o.id.to_string() == "read_file"));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn resume_session_returns_config_options() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let resp = agent.resume_session(ResumeSessionRequest::new(sid, "/")).await.unwrap();
+            let config_options = resp.config_options.unwrap_or_default();
+            assert!(!config_options.is_empty(), "resume_session must return tool config options");
+            assert!(config_options.iter().any(|o| o.id.to_string() == "read_file"));
         }).await;
     }
 
@@ -2620,6 +3645,38 @@ mod tests {
 
     // ── session store integration ─────────────────────────────────────────────
 
+    struct StubSessionStore {
+        snapshot: Option<crate::session_store::SessionSnapshot>,
+    }
+
+    impl crate::session_store::SessionStoring for StubSessionStore {
+        fn save<'a>(
+            &'a self,
+            _snapshot: &'a crate::session_store::SessionSnapshot,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
+
+        fn remove<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
+
+        fn load<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>,
+        > {
+            let snap = self.snapshot.clone();
+            Box::pin(async move { snap })
+        }
+    }
+
     struct RecordingSessionStore {
         saves: Arc<std::sync::Mutex<Vec<String>>>,
     }
@@ -2649,6 +3706,16 @@ mod tests {
             _session_id: &'a str,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
             Box::pin(async move {})
+        }
+
+        fn load<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>,
+        > {
+            Box::pin(async move { None })
         }
     }
 
@@ -3039,6 +4106,438 @@ mod tests {
                 matches!(&n.update, agent_client_protocol::SessionUpdate::UsageUpdate(_))
             });
             assert!(has_usage, "a UsageUpdate notification must be fired for Usage events");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn usage_event_fires_usage_notification_after_tool_round() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "call_u".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path": "."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20 },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
+            let notes = agent.notifier.notifications.lock().unwrap();
+            let has_usage = notes.iter().any(|n| {
+                matches!(&n.update, agent_client_protocol::SessionUpdate::UsageUpdate(_))
+            });
+            assert!(has_usage, "UsageUpdate must be fired when usage arrives in the follow-up call after a tool round");
+        }).await;
+    }
+
+    // ── load_session KV restore edge cases ───────────────────────────────────────
+
+    fn stub_snapshot(id: &str, tools: Vec<String>) -> crate::session_store::SessionSnapshot {
+        crate::session_store::SessionSnapshot {
+            id: id.to_string(),
+            tenant_id: "default".to_string(),
+            name: "Stub".to_string(),
+            model: None,
+            tools,
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_empty_tools_re_enables_all() {
+        let snap = stub_snapshot("pre-fix", vec![]);
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent.load_session(LoadSessionRequest::new(SessionId::from("pre-fix"), "/"))
+                .await
+                .expect("load must succeed from KV");
+            let sessions = agent.sessions.lock().await;
+            let tools = &sessions["pre-fix"].enabled_tools;
+            let expected: Vec<String> = trogon_tools::all_tool_defs()
+                .iter()
+                .map(|d| d.name.clone())
+                .collect();
+            assert_eq!(*tools, expected, "pre-fix snapshot with tools:[] must restore all trogon tools");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_history() {
+        use crate::session_store::{MessageUsage, SnapshotMessage, TextBlock};
+        let mut snap = stub_snapshot("hist-sess", vec!["read_file".to_string()]);
+        snap.messages = vec![
+            SnapshotMessage {
+                role: "user".to_string(),
+                content: vec![TextBlock::new("Hello!")],
+                usage: None,
+            },
+            SnapshotMessage {
+                role: "assistant".to_string(),
+                content: vec![TextBlock::new("Hi there!")],
+                usage: Some(MessageUsage {
+                    input_tokens: 12,
+                    output_tokens: 4,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }),
+            },
+        ];
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent.load_session(LoadSessionRequest::new(SessionId::from("hist-sess"), "/"))
+                .await
+                .expect("load must succeed");
+            let sessions = agent.sessions.lock().await;
+            let history = &sessions["hist-sess"].history;
+            assert_eq!(history.len(), 2, "both messages must be restored");
+            assert_eq!(history[0].role, "user");
+            assert_eq!(history[0].content, "Hello!");
+            assert_eq!(history[1].role, "assistant");
+            assert_eq!(history[1].content, "Hi there!");
+            assert_eq!(history[1].prompt_tokens, Some(12));
+            assert_eq!(history[1].completion_tokens, Some(4));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_kv_restore_preserves_model() {
+        let mut snap = stub_snapshot("model-sess", vec!["read_file".to_string()]);
+        snap.model = Some("openai/gpt-4o".to_string());
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            let resp = agent.load_session(LoadSessionRequest::new(SessionId::from("model-sess"), "/"))
+                .await
+                .expect("load must succeed");
+            let current_model = resp.models
+                .as_ref()
+                .map(|m| m.current_model_id.0.as_ref().to_string());
+            assert_eq!(
+                current_model.as_deref(),
+                Some("openai/gpt-4o"),
+                "load_session must report the snapshot model in response"
+            );
+            let sessions = agent.sessions.lock().await;
+            assert_eq!(
+                sessions["model-sess"].model.as_deref(),
+                Some("openai/gpt-4o"),
+                "in-memory session must have model from snapshot"
+            );
+        }).await;
+    }
+
+    struct SnapshotCapturingStore {
+        snapshots: Arc<std::sync::Mutex<Vec<crate::session_store::SessionSnapshot>>>,
+    }
+
+    impl SnapshotCapturingStore {
+        fn new() -> (Self, Arc<std::sync::Mutex<Vec<crate::session_store::SessionSnapshot>>>) {
+            let snaps = Arc::new(std::sync::Mutex::new(Vec::new()));
+            (Self { snapshots: Arc::clone(&snaps) }, snaps)
+        }
+    }
+
+    impl crate::session_store::SessionStoring for SnapshotCapturingStore {
+        fn save<'a>(
+            &'a self,
+            snapshot: &'a crate::session_store::SessionSnapshot,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            let snap = snapshot.clone();
+            let snaps = Arc::clone(&self.snapshots);
+            Box::pin(async move { snaps.lock().unwrap().push(snap); })
+        }
+
+        fn remove<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {})
+        }
+
+        fn load<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _session_id: &'a str,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<crate::session_store::SessionSnapshot>> + Send + 'a>> {
+            Box::pin(async move { None })
+        }
+    }
+
+    #[tokio::test]
+    async fn fork_session_snapshot_inherits_enabled_tools() {
+        let (store, snaps) = SnapshotCapturingStore::new();
+        let agent = OpenRouterAgent::with_deps(
+            MockSessionNotifier::new(),
+            "test-model",
+            "k",
+            MockOpenRouterHttpClient::new(),
+        )
+        .with_session_store(Arc::new(store));
+        local().run_until(async move {
+            let src_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    src_id.clone(),
+                    "read_file",
+                    "disabled",
+                ))
+                .await
+                .unwrap();
+            agent
+                .fork_session(ForkSessionRequest::new(src_id, PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            // new_session saves snapshot[0] (src); fork_session saves snapshot[1] (fork)
+            let recorded = snaps.lock().unwrap().clone();
+            let fork_snap = recorded.last().expect("fork must be saved to store");
+            assert!(
+                !fork_snap.tools.contains(&"read_file".to_string()),
+                "fork snapshot must inherit disabled read_file from source; tools: {:?}",
+                fork_snap.tools
+            );
+            assert!(
+                fork_snap.tools.contains(&"write_file".to_string()),
+                "fork snapshot must contain enabled tools from source"
+            );
+        })
+        .await;
+    }
+
+    // ── session/export and session/import ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_export_returns_portable_messages() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session_with_history(
+                "s1",
+                vec![Message::user("hello"), Message::assistant("world")],
+            ).await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "s1" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await
+                .unwrap();
+
+            let result_json = resp.0.get();
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(result_json).unwrap();
+
+            assert_eq!(portable.len(), 2);
+            assert_eq!(portable[0].role, "user");
+            assert_eq!(portable[0].text, "hello");
+            assert_eq!(portable[1].role, "assistant");
+            assert_eq!(portable[1].text, "world");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_replaces_session_history() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s2").await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "s2",
+                    "messages": [{ "role": "user", "text": "imported" }]
+                }).to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", params.into()))
+                .await
+                .unwrap();
+
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "s2" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+
+            let result_json = resp.0.get();
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(result_json).unwrap();
+
+            assert_eq!(portable.len(), 1);
+            assert_eq!(portable[0].text, "imported");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_unknown_session_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "no-such" }).to_string(),
+            ).unwrap();
+            let result = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await;
+            assert!(result.is_err(), "export of unknown session must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_missing_session_id_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            let result = agent
+                .ext_method(ExtRequest::new("session/export", params.into()))
+                .await;
+            assert!(result.is_err(), "export without sessionId must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_import_round_trip() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session_with_history(
+                "src",
+                vec![Message::user("q"), Message::assistant("a")],
+            ).await;
+            agent.test_insert_session("dst").await;
+
+            // Export from src
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "src" }).to_string(),
+            ).unwrap();
+            let src_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+            let exported_json = src_resp.0.get().to_string();
+
+            // Import the raw JSON array into dst
+            let import_body = serde_json::json!({
+                "sessionId": "dst",
+                "messages": serde_json::from_str::<serde_json::Value>(&exported_json).unwrap()
+            });
+            let import_params = serde_json::value::RawValue::from_string(
+                import_body.to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+                .unwrap();
+
+            // Export from dst and compare
+            let export_dst_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "dst" }).to_string(),
+            ).unwrap();
+            let dst_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
+                .await
+                .unwrap();
+
+            let src_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(&exported_json).unwrap();
+            let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(dst_resp.0.get()).unwrap();
+
+            assert_eq!(src_portable.len(), dst_portable.len());
+            for (s, d) in src_portable.iter().zip(dst_portable.iter()) {
+                assert_eq!(s.role, d.role);
+                assert_eq!(s.text, d.text);
+            }
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_trims_to_max_history() {
+        let agent = {
+            let _lock = env_lock();
+            unsafe { std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "2"); }
+            let a = make_agent();
+            unsafe { std::env::remove_var("OPENROUTER_MAX_HISTORY_MESSAGES"); }
+            a
+        };
+        local().run_until(async move {
+            agent.test_insert_session("trim1").await;
+
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({
+                    "sessionId": "trim1",
+                    "messages": [
+                        { "role": "user",      "text": "a" },
+                        { "role": "assistant", "text": "b" },
+                        { "role": "user",      "text": "c" },
+                        { "role": "assistant", "text": "d" },
+                        { "role": "user",      "text": "e" }
+                    ]
+                }).to_string(),
+            ).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", params.into()))
+                .await
+                .unwrap();
+
+            let export_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": "trim1" }).to_string(),
+            ).unwrap();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params.into()))
+                .await
+                .unwrap();
+
+            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(resp.0.get()).unwrap();
+
+            assert!(
+                portable.len() <= 2,
+                "expected history trimmed to max_history=2, got {} messages",
+                portable.len()
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_unknown_session_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
+            ).unwrap();
+            let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+            assert!(result.is_err(), "import of unknown session must return Err");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn ext_method_import_malformed_messages_returns_error() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            let params = serde_json::value::RawValue::from_string(
+                serde_json::json!({"sessionId":"s1","messages":"not-an-array"}).to_string()
+            ).unwrap();
+            let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+            assert!(result.is_err(), "malformed messages must return Err");
         }).await;
     }
 }

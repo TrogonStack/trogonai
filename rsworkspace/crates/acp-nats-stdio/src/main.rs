@@ -308,7 +308,7 @@ mod tests {
                 model: "claude-opus-4-6".to_string(),
                 max_iterations: 10,
                 thinking_budget: None,
-                tool_context: Arc::new(ToolContext { proxy_url: String::new() }),
+                tool_context: Arc::new(ToolContext { proxy_url: String::new(), cwd: String::new(), http_client: http.clone() }),
                 memory_owner: None,
                 memory_repo: None,
                 memory_path: None,

@@ -908,6 +908,121 @@ async fn serve_js_dispatches_resume_session_to_agent() {
     .await;
 }
 
+// ── serve_js: DeliverNew — stale messages are ignored ────────────────────────
+
+/// `commands_observer` uses `DeliverPolicy::New`, so messages published to the
+/// COMMANDS stream BEFORE the consumer is created must NOT be dispatched to the
+/// agent.  Messages published AFTER consumer creation must still be dispatched.
+#[tokio::test]
+async fn serve_js_deliver_new_ignores_pre_existing_messages() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "deliver-new-sess";
+
+    // Publish 3 prompt commands into the stream BEFORE any consumer exists.
+    for i in 0..3_u32 {
+        let req_id = format!("stale-req-{i}");
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("X-Req-Id", req_id.as_str());
+        let payload =
+            serde_json::to_vec(&PromptRequest::new(session_id, vec![])).unwrap();
+        js_ctx
+            .publish_with_headers(
+                format!("acp.session.{session_id}.agent.prompt"),
+                headers,
+                payload.into(),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+    }
+
+    let prompt_called = Arc::new(Mutex::new(false));
+    let agent = MockAgent {
+        prompt_called: prompt_called.clone(),
+        ..Default::default()
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let js_client = NatsJetStreamClient::new(js_ctx.clone());
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(
+                agent,
+                nats.clone(),
+                js_client,
+                prefix,
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            );
+            tokio::task::spawn_local(io_task);
+
+            // Give the consumer enough time to process any stale messages if DeliverAll.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            assert!(
+                !*prompt_called.lock().unwrap(),
+                "DeliverNew: pre-existing stream messages must NOT trigger agent.prompt()"
+            );
+        })
+        .await;
+}
+
+/// After `AgentSideNatsConnection::with_jetstream` starts its consumer
+/// (`DeliverPolicy::New`), messages published from that point on ARE dispatched.
+#[tokio::test]
+async fn serve_js_deliver_new_receives_messages_published_after_consumer_creation() {
+    let (_c, port) = start_nats().await;
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect to NATS");
+    let js_ctx = jetstream::new(nats.clone());
+    setup_streams(&js_ctx).await;
+
+    let session_id = "deliver-new-fresh-sess";
+    let req_id = "req-after-start";
+    let response_subject =
+        format!("acp.session.{}.agent.prompt.response.{}", session_id, req_id);
+
+    let prompt_called = Arc::new(Mutex::new(false));
+    let agent = MockAgent {
+        prompt_called: prompt_called.clone(),
+        ..Default::default()
+    };
+
+    let nats2 = nats.clone();
+    let js2 = js_ctx.clone();
+    run_with_jetstream(nats, js_ctx, agent, async move {
+        // Consumer is now active.  Publish one fresh message.
+        let msg = serve_js_round_trip(
+            &nats2,
+            &js2,
+            &format!("acp.session.{session_id}.agent.prompt"),
+            req_id,
+            serde_json::to_vec(&PromptRequest::new(session_id, vec![])).unwrap(),
+            &response_subject,
+        )
+        .await;
+        let resp: PromptResponse =
+            serde_json::from_slice(&msg.payload).expect("invalid PromptResponse");
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    })
+    .await;
+
+    assert!(
+        *prompt_called.lock().unwrap(),
+        "DeliverNew: message published after consumer creation must be dispatched"
+    );
+}
+
 // ── serve_js: close_session ───────────────────────────────────────────────────
 
 #[tokio::test]

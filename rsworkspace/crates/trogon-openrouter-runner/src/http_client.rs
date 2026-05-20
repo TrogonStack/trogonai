@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures_util::stream::LocalBoxStream;
 
-use crate::client::{Message, OpenRouterEvent};
+use crate::client::{Message, OpenRouterEvent, ToolDef};
 
 /// Abstraction over the OpenRouter HTTP call so agent tests can inject a mock
 /// without spinning up a TCP server.
@@ -12,6 +12,7 @@ pub trait OpenRouterHttpClient {
         model: &str,
         messages: &[Message],
         api_key: &str,
+        tools: &[ToolDef],
     ) -> LocalBoxStream<'static, OpenRouterEvent>;
 }
 
@@ -26,12 +27,13 @@ pub mod mock {
     use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 
     use super::OpenRouterHttpClient;
-    use crate::client::{Message, OpenRouterEvent};
+    use crate::client::{Message, OpenRouterEvent, ToolDef};
 
     pub struct MockCall {
         pub model: String,
         pub messages: Vec<Message>,
         pub api_key: String,
+        pub tools: Vec<ToolDef>,
     }
 
     pub enum MockResponse {
@@ -89,11 +91,17 @@ pub mod mock {
             model: &str,
             messages: &[Message],
             api_key: &str,
+            tools: &[ToolDef],
         ) -> LocalBoxStream<'static, OpenRouterEvent> {
             self.calls.lock().unwrap().push(MockCall {
                 model: model.to_string(),
                 messages: messages.to_vec(),
                 api_key: api_key.to_string(),
+                tools: tools.iter().map(|t| ToolDef {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    parameters: t.parameters.clone(),
+                }).collect(),
             });
 
             let response = self
@@ -120,8 +128,9 @@ pub mod mock {
             model: &str,
             messages: &[Message],
             api_key: &str,
+            tools: &[ToolDef],
         ) -> LocalBoxStream<'static, OpenRouterEvent> {
-            (**self).chat_stream(model, messages, api_key).await
+            (**self).chat_stream(model, messages, api_key, tools).await
         }
     }
 }

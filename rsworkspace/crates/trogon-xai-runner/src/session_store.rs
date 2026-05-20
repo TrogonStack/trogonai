@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::jetstream::{self, kv};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 const SESSIONS_BUCKET: &str = "SESSIONS";
@@ -14,7 +14,7 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Wire format for a session stored in the SESSIONS KV bucket.
 /// Schema matches `ChatSession` from trogon-agent so trogon-console can read it.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub id: String,
     pub tenant_id: String,
@@ -38,7 +38,7 @@ pub struct SessionSnapshot {
 
 /// Per-message token usage written to the SESSIONS bucket.
 /// Field names match `RawUsage` in trogon-console so the console can sum totals.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MessageUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -54,7 +54,7 @@ fn is_zero_u32(v: &u32) -> bool {
 
 /// A message entry in the snapshot — `content` uses the same tagged-block format
 /// as `ContentBlock::Text` in trogon-agent so the console can render message text.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SnapshotMessage {
     pub role: String,
     pub content: Vec<TextBlock>,
@@ -63,17 +63,17 @@ pub struct SnapshotMessage {
 }
 
 /// A plain-text content block (`{"type":"text","text":"..."}`).
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TextBlock {
     #[serde(rename = "type")]
-    pub kind: &'static str, // always "text"
+    pub kind: String,
     pub text: String,
 }
 
 impl TextBlock {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            kind: "text",
+            kind: "text".to_string(),
             text: text.into(),
         }
     }
@@ -84,6 +84,11 @@ impl TextBlock {
 pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
+    fn load<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+    ) -> BoxFuture<'a, Option<SessionSnapshot>>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -127,6 +132,24 @@ impl NatsSessionStore {
             warn!(session_id, error = %e, "failed to delete session from SESSIONS KV");
         }
     }
+
+    async fn load_impl(&self, tenant_id: &str, session_id: &str) -> Option<SessionSnapshot> {
+        let key = format!("{tenant_id}.{session_id}");
+        let entry = match self.sessions_kv.entry(&key).await {
+            Ok(e) => e?,
+            Err(e) => {
+                warn!(session_id, error = %e, "failed to read session from SESSIONS KV");
+                return None;
+            }
+        };
+        match serde_json::from_slice::<SessionSnapshot>(&entry.value) {
+            Ok(snap) => Some(snap),
+            Err(e) => {
+                warn!(session_id, error = %e, "failed to deserialize session snapshot");
+                None
+            }
+        }
+    }
 }
 
 impl SessionStoring for NatsSessionStore {
@@ -136,6 +159,14 @@ impl SessionStoring for NatsSessionStore {
 
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()> {
         Box::pin(self.remove_impl(tenant_id, session_id))
+    }
+
+    fn load<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+    ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+        Box::pin(self.load_impl(tenant_id, session_id))
     }
 }
 
@@ -182,6 +213,8 @@ pub mod mock {
     pub struct MockSessionStore {
         pub saves: Mutex<Vec<SessionSnapshot>>,
         pub removes: Mutex<Vec<(String, String)>>,
+        /// Pre-populated snapshots returned by `load()`. Matched by session id.
+        pub loads: Mutex<Vec<SessionSnapshot>>,
     }
 
     impl MockSessionStore {
@@ -189,6 +222,7 @@ pub mod mock {
             Self {
                 saves: Mutex::new(vec![]),
                 removes: Mutex::new(vec![]),
+                loads: Mutex::new(vec![]),
             }
         }
     }
@@ -208,6 +242,21 @@ pub mod mock {
                 .expect("removes lock poisoned")
                 .push((tenant_id.to_string(), session_id.to_string()));
             Box::pin(std::future::ready(()))
+        }
+
+        fn load<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            session_id: &'a str,
+        ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+            let result = self
+                .loads
+                .lock()
+                .expect("loads lock poisoned")
+                .iter()
+                .find(|s| s.id == session_id)
+                .cloned();
+            Box::pin(std::future::ready(result))
         }
     }
 }
