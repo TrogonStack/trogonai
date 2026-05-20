@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Valid use cases:
 /// - optimistic concurrency with `StreamWritePrecondition::At`
 /// - projection freshness checks
-/// - replay checkpoints
+/// - snapshot checkpoints
 /// - dropping stale realtime updates
 ///
 /// Invalid assumptions:
