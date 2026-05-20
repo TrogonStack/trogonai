@@ -15,6 +15,26 @@ path = "src/bin/platform_live.rs"
 name = "xai_live"
 path = "src/bin/xai_live.rs"
 
+[[bin]]
+name = "live_no_apikey"
+path = "src/bin/live_no_apikey.rs"
+
+[[bin]]
+name = "console_live"
+path = "src/bin/console_live.rs"
+
+[[bin]]
+name = "registry_transcript_live"
+path = "src/bin/registry_transcript_live.rs"
+
+[[bin]]
+name = "actor_live"
+path = "src/bin/actor_live.rs"
+
+[[bin]]
+name = "ws_transport_live"
+path = "src/bin/ws_transport_live.rs"
+
 [dependencies]
 acp-nats          = { workspace = true }
 acp-nats-agent    = { path = "../acp-nats-agent" }
@@ -27,11 +47,20 @@ serde             = { workspace = true }
 tempfile          = "3"
 reqwest           = { workspace = true, features = ["json"] }
 serde_json        = { workspace = true }
-tokio             = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+testcontainers-modules = { workspace = true, features = ["nats"] }
+tokio             = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 trogon-acp-runner    = { path = "../trogon-acp-runner", features = ["test-helpers"] }
 trogon-xai-runner    = { path = "../trogon-xai-runner", features = ["test-helpers"] }
 trogon-openrouter-runner = { path = "../trogon-openrouter-runner", features = ["test-helpers"] }
 trogon-runner-tools  = { path = "../trogon-runner-tools" }
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-nats       = { workspace = true }
+trogon-cli        = { path = "../trogon-cli" }
+trogon-registry   = { workspace = true, features = ["test-support"] }
+axum              = { workspace = true }
+acp-nats-ws       = { path = "../acp-nats-ws" }
+tokio-tungstenite = { workspace = true }
+trogon-actor      = { path = "../trogon-actor" }
+trogon-console    = { path = "../trogon-console" }
+trogon-transcript = { path = "../trogon-transcript" }
 uuid              = { workspace = true, features = ["v4"] }

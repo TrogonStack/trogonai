@@ -285,3 +285,78 @@ pub mod mock {
         }
     }
 }
+
+#[cfg(all(test, feature = "test-helpers"))]
+mod tests {
+    use bytes::Bytes;
+    use super::SessionNotifier as _;
+    use super::mock::MockSessionNotifier;
+
+    #[tokio::test]
+    async fn publish_captures_subject_and_payload() {
+        let notifier = MockSessionNotifier::new();
+        notifier.publish("subject.a".into(), Bytes::from("payload-a")).await;
+        notifier.publish("subject.b".into(), Bytes::from("payload-b")).await;
+        let pubs = notifier.published();
+        assert_eq!(pubs.len(), 2);
+        assert_eq!(pubs[0].0, "subject.a");
+        assert_eq!(pubs[0].1, Bytes::from("payload-a"));
+        assert_eq!(pubs[1].0, "subject.b");
+        assert_eq!(pubs[1].1, Bytes::from("payload-b"));
+    }
+
+    #[tokio::test]
+    async fn schedule_publish_captures_without_delay() {
+        let notifier = MockSessionNotifier::new();
+        notifier.schedule_publish("sched.subj".into(), Bytes::from("sched-data"), std::time::Duration::from_secs(99));
+        let pubs = notifier.published();
+        assert_eq!(pubs.len(), 1);
+        assert_eq!(pubs[0].0, "sched.subj");
+    }
+
+    #[tokio::test]
+    async fn subscribe_cancel_and_trigger_fires_receiver() {
+        let notifier = MockSessionNotifier::new();
+        let rx = notifier.subscribe_cancel("cancel.subj".into()).await;
+        assert!(rx.is_some(), "subscribe_cancel must return Some");
+        let rx = rx.unwrap();
+        notifier.trigger_cancel();
+        rx.await.expect("cancel receiver must fire after trigger_cancel");
+    }
+
+    #[tokio::test]
+    async fn subscribe_steer_delivers_preloaded_messages() {
+        let notifier = MockSessionNotifier::new();
+        notifier.inject_steer_message("msg-1");
+        notifier.inject_steer_message("msg-2");
+        let mut rx = notifier.subscribe_steer("steer.subj".into()).await.unwrap();
+        assert_eq!(rx.try_recv().ok().as_deref(), Some("msg-1"));
+        assert_eq!(rx.try_recv().ok().as_deref(), Some("msg-2"));
+        assert!(rx.try_recv().is_err(), "channel must be empty after draining");
+    }
+
+    #[tokio::test]
+    async fn fail_steer_subscribe_returns_none_once_then_recovers() {
+        let notifier = MockSessionNotifier::new();
+        notifier.fail_steer_subscribe();
+        let first = notifier.subscribe_steer("steer.subj".into()).await;
+        assert!(first.is_none(), "subscribe must fail when fail_steer_subscribe is set");
+        let second = notifier.subscribe_steer("steer.subj".into()).await;
+        assert!(second.is_some(), "subscribe must succeed on subsequent call");
+    }
+
+    #[tokio::test]
+    async fn steer_subjects_records_each_subscription() {
+        let notifier = MockSessionNotifier::new();
+        notifier.subscribe_steer("steer.alpha".into()).await;
+        notifier.subscribe_steer("steer.beta".into()).await;
+        let subjects = notifier.steer_subjects();
+        assert_eq!(subjects, vec!["steer.alpha", "steer.beta"]);
+    }
+
+    #[tokio::test]
+    async fn trigger_cancel_without_subscription_is_noop() {
+        let notifier = MockSessionNotifier::new();
+        notifier.trigger_cancel();
+    }
+}

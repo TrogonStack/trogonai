@@ -107,6 +107,107 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use trogon_tools::ToolContext;
+    use trogon_agent_core::agent_loop::AgentLoop;
+    use crate::agent::GatewayConfig;
+    use super::AgentRunner;
+
+    fn make_agent_loop() -> AgentLoop {
+        AgentLoop {
+            http_client: reqwest::Client::new(),
+            proxy_url: String::new(),
+            anthropic_token: "original-token".to_string(),
+            anthropic_base_url: None,
+            anthropic_extra_headers: vec![],
+            streaming_client: None,
+            model: "claude-opus-4-6".to_string(),
+            max_iterations: 10,
+            thinking_budget: None,
+            tool_context: Arc::new(ToolContext {
+                proxy_url: String::new(),
+                cwd: String::new(),
+                http_client: reqwest::Client::new(),
+            }),
+            memory_owner: None,
+            memory_repo: None,
+            memory_path: None,
+            mcp_tool_defs: vec![],
+            mcp_dispatch: vec![],
+            permission_checker: None,
+            elicitation_provider: None,
+        }
+    }
+
+    #[test]
+    fn apply_gateway_sets_base_url_token_and_headers() {
+        let mut runner = make_agent_loop();
+        let config = GatewayConfig {
+            base_url: "https://proxy.example.com".to_string(),
+            token: "gateway-token".to_string(),
+            extra_headers: vec![("X-Custom".to_string(), "value".to_string())],
+        };
+        runner.apply_gateway(&config);
+        assert_eq!(runner.anthropic_base_url, Some("https://proxy.example.com".to_string()));
+        assert_eq!(runner.anthropic_token, "gateway-token");
+        assert_eq!(runner.anthropic_extra_headers, vec![("X-Custom".to_string(), "value".to_string())]);
+    }
+
+    #[test]
+    fn apply_gateway_overwrites_previous_values() {
+        let mut runner = make_agent_loop();
+        runner.apply_gateway(&GatewayConfig {
+            base_url: "https://first.example.com".to_string(),
+            token: "token-1".to_string(),
+            extra_headers: vec![],
+        });
+        runner.apply_gateway(&GatewayConfig {
+            base_url: "https://second.example.com".to_string(),
+            token: "token-2".to_string(),
+            extra_headers: vec![("X-New".to_string(), "v2".to_string())],
+        });
+        assert_eq!(runner.anthropic_base_url, Some("https://second.example.com".to_string()));
+        assert_eq!(runner.anthropic_token, "token-2");
+        assert_eq!(runner.anthropic_extra_headers, vec![("X-New".to_string(), "v2".to_string())]);
+    }
+
+    #[test]
+    fn set_model_updates_model_field() {
+        let mut runner = make_agent_loop();
+        assert_eq!(runner.model(), "claude-opus-4-6");
+        runner.set_model("claude-haiku-4-5".to_string());
+        assert_eq!(runner.model(), "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn add_mcp_tools_extends_tool_defs() {
+        let mut runner = make_agent_loop();
+        assert!(runner.mcp_tool_defs.is_empty());
+        let def = trogon_tools::tool_def("my_tool", "does stuff", serde_json::json!({"type":"object","properties":{}}));
+        runner.add_mcp_tools(vec![def], vec![]);
+        assert_eq!(runner.mcp_tool_defs.len(), 1);
+        assert_eq!(runner.mcp_tool_defs[0].name, "my_tool");
+    }
+
+    #[test]
+    fn add_mcp_tools_accumulates_across_calls() {
+        let mut runner = make_agent_loop();
+        runner.add_mcp_tools(
+            vec![trogon_tools::tool_def("tool_a", "a", serde_json::json!({}))],
+            vec![],
+        );
+        runner.add_mcp_tools(
+            vec![trogon_tools::tool_def("tool_b", "b", serde_json::json!({}))],
+            vec![],
+        );
+        assert_eq!(runner.mcp_tool_defs.len(), 2);
+        assert_eq!(runner.mcp_tool_defs[0].name, "tool_a");
+        assert_eq!(runner.mcp_tool_defs[1].name, "tool_b");
+    }
+}
+
 // ── Mock (test-helpers feature) ───────────────────────────────────────────────
 
 #[cfg(feature = "test-helpers")]

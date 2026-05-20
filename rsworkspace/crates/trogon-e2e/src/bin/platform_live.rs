@@ -142,31 +142,46 @@ async fn send_and_wait(
     serde_json::from_slice(&msg.payload).expect("invalid JSON response")
 }
 
-// ── Mock Anthropic response bodies ─────────────────────────────────────────────
+// ── SSE mock Anthropic response bodies ────────────────────────────────────────
+//
+// run_chat_streaming() always calls complete_streaming(), which requires an SSE
+// response (text/event-stream). Plain JSON bodies produce an empty stop_reason.
 
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type":"tool_use","id":"tu_001","name":"unknown_tool","input":{}}]
-    })
-    .to_string()
+fn sse_event(event_type: &str, data: serde_json::Value) -> String {
+    format!("event: {event_type}\ndata: {}\n\n", serde_json::to_string(&data).unwrap())
 }
 
-fn workspace_tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type":"tool_use","id":"tu_rbac_1","name":"unknown_tool","input":{"path":"/workspace/foo.rs"}}]
-    })
-    .to_string()
+fn sse_end_turn(text: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}})),
+        sse_event("content_block_start", serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})),
+        sse_event("content_block_delta", serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}})),
+        sse_event("content_block_stop", serde_json::json!({"type":"content_block_stop","index":0})),
+        sse_event("message_delta", serde_json::json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}})),
+        sse_event("message_stop", serde_json::json!({"type":"message_stop"})),
+    ].join("")
 }
 
-fn end_turn_body(text: &str) -> String {
-    serde_json::json!({
-        "stop_reason": "end_turn",
-        "content": [{"type":"text","text":text}],
-        "usage": {"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}
-    })
-    .to_string()
+fn sse_tool_use() -> String {
+    [
+        sse_event("message_start", serde_json::json!({"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}})),
+        sse_event("content_block_start", serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_001","name":"unknown_tool"}})),
+        sse_event("content_block_delta", serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}})),
+        sse_event("content_block_stop", serde_json::json!({"type":"content_block_stop","index":0})),
+        sse_event("message_delta", serde_json::json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":10}})),
+        sse_event("message_stop", serde_json::json!({"type":"message_stop"})),
+    ].join("")
+}
+
+fn sse_workspace_tool_use() -> String {
+    [
+        sse_event("message_start", serde_json::json!({"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}})),
+        sse_event("content_block_start", serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_rbac_1","name":"unknown_tool"}})),
+        sse_event("content_block_delta", serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"/workspace/foo.rs\"}"}})),
+        sse_event("content_block_stop", serde_json::json!({"type":"content_block_stop","index":0})),
+        sse_event("message_delta", serde_json::json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":10}})),
+        sse_event("message_stop", serde_json::json!({"type":"message_stop"})),
+    ].join("")
 }
 
 // ── Output helpers ─────────────────────────────────────────────────────────────
@@ -198,11 +213,11 @@ async fn test_rbac_allow_bypasses_channel() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(workspace_tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -246,11 +261,11 @@ async fn test_rbac_deny_bypasses_channel() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(workspace_tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -305,7 +320,7 @@ async fn test_egress_deny_skips_mcp() -> bool {
     let anthropic = MockServer::start();
     anthropic.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
 
     NatsSessionStore::open(&js).await.unwrap()
@@ -356,11 +371,11 @@ async fn test_audit_allow_policy_records_allowed() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(workspace_tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
     });
 
     let (perm_tx, _perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -406,11 +421,11 @@ async fn test_audit_deny_policy_records_denied() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(workspace_tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_workspace_tool_use());
     });
 
     let (perm_tx, _perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -456,11 +471,11 @@ async fn test_audit_channel_approval() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -504,11 +519,11 @@ async fn test_audit_channel_denial() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -578,11 +593,11 @@ async fn test_permission_bridge_allow_via_nats() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -661,11 +676,11 @@ async fn test_permission_bridge_allow_always_persists_and_auto_approves() -> boo
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);
@@ -765,11 +780,11 @@ async fn test_allowed_tools_in_session_records_allowed_audit() -> bool {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(POST).path("/messages").body_contains("tool_result");
-        then.status(200).header("Content-Type", "application/json").body(end_turn_body("done"));
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_end_turn("done"));
     });
     server.mock(|when, then| {
         when.method(POST).path("/messages");
-        then.status(200).header("Content-Type", "application/json").body(tool_use_body());
+        then.status(200).header("Content-Type", "text/event-stream").body(sse_tool_use());
     });
 
     let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(8);

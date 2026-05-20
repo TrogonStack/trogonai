@@ -226,6 +226,92 @@ mod tests {
                 .unwrap();
             assert_eq!(r, "No active todos.");
         }
+
+        #[tokio::test]
+        async fn todo_write_missing_id_returns_error() {
+            let t = tool("s1");
+            let r = t
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"content":"do stuff","status":"pending"}),
+                )
+                .await;
+            assert!(r.is_err());
+            assert!(r.unwrap_err().contains("id"), "error must mention 'id'");
+        }
+
+        #[tokio::test]
+        async fn todo_write_missing_content_returns_error() {
+            let t = tool("s1");
+            let r = t
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"id":"t1","status":"pending"}),
+                )
+                .await;
+            assert!(r.is_err());
+            assert!(r.unwrap_err().contains("content"), "error must mention 'content'");
+        }
+
+        #[tokio::test]
+        async fn todo_write_missing_status_returns_error() {
+            let t = tool("s1");
+            let r = t
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"id":"t1","content":"do stuff"}),
+                )
+                .await;
+            assert!(r.is_err());
+            assert!(r.unwrap_err().contains("status"), "error must mention 'status'");
+        }
+
+        #[tokio::test]
+        async fn todo_read_when_all_completed_returns_no_active() {
+            let t = tool("s1");
+            t.call_tool(
+                "todo_write",
+                &serde_json::json!({"id":"t1","content":"done task","status":"completed"}),
+            )
+            .await
+            .unwrap();
+            t.call_tool(
+                "todo_write",
+                &serde_json::json!({"id":"t2","content":"also done","status":"completed"}),
+            )
+            .await
+            .unwrap();
+            let r = t.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
+            assert_eq!(r, "No active todos.");
+        }
+
+        #[tokio::test]
+        async fn todo_write_invalid_status_error_mentions_received_value() {
+            let t = tool("s1");
+            let r = t
+                .call_tool(
+                    "todo_write",
+                    &serde_json::json!({"id":"t1","content":"x","status":"invalid_state"}),
+                )
+                .await;
+            let err = r.unwrap_err();
+            assert!(err.contains("invalid_state"), "error must include the bad value, got: {err}");
+        }
+
+        #[tokio::test]
+        async fn todo_read_output_format_includes_status_id_content() {
+            let t = tool("s1");
+            t.call_tool(
+                "todo_write",
+                &serde_json::json!({"id":"task-42","content":"write tests","status":"in_progress"}),
+            )
+            .await
+            .unwrap();
+            let r = t.call_tool("todo_read", &serde_json::json!({})).await.unwrap();
+            assert!(r.contains("in_progress"), "output must contain status");
+            assert!(r.contains("task-42"), "output must contain id");
+            assert!(r.contains("write tests"), "output must contain content");
+        }
     }
 
     /// The `other` branch (line 129) is reachable by calling `call_tool` directly
