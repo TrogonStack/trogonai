@@ -3075,6 +3075,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-decider-runtime"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trogon-decider",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-gateway"
 version = "0.1.0"
 dependencies = [
