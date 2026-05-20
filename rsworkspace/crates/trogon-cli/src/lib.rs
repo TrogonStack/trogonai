@@ -11,10 +11,12 @@ pub use print::OutputFormat;
 pub use session::Session;
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
+pub mod cross_runner;
+pub use cross_runner::CrossRunnerSwitcher;
+
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-/// Wraps a child process and kills it when dropped.
 pub struct KillOnDrop(pub Child);
 
 impl std::fmt::Debug for KillOnDrop {
@@ -29,8 +31,6 @@ impl Drop for KillOnDrop {
     }
 }
 
-/// Connect to NATS at `url`. If the first attempt fails and `nats-server` is
-/// in PATH, spawn it and retry until `timeout` elapses.
 pub async fn connect_or_start_nats(
     url: &str,
     timeout: Duration,
