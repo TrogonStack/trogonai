@@ -341,6 +341,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            tool_http_client: self.tool_http_client,
         }
     }
 
@@ -647,7 +648,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     .into_iter()
                     .map(|d| d.name)
                     .collect(),
-                system_prompt: session_system_prompt,
+                system_prompt,
                 created_at: Instant::now(),
                 created_at_iso,
                 parent_session_id: None,
