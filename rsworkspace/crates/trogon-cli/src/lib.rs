@@ -8,7 +8,7 @@ pub mod stdio_mcp_bridge;
 pub use fs::{Fs, RealFs};
 pub use nats::NatsClient;
 pub use print::OutputFormat;
-pub use session::Session;
+pub use session::{NatsSessionFactory, Session, SessionFactory};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;

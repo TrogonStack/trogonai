@@ -1,7 +1,10 @@
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::Parser;
 use std::time::Duration;
-use trogon_cli::{connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, OutputFormat, RealFs};
+use trogon_cli::{
+    connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, NatsSessionFactory,
+    OutputFormat, RealFs,
+};
 
 #[derive(Parser)]
 #[command(name = "trogon", about = "Trogon AI CLI")]
@@ -64,7 +67,8 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config, registry);
-        trogon_cli::repl::run(nats, &args.prefix, cwd, RealFs, switcher).await?;
+        let factory = NatsSessionFactory::new(nats);
+        trogon_cli::repl::run(factory, &args.prefix, cwd, RealFs, switcher).await?;
     }
 
     Ok(())
