@@ -4,7 +4,7 @@ use crate::stream::{
     StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
-    Decider, Event, EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, Events, StreamEvent,
+    Decider, Event, EventDecode, EventEncode, EventId, EventIdentity, EventType, Events, Headers, StreamEvent,
     WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
@@ -480,7 +480,7 @@ pub struct CommandExecution<'a, E, C, S, G> {
     command: &'a C,
     write_precondition: Option<StreamWritePrecondition>,
     snapshots: S,
-    headers: EventHeaders,
+    headers: Headers,
     event_id_generator: G,
 }
 
@@ -494,7 +494,7 @@ where
             command,
             write_precondition: None,
             snapshots: WithoutSnapshots,
-            headers: EventHeaders::empty(),
+            headers: Headers::empty(),
             event_id_generator: UuidV7Generator,
         }
     }
@@ -543,15 +543,12 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         self
     }
 
-    pub fn with_headers(mut self, headers: EventHeaders) -> Self {
+    pub fn with_headers(mut self, headers: Headers) -> Self {
         self.headers = headers;
         self
     }
 
-    pub fn with_event_id_generator<NextG>(
-        self,
-        event_id_generator: NextG,
-    ) -> CommandExecution<'a, E, C, S, NextG>
+    pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, S, NextG>
     where
         NextG: NowV7,
     {
@@ -607,13 +604,15 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
                 headers: self.headers.clone(),
             });
         }
-        let stream_write_precondition =
-            resolve_stream_write_precondition::<C>(self.write_precondition, current_position);
+
         let append_outcome = self
             .event_store
             .append_stream(AppendStreamRequest {
                 stream_id,
-                stream_write_precondition,
+                stream_write_precondition: C::WRITE_PRECONDITION
+                    .map(StreamWritePrecondition::from)
+                    .or(self.write_precondition)
+                    .unwrap_or_else(|| current_position.into()),
                 events: encoded_events,
             })
             .await
@@ -661,7 +660,7 @@ where
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
-        let state = replay_stream_events::<C>(C::initial_state(), stream_read.events)?;
+        let state = evolve_state_from_stream_events::<C>(C::initial_state(), &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
 
         Ok(ExecutionResult {
@@ -726,10 +725,9 @@ where
             }
         }
 
-        let replayed_event_count = stream_read.events.len() as u64;
-        let state = replay_stream_events::<C>(state, stream_read.events)?;
+        let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let events_since_snapshot = replayed_event_count + events.len() as u64;
+        let events_since_snapshot = stream_read.events.len() as u64 + events.len() as u64;
 
         // Keep the policy decision inline: for frequency policies it is cheaper
         // than spawning, and only the storage mutation needs to be best-effort.
@@ -755,19 +753,6 @@ where
             state,
         })
     }
-}
-
-fn resolve_stream_write_precondition<C>(
-    write_precondition: Option<StreamWritePrecondition>,
-    current_position: Option<StreamPosition>,
-) -> StreamWritePrecondition
-where
-    C: Decider,
-{
-    C::WRITE_PRECONDITION
-        .map(StreamWritePrecondition::from)
-        .or(write_precondition)
-        .unwrap_or_else(|| current_position.into())
 }
 
 impl From<WritePrecondition> for StreamWritePrecondition {
@@ -810,9 +795,9 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     });
 }
 
-fn replay_stream_events<C>(
+fn evolve_state_from_stream_events<C>(
     mut state: C::State,
-    stream_events: Vec<StreamEvent>,
+    stream_events: &[StreamEvent],
 ) -> Result<C::State, ReplayStreamError<C::EvolveError, CommandEventDecodeError<C>>>
 where
     C: Decider,
@@ -850,7 +835,7 @@ mod tests {
         StreamPosition::try_new(value).expect("test stream position must be non-zero")
     }
 
-    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &EventHeaders) -> Event
+    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &Headers) -> Event
     where
         E: EventType + EventIdentity + EventEncode,
         G: NowV7 + ?Sized,
@@ -1289,7 +1274,7 @@ mod tests {
         };
         StreamEvent {
             stream_id,
-            event: encode_event(&event, &UuidV7Generator, &EventHeaders::empty()),
+            event: encode_event(&event, &UuidV7Generator, &Headers::empty()),
             stream_position: position(sequence),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_000 + sequence as i64, 0).unwrap(),
         }

@@ -7,11 +7,11 @@ use super::{
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EventHeaders {
+pub struct Headers {
     entries: BTreeMap<HeaderName, HeaderValue>,
 }
 
-impl EventHeaders {
+impl Headers {
     pub fn new() -> Self {
         Self::default()
     }

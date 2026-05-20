@@ -1,5 +1,5 @@
 pub mod snapshot_store;
-pub(crate) mod stream_store;
+pub mod stream_store;
 
 use std::fmt;
 

@@ -1,21 +1,15 @@
 mod codec;
-mod event_headers;
 mod event_id;
 mod event_identity;
 mod event_type;
-mod from_entries_error;
-mod header_name;
-mod header_value;
 mod stream_event;
 
+use crate::headers::Headers;
+
 pub use codec::{EventData, EventDecode, EventEncode};
-pub use event_headers::EventHeaders;
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;
-pub use from_entries_error::FromEntriesError;
-pub use header_name::{HeaderName, HeaderNameError};
-pub use header_value::{HeaderValue, HeaderValueError};
 pub use stream_event::StreamEvent;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,12 +17,13 @@ pub struct Event {
     pub id: EventId,
     pub r#type: String,
     pub content: Vec<u8>,
-    pub headers: EventHeaders,
+    pub headers: Headers,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError};
     use crate::{EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamPosition};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -54,7 +49,7 @@ mod tests {
         serde_json::from_slice(payload)
     }
 
-    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &EventHeaders) -> Event
+    fn encode_event<E, G>(event: &E, event_id_generator: &G, headers: &Headers) -> Event
     where
         E: EventType + EventIdentity + EventEncode,
         G: NowV7 + ?Sized,
@@ -138,7 +133,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
+        let event = encode_event(&payload, &UuidV7Generator, &Headers::empty());
 
         assert_eq!(event.id.as_uuid().get_version_num(), 7);
         assert_eq!(event.r#type, "TestEvent");
@@ -157,7 +152,7 @@ mod tests {
             id: event_id,
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
+        let event = encode_event(&payload, &UuidV7Generator, &Headers::empty());
 
         assert_eq!(event.id, event_id);
     }
@@ -173,7 +168,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
+        let event = encode_event(&payload, &UuidV7Generator, &Headers::empty());
 
         let recorded = StreamEvent {
             stream_id: "alpha".to_string(),
@@ -192,7 +187,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let event = encode_event(&payload, &UuidV7Generator, &EventHeaders::empty());
+        let event = encode_event(&payload, &UuidV7Generator, &Headers::empty());
         assert_eq!(
             TestEvent::decode(EventData::new(&event.r#type, &event.content))
                 .unwrap()
@@ -215,7 +210,7 @@ mod tests {
             id: "alpha".to_string(),
             value: "beta".to_string(),
         };
-        let headers = EventHeaders::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
+        let headers = Headers::one(HeaderName::new("trace-id").unwrap(), "trace-1").unwrap();
 
         let generated = encode_event(&event, &UuidV7Generator, &headers);
         assert_eq!(
@@ -227,7 +222,7 @@ mod tests {
             Some("trace-1")
         );
 
-        let no_headers = encode_event(&event, &UuidV7Generator, &EventHeaders::empty());
+        let no_headers = encode_event(&event, &UuidV7Generator, &Headers::empty());
         assert!(no_headers.headers.is_empty());
 
         let recorded = StreamEvent {
@@ -244,14 +239,14 @@ mod tests {
     }
 
     #[test]
-    fn event_headers_accepts_metadata_names_and_validates_values() {
+    fn headers_accept_metadata_names_and_validate_values() {
         let name = HeaderName::new("trace-id").unwrap();
         assert_eq!(name.as_str(), "trace-id");
 
         let value = HeaderValue::new("trace-1").unwrap();
         assert_eq!(value.as_str(), "trace-1");
         assert_eq!(HeaderValue::from_str("trace-2").unwrap().as_str(), "trace-2");
-        let typed_headers = EventHeaders::one(HeaderName::new("typed").unwrap(), value.clone()).unwrap();
+        let typed_headers = Headers::one(HeaderName::new("typed").unwrap(), value.clone()).unwrap();
         assert_eq!(typed_headers.get("typed").map(HeaderValue::as_str), Some("trace-1"));
         assert_eq!(typed_headers.get_str("typed"), Some("trace-1"));
 
@@ -265,16 +260,16 @@ mod tests {
         );
         assert_eq!(HeaderName::new("").unwrap_err(), HeaderNameError);
         assert_eq!(
-            EventHeaders::one(HeaderName::new("trace-id").unwrap(), "line\r\nbreak"),
+            Headers::one(HeaderName::new("trace-id").unwrap(), "line\r\nbreak"),
             Err(HeaderValueError)
         );
         assert!(matches!(
-            EventHeaders::from_entries([("", "value")]),
-            Err(crate::headers::FromEntriesError::InvalidName { .. })
+            Headers::from_entries([("", "value")]),
+            Err(FromEntriesError::InvalidName { .. })
         ));
         assert!(matches!(
-            EventHeaders::from_entries([("trace-id", "line\r\nbreak")]),
-            Err(crate::headers::FromEntriesError::InvalidValue { .. })
+            Headers::from_entries([("trace-id", "line\r\nbreak")]),
+            Err(FromEntriesError::InvalidValue { .. })
         ));
         assert!(HeaderValue::new("null\0break").is_err());
     }

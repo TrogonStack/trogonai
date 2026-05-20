@@ -12,13 +12,13 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_eventsourcing::snapshot::Snapshot;
 use trogon_eventsourcing::{
-    AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventEncode, EventHeaders, EventId,
-    EventIdentity, EventType, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest,
-    ReadStreamResponse, SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition,
-    StreamRead, StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
+    AppendStreamRequest, AppendStreamResponse, Event, EventData, EventDecode, EventEncode, EventId, EventIdentity,
+    EventType, Headers, ReadFrom, ReadSnapshotRequest, ReadSnapshotResponse, ReadStreamRequest, ReadStreamResponse,
+    SnapshotRead, SnapshotType, SnapshotWrite, StreamAppend, StreamEvent, StreamPosition, StreamRead,
+    StreamWritePrecondition, WriteSnapshotRequest, WriteSnapshotResponse,
 };
 use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
-use trogon_std::UuidV7Generator;
+use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
     GetJobCommand, JobEventCase, ListJobsCommand, ResolvedJob,
@@ -167,7 +167,7 @@ where
         id,
         r#type: event.event_type().unwrap().to_string(),
         content: event.encode().unwrap(),
-        headers: EventHeaders::empty(),
+        headers: Headers::empty(),
     }
 }
 

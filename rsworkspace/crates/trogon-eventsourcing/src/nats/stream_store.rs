@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use trogon_nats::jetstream::JetStreamPublishMessage;
 use trogon_std::{NowV7, UuidV7Generator};
 
-use crate::{Event, EventHeaders, EventId, StreamEvent};
+use crate::{Event, EventId, Headers, StreamEvent};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
@@ -263,7 +263,7 @@ pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, Stre
     let subject = message.subject.to_string();
     let stream_position = crate::StreamPosition::try_new(message.sequence)
         .map_err(|source| StreamStoreError::read_source("failed to read stream message position", source))?;
-    let event_headers = event_headers_from_headers(headers)?;
+    let headers = headers_from_nats_headers(headers)?;
 
     Ok(StreamEvent {
         stream_id: subject,
@@ -271,7 +271,7 @@ pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, Stre
             id: event_id,
             r#type: event_type,
             content: message.payload.to_vec(),
-            headers: event_headers,
+            headers,
         },
         stream_position,
         recorded_at,
@@ -287,7 +287,7 @@ fn event_header_name(name: &str) -> String {
     format!("{TROGON_EVENT_HEADER_PREFIX}{name}")
 }
 
-fn event_headers_from_headers(headers: &HeaderMap) -> Result<EventHeaders, StreamStoreError> {
+fn headers_from_nats_headers(headers: &HeaderMap) -> Result<Headers, StreamStoreError> {
     let mut entries = Vec::new();
     for (name, values) in headers.iter() {
         let header_name = name.to_string();
@@ -302,7 +302,7 @@ fn event_headers_from_headers(headers: &HeaderMap) -> Result<EventHeaders, Strea
         };
         entries.push((event_header_name.to_string(), value.as_str().to_string()));
     }
-    EventHeaders::from_entries(entries)
+    Headers::from_entries(entries)
         .map_err(|source| StreamStoreError::read_source("failed to read stream message event headers", source))
 }
 
@@ -327,11 +327,11 @@ mod tests {
     };
     use uuid::Uuid;
 
-    use crate::{Event, EventHeaders, EventId};
+    use crate::{Event, EventId, Headers};
 
     use super::{
         NATS_BATCH_COMMIT, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, build_publish_message,
-        event_headers_from_headers,
+        headers_from_nats_headers,
     };
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
             id: EventId::from(Uuid::from_u128(1)),
             r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
-            headers: EventHeaders::empty(),
+            headers: Headers::empty(),
         };
 
         let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
@@ -358,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn build_publish_message_maps_event_headers_to_trogon_headers() {
+    fn build_publish_message_maps_headers_to_trogon_headers() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
             r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
-            headers: EventHeaders::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
+            headers: Headers::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
@@ -386,19 +386,19 @@ mod tests {
     }
 
     #[test]
-    fn event_headers_from_headers_reads_trogon_event_headers() {
+    fn headers_from_nats_headers_reads_trogon_headers() {
         let mut headers = HeaderMap::new();
         headers.insert(format!("{TROGON_EVENT_HEADER_PREFIX}trace-id"), "trace-1");
         headers.insert("Trogon-Event-Type", "test.event");
         headers.insert("Nats-Msg-Id", "00000000-0000-0000-0000-000000000001");
 
-        let event_headers = event_headers_from_headers(&headers).unwrap();
+        let parsed_headers = headers_from_nats_headers(&headers).unwrap();
 
         assert_eq!(
-            event_headers.get("trace-id").map(|value| value.as_str()),
+            parsed_headers.get("trace-id").map(|value| value.as_str()),
             Some("trace-1")
         );
-        assert_eq!(event_headers.len(), 1);
+        assert_eq!(parsed_headers.len(), 1);
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod tests {
             id: EventId::from(Uuid::from_u128(1)),
             r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
-            headers: EventHeaders::empty(),
+            headers: Headers::empty(),
         };
 
         let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
@@ -441,7 +441,7 @@ mod tests {
             id: EventId::from(Uuid::from_u128(1)),
             r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
-            headers: EventHeaders::empty(),
+            headers: Headers::empty(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)

@@ -1,28 +1,21 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod event;
-mod execution;
+pub mod event;
+pub mod execution;
+pub mod headers;
 pub mod nats;
 pub mod snapshot;
-mod stream;
+pub mod stream;
 
-pub mod headers {
-    pub use crate::event::{
-        EventHeaders as Headers, FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError,
-    };
-}
-
-pub use event::{
-    Event, EventData, EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, HeaderName,
-    HeaderNameError, HeaderValue, HeaderValueError, StreamEvent,
-};
+pub use event::{Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamEvent};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
-    CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, ExecutionResult, FrequencySnapshot,
-    DecideSnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotPolicy,
-    SnapshotTaskScheduler, Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, DecideSnapshot, ExecutionResult,
+    FrequencySnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotPolicy, SnapshotTaskScheduler,
+    Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
+pub use headers::{HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 pub use nats::{
     StreamStoreError, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
     record_stream_message,

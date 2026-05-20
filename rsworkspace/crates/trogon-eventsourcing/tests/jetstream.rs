@@ -17,7 +17,7 @@ use trogon_eventsourcing::nats::{
 };
 use trogon_eventsourcing::{
     AppendStreamRequest, AppendStreamResponse, CommandError, CommandExecution, Decider, Decision, Event, EventData,
-    EventDecode, EventEncode, EventHeaders, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, ReadFrom,
+    EventDecode, EventEncode, EventId, EventIdentity, EventType, FrequencySnapshot, HeaderName, Headers, ReadFrom,
     ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream, SnapshotRead, SnapshotType, SnapshotWrite,
     Snapshots, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition, TROGON_EVENT_TYPE,
     TokioSnapshotTaskScheduler, WriteSnapshotRequest,
@@ -346,7 +346,7 @@ fn nats_test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://127.0.0.1:14222".to_string())
 }
 
-fn encode_event<E>(event: &E, headers: &EventHeaders) -> TestResult<Event>
+fn encode_event<E>(event: &E, headers: &Headers) -> TestResult<Event>
 where
     E: EventType + EventIdentity + EventEncode,
     <E as EventType>::Error: Error + Send + Sync + 'static,
@@ -365,8 +365,7 @@ where
 
 fn test_event(_stream_id: &str, value: impl Into<String>) -> Result<Event, JetStreamStoreError<std::io::Error>> {
     let event = TestEvent { value: value.into() };
-    encode_event(&event, &EventHeaders::empty())
-        .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
+    encode_event(&event, &Headers::empty()).map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))
 }
 
 fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>) -> TestResult<Event> {
@@ -374,7 +373,7 @@ fn test_event_with_id(_stream_id: &str, event_id: Uuid, value: impl Into<String>
         event_id: Some(EventId::from(event_id)),
         value: value.into(),
     };
-    Ok(encode_event(&event, &EventHeaders::empty())?)
+    Ok(encode_event(&event, &Headers::empty())?)
 }
 
 fn debug_error<E>(error: E) -> std::io::Error
@@ -783,10 +782,7 @@ async fn jetstream_store_append_responses_match_recorded_stream_positions() -> T
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(alpha_one.stream_position),
-            events: vec![
-                test_event("alpha", "alpha-two")?,
-                test_event("alpha", "alpha-three")?,
-            ],
+            events: vec![test_event("alpha", "alpha-two")?, test_event("alpha", "alpha-three")?],
         })
         .await?;
     let beta_two = append_one(
@@ -1287,14 +1283,14 @@ async fn jetstream_store_any_can_start_new_subject_after_global_history() -> Tes
 
 #[tokio::test]
 #[ignore = "requires actual NATS JetStream"]
-async fn jetstream_store_preserves_event_headers() -> TestResult {
+async fn jetstream_store_preserves_headers() -> TestResult {
     let fixture = JetStreamFixture::new().await?;
 
     let header_payload = TestEvent {
         value: "headers".to_string(),
     };
-    let event_headers = EventHeaders::one(HeaderName::new("trace-id")?, "trace-1")?;
-    let event = encode_event(&header_payload, &event_headers)?;
+    let headers = Headers::one(HeaderName::new("trace-id")?, "trace-1")?;
+    let event = encode_event(&header_payload, &headers)?;
     fixture
         .store
         .append_stream(AppendStreamRequest {
@@ -1312,7 +1308,7 @@ async fn jetstream_store_preserves_event_headers() -> TestResult {
         })
         .await?;
     assert_eq!(read.events.len(), 1);
-    assert_eq!(read.events[0].event.headers, event_headers);
+    assert_eq!(read.events[0].event.headers, headers);
 
     fixture.delete().await
 }
@@ -1632,7 +1628,7 @@ async fn jetstream_command_execution_snapshot_skips_earlier_corrupt_same_subject
         ))),
         amount: 5,
     };
-    let seed = encode_event(&seed_payload, &EventHeaders::empty())?;
+    let seed = encode_event(&seed_payload, &Headers::empty())?;
     let seed_outcome = fixture
         .store
         .append_stream(AppendStreamRequest {
@@ -1771,7 +1767,7 @@ async fn jetstream_command_execution_reports_decode_errors_from_corrupt_events()
         id: EventId::from(Uuid::from_u128(0x018f_8f4d_94a8_7000_8000_0000_0000_0401)),
         r#type: "test.counter_increased".to_string(),
         content: b"not-json".to_vec(),
-        headers: EventHeaders::empty(),
+        headers: Headers::empty(),
     };
     fixture
         .store
@@ -2107,7 +2103,7 @@ async fn jetstream_store_any_rejects_concurrent_duplicate_event_ids_without_adva
                 event_id: Some(EventId::from(event_id)),
                 value: format!("attempt-{index}"),
             };
-            let event = encode_event(&payload, &EventHeaders::empty())
+            let event = encode_event(&payload, &Headers::empty())
                 .map_err(|source| JetStreamStoreError::Codec(std::io::Error::other(source)))?;
             store
                 .append_stream(AppendStreamRequest {
@@ -2586,10 +2582,7 @@ async fn jetstream_store_returns_batch_commit_sequence_after_interleaved_subject
         .append_stream(AppendStreamRequest {
             stream_id: "alpha",
             stream_write_precondition: StreamWritePrecondition::At(position(1)),
-            events: vec![
-                test_event("alpha", "alpha-two")?,
-                test_event("alpha", "alpha-three")?,
-            ],
+            events: vec![test_event("alpha", "alpha-two")?, test_event("alpha", "alpha-three")?],
         })
         .await?;
     assert_eq!(outcome.stream_position, position(4));
