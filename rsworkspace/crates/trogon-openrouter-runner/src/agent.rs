@@ -51,6 +51,7 @@ const MAX_SESSIONS: usize = 100;
 /// OpenRouter model IDs are typically `provider/model-name`; matching is done on the full
 /// ID lowercased so both full and short-form IDs work.
 /// Returns `None` for unknown models — callers should omit the percentage rather than guess.
+#[allow(dead_code)]
 fn context_window_tokens(model_id: &str) -> Option<u64> {
     let m = model_id.to_lowercase();
     // Anthropic Claude (all current generations have 200k context)
@@ -287,6 +288,9 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             skill_loader: self.skill_loader,
             session_store: self.session_store,
             tenant_id: self.tenant_id,
+            registry: self.registry,
+            execution_nats: self.execution_nats,
+            tool_http_client: self.tool_http_client,
         }
     }
 
