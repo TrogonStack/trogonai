@@ -23,7 +23,7 @@ use bytes::Bytes;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
 use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBlock, ImageSource, Message};
-use trogon_agent_core::tools::ToolDef;
+use trogon_agent_core::tools::{ToolDef, all_tool_defs};
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
@@ -471,7 +471,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
-        let tools: Vec<ToolDef> = vec![];
+        let tools: Vec<ToolDef> = all_tool_defs();
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
