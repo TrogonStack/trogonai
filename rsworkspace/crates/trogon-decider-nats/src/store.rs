@@ -1,19 +1,22 @@
 use std::fmt;
 
 use async_nats::jetstream::{self, kv};
+#[cfg(not(coverage))]
 use trogon_decider_runtime::snapshot::{
     ReadSnapshotRequest, ReadSnapshotResponse, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
+#[cfg(not(coverage))]
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, ReadFrom, ReadStreamRequest, ReadStreamResponse, SnapshotRead,
-    SnapshotWrite, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, ReadStreamRequest, ReadStreamResponse, SnapshotRead, SnapshotWrite,
+    StreamAppend, StreamRead,
 };
+use trogon_decider_runtime::{ReadFrom, StreamPosition, StreamWritePrecondition};
 
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
-use crate::stream_store::{
-    StreamStoreError, StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream,
-};
+use crate::stream_store::StreamStoreError;
+#[cfg(not(coverage))]
+use crate::stream_store::{StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Optimistic concurrency conflict details for a failed stream append.
@@ -175,8 +178,14 @@ impl<Resolver> JetStreamStore<Resolver> {
     pub fn snapshot_config(&self) -> &NatsSnapshotConfig {
         &self.snapshot_config
     }
+
+    /// Returns the resolver used to map stream ids to JetStream subjects.
+    pub fn subject_resolver(&self) -> &Resolver {
+        &self.subject_resolver
+    }
 }
 
+#[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
@@ -223,6 +232,7 @@ fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
     }
 }
 
+#[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
@@ -268,6 +278,7 @@ where
     }
 }
 
+#[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
@@ -288,6 +299,7 @@ where
     }
 }
 
+#[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver>
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
