@@ -2015,6 +2015,43 @@ mod tests {
         }).await;
     }
 
+    #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        let snap = crate::session_store::SessionSnapshot {
+            id: "tok-sess".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Token Session".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+            total_input_tokens: 200,
+            total_output_tokens: 80,
+            total_cache_read_tokens: 30,
+            total_cache_creation_tokens: 10,
+        };
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent
+                .load_session(LoadSessionRequest::new(SessionId::from("tok-sess"), "/"))
+                .await
+                .expect("load from KV must succeed");
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get("tok-sess").expect("session must be in memory after load");
+            assert_eq!(s.total_input_tokens, 200, "total_input_tokens must be restored from KV");
+            assert_eq!(s.total_output_tokens, 80, "total_output_tokens must be restored from KV");
+            assert_eq!(s.total_cache_read_tokens, 30, "total_cache_read_tokens must be restored from KV");
+            assert_eq!(s.total_cache_creation_tokens, 10, "total_cache_creation_tokens must be restored from KV");
+        }).await;
+    }
+
     // ── list_sessions ─────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -5076,6 +5113,108 @@ mod tests {
             assert_eq!(fork.total_output_tokens, 0, "forked session must start with zero output tokens");
             assert_eq!(fork.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
             assert_eq!(fork.total_cache_creation_tokens, 0, "forked session must start with zero cache creation tokens");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn cache_creation_tokens_accumulate_across_tool_rounds() {
+        let agent = make_agent_with_key("k");
+        // Round 1: tool call with cache_creation_tokens = 5
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, cache_read_tokens: 0, cache_creation_tokens: 5 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        // Round 2: final answer with cache_creation_tokens = 8
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, cache_read_tokens: 0, cache_creation_tokens: 8 },
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")])).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(
+                s.total_cache_creation_tokens, 13,
+                "cache_creation_tokens must accumulate across tool rounds: 5 + 8 = 13"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_saves_tokens_when_prompt_canceled() {
+        // Verify that tokens accumulated before cancel are updated in-memory so
+        // they will be persisted when the store save runs unconditionally after
+        // the streaming loop exits.
+        let agent = Arc::new(make_agent_with_key("k"));
+        let agent2 = Arc::clone(&agent);
+        let agent3 = Arc::clone(&agent);
+
+        // Round 1: Usage + tool call (forces a second HTTP call).
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 15, completion_tokens: 6, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c_cancel".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        // Round 2: slow — hangs until cancel fires.
+        agent.client.push_slow_response(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sid_str = sid.to_string();
+            let sid2 = sid.clone();
+
+            let agent_prompt = Arc::clone(&agent);
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt.prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("go")],
+                )).await.unwrap()
+            });
+
+            let cancel_handle = tokio::task::spawn_local(async move {
+                // Wait for UsageUpdate notification — confirms round-1 Usage was
+                // processed and prompt_input_total is already 15.
+                loop {
+                    let has_usage = agent2.notifier.notifications.lock().unwrap().iter()
+                        .any(|n| matches!(n.update, agent_client_protocol::SessionUpdate::UsageUpdate(_)));
+                    if has_usage { break; }
+                    tokio::task::yield_now().await;
+                }
+                agent2.cancel(CancelNotification::new(sid2)).await.unwrap();
+            });
+
+            let (result, _) = tokio::join!(prompt_handle, cancel_handle);
+            let result = result.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            // After cancel, the unconditional post-loop path must have updated in-memory tokens.
+            let sessions = agent3.sessions.lock().await;
+            let s = sessions.get(&sid_str).expect("session must still exist after cancel");
+            assert_eq!(
+                s.total_input_tokens, 15,
+                "cancelled prompt must accumulate input tokens in session state"
+            );
+            assert_eq!(
+                s.total_output_tokens, 6,
+                "cancelled prompt must accumulate output tokens in session state"
+            );
         }).await;
     }
 }

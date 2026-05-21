@@ -35,8 +35,8 @@ use futures_util::StreamExt as _;
 use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_xai_runner::{
-    AgentConfig, AgentLoading, FinishReason, InputItem, SessionNotifier, SkillLoading, XaiAgent,
-    XaiEvent, XaiHttpClient,
+    AgentConfig, AgentLoading, FinishReason, InputItem, SessionNotifier, SessionStoring,
+    SkillLoading, XaiAgent, XaiEvent, XaiHttpClient,
 };
 
 // ── Inline mock: xAI HTTP client ─────────────────────────────────────────────
@@ -157,6 +157,46 @@ impl TestNotifier {
 impl SessionNotifier for TestNotifier {
     async fn notify(&self, notification: SessionNotification) {
         self.notifications.lock().unwrap().push(notification);
+    }
+}
+
+// ── Inline session store: records full snapshots for cancel+KV tests ──────────
+
+struct RecordingStore {
+    saves: Arc<Mutex<Vec<trogon_xai_runner::session_store::SessionSnapshot>>>,
+}
+
+impl RecordingStore {
+    fn new() -> (Self, Arc<Mutex<Vec<trogon_xai_runner::session_store::SessionSnapshot>>>) {
+        let saves = Arc::new(Mutex::new(Vec::new()));
+        (Self { saves: Arc::clone(&saves) }, saves)
+    }
+}
+
+impl trogon_xai_runner::SessionStoring for RecordingStore {
+    fn save<'a>(
+        &'a self,
+        snapshot: &'a trogon_xai_runner::session_store::SessionSnapshot,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        let snap = snapshot.clone();
+        let saves = Arc::clone(&self.saves);
+        Box::pin(async move { saves.lock().unwrap().push(snap); })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {})
+    }
+
+    fn load<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<trogon_xai_runner::session_store::SessionSnapshot>> + Send + 'a>> {
+        Box::pin(async move { None })
     }
 }
 
@@ -6104,6 +6144,155 @@ async fn import_via_nats_clears_last_response_id() {
                 calls[1].input_len >= 3,
                 "second prompt must include imported messages + new user turn, got input_len={}",
                 calls[1].input_len
+            );
+        })
+        .await;
+}
+
+// ── cancel via NATS saves token totals to KV when usage received before cancel ──
+
+/// A prompt cancelled via NATS must persist token totals that arrived before the
+/// cancel to the session store — verifies the cancel code path writes KV through
+/// the full NATS dispatch stack.
+#[tokio::test]
+async fn cancel_saves_token_totals_to_kv() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let nats = MockNatsClient::new();
+            let http = TestHttpClient::new();
+            let notifier = TestNotifier::new();
+            let global_tx = nats.inject_messages();
+            let session_tx = nats.inject_messages();
+
+            let (store, saves) = RecordingStore::new();
+
+            let agent = XaiAgent::with_deps(notifier.clone(), "grok-3", "test-key", http.clone())
+                .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let prefix = acp_nats::acp_prefix::AcpPrefix::new("acp").unwrap();
+            let (_, io_task) =
+                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+            tokio::task::spawn_local(async move { let _ = io_task.await; });
+
+            // Create a session via NATS.
+            let msg = async_nats::Message {
+                subject: "acp.agent.session.new".into(),
+                reply: Some("r.new".into()),
+                payload: serde_json::to_vec(&NewSessionRequest::new("/tmp")).unwrap().into(),
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            };
+            global_tx.unbounded_send(msg).unwrap();
+
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 1 { break; }
+                assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
+                tokio::task::yield_now().await;
+            }
+            let sid: String = serde_json::from_slice::<serde_json::Value>(
+                &nats.published_payloads()[0],
+            )
+            .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // First response: Usage + Incomplete → triggers a continuation call.
+            http.push(vec![
+                XaiEvent::ResponseId { id: "r1".to_string() },
+                XaiEvent::Usage { prompt_tokens: 7, completion_tokens: 3, cached_tokens: 0 },
+                XaiEvent::Finished {
+                    reason: FinishReason::Incomplete,
+                    incomplete_reason: Some("max_output_tokens".to_string()),
+                },
+            ]);
+            // Second call (continuation): slow — hangs until cancel fires.
+            http.push_slow(XaiEvent::TextDelta { text: "partial".to_string() });
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            let msg = async_nats::Message {
+                subject: prompt_subj.into(),
+                reply: Some("r.prompt".into()),
+                payload: serde_json::to_vec(&PromptRequest::new(
+                    sid.clone(),
+                    vec![ContentBlock::from("hi")],
+                ))
+                .unwrap()
+                .into(),
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            };
+            session_tx.unbounded_send(msg).unwrap();
+
+            // Wait for both the UsageUpdate notification (confirming usage accumulated)
+            // and AgentMessageChunk (confirming round 2 is streaming and cancel_senders
+            // is populated). Two notifications total.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if notifier.count() >= 2 { break; }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for UsageUpdate + AgentMessageChunk notifications; got {}",
+                    notifier.count()
+                );
+                tokio::task::yield_now().await;
+            }
+
+            // Send cancel via NATS (notification — no reply subject).
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            let msg = async_nats::Message {
+                subject: cancel_subj.into(),
+                reply: None,
+                payload: serde_json::to_vec(&CancelNotification::new(sid.clone()))
+                    .unwrap()
+                    .into(),
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            };
+            session_tx.unbounded_send(msg).unwrap();
+
+            // Wait for the prompt response (publish 2 = new_session response + prompt response).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 2 { break; }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for cancel prompt response"
+                );
+                tokio::task::yield_now().await;
+            }
+            let payloads = nats.published_payloads();
+            let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert_eq!(
+                resp.stop_reason,
+                StopReason::Cancelled,
+                "cancelled via NATS must return Cancelled"
+            );
+
+            // The store must have a snapshot with non-zero token totals.
+            // (1 save from new_session + 1 save from cancel path = at least 2)
+            let stored = saves.lock().unwrap();
+            assert!(
+                stored.len() >= 2,
+                "store must be saved on new_session and on cancel; got {} saves",
+                stored.len()
+            );
+            let last = stored.last().unwrap();
+            assert_eq!(
+                last.total_input_tokens, 7,
+                "cancel path must persist accumulated input tokens to KV"
+            );
+            assert_eq!(
+                last.total_output_tokens, 3,
+                "cancel path must persist accumulated output tokens to KV"
             );
         })
         .await;
