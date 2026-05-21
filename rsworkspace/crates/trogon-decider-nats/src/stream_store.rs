@@ -655,10 +655,8 @@ mod tests {
     #[tokio::test]
     async fn append_stream_publishes_batch_with_shared_batch_id() {
         let js = MockJetStreamPublishMessage::new();
-        js.enqueue_ack_with_sequence(10);
-        js.enqueue_ack_with_sequence(11);
 
-        append_stream(
+        let position = append_stream(
             &js,
             make_subject("test.events"),
             Some(0),
@@ -667,8 +665,11 @@ mod tests {
         .await
         .expect("publish should succeed");
 
+        assert_eq!(position, StreamPosition::try_new(2).unwrap());
         let messages = js.published_messages();
         assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].sequence, 1);
+        assert_eq!(messages[1].sequence, 2);
         let first_headers = messages[0].headers.clone().unwrap_or_default();
         let second_headers = messages[1].headers.clone().unwrap_or_default();
         let first_batch_id = first_headers.get(NATS_BATCH_ID).map(|v| v.as_str().to_string());
@@ -683,6 +684,49 @@ mod tests {
         );
         assert_eq!(first_headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), None);
         assert_eq!(second_headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn append_stream_uses_semantic_subject_sequence_guard() {
+        let js = MockJetStreamPublishMessage::new();
+
+        append_stream(
+            &js,
+            make_subject("test.events.alpha"),
+            Some(0),
+            &[make_event(1, b"first")],
+        )
+        .await
+        .expect("first publish should succeed");
+        append_stream(
+            &js,
+            make_subject("test.events.beta"),
+            Some(0),
+            &[make_event(2, b"other")],
+        )
+        .await
+        .expect("interleaved publish should succeed");
+        append_stream(
+            &js,
+            make_subject("test.events.alpha"),
+            Some(1),
+            &[make_event(3, b"second")],
+        )
+        .await
+        .expect("subject guard should use latest subject sequence");
+
+        let stale = append_stream(
+            &js,
+            make_subject("test.events.alpha"),
+            Some(1),
+            &[make_event(4, b"stale")],
+        )
+        .await
+        .expect_err("stale subject sequence should fail");
+
+        assert!(matches!(stale, StreamStoreError::WrongExpectedVersion));
+        assert_eq!(js.last_subject_sequence("test.events.alpha"), 3);
+        assert_eq!(js.last_subject_sequence("test.events.beta"), 2);
     }
 
     #[tokio::test]
@@ -778,6 +822,44 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].stream_id, "a");
+    }
+
+    #[tokio::test]
+    async fn read_subject_stream_observes_semantic_publish_mock() {
+        let js = MockJetStreamPublishMessage::new();
+        append_stream(
+            &js,
+            make_subject("test.events.alpha"),
+            Some(0),
+            &[make_event(1, b"alpha-one")],
+        )
+        .await
+        .expect("alpha publish should succeed");
+        append_stream(
+            &js,
+            make_subject("test.events.beta"),
+            Some(0),
+            &[make_event(2, b"beta-one")],
+        )
+        .await
+        .expect("beta publish should succeed");
+        append_stream(
+            &js,
+            make_subject("test.events.alpha"),
+            Some(1),
+            &[make_event(3, b"alpha-two")],
+        )
+        .await
+        .expect("alpha second publish should succeed");
+
+        let events = super::read_subject_stream(&js, "alpha", "test.events.alpha", 1, 3)
+            .await
+            .expect("read should succeed");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].stream_id, "alpha");
+        assert_eq!(events[0].stream_position, StreamPosition::try_new(1).unwrap());
+        assert_eq!(events[1].stream_position, StreamPosition::try_new(3).unwrap());
     }
 
     #[tokio::test]
