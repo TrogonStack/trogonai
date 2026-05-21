@@ -6,7 +6,6 @@
 //! adapter handles stream positions, optimistic concurrency, event envelopes,
 //! and snapshot persistence.
 
-#![warn(missing_docs)]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod store;
