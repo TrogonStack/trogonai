@@ -2,7 +2,6 @@ use crate::nats::NatsClient;
 use agent_client_protocol::{
     ContentBlock, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, TextContent,
 };
-use bytes::Bytes;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -235,12 +234,12 @@ impl<N: NatsClient> Session for TrogonSession<N> {
     }
 
     fn cancel(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
-        let subject = format!(
-            "{}.session.{}.agent.cancel",
-            self.prefix, self.session_id
-        );
+        let subject = format!("{}.session.{}.agent.cancel", self.prefix, self.session_id);
+        let session_id = self.session_id.clone();
         async move {
-            let _ = self.nats.publish_bytes(subject, Bytes::new()).await;
+            if let Ok(payload) = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })) {
+                let _ = self.nats.publish_bytes(subject, payload.into()).await;
+            }
         }
     }
 
@@ -250,21 +249,31 @@ impl<N: NatsClient> Session for TrogonSession<N> {
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
     {
         let model_id = model_id.to_string();
-        let subject = format!("{}.session.{}.agent.set_model", self.prefix, self.session_id);
+        let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
         let nats = &self.nats;
         async move {
+            let req_id = Uuid::now_v7().to_string();
+            let subject = format!("{prefix}.session.{session_id}.agent.set_model");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.set_model.response.{req_id}");
+
+            let mut resp_rx = nats
+                .subscribe_bytes(resp_subject)
+                .await
+                .map_err(|e| anyhow::anyhow!("subscribe set_model response: {e}"))?;
+
             let payload = serde_json::to_vec(&serde_json::json!({
                 "sessionId": session_id,
                 "modelId": model_id,
             }))?;
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                nats.request_bytes(subject, payload.into()),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?
-            .map_err(|e| anyhow::anyhow!("NATS error setting model: {e}"))?;
+
+            nats.publish_with_req_id_bytes(subject, req_id, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("publish set_model: {e}"))?;
+
+            tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?;
             Ok(())
         }
     }
@@ -282,12 +291,17 @@ impl<N: NatsClient> Session for TrogonSession<N> {
     }
 
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
-        let subject = format!(
-            "{}.session.{}.agent.close",
-            self.prefix, self.session_id
-        );
+        let subject = format!("{}.session.{}.agent.close", self.prefix, self.session_id);
+        let session_id = self.session_id.clone();
+        let prefix = self.prefix.clone();
         async move {
-            let _ = self.nats.publish_bytes(subject, Bytes::new()).await;
+            let req_id = Uuid::now_v7().to_string();
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.close.response.{req_id}");
+            // Subscribe before publishing so the runner's response is accepted (even though we ignore it).
+            let _resp_rx = self.nats.subscribe_bytes(resp_subject).await;
+            if let Ok(payload) = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })) {
+                let _ = self.nats.publish_with_req_id_bytes(subject, req_id, payload.into()).await;
+            }
         }
     }
 }

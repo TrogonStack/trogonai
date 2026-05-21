@@ -1104,7 +1104,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             &AcpSessionId::new(&session_id).expect("valid session_id"),
         )
         .to_string();
-        self.notifier.publish(cancel_subject, Bytes::new()).await;
+        let cancel_payload = serde_json::to_vec(
+            &serde_json::json!({ "sessionId": &session_id }),
+        )
+        .unwrap_or_default();
+        self.notifier.publish(cancel_subject, cancel_payload.into()).await;
 
         if let Err(e) = self.store.delete(&session_id).await {
             warn!(session_id, error = %e, "agent: failed to delete session");
