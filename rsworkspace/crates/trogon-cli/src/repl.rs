@@ -186,7 +186,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, cwd_str).await {
                             Ok(outcome) => {
                                 if outcome.same_runner {
-                                    println!("Already on a runner that supports {model_id}");
+                                    match session.set_model(&model_id).await {
+                                        Ok(()) => println!("Model set to {model_id}"),
+                                        Err(e) => eprintln!("Error setting model: {e}"),
+                                    }
                                 } else {
                                     session.close().await;
                                     session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
