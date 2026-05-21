@@ -33,6 +33,10 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                     stop_reason = reason;
                     break;
                 }
+                StreamEvent::Error(msg) => {
+                    session.close().await;
+                    return Err(anyhow::anyhow!("{msg}"));
+                }
                 StreamEvent::Thinking
                 | StreamEvent::ToolCall(_)
                 | StreamEvent::Diff(_)
@@ -54,6 +58,10 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                         return Err(anyhow::anyhow!("agent stopped with error"));
                     }
                     break;
+                }
+                StreamEvent::Error(msg) => {
+                    session.close().await;
+                    return Err(anyhow::anyhow!("{msg}"));
                 }
                 StreamEvent::Thinking
                 | StreamEvent::ToolCall(_)

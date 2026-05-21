@@ -316,6 +316,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             session_used_tokens = used_tokens;
                                             session_context_size = context_size;
                                         }
+                                        Some(StreamEvent::Error(msg)) => {
+                                            if !response_buf.is_empty() {
+                                                print!("{}", crate::markdown::render(&response_buf));
+                                                response_buf.clear();
+                                            }
+                                            eprintln!("\n\x1b[31merror: {msg}\x1b[0m");
+                                            let _ = stdout.flush();
+                                            break;
+                                        }
                                         Some(StreamEvent::Done(reason)) => {
                                             if !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
@@ -323,6 +332,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             }
                                             if reason == "cancelled" {
                                                 eprintln!("\n[cancelled]");
+                                            } else if reason == "maxTurnRequests" {
+                                                eprintln!("\n\x1b[33m[max tool rounds reached — try rephrasing or using /compact]\x1b[0m");
                                             } else {
                                                 println!();
                                                 if session_context_size > 0 {
