@@ -929,6 +929,46 @@ async fn fork_session_branch_at_index_wrong_type_falls_back_to_full_copy() {
         .await;
 }
 
+#[tokio::test]
+async fn fork_session_resets_token_totals_to_zero() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            // Inject token totals into the parent session.
+            let mut state = store.load(&source_id).await.unwrap();
+            state.total_input_tokens = 1000;
+            state.total_output_tokens = 400;
+            state.total_cache_creation_tokens = 80;
+            state.total_cache_read_tokens = 20;
+            store.save(&source_id, &state).await.unwrap();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(fork_state.total_input_tokens, 0, "fork must start with zero input tokens");
+            assert_eq!(fork_state.total_output_tokens, 0, "fork must start with zero output tokens");
+            assert_eq!(fork_state.total_cache_creation_tokens, 0, "fork must start with zero cache-creation tokens");
+            assert_eq!(fork_state.total_cache_read_tokens, 0, "fork must start with zero cache-read tokens");
+
+            // Parent totals must be unchanged.
+            let parent_state = store.load(&source_id).await.unwrap();
+            assert_eq!(parent_state.total_input_tokens, 1000);
+        })
+        .await;
+}
+
 // ── ext_method: session/list_children edge cases ──────────────────────────────
 
 #[tokio::test]
