@@ -14,7 +14,7 @@ struct Args {
     nats_url: String,
 
     /// ACP prefix (overrides ACP_PREFIX)
-    #[arg(long, env = "ACP_PREFIX", default_value = "acp")]
+    #[arg(long, env = "ACP_PREFIX", default_value = "acp.claude")]
     prefix: String,
 
     /// Non-interactive mode: send PROMPT and print result to stdout.
