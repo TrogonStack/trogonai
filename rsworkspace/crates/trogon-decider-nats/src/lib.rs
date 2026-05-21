@@ -16,13 +16,13 @@ pub mod snapshot_store;
 pub mod stream_store;
 
 pub use snapshot_store::{
-    NatsSnapshotConfig, SnapshotChange, SnapshotStoreError, SnapshotStoreSourceError, checkpoint_key, list_snapshots,
-    maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot, read_snapshot_map, snapshot_key,
-    write_checkpoint, write_snapshot,
+    NatsSnapshotConfig, SnapshotChange, SnapshotCodecError, SnapshotKvError, SnapshotStoreError, checkpoint_key,
+    list_snapshots, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot,
+    read_snapshot_map, snapshot_key, write_checkpoint, write_snapshot,
 };
 pub use store::{JetStreamStore, JetStreamStoreBuilder, JetStreamStoreError, OptimisticConcurrencyConflictError};
 pub use stream_store::{
-    StreamStoreError, StreamStoreSourceError, StreamSubject, StreamSubjectResolver, SubjectState,
+    PublishStreamError, ReadStreamError, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState,
     TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, read_stream, read_stream_range,
     record_stream_message, subject_current_position,
 };

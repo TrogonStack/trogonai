@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{convert::Infallible, fmt};
 
 use async_nats::jetstream::{self, kv};
 #[cfg(not(coverage))]
@@ -50,7 +50,7 @@ impl std::error::Error for OptimisticConcurrencyConflictError {}
 
 #[derive(Debug)]
 /// Error raised by [`JetStreamStore`] read, append, and snapshot operations.
-pub enum JetStreamStoreError<Error> {
+pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible> {
     /// Subject resolution failed before JetStream storage was accessed.
     ResolveSubject(Error),
     /// Reading stream events from JetStream failed.
@@ -58,16 +58,17 @@ pub enum JetStreamStoreError<Error> {
     /// Appending stream events to JetStream failed.
     AppendStream(StreamStoreError),
     /// Reading or writing snapshots failed.
-    Snapshot(SnapshotStoreError),
+    Snapshot(SnapshotStoreError<SnapshotPayloadError>),
     /// Encoding or decoding a runtime payload failed.
     Codec(Error),
     /// The write precondition did not match the current stream state.
     OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError),
 }
 
-impl<Error> fmt::Display for JetStreamStoreError<Error>
+impl<Error, SnapshotPayloadError> fmt::Display for JetStreamStoreError<Error, SnapshotPayloadError>
 where
     Error: std::error::Error + Send + Sync + 'static,
+    SnapshotPayloadError: std::fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -83,9 +84,10 @@ where
     }
 }
 
-impl<Error> std::error::Error for JetStreamStoreError<Error>
+impl<Error, SnapshotPayloadError> std::error::Error for JetStreamStoreError<Error, SnapshotPayloadError>
 where
     Error: std::error::Error + Send + Sync + 'static,
+    SnapshotPayloadError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -286,7 +288,7 @@ where
     Payload::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
-    type Error = JetStreamStoreError<Resolver::Error>;
+    type Error = JetStreamStoreError<Resolver::Error, Payload::Error>;
 
     async fn read_snapshot(
         &self,
@@ -307,7 +309,7 @@ where
     Payload::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
-    type Error = JetStreamStoreError<Resolver::Error>;
+    type Error = JetStreamStoreError<Resolver::Error, Payload::Error>;
 
     async fn write_snapshot(
         &self,

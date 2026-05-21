@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 trogon-decider-runtime = { version = "0.1.0", path = "../trogon-decider-runtime" }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats" }
 trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }
@@ -33,4 +34,3 @@ serde_json = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats", features = ["test-support"] }
-uuid = { workspace = true }

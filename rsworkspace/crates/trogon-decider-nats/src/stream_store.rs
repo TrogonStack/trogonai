@@ -8,20 +8,24 @@ use async_nats::{
     HeaderMap, Subject, SubjectError,
     header::{IntoHeaderName, NATS_MESSAGE_ID},
     jetstream::{
-        self, Error as JetStreamError, ErrorCode, context, context::PublishErrorKind, message::PublishMessage,
+        self, Error as JetStreamError, ErrorCode, context,
+        context::PublishErrorKind,
+        message::PublishMessage,
         publish::PublishAck,
+        stream::{InfoError, LastRawMessageError, RawMessageError},
     },
     subject::ToSubject,
 };
 use chrono::{DateTime, Utc};
 use std::{fmt, future::IntoFuture};
-use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
+use trogon_decider_runtime::{
+    Event, EventId, FromEntriesError, Headers, InvalidStreamPosition, StreamEvent, StreamPosition,
+};
 use trogon_nats::jetstream::{
     JetStreamGetRawMessage, JetStreamGetStreamInfo, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
 };
 use trogon_std::{NowV7, UuidV7Generator};
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
 
 const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
@@ -96,43 +100,116 @@ pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static
 }
 
 #[derive(Debug)]
-/// Source error with fixed call-site context for stream storage failures.
-pub struct StreamStoreSourceError {
-    context: &'static str,
-    source: BoxError,
+/// Error raised while reading stream events.
+#[allow(missing_docs)]
+pub enum ReadStreamError {
+    QueryStreamInfo { source: InfoError },
+    ReadLatestSubjectPosition { source: InvalidStreamPosition },
+    ReadLatestSubjectMessage { source: LastRawMessageError },
+    ReadStreamMessage { source: RawMessageError },
+    InvalidMessageTimestamp { subject: String },
+    ReadMessageEventId { source: uuid::Error },
+    ReadMessagePosition { source: InvalidStreamPosition },
+    InvalidEventHeaderValueCount { header_name: String },
+    ReadMessageEventHeaders { source: FromEntriesError },
+    MissingMessageHeader { header_name: &'static str },
 }
 
-impl StreamStoreSourceError {
-    fn new<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self {
-            context,
-            source: Box::new(source),
+impl fmt::Display for ReadStreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::QueryStreamInfo { source } => write!(f, "failed to query stream info: {source}"),
+            Self::ReadLatestSubjectPosition { source } => {
+                write!(f, "failed to read latest subject position: {source}")
+            }
+            Self::ReadLatestSubjectMessage { source } => write!(f, "failed to read latest subject message: {source}"),
+            Self::ReadStreamMessage { source } => write!(f, "failed to read stream message: {source}"),
+            Self::InvalidMessageTimestamp { subject } => {
+                write!(
+                    f,
+                    "failed to convert stream message timestamp into recorded event time: {subject}"
+                )
+            }
+            Self::ReadMessageEventId { source } => write!(f, "failed to read stream message event id: {source}"),
+            Self::ReadMessagePosition { source } => {
+                write!(f, "failed to read stream message position: {source}")
+            }
+            Self::InvalidEventHeaderValueCount { header_name } => write!(
+                f,
+                "failed to read stream message event headers: event header '{header_name}' must have exactly one value"
+            ),
+            Self::ReadMessageEventHeaders { source } => {
+                write!(f, "failed to read stream message event headers: {source}")
+            }
+            Self::MissingMessageHeader { header_name } => {
+                write!(
+                    f,
+                    "failed to read stream message event envelope: stream message is missing {header_name} header"
+                )
+            }
         }
     }
-
-    /// Returns the diagnostic operation context for the failed call.
-    pub const fn context(&self) -> &'static str {
-        self.context
-    }
-
-    /// Returns the typed source error returned by JetStream or envelope decoding.
-    pub fn source(&self) -> &(dyn std::error::Error + 'static) {
-        self.source.as_ref()
-    }
 }
 
-impl fmt::Display for StreamStoreSourceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.context, self.source)
-    }
-}
-
-impl std::error::Error for StreamStoreSourceError {
+impl std::error::Error for ReadStreamError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source())
+        match self {
+            Self::QueryStreamInfo { source } => Some(source),
+            Self::ReadLatestSubjectPosition { source } => Some(source),
+            Self::ReadLatestSubjectMessage { source } => Some(source),
+            Self::ReadStreamMessage { source } => Some(source),
+            Self::InvalidMessageTimestamp { .. } => None,
+            Self::ReadMessageEventId { source } => Some(source),
+            Self::ReadMessagePosition { source } => Some(source),
+            Self::InvalidEventHeaderValueCount { .. } => None,
+            Self::ReadMessageEventHeaders { source } => Some(source),
+            Self::MissingMessageHeader { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+/// Error raised while appending stream events.
+#[allow(missing_docs)]
+pub enum PublishStreamError {
+    PublishEvent { source: context::PublishError },
+    MissingBatchCommitAck,
+    AcknowledgeEvent { source: context::PublishError },
+    AcknowledgeBatchCommit { source: context::PublishError },
+    DuplicateEventId,
+    ReadAppendPosition { source: InvalidStreamPosition },
+}
+
+impl fmt::Display for PublishStreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublishEvent { source } => write!(f, "failed to publish stream event: {source}"),
+            Self::MissingBatchCommitAck => {
+                write!(
+                    f,
+                    "failed to publish stream event batch: batch commit ack was not created"
+                )
+            }
+            Self::AcknowledgeEvent { source } => write!(f, "failed to acknowledge stream event: {source}"),
+            Self::AcknowledgeBatchCommit { source } => {
+                write!(f, "failed to acknowledge stream event batch commit: {source}")
+            }
+            Self::DuplicateEventId => write!(f, "duplicate event id"),
+            Self::ReadAppendPosition { source } => write!(f, "failed to read stream append position: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for PublishStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PublishEvent { source } => Some(source),
+            Self::MissingBatchCommitAck => None,
+            Self::AcknowledgeEvent { source } => Some(source),
+            Self::AcknowledgeBatchCommit { source } => Some(source),
+            Self::DuplicateEventId => None,
+            Self::ReadAppendPosition { source } => Some(source),
+        }
     }
 }
 
@@ -140,26 +217,22 @@ impl std::error::Error for StreamStoreSourceError {
 /// Error raised while reading or appending stream events.
 pub enum StreamStoreError {
     /// JetStream read operation failed.
-    Read(StreamStoreSourceError),
+    Read(ReadStreamError),
     /// JetStream publish operation failed.
-    Publish(StreamStoreSourceError),
+    Publish(PublishStreamError),
     /// JetStream rejected the expected last subject sequence.
     WrongExpectedVersion,
 }
 
-impl StreamStoreError {
-    pub(crate) fn read_source<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::Read(StreamStoreSourceError::new(context, source))
+impl From<ReadStreamError> for StreamStoreError {
+    fn from(source: ReadStreamError) -> Self {
+        Self::Read(source)
     }
+}
 
-    pub(crate) fn publish_source<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::Publish(StreamStoreSourceError::new(context, source))
+impl From<PublishStreamError> for StreamStoreError {
+    fn from(source: PublishStreamError) -> Self {
+        Self::Publish(source)
     }
 }
 
@@ -178,7 +251,8 @@ impl std::fmt::Display for StreamStoreError {
 impl std::error::Error for StreamStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read(source) | Self::Publish(source) => Some(source),
+            Self::Read(source) => Some(source),
+            Self::Publish(source) => Some(source),
             Self::WrongExpectedVersion => None,
         }
     }
@@ -215,58 +289,48 @@ where
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
             .await
-            .map_err(|source| StreamStoreError::publish_source("failed to publish stream event", source))?;
+            .map_err(|source| PublishStreamError::PublishEvent { source })?;
         if index == 0 && expected_last_subject_sequence.is_some() && events.len() > 1 {
-            acknowledge_batch_member_publish(ack, "failed to acknowledge stream event").await?;
+            acknowledge_batch_member_publish(ack).await?;
         } else if index + 1 == events.len() {
             batch_ack = Some(ack);
         }
     }
 
     let Some(batch_ack) = batch_ack else {
-        return Err(StreamStoreError::publish_source(
-            "failed to publish stream event batch",
-            std::io::Error::other("batch commit ack was not created"),
-        ));
+        return Err(PublishStreamError::MissingBatchCommitAck.into());
     };
 
     let PublishAck {
         sequence: batch_sequence,
         ..
-    } = acknowledge_publish(batch_ack, "failed to acknowledge stream event batch commit").await?;
+    } = acknowledge_publish(batch_ack).await?;
 
-    StreamPosition::try_new(batch_sequence)
-        .map_err(|source| StreamStoreError::publish_source("failed to read stream append position", source))
+    StreamPosition::try_new(batch_sequence).map_err(|source| PublishStreamError::ReadAppendPosition { source }.into())
 }
 
-async fn acknowledge_publish<F>(ack: F, context: &'static str) -> Result<PublishAck, StreamStoreError>
+async fn acknowledge_publish<F>(ack: F) -> Result<PublishAck, StreamStoreError>
 where
     F: IntoFuture<Output = Result<PublishAck, context::PublishError>>,
 {
     match ack.into_future().await {
         Ok(ack @ PublishAck { duplicate: false, .. }) => Ok(ack),
-        Ok(PublishAck { duplicate: true, .. }) => Err(StreamStoreError::publish_source(
-            context,
-            std::io::Error::other("duplicate event id"),
-        )),
+        Ok(PublishAck { duplicate: true, .. }) => Err(PublishStreamError::DuplicateEventId.into()),
         Err(error) if is_wrong_last_sequence(&error) => Err(StreamStoreError::WrongExpectedVersion),
-        Err(error) => Err(StreamStoreError::publish_source(context, error)),
+        Err(source) => Err(PublishStreamError::AcknowledgeBatchCommit { source }.into()),
     }
 }
 
-async fn acknowledge_batch_member_publish<F>(ack: F, context: &'static str) -> Result<(), StreamStoreError>
+async fn acknowledge_batch_member_publish<F>(ack: F) -> Result<(), StreamStoreError>
 where
     F: IntoFuture<Output = Result<PublishAck, context::PublishError>>,
 {
     match ack.into_future().await {
         Ok(PublishAck { duplicate: false, .. }) => Ok(()),
-        Ok(PublishAck { duplicate: true, .. }) => Err(StreamStoreError::publish_source(
-            context,
-            std::io::Error::other("duplicate event id"),
-        )),
+        Ok(PublishAck { duplicate: true, .. }) => Err(PublishStreamError::DuplicateEventId.into()),
         Err(error) if is_wrong_last_sequence(&error) => Err(StreamStoreError::WrongExpectedVersion),
         Err(error) if is_empty_atomic_batch_member_ack(&error) => Ok(()),
-        Err(error) => Err(StreamStoreError::publish_source(context, error)),
+        Err(source) => Err(PublishStreamError::AcknowledgeEvent { source }.into()),
     }
 }
 
@@ -323,7 +387,7 @@ where
     let info = stream
         .get_info()
         .await
-        .map_err(|source| StreamStoreError::read_source("failed to query stream info", source))?;
+        .map_err(|source| ReadStreamError::QueryStreamInfo { source })?;
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
@@ -363,7 +427,7 @@ where
     match stream.get_last_raw_message_by_subject(subject.as_str()).await {
         Ok(message) => StreamPosition::try_new(message.sequence)
             .map(Some)
-            .map_err(|source| StreamStoreError::read_source("failed to read latest subject position", source)),
+            .map_err(|source| ReadStreamError::ReadLatestSubjectPosition { source }.into()),
         Err(error)
             if matches!(
                 error.kind(),
@@ -372,10 +436,7 @@ where
         {
             Ok(None)
         }
-        Err(error) => Err(StreamStoreError::read_source(
-            "failed to read latest subject message",
-            error,
-        )),
+        Err(source) => Err(ReadStreamError::ReadLatestSubjectMessage { source }.into()),
     }
 }
 
@@ -441,7 +502,7 @@ where
         {
             Ok(None)
         }
-        Err(source) => Err(StreamStoreError::read_source("failed to read stream message", source)),
+        Err(source) => Err(ReadStreamError::ReadStreamMessage { source }.into()),
     }
 }
 
@@ -454,20 +515,17 @@ pub fn record_stream_message(
     stream_id: impl Into<String>,
 ) -> Result<StreamEvent, StreamStoreError> {
     let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
-        .ok_or_else(|| {
-            StreamStoreError::read_source(
-                "failed to convert stream message timestamp into recorded event time",
-                std::io::Error::other(message.subject.to_string()),
-            )
+        .ok_or_else(|| ReadStreamError::InvalidMessageTimestamp {
+            subject: message.subject.to_string(),
         })?;
 
     let headers = &message.headers;
     let event_id = required_header(headers, NATS_MESSAGE_ID, "Nats-Msg-Id")?
         .parse::<EventId>()
-        .map_err(|source| StreamStoreError::read_source("failed to read stream message event id", source))?;
+        .map_err(|source| ReadStreamError::ReadMessageEventId { source })?;
     let event_type = required_header(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
-    let stream_position = StreamPosition::try_new(message.sequence)
-        .map_err(|source| StreamStoreError::read_source("failed to read stream message position", source))?;
+    let stream_position =
+        StreamPosition::try_new(message.sequence).map_err(|source| ReadStreamError::ReadMessagePosition { source })?;
     let headers = headers_from_nats_headers(headers)?;
 
     Ok(StreamEvent {
@@ -500,15 +558,11 @@ fn headers_from_nats_headers(headers: &HeaderMap) -> Result<Headers, StreamStore
             continue;
         };
         let [value] = values.as_slice() else {
-            return Err(StreamStoreError::read_source(
-                "failed to read stream message event headers",
-                std::io::Error::other(format!("event header '{header_name}' must have exactly one value")),
-            ));
+            return Err(ReadStreamError::InvalidEventHeaderValueCount { header_name }.into());
         };
         entries.push((event_header_name.to_string(), value.as_str().to_string()));
     }
-    Headers::from_entries(entries)
-        .map_err(|source| StreamStoreError::read_source("failed to read stream message event headers", source))
+    Headers::from_entries(entries).map_err(|source| ReadStreamError::ReadMessageEventHeaders { source }.into())
 }
 
 fn required_header<'a>(
@@ -517,10 +571,10 @@ fn required_header<'a>(
     display_name: &'static str,
 ) -> Result<&'a str, StreamStoreError> {
     headers.get(name).map(|value| value.as_str()).ok_or_else(|| {
-        StreamStoreError::read_source(
-            "failed to read stream message event envelope",
-            std::io::Error::other(format!("stream message is missing {display_name} header")),
-        )
+        ReadStreamError::MissingMessageHeader {
+            header_name: display_name,
+        }
+        .into()
     })
 }
 

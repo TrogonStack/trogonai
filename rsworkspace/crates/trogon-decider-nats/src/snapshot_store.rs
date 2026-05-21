@@ -8,11 +8,11 @@
 use async_nats::jetstream::kv;
 use bytes::Bytes;
 use futures::StreamExt;
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, convert::Infallible};
 use trogon_decider_runtime::StreamPosition;
 use trogon_decider_runtime::snapshot::{
-    EncodedSnapshot, Snapshot, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, decode_snapshot,
-    encode_snapshot,
+    EncodedSnapshot, Snapshot, SnapshotEnvelopeDecodeError, SnapshotEnvelopeEncodeError, SnapshotPayloadData,
+    SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
 };
 use trogon_nats::jetstream::{
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
@@ -40,56 +40,190 @@ impl<T> SnapshotKvBucket for T where
 {
 }
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-#[derive(Debug)]
-/// Source error with fixed call-site context for snapshot storage failures.
-pub struct SnapshotStoreSourceError {
-    context: &'static str,
-    source: BoxError,
+#[derive(Debug, Clone, Copy)]
+enum SnapshotStoreContext {
+    ListSnapshotKeys,
+    ReadSnapshotKey,
+    ReadSnapshotValue,
+    ReadSnapshotEntry,
+    AdvanceCheckpoint,
+    CreateCheckpoint,
+    ReadCheckpointEntry,
+    DecodeCheckpoint,
+    ReadEntryForUpdate,
+    UpdateEntry,
+    CreateEntry,
+    ReadEntryForSnapshotUpdate,
+    UpdateSnapshotEntry,
+    CreateSnapshotEntry,
+    ReadEntryForDelete,
+    DeleteEntry,
 }
 
-impl SnapshotStoreSourceError {
-    fn new<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self {
-            context,
-            source: Box::new(source),
+impl SnapshotStoreContext {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ListSnapshotKeys => "failed to list stream snapshot keys",
+            Self::ReadSnapshotKey => "failed to read stream snapshot key",
+            Self::ReadSnapshotValue => "failed to read stream snapshot value",
+            Self::ReadSnapshotEntry => "failed to read stream snapshot entry",
+            Self::AdvanceCheckpoint => "failed to advance stream snapshot checkpoint",
+            Self::CreateCheckpoint => "failed to create stream snapshot checkpoint",
+            Self::ReadCheckpointEntry => "failed to read stream snapshot checkpoint entry",
+            Self::DecodeCheckpoint => "failed to decode stream snapshot checkpoint",
+            Self::ReadEntryForUpdate => "failed to read key-value entry for update",
+            Self::UpdateEntry => "failed to update key-value entry",
+            Self::CreateEntry => "failed to create key-value entry",
+            Self::ReadEntryForSnapshotUpdate => "failed to read key-value entry for snapshot update",
+            Self::UpdateSnapshotEntry => "failed to update snapshot entry",
+            Self::CreateSnapshotEntry => "failed to create snapshot entry",
+            Self::ReadEntryForDelete => "failed to read key-value entry for delete",
+            Self::DeleteEntry => "failed to delete key-value entry",
         }
     }
-
-    /// Returns the diagnostic operation context for the failed call.
-    pub const fn context(&self) -> &'static str {
-        self.context
-    }
-
-    /// Returns the typed source error returned by the storage or codec layer.
-    pub fn source(&self) -> &(dyn std::error::Error + 'static) {
-        self.source.as_ref()
-    }
 }
 
-impl std::fmt::Display for SnapshotStoreSourceError {
+#[derive(Debug)]
+/// JetStream Key/Value error raised by snapshot storage.
+#[allow(missing_docs)]
+pub enum SnapshotKvError {
+    ListSnapshotKeys { source: kv::HistoryError },
+    ReadSnapshotKey { source: kv::WatcherError },
+    ReadSnapshotValue { source: kv::EntryError },
+    ReadSnapshotEntry { source: kv::EntryError },
+    AdvanceCheckpoint { source: kv::UpdateError },
+    CreateCheckpoint { source: kv::CreateError },
+    ReadCheckpointEntry { source: kv::EntryError },
+    DecodeCheckpoint { key: String },
+    ReadEntryForUpdate { source: kv::EntryError },
+    UpdateEntry { source: kv::UpdateError },
+    CreateEntry { source: kv::CreateError },
+    ReadEntryForSnapshotUpdate { source: kv::EntryError },
+    UpdateSnapshotEntry { source: kv::UpdateError },
+    CreateSnapshotEntry { source: kv::CreateError },
+    ReadEntryForDelete { source: kv::EntryError },
+    DeleteEntry { source: kv::DeleteError },
+}
+
+impl std::fmt::Display for SnapshotKvError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.context, self.source)
+        match self {
+            Self::ListSnapshotKeys { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ListSnapshotKeys.as_str())
+            }
+            Self::ReadSnapshotKey { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotKey.as_str())
+            }
+            Self::ReadSnapshotValue { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotValue.as_str())
+            }
+            Self::ReadSnapshotEntry { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadSnapshotEntry.as_str())
+            }
+            Self::AdvanceCheckpoint { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::AdvanceCheckpoint.as_str())
+            }
+            Self::CreateCheckpoint { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::CreateCheckpoint.as_str())
+            }
+            Self::ReadCheckpointEntry { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadCheckpointEntry.as_str())
+            }
+            Self::DecodeCheckpoint { key } => write!(f, "{}: {key}", SnapshotStoreContext::DecodeCheckpoint.as_str()),
+            Self::ReadEntryForUpdate { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadEntryForUpdate.as_str())
+            }
+            Self::UpdateEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::UpdateEntry.as_str()),
+            Self::CreateEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::CreateEntry.as_str()),
+            Self::ReadEntryForSnapshotUpdate { source } => {
+                write!(
+                    f,
+                    "{}: {source}",
+                    SnapshotStoreContext::ReadEntryForSnapshotUpdate.as_str()
+                )
+            }
+            Self::UpdateSnapshotEntry { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::UpdateSnapshotEntry.as_str())
+            }
+            Self::CreateSnapshotEntry { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::CreateSnapshotEntry.as_str())
+            }
+            Self::ReadEntryForDelete { source } => {
+                write!(f, "{}: {source}", SnapshotStoreContext::ReadEntryForDelete.as_str())
+            }
+            Self::DeleteEntry { source } => write!(f, "{}: {source}", SnapshotStoreContext::DeleteEntry.as_str()),
+        }
     }
 }
 
-impl std::error::Error for SnapshotStoreSourceError {
+impl std::error::Error for SnapshotKvError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source())
+        match self {
+            Self::ListSnapshotKeys { source } => Some(source),
+            Self::ReadSnapshotKey { source } => Some(source),
+            Self::ReadSnapshotValue { source } => Some(source),
+            Self::ReadSnapshotEntry { source } => Some(source),
+            Self::AdvanceCheckpoint { source } => Some(source),
+            Self::CreateCheckpoint { source } => Some(source),
+            Self::ReadCheckpointEntry { source } => Some(source),
+            Self::DecodeCheckpoint { .. } => None,
+            Self::ReadEntryForUpdate { source } => Some(source),
+            Self::UpdateEntry { source } => Some(source),
+            Self::CreateEntry { source } => Some(source),
+            Self::ReadEntryForSnapshotUpdate { source } => Some(source),
+            Self::UpdateSnapshotEntry { source } => Some(source),
+            Self::CreateSnapshotEntry { source } => Some(source),
+            Self::ReadEntryForDelete { source } => Some(source),
+            Self::DeleteEntry { source } => Some(source),
+        }
+    }
+}
+
+#[derive(Debug)]
+/// Snapshot envelope or payload codec error.
+#[allow(missing_docs)]
+pub enum SnapshotCodecError<PayloadError> {
+    EncodePayload { source: PayloadError },
+    EncodeEnvelope { source: SnapshotEnvelopeEncodeError },
+    DecodeEnvelope { source: SnapshotEnvelopeDecodeError },
+    DecodePayload { source: PayloadError },
+}
+
+impl<PayloadError> std::fmt::Display for SnapshotCodecError<PayloadError>
+where
+    PayloadError: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EncodePayload { source } => write!(f, "failed to encode stream snapshot payload: {source}"),
+            Self::EncodeEnvelope { source } => write!(f, "failed to encode stream snapshot envelope: {source}"),
+            Self::DecodeEnvelope { source } => write!(f, "failed to decode stream snapshot envelope: {source}"),
+            Self::DecodePayload { source } => write!(f, "failed to decode stream snapshot payload: {source}"),
+        }
+    }
+}
+
+impl<PayloadError> std::error::Error for SnapshotCodecError<PayloadError>
+where
+    PayloadError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EncodePayload { source } => Some(source),
+            Self::EncodeEnvelope { source } => Some(source),
+            Self::DecodeEnvelope { source } => Some(source),
+            Self::DecodePayload { source } => Some(source),
+        }
     }
 }
 
 #[derive(Debug)]
 /// Error raised while reading, writing, or decoding snapshot state.
-pub enum SnapshotStoreError {
+pub enum SnapshotStoreError<PayloadError = Infallible> {
     /// JetStream Key/Value operation failed.
-    Kv(SnapshotStoreSourceError),
+    Kv(SnapshotKvError),
     /// Snapshot envelope or payload encoding failed.
-    Codec(SnapshotStoreSourceError),
+    Codec(SnapshotCodecError<PayloadError>),
     /// A key used the snapshot namespace prefix but did not include a stream id.
     InvalidSnapshotKey {
         /// Invalid key observed in the Key/Value bucket.
@@ -167,23 +301,22 @@ impl<T> SnapshotChange<T> {
     }
 }
 
-impl SnapshotStoreError {
-    fn kv_source<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::Kv(SnapshotStoreSourceError::new(context, source))
-    }
-
-    fn codec_source<E>(context: &'static str, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::Codec(SnapshotStoreSourceError::new(context, source))
+impl<PayloadError> From<SnapshotKvError> for SnapshotStoreError<PayloadError> {
+    fn from(source: SnapshotKvError) -> Self {
+        Self::Kv(source)
     }
 }
 
-impl std::fmt::Display for SnapshotStoreError {
+impl<PayloadError> From<SnapshotCodecError<PayloadError>> for SnapshotStoreError<PayloadError> {
+    fn from(source: SnapshotCodecError<PayloadError>) -> Self {
+        Self::Codec(source)
+    }
+}
+
+impl<PayloadError> std::fmt::Display for SnapshotStoreError<PayloadError>
+where
+    PayloadError: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Kv(source) => write!(f, "KV error: {source}"),
@@ -198,10 +331,14 @@ impl std::fmt::Display for SnapshotStoreError {
     }
 }
 
-impl std::error::Error for SnapshotStoreError {
+impl<PayloadError> std::error::Error for SnapshotStoreError<PayloadError>
+where
+    PayloadError: std::error::Error + 'static,
+{
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Kv(source) | Self::Codec(source) => Some(source),
+            Self::Kv(source) => Some(source),
+            Self::Codec(source) => Some(source),
             Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointName { .. } => None,
         }
     }
@@ -234,7 +371,7 @@ where
         })
 }
 
-fn stream_id_from_snapshot_key<T>(key: &str) -> Result<Option<String>, SnapshotStoreError>
+fn stream_id_from_snapshot_key<T, PayloadError>(key: &str) -> Result<Option<String>, SnapshotStoreError<PayloadError>>
 where
     T: SnapshotType,
 {
@@ -249,38 +386,44 @@ where
     Ok(Some(stream_id.to_string()))
 }
 
-fn snapshot_value<T>(snapshot: &Snapshot<T>) -> Result<Vec<u8>, SnapshotStoreError>
+fn snapshot_value<T>(snapshot: &Snapshot<T>) -> Result<Vec<u8>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadEncode,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let encoded = encode_snapshot(snapshot)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to encode stream snapshot payload", source))?;
+    let payload = snapshot
+        .payload
+        .encode()
+        .map_err(|source| SnapshotCodecError::EncodePayload { source })?;
+    let encoded = EncodedSnapshot::new(snapshot.position, payload);
 
     encoded
         .into_bytes()
-        .map_err(|source| SnapshotStoreError::codec_source("failed to encode stream snapshot envelope", source))
+        .map_err(|source| SnapshotCodecError::EncodeEnvelope { source }.into())
 }
 
-fn snapshot_from_value<T>(value: &[u8]) -> Result<Snapshot<T>, SnapshotStoreError>
+fn snapshot_from_value<T>(value: &[u8]) -> Result<Snapshot<T>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadDecode,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let encoded = EncodedSnapshot::from_bytes(value)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))?;
+    let encoded = EncodedSnapshot::from_bytes(value).map_err(|source| SnapshotCodecError::DecodeEnvelope { source })?;
+    let payload = T::decode(SnapshotPayloadData::new(encoded.payload.as_slice()))
+        .map_err(|source| SnapshotCodecError::DecodePayload { source })?;
 
-    decode_snapshot(encoded)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot payload", source))
+    Ok(Snapshot::new(encoded.position, payload))
 }
 
-fn snapshot_position_from_value(value: &[u8]) -> Result<StreamPosition, SnapshotStoreError> {
+fn snapshot_position_from_value<PayloadError>(value: &[u8]) -> Result<StreamPosition, SnapshotStoreError<PayloadError>>
+where
+    PayloadError: std::error::Error + Send + Sync + 'static,
+{
     EncodedSnapshot::from_bytes(value)
         .map(|snapshot| snapshot.position)
-        .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))
+        .map_err(|source| SnapshotCodecError::DecodeEnvelope { source }.into())
 }
 
-async fn read_snapshot_entries<T, K>(bucket: &K) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
+async fn read_snapshot_entries<T, K>(bucket: &K) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -289,19 +432,18 @@ where
     let mut keys = bucket
         .keys()
         .await
-        .map_err(|source| SnapshotStoreError::kv_source("failed to list stream snapshot keys", source))?;
+        .map_err(|source| SnapshotKvError::ListSnapshotKeys { source })?;
     let mut snapshots = Vec::new();
 
     while let Some(result) = keys.next().await {
-        let key =
-            result.map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot key", source))?;
-        let Some(stream_id) = stream_id_from_snapshot_key::<T>(&key)? else {
+        let key = result.map_err(|source| SnapshotKvError::ReadSnapshotKey { source })?;
+        let Some(stream_id) = stream_id_from_snapshot_key::<T, T::Error>(&key)? else {
             continue;
         };
         let Some(value) = bucket
             .get(key)
             .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot value", source))?
+            .map_err(|source| SnapshotKvError::ReadSnapshotValue { source })?
         else {
             continue;
         };
@@ -313,7 +455,7 @@ where
 }
 
 /// Reads the snapshot currently stored for the stream id.
-pub async fn read_snapshot<T, K>(bucket: &K, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot<T, K>(bucket: &K, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -322,7 +464,7 @@ where
     let Some(value) = bucket
         .get(snapshot_key::<T>(id))
         .await
-        .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot entry", source))?
+        .map_err(|source| SnapshotKvError::ReadSnapshotEntry { source })?
     else {
         return Ok(None);
     };
@@ -331,7 +473,11 @@ where
 }
 
 /// Writes a snapshot for the stream id.
-pub async fn write_snapshot<T, K>(bucket: &K, id: &str, snapshot: Snapshot<T>) -> Result<(), SnapshotStoreError>
+pub async fn write_snapshot<T, K>(
+    bucket: &K,
+    id: &str,
+    snapshot: Snapshot<T>,
+) -> Result<(), SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadEncode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -341,7 +487,7 @@ where
 }
 
 /// Lists snapshots in the payload type namespace.
-pub async fn list_snapshots<T, K>(bucket: &K) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
+pub async fn list_snapshots<T, K>(bucket: &K) -> Result<Vec<Snapshot<T>>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -353,7 +499,7 @@ where
 }
 
 /// Reads snapshots in the payload type namespace keyed by stream id.
-pub async fn read_snapshot_map<T, K>(bucket: &K) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot_map<T, K>(bucket: &K) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -414,18 +560,12 @@ where
         Some(revision) => match bucket.update(&checkpoint_key, value.into(), revision).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(()),
-            Err(source) => Err(SnapshotStoreError::kv_source(
-                "failed to advance stream snapshot checkpoint",
-                source,
-            )),
+            Err(source) => Err(SnapshotKvError::AdvanceCheckpoint { source }.into()),
         },
         None => match bucket.create(&checkpoint_key, value.into()).await {
             Ok(_) => Ok(()),
             Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(()),
-            Err(source) => Err(SnapshotStoreError::kv_source(
-                "failed to create stream snapshot checkpoint",
-                source,
-            )),
+            Err(source) => Err(SnapshotKvError::CreateCheckpoint { source }.into()),
         },
     }
 }
@@ -434,7 +574,10 @@ where
 ///
 /// Upserts keep the highest snapshot position already present in the bucket;
 /// deletes are idempotent.
-pub async fn persist_snapshot_change<T, K>(bucket: &K, change: SnapshotChange<T>) -> Result<(), SnapshotStoreError>
+pub async fn persist_snapshot_change<T, K>(
+    bucket: &K,
+    change: SnapshotChange<T>,
+) -> Result<(), SnapshotStoreError<T::Error>>
 where
     T: SnapshotPayloadEncode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
@@ -444,10 +587,11 @@ where
         SnapshotChange::Upsert { stream_id, snapshot } => {
             let snapshot_position = snapshot.position;
             let value = snapshot_value(snapshot.as_ref())?;
-            write_snapshot_value(bucket, &snapshot_key::<T>(&stream_id), snapshot_position, value).await?;
+            write_snapshot_value::<T::Error, K>(bucket, &snapshot_key::<T>(&stream_id), snapshot_position, value)
+                .await?;
         }
         SnapshotChange::Delete { stream_id } => {
-            delete_kv_value(bucket, &snapshot_key::<T>(&stream_id)).await?;
+            delete_kv_value::<T::Error, K>(bucket, &snapshot_key::<T>(&stream_id)).await?;
         }
     }
 
@@ -470,7 +614,7 @@ where
     let Some(entry) = bucket
         .entry(checkpoint_key.clone())
         .await
-        .map_err(|source| SnapshotStoreError::kv_source("failed to read stream snapshot checkpoint entry", source))?
+        .map_err(|source| SnapshotKvError::ReadCheckpointEntry { source })?
     else {
         return Ok((None, 0));
     };
@@ -481,12 +625,7 @@ where
     let sequence = String::from_utf8(entry.value.to_vec())
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .ok_or_else(|| {
-            SnapshotStoreError::kv_source(
-                "failed to decode stream snapshot checkpoint",
-                std::io::Error::other(checkpoint_key),
-            )
-        })?;
+        .ok_or(SnapshotKvError::DecodeCheckpoint { key: checkpoint_key })?;
 
     Ok((Some(entry.revision), sequence))
 }
@@ -500,16 +639,13 @@ where
         if let Some(entry) = bucket
             .entry(key.to_string())
             .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for update", source))?
+            .map_err(|source| SnapshotKvError::ReadEntryForUpdate { source })?
         {
             match bucket.update(key, value.clone(), entry.revision).await {
                 Ok(_) => return Ok(()),
                 Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
                 Err(source) => {
-                    return Err(SnapshotStoreError::kv_source(
-                        "failed to update key-value entry",
-                        source,
-                    ));
+                    return Err(SnapshotKvError::UpdateEntry { source }.into());
                 }
             }
         } else {
@@ -517,75 +653,82 @@ where
                 Ok(_) => return Ok(()),
                 Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
                 Err(source) => {
-                    return Err(SnapshotStoreError::kv_source(
-                        "failed to create key-value entry",
-                        source,
-                    ));
+                    return Err(SnapshotKvError::CreateEntry { source }.into());
                 }
             }
         }
     }
 }
 
-async fn write_snapshot_value<K>(
+async fn write_snapshot_value<PayloadError, K>(
     bucket: &K,
     key: &str,
     snapshot_position: StreamPosition,
     value: Vec<u8>,
-) -> Result<(), SnapshotStoreError>
+) -> Result<(), SnapshotStoreError<PayloadError>>
 where
+    PayloadError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     loop {
-        let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
-            SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
-        })?
+        let Some(entry) = bucket
+            .entry(key.to_string())
+            .await
+            .map_err(|source| SnapshotKvError::ReadEntryForSnapshotUpdate { source })?
         else {
-            if create_snapshot_value(bucket, key, value.clone()).await? {
+            if create_snapshot_value::<PayloadError, K>(bucket, key, value.clone()).await? {
                 return Ok(());
             }
             continue;
         };
 
         if entry.operation != kv::Operation::Put {
-            if create_snapshot_value(bucket, key, value.clone()).await? {
+            if create_snapshot_value::<PayloadError, K>(bucket, key, value.clone()).await? {
                 return Ok(());
             }
             continue;
         }
 
-        if snapshot_position_from_value(&entry.value)? >= snapshot_position {
+        if snapshot_position_from_value::<PayloadError>(&entry.value)? >= snapshot_position {
             return Ok(());
         }
 
         match bucket.update(key, value.clone().into(), entry.revision).await {
             Ok(_) => return Ok(()),
             Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
-            Err(source) => return Err(SnapshotStoreError::kv_source("failed to update snapshot entry", source)),
+            Err(source) => {
+                return Err(SnapshotKvError::UpdateSnapshotEntry { source }.into());
+            }
         }
     }
 }
 
-async fn create_snapshot_value<K>(bucket: &K, key: &str, value: Vec<u8>) -> Result<bool, SnapshotStoreError>
+async fn create_snapshot_value<PayloadError, K>(
+    bucket: &K,
+    key: &str,
+    value: Vec<u8>,
+) -> Result<bool, SnapshotStoreError<PayloadError>>
 where
+    PayloadError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvCreate,
 {
     match bucket.create(key, value.into()).await {
         Ok(_) => Ok(true),
         Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(false),
-        Err(source) => Err(SnapshotStoreError::kv_source("failed to create snapshot entry", source)),
+        Err(source) => Err(SnapshotKvError::CreateSnapshotEntry { source }.into()),
     }
 }
 
-async fn delete_kv_value<K>(bucket: &K, key: &str) -> Result<(), SnapshotStoreError>
+async fn delete_kv_value<PayloadError, K>(bucket: &K, key: &str) -> Result<(), SnapshotStoreError<PayloadError>>
 where
+    PayloadError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKeyValueDeleteExpectRevision,
 {
     loop {
         let Some(entry) = bucket
             .entry(key.to_string())
             .await
-            .map_err(|source| SnapshotStoreError::kv_source("failed to read key-value entry for delete", source))?
+            .map_err(|source| SnapshotKvError::ReadEntryForDelete { source })?
         else {
             return Ok(());
         };
@@ -597,10 +740,7 @@ where
             Ok(()) => return Ok(()),
             Err(source) if source.kind() == kv::DeleteErrorKind::WrongLastRevision => continue,
             Err(source) => {
-                return Err(SnapshotStoreError::kv_source(
-                    "failed to delete key-value entry",
-                    source,
-                ));
+                return Err(SnapshotKvError::DeleteEntry { source }.into());
             }
         }
     }
@@ -742,11 +882,11 @@ mod tests {
     #[test]
     fn stream_id_from_snapshot_key_uses_configured_prefix() {
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload>("snapshots.v2.backup").unwrap(),
+            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v2.backup").unwrap(),
             Some("backup".to_string())
         );
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload>("snapshots.v1.backup").unwrap(),
+            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v1.backup").unwrap(),
             None
         );
     }
@@ -754,7 +894,7 @@ mod tests {
     #[test]
     fn stream_id_from_snapshot_key_rejects_empty_suffix() {
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload>("snapshots.v2.")
+            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v2.")
                 .unwrap_err()
                 .to_string(),
             "Invalid stream snapshot key: snapshots.v2."

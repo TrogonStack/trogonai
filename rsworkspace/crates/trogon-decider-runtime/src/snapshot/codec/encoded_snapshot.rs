@@ -36,20 +36,18 @@ impl EncodedSnapshot {
     }
 }
 
-pub fn encode_snapshot<T>(snapshot: &Snapshot<T>) -> Result<EncodedSnapshot, SnapshotEncodeError>
+pub fn encode_snapshot<T>(snapshot: &Snapshot<T>) -> Result<EncodedSnapshot, SnapshotEncodeError<T::Error>>
 where
     T: SnapshotPayloadEncode,
-    T::Error: std::error::Error + Send + Sync + 'static,
 {
     let payload = snapshot.payload.encode().map_err(SnapshotEncodeError::new)?;
 
     Ok(EncodedSnapshot::new(snapshot.position, payload))
 }
 
-pub fn decode_snapshot<T>(encoded: EncodedSnapshot) -> Result<Snapshot<T>, SnapshotDecodeError>
+pub fn decode_snapshot<T>(encoded: EncodedSnapshot) -> Result<Snapshot<T>, SnapshotDecodeError<T::Error>>
 where
     T: SnapshotPayloadDecode,
-    T::Error: std::error::Error + Send + Sync + 'static,
 {
     let payload = T::decode(SnapshotPayloadData::new(encoded.payload.as_slice())).map_err(SnapshotDecodeError::new)?;
 
