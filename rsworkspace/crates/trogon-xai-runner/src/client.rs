@@ -111,8 +111,8 @@ impl Message {
 /// - `ServerSide`: a built-in xAI tool (e.g. `"web_search"`). Serialized as
 ///   `{ "type": "<name>" }`.
 /// - `Function`: a client-side function the runner will execute. Serialized
-///   as `{ "type": "function", "function": { "name": ..., "description": ...,
-///   "parameters": ... } }`.
+///   as `{ "type": "function", "name": ..., "description": ..., "parameters": ... }`
+///   (xAI Responses API shape — flat, not nested under a `function` key).
 #[derive(Clone, Debug)]
 pub enum ToolSpec {
     ServerSide(String),
@@ -143,13 +143,15 @@ impl Serialize for ToolSpec {
                 map.end()
             }
             Self::Function { name, description, parameters } => {
+                // xAI Responses API expects a flat tool object:
+                //   { "type": "function", "name": ..., "description": ..., "parameters": ... }
+                // (not the OpenAI Chat Completions shape where name/description/parameters
+                // are nested under a "function" key.)
                 serde_json::json!({
                     "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": description,
-                        "parameters": parameters,
-                    }
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
                 })
                 .serialize(s)
             }
@@ -2258,9 +2260,13 @@ mod tests {
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["type"], "function");
-        assert_eq!(json["function"]["name"], "bash");
-        assert_eq!(json["function"]["description"], "Run a shell command");
-        assert!(json.get("name").is_none(), "top-level 'name' key must not appear in Function spec");
+        assert_eq!(json["name"], "bash");
+        assert_eq!(json["description"], "Run a shell command");
+        assert_eq!(json["parameters"]["type"], "object");
+        assert!(
+            json.get("function").is_none(),
+            "Responses API requires flat function spec — must not nest under 'function'"
+        );
     }
 
     // ── InputItem serialization ───────────────────────────────────────────────
