@@ -120,6 +120,10 @@ struct OpenRouterSession {
     created_at_iso: String,
     parent_session_id: Option<String>,
     branched_at_index: Option<usize>,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
+    total_cache_read_tokens: u64,
+    total_cache_creation_tokens: u64,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -413,6 +417,10 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             agent_id: self.agent_id.clone(),
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
+            total_input_tokens: session.total_input_tokens,
+            total_output_tokens: session.total_output_tokens,
+            total_cache_read_tokens: session.total_cache_read_tokens,
+            total_cache_creation_tokens: session.total_cache_creation_tokens,
         }
     }
 
@@ -601,6 +609,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                total_cache_creation_tokens: 0,
             },
         );
 
@@ -661,6 +673,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let created_at_iso = snap.created_at.clone();
                 let parent_session_id = snap.parent_session_id.clone();
                 let branched_at_index = snap.branched_at_index;
+                let total_input_tokens = snap.total_input_tokens;
+                let total_output_tokens = snap.total_output_tokens;
+                let total_cache_read_tokens = snap.total_cache_read_tokens;
+                let total_cache_creation_tokens = snap.total_cache_creation_tokens;
                 let api_key = self.global_api_key.clone();
                 let system_prompt = self.system_prompt.clone();
 
@@ -679,6 +695,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
+                        total_input_tokens,
+                        total_output_tokens,
+                        total_cache_read_tokens,
+                        total_cache_creation_tokens,
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
@@ -754,6 +774,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                total_cache_creation_tokens: 0,
             },
         );
 
@@ -800,14 +824,24 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .iter()
             .map(|(id, s)| {
                 let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
-                if s.parent_session_id.is_some() || s.branched_at_index.is_some() {
-                    let mut meta = serde_json::Map::new();
-                    if let Some(ref parent_id) = s.parent_session_id {
-                        meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                let mut meta = serde_json::Map::new();
+                if let Some(ref parent_id) = s.parent_session_id {
+                    meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                }
+                if let Some(idx) = s.branched_at_index {
+                    meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                }
+                if s.total_input_tokens > 0 {
+                    meta.insert("totalInputTokens".to_string(), serde_json::json!(s.total_input_tokens));
+                    meta.insert("totalOutputTokens".to_string(), serde_json::json!(s.total_output_tokens));
+                    if s.total_cache_read_tokens > 0 {
+                        meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(s.total_cache_read_tokens));
                     }
-                    if let Some(idx) = s.branched_at_index {
-                        meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                    if s.total_cache_creation_tokens > 0 {
+                        meta.insert("totalCacheCreationTokens".to_string(), serde_json::json!(s.total_cache_creation_tokens));
                     }
+                }
+                if !meta.is_empty() {
                     info = info.meta(meta);
                 }
                 info
@@ -1030,6 +1064,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mut tool_rounds: u32 = 0;
         const MAX_TOOL_ROUNDS: u32 = 10;
 
+        let mut prompt_input_total: u64 = 0;
+        let mut prompt_output_total: u64 = 0;
+        let mut prompt_cache_read_total: u64 = 0;
+        let mut prompt_cache_creation_total: u64 = 0;
+
         let stop_reason = 'outer: loop {
             assistant_text.clear();
             usage = None;
@@ -1096,8 +1135,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterEvent::Usage {
                         prompt_tokens,
                         completion_tokens,
+                        cache_read_tokens,
+                        cache_creation_tokens,
                     } => {
                         usage = Some((prompt_tokens, completion_tokens));
+                        prompt_input_total += prompt_tokens;
+                        prompt_output_total += completion_tokens;
+                        prompt_cache_read_total += cache_read_tokens;
+                        prompt_cache_creation_total += cache_creation_tokens;
                         notifier
                             .notify(agent_client_protocol::SessionNotification::new(
                                 notification_session_id.clone(),
@@ -1219,6 +1264,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 }
                 s.history = messages;
                 Self::trim_history(&mut s.history, self.max_history);
+                s.total_input_tokens += prompt_input_total;
+                s.total_output_tokens += prompt_output_total;
+                s.total_cache_read_tokens += prompt_cache_read_total;
+                s.total_cache_creation_tokens += prompt_cache_creation_total;
                 if let Some(store) = &self.session_store {
                     let snapshot = self.build_snapshot(&session_id, s);
                     store.save(&snapshot).await;
@@ -1398,11 +1447,21 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         });
     }
 
     pub async fn test_insert_session(&self, id: &str) {
         self.test_insert_session_with_history(id, vec![]).await;
+    }
+}
+
+impl<H, N, M> OpenRouterAgent<H, N, M> {
+    pub async fn test_cancel_channels_len(&self) -> usize {
+        self.cancel_senders.lock().await.len()
     }
 }
 
@@ -1602,6 +1661,10 @@ mod tests {
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         }
     }
 
@@ -1914,6 +1977,10 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let agent = make_agent()
             .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
@@ -2925,7 +2992,7 @@ mod tests {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
@@ -4281,7 +4348,7 @@ mod tests {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8 },
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
@@ -4312,7 +4379,7 @@ mod tests {
         ]);
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "done".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20 },
+            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
@@ -4341,6 +4408,10 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         }
     }
 
@@ -4928,6 +4999,83 @@ mod tests {
             ).unwrap();
             let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
             assert!(result.is_err(), "malformed messages must return Err");
+        }).await;
+    }
+
+    // ── token tracking ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn token_totals_accumulate_across_tool_rounds() {
+        // Two outer-loop iterations: first returns a tool call, second returns text.
+        // Each call reports Usage → totals must sum across both rounds.
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")])).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.total_input_tokens, 30, "input tokens must sum across both tool rounds");
+            assert_eq!(s.total_output_tokens, 13, "output tokens must sum across both tool rounds");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cache_read_tokens: 5, cache_creation_tokens: 2 },
+            OpenRouterEvent::TextDelta { text: "answer".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")])).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let info = resp.sessions.iter().find(|s| s.session_id == sid)
+                .expect("session must appear in list");
+            let meta = info.meta.as_ref().expect("meta must be set after prompt with usage");
+            assert_eq!(meta["totalInputTokens"], 42);
+            assert_eq!(meta["totalOutputTokens"], 7);
+            assert_eq!(meta["totalCacheReadTokens"], 5);
+            assert_eq!(meta["totalCacheCreationTokens"], 2);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta { text: "text".to_string() },
+        ]);
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::from("prompt")])).await.unwrap();
+
+            let fork_id = agent.fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/f")))
+                .await.unwrap().session_id;
+
+            let sessions = agent.sessions.lock().await;
+            let fork = sessions.get(&fork_id.to_string()).unwrap();
+            assert_eq!(fork.total_input_tokens, 0, "forked session must start with zero input tokens");
+            assert_eq!(fork.total_output_tokens, 0, "forked session must start with zero output tokens");
+            assert_eq!(fork.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
+            assert_eq!(fork.total_cache_creation_tokens, 0, "forked session must start with zero cache creation tokens");
         }).await;
     }
 }

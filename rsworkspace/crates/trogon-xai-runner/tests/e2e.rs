@@ -642,10 +642,9 @@ async fn cancel_via_nats_interrupts_prompt() {
                 "r.prompt",
             );
 
-            // Yield to let the prompt task start and enter the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Cancel is a notification (no reply subject) — fires the oneshot.
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");
@@ -1193,6 +1192,7 @@ async fn prompt_full_event_sequence_response_id_usage_finished() {
                 XaiEvent::Usage {
                     prompt_tokens: 10,
                     completion_tokens: 5,
+                    cached_tokens: 0,
                 },
                 XaiEvent::Finished {
                     reason: FinishReason::Completed,
@@ -1498,10 +1498,9 @@ async fn close_session_cancels_in_flight_prompt() {
                 "r.prompt",
             );
 
-            // Let the prompt task start and enter the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Close the session — this sends () on the cancel channel.
             let close_subj = format!("acp.session.{sid}.agent.close");
@@ -2342,10 +2341,9 @@ async fn close_session_mid_stream_removes_session_permanently() {
                 "r.prompt",
             );
 
-            // Let the prompt enter its streaming loop before closing.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Close while streaming — sends cancel + removes session from state.
             let close_subj = format!("acp.session.{sid}.agent.close");
@@ -4263,7 +4261,7 @@ async fn usage_update_notification_sent_via_nats() {
             let sid = create_session(&h).await;
 
             h.http.push(vec![
-                XaiEvent::Usage { prompt_tokens: 12, completion_tokens: 7 },
+                XaiEvent::Usage { prompt_tokens: 12, completion_tokens: 7, cached_tokens: 0 },
                 XaiEvent::TextDelta { text: "hello".to_string() },
                 XaiEvent::Done,
             ]);
@@ -5211,10 +5209,9 @@ async fn session_is_usable_after_cancel_via_nats() {
                 "r.p1",
             );
 
-            // Yield so the agent task starts streaming before we cancel.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Cancel — fires the abort channel.
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");

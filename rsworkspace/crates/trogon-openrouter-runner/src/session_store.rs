@@ -30,6 +30,14 @@ pub struct SessionSnapshot {
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_read_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_creation_tokens: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,6 +51,10 @@ pub struct MessageUsage {
 }
 
 fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
@@ -326,6 +338,10 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v.get("model").is_none());
@@ -350,6 +366,10 @@ mod tests {
             agent_id: Some("agent-1".to_string()),
             parent_session_id: Some("parent-id".to_string()),
             branched_at_index: Some(3),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert_eq!(v["model"], "gpt-4");
@@ -375,6 +395,10 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v["tools"].is_array(), "tools must always be serialized");
@@ -405,6 +429,10 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let v = serde_json::to_value(&snap).unwrap();
         let msgs = v["messages"].as_array().unwrap();

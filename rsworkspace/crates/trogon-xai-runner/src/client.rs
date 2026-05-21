@@ -274,6 +274,7 @@ pub enum XaiEvent {
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
+        cached_tokens: u64,
     },
     /// Why the model stopped — included in the `response.completed` event.
     ///
@@ -774,10 +775,12 @@ fn process_sse_line(
                 .as_u64()
                 .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
+            let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,
                     completion_tokens: c,
+                    cached_tokens: cached,
                 });
             }
             let incomplete_reason = val["response"]["incomplete_details"]["reason"]
@@ -847,10 +850,12 @@ fn process_sse_line(
                 .as_u64()
                 .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
+            let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,
                     completion_tokens: c,
+                    cached_tokens: cached,
                 });
             }
             // Emit the finish reason from response.status (Responses API field).
@@ -1012,7 +1017,8 @@ mod tests {
                 event,
                 XaiEvent::Usage {
                     prompt_tokens: 42,
-                    completion_tokens: 7
+                    completion_tokens: 7,
+                    ..
                 }
             ),
             "unexpected event: {event:?}"
@@ -1029,7 +1035,8 @@ mod tests {
                 event,
                 XaiEvent::Usage {
                     prompt_tokens: 100,
-                    completion_tokens: 50
+                    completion_tokens: 50,
+                    ..
                 }
             ),
             "unexpected event: {event:?}"
@@ -1429,7 +1436,8 @@ mod tests {
                 e,
                 XaiEvent::Usage {
                     prompt_tokens: 10,
-                    completion_tokens: 20
+                    completion_tokens: 20,
+                    ..
                 }
             )),
             "usage nested in response object must be extracted: {events:?}"
@@ -1752,7 +1760,8 @@ mod tests {
                 e,
                 XaiEvent::Usage {
                     prompt_tokens: 5,
-                    completion_tokens: 0
+                    completion_tokens: 0,
+                    ..
                 }
             )),
             "asymmetric usage (p=5, c=0) must still be emitted: {events:?}"

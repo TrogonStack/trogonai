@@ -141,7 +141,7 @@ impl OpenRouterHttpClient for UsageHttpClient {
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]))
     }
 }
@@ -1499,6 +1499,98 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
             Some("act like a pirate"),
             "_meta.systemPrompt must be stored in the session state"
         );
+        })
+        .await;
+}
+
+// ── token tracking persisted to KV ───────────────────────────────────────────
+
+/// After a prompt with token usage, `totalInputTokens` and `totalOutputTokens`
+/// must appear in the SESSIONS KV snapshot.
+#[tokio::test]
+async fn token_totals_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("track my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
+            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+        })
+        .await;
+}
+
+/// After forking a session that has token totals, the fork's KV snapshot must
+/// not carry the parent's totals (zero values are omitted from JSON).
+#[tokio::test]
+async fn fork_session_token_totals_absent_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src.session_id,
+                    vec![ContentBlock::from("prompt")],
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert!(
+                v.get("total_input_tokens").is_none(),
+                "fork must not inherit parent's total_input_tokens; got: {v}"
+            );
+            assert!(
+                v.get("total_output_tokens").is_none(),
+                "fork must not inherit parent's total_output_tokens; got: {v}"
+            );
         })
         .await;
 }
