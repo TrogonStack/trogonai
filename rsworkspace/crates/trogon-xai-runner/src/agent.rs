@@ -3704,6 +3704,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_sends_full_history_when_no_previous_response_id() {
+        let _guard = env_lock().lock().await;
         let agent = make_agent();
         let history = vec![
             Message::user("first question"),
