@@ -3075,6 +3075,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-decider-nats"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "trogon-decider-runtime",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-decider-runtime"
 version = "0.1.0"
 dependencies = [
