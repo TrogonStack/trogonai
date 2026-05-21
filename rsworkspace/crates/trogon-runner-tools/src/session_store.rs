@@ -137,6 +137,18 @@ pub struct SessionState {
     /// Compaction triggers at 85 % of this value. Default: 200 000.
     #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
     pub token_budget: u64,
+    /// Cumulative input tokens consumed across all prompt turns in this session.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_input_tokens: u64,
+    /// Cumulative output tokens generated across all prompt turns in this session.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_output_tokens: u64,
+    /// Cumulative cache-creation tokens across all prompt turns in this session.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_creation_tokens: u64,
+    /// Cumulative cache-read tokens across all prompt turns in this session.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_read_tokens: u64,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -154,6 +166,10 @@ fn default_token_budget() -> u64 {
 
 fn is_default_token_budget(v: &u64) -> bool {
     *v == 200_000
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 impl Default for SessionState {
@@ -180,6 +196,10 @@ impl Default for SessionState {
             todos: Vec::new(),
             permission_rules_text: None,
             token_budget: default_token_budget(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
         }
     }
 }
