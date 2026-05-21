@@ -438,23 +438,6 @@ fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value)
     .join("")
 }
 
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
-    })
-    .to_string()
-}
-
-fn max_tokens_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [{"type": "text", "text": "partial"}],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
-}
-
 fn end_turn_body(text: &str) -> String {
     sse_body(&[
         ("message_start", serde_json::json!({

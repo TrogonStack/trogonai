@@ -260,7 +260,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let mut resp_rx = nats
                 .subscribe_bytes(resp_subject)
                 .await
-                .map_err(|e| anyhow::anyhow!("subscribe set_model response: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
 
             let payload = serde_json::to_vec(&serde_json::json!({
                 "sessionId": session_id,
@@ -269,7 +269,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
 
             nats.publish_with_req_id_bytes(subject, req_id, payload.into())
                 .await
-                .map_err(|e| anyhow::anyhow!("publish set_model: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
 
             tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
@@ -706,7 +706,9 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
-        nats.queue_request_ok(Bytes::from(b"{}".as_slice()));
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        nats.add_subscription(rx);
+        tx.send(Bytes::from(b"{}".as_ref())).await.unwrap();
         let result = session.set_model("claude-opus-4-7").await;
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
     }
@@ -719,7 +721,7 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
-        nats.queue_request_err("connection refused");
+        // no subscription queued — subscribe_bytes will fail
         let err = session.set_model("claude-opus-4-7").await.unwrap_err();
         assert!(err.to_string().contains("NATS error"), "got: {err}");
     }

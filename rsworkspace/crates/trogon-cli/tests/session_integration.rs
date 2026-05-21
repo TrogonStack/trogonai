@@ -32,6 +32,7 @@ async fn connect(port: u16) -> async_nats::Client {
 
 const PREFIX: &str = "test";
 const TIMEOUT: Duration = Duration::from_secs(5);
+const REQ_ID_HEADER: &str = "X-Req-Id";
 
 /// Spawn a fake runner that handles exactly one `session.new` request,
 /// replies with the given session_id, then drops.
@@ -107,7 +108,8 @@ async fn usage_update_notification_emits_usage_event() {
         .await
         .expect("timeout waiting for prompt")
         .expect("prompt message");
-    let inbox = prompt_msg.reply.expect("prompt must have reply inbox");
+    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     // Publish a UsageUpdate notification.
     let usage_notif = serde_json::json!({
@@ -130,9 +132,9 @@ async fn usage_update_notification_emits_usage_event() {
     // both arrive simultaneously, Done wins and the notification is lost.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Send Done reply to close the turn.
+    // Send Done to close the turn.
     let done_reply = serde_json::json!({ "stopReason": "end_turn" });
-    nats.publish(inbox, serde_json::to_vec(&done_reply).unwrap().into())
+    nats.publish(done_subj, serde_json::to_vec(&done_reply).unwrap().into())
         .await
         .unwrap();
 
@@ -169,7 +171,8 @@ async fn tool_call_edit_emits_tool_call_and_diff_events() {
         .await
         .expect("timeout")
         .expect("prompt msg");
-    let inbox = prompt_msg.reply.expect("inbox");
+    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
         "sessionId": session_id,
@@ -190,7 +193,7 @@ async fn tool_call_edit_emits_tool_call_and_diff_events() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let done_reply = serde_json::json!({ "stopReason": "end_turn" });
-    nats.publish(inbox, serde_json::to_vec(&done_reply).unwrap().into())
+    nats.publish(done_subj, serde_json::to_vec(&done_reply).unwrap().into())
         .await
         .unwrap();
 
@@ -228,7 +231,8 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
 
     let rx = session.prompt("write a file").await.unwrap();
     let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let inbox = prompt_msg.reply.expect("inbox");
+    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
         "sessionId": session_id,
@@ -244,7 +248,7 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
     });
     nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(inbox, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
 
     let events = collect_events(rx).await;
 
@@ -279,7 +283,8 @@ async fn tool_call_bash_emits_only_tool_call_no_diff() {
 
     let rx = session.prompt("run bash").await.unwrap();
     let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let inbox = prompt_msg.reply.expect("inbox");
+    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
         "sessionId": session_id,
@@ -292,7 +297,7 @@ async fn tool_call_bash_emits_only_tool_call_no_diff() {
     });
     nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(inbox, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
 
     let events = collect_events(rx).await;
 
@@ -326,7 +331,8 @@ async fn cancel_publishes_to_cancel_subject() {
         .expect("timeout waiting for cancel message")
         .expect("cancel message");
 
-    assert!(msg.payload.is_empty(), "cancel payload must be empty");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("cancel payload must be valid JSON");
+    assert_eq!(payload["sessionId"].as_str(), Some(session_id.as_str()), "cancel payload must contain sessionId");
 }
 
 /// AgentMessageChunk notification → StreamEvent::Text
@@ -348,7 +354,8 @@ async fn agent_message_chunk_emits_text_event() {
 
     let rx = session.prompt("say hello").await.unwrap();
     let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let inbox = prompt_msg.reply.expect("inbox");
+    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     // Publish two text chunks then done.
     for chunk in &["Hello", ", world!"] {
@@ -364,7 +371,7 @@ async fn agent_message_chunk_emits_text_event() {
             .unwrap();
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(inbox, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
 
     let events = collect_events(rx).await;
 
