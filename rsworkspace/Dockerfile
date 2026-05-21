@@ -158,7 +158,7 @@ COPY --from=builder /workspace/target/release/trogon-compactor /usr/local/bin/tr
 ENTRYPOINT ["trogon-compactor"]
 
 # ── Stage 15: trogon-xai-runner runtime ──────────────────────────────────────
-FROM debian:bookworm-slim AS trogon-xai-runner
+FROM debian:trixie-slim AS trogon-xai-runner
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/target/release/trogon-xai-runner /usr/local/bin/trogon-xai-runner
