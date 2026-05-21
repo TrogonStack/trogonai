@@ -181,7 +181,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/model" && !arg.is_empty() {
-                        let model_id = arg.trim().to_string();
+                        let model_id = resolve_model_alias(arg.trim()).to_string();
                         let cwd_str = cwd.to_str().unwrap_or(".");
                         match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, cwd_str).await {
                             Ok(outcome) => {
@@ -369,6 +369,15 @@ pub(crate) struct ModelSwitchOutcome {
     pub same_runner: bool,
     pub new_prefix: String,
     pub new_session_id: String,
+}
+
+fn resolve_model_alias(input: &str) -> &str {
+    match input {
+        "haiku"  => "claude-haiku-4-5-20251001",
+        "sonnet" => "claude-sonnet-4-6",
+        "opus"   => "claude-opus-4-7",
+        other    => other,
+    }
 }
 
 pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
