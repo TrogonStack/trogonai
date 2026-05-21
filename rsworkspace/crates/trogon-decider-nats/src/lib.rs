@@ -105,6 +105,36 @@ pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static
     ) -> impl std::future::Future<Output = Result<SubjectState, Self::Error>> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Optimistic concurrency conflict details for a failed stream append.
+pub struct OptimisticConcurrencyConflictError {
+    /// Domain stream id that was being appended.
+    pub stream_id: String,
+    /// Expected stream state supplied by the caller.
+    pub expected: StreamWritePrecondition,
+    /// Current stream position observed before publishing.
+    pub current_position: Option<StreamPosition>,
+}
+
+impl fmt::Display for OptimisticConcurrencyConflictError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.current_position {
+            Some(current_position) => write!(
+                f,
+                "OCC conflict for stream '{}': expected {:?}, current position is {current_position}",
+                self.stream_id, self.expected
+            ),
+            None => write!(
+                f,
+                "OCC conflict for stream '{}': expected {:?}, stream has no current position",
+                self.stream_id, self.expected
+            ),
+        }
+    }
+}
+
+impl std::error::Error for OptimisticConcurrencyConflictError {}
+
 #[derive(Debug)]
 /// Error raised by [`JetStreamStore`] read, append, and snapshot operations.
 pub enum JetStreamStoreError<Error> {
@@ -119,14 +149,7 @@ pub enum JetStreamStoreError<Error> {
     /// Encoding or decoding a runtime payload failed.
     Codec(Error),
     /// The write precondition did not match the current stream state.
-    OptimisticConcurrencyConflict {
-        /// Domain stream id that was being appended.
-        stream_id: String,
-        /// Expected stream state supplied by the caller.
-        expected: StreamWritePrecondition,
-        /// Current stream position observed before publishing.
-        current_position: Option<StreamPosition>,
-    },
+    OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError),
 }
 
 impl<Error> fmt::Display for JetStreamStoreError<Error>
@@ -142,20 +165,7 @@ where
             Self::AppendStream(source) => write!(f, "failed to append stream events: {source}"),
             Self::Snapshot(source) => write!(f, "failed to access snapshots: {source}"),
             Self::Codec(source) => write!(f, "codec error: {source}"),
-            Self::OptimisticConcurrencyConflict {
-                stream_id,
-                expected,
-                current_position,
-            } => match current_position {
-                Some(current_position) => write!(
-                    f,
-                    "OCC conflict for stream '{stream_id}': expected {expected:?}, current position is {current_position}"
-                ),
-                None => write!(
-                    f,
-                    "OCC conflict for stream '{stream_id}': expected {expected:?}, stream has no current position"
-                ),
-            },
+            Self::OptimisticConcurrencyConflict(source) => source.fmt(f),
         }
     }
 }
@@ -170,7 +180,7 @@ where
             Self::ReadStream(source) | Self::AppendStream(source) => Some(source),
             Self::Snapshot(source) => Some(source),
             Self::Codec(source) => Some(source),
-            Self::OptimisticConcurrencyConflict { .. } => None,
+            Self::OptimisticConcurrencyConflict(source) => Some(source),
         }
     }
 }
@@ -307,11 +317,13 @@ where
         )
         .await
         .map_err(|source| match source {
-            StreamStoreError::WrongExpectedVersion => JetStreamStoreError::OptimisticConcurrencyConflict {
-                stream_id: stream_id.to_string(),
-                expected: expected_state,
-                current_position,
-            },
+            StreamStoreError::WrongExpectedVersion => {
+                JetStreamStoreError::OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError {
+                    stream_id: stream_id.to_string(),
+                    expected: expected_state,
+                    current_position,
+                })
+            }
             other => JetStreamStoreError::AppendStream(other),
         })?;
 
@@ -369,15 +381,13 @@ where
 {
     match expected_state {
         StreamWritePrecondition::Any => Ok(None),
-        StreamWritePrecondition::StreamExists => {
-            current_position
-                .map(|_| None)
-                .ok_or_else(|| JetStreamStoreError::OptimisticConcurrencyConflict {
-                    stream_id: stream_id.to_string(),
-                    expected: StreamWritePrecondition::StreamExists,
-                    current_position,
-                })
-        }
+        StreamWritePrecondition::StreamExists => current_position.map(|_| None).ok_or_else(|| {
+            JetStreamStoreError::OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError {
+                stream_id: stream_id.to_string(),
+                expected: StreamWritePrecondition::StreamExists,
+                current_position,
+            })
+        }),
         StreamWritePrecondition::NoStream => Ok(Some(0)),
         StreamWritePrecondition::At(position) => Ok(Some(position.as_u64())),
     }
@@ -481,11 +491,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            JetStreamStoreError::OptimisticConcurrencyConflict {
-                stream_id,
-                expected: StreamWritePrecondition::StreamExists,
-                current_position: None,
-            } if stream_id == "jobs.backup"
+            JetStreamStoreError::OptimisticConcurrencyConflict(conflict)
+                if conflict.stream_id == "jobs.backup"
+                    && conflict.expected == StreamWritePrecondition::StreamExists
+                    && conflict.current_position.is_none()
         ));
     }
 
