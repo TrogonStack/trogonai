@@ -1,0 +1,17 @@
+error[E0599]: no method named `when` found for struct `ThenEvents<Event>` in the current scope
+  --> tests/ui/fail/after_then.rs:13:10
+   |
+ 9 |       TestCase::<TestCommand>::new()
+   |       ------------------------------
+   |       |
+   |  _____method `when` is available on `TestCase<TestCommand>`
+   | |
+10 | |         .given_no_history()
+   | |          ------------------ method `when` is available on `TestCase<TestCommand, NoHistory>`
+11 | |         .when(TestCommand)
+   | |          ----------------- method `when` is available on `TestCase<TestCommand, When<TestEvent, TestState, TestCommand>>`
+12 | |         .then([TestEvent::Registered])
+13 | |         .when(TestCommand);
+   | |         -^^^^ method not found in `ThenEvents<TestEvent>`
+   | |_________|
+   |
