@@ -1,28 +1,36 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::context::{
-    self, CreateKeyValueError, CreateKeyValueErrorKind, GetStreamError, GetStreamErrorKind,
+    self, CreateKeyValueError, CreateKeyValueErrorKind, GetStreamError, GetStreamErrorKind, PublishError,
+    PublishErrorKind, RequestErrorKind,
 };
 use async_nats::jetstream::kv;
-use async_nats::jetstream::message::StreamMessage;
+use async_nats::jetstream::message::{OutboundMessage, StreamMessage};
 use async_nats::jetstream::publish::PublishAck;
-use async_nats::jetstream::stream::{self, LastRawMessageError, LastRawMessageErrorKind};
+use async_nats::jetstream::stream::{self, LastRawMessageError, LastRawMessageErrorKind, RawMessageError};
 use async_nats::jetstream::{self, AckKind};
 use async_nats::subject::ToSubject;
+use async_nats::{
+    HeaderMap,
+    header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
+};
 use bytes::Bytes;
 use futures::channel::mpsc;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, Iter};
+use std::vec::IntoIter as VecIntoIter;
+use time::OffsetDateTime;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
-    JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
-    JetStreamKeyValueUpdate, JetStreamLastRawMessageBySubject, JetStreamPublisher,
+    JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
+    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
+    JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
+    JetStreamPublisher,
 };
 use crate::mocks::MockError;
 
@@ -304,6 +312,316 @@ impl JetStreamPublisher for MockJetStreamPublisher {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct MockJetStreamPublishMessage {
+    published: Arc<Mutex<Vec<MockPublishedOutboundMessage>>>,
+    pending_batches: Arc<Mutex<HashMap<String, Vec<MockPublishedOutboundMessage>>>>,
+    next_sequence: Arc<Mutex<u64>>,
+    results: Arc<Mutex<VecDeque<MockPublishMessageOutcome>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MockPublishedOutboundMessage {
+    pub sequence: u64,
+    pub subject: String,
+    pub headers: Option<HeaderMap>,
+    pub payload: Bytes,
+}
+
+impl MockPublishedOutboundMessage {
+    fn new(message: OutboundMessage, sequence: u64) -> Self {
+        Self {
+            sequence,
+            subject: message.subject.to_string(),
+            headers: message.headers,
+            payload: message.payload,
+        }
+    }
+
+    fn stream_message(&self) -> StreamMessage {
+        StreamMessage {
+            subject: self.subject.clone().into(),
+            sequence: self.sequence,
+            headers: self.headers.clone().unwrap_or_default(),
+            payload: self.payload.clone(),
+            time: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum MockPublishMessageOutcome {
+    Ack(u64),
+    Duplicate(u64),
+    PublishError(PublishErrorKind),
+    AckError(PublishErrorKind),
+}
+
+const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
+const NATS_BATCH_ID: &str = "Nats-Batch-Id";
+
+impl MockJetStreamPublishMessage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn published_messages(&self) -> Vec<MockPublishedOutboundMessage> {
+        self.published.lock().unwrap().clone()
+    }
+
+    pub fn last_subject_sequence(&self, subject: &str) -> u64 {
+        last_subject_sequence(&self.published.lock().unwrap(), subject)
+    }
+
+    pub fn enqueue_wrong_last_sequence(&self) {
+        self.results
+            .lock()
+            .unwrap()
+            .push_back(MockPublishMessageOutcome::AckError(PublishErrorKind::WrongLastSequence));
+    }
+
+    pub fn enqueue_publish_error(&self, kind: PublishErrorKind) {
+        self.results
+            .lock()
+            .unwrap()
+            .push_back(MockPublishMessageOutcome::PublishError(kind));
+    }
+
+    pub fn enqueue_ack_error(&self, kind: PublishErrorKind) {
+        self.results
+            .lock()
+            .unwrap()
+            .push_back(MockPublishMessageOutcome::AckError(kind));
+    }
+
+    pub fn enqueue_duplicate(&self) {
+        let seq = self.next_assigned_sequence();
+        self.results
+            .lock()
+            .unwrap()
+            .push_back(MockPublishMessageOutcome::Duplicate(seq));
+    }
+
+    pub fn enqueue_ack_with_sequence(&self, sequence: u64) {
+        {
+            let mut next = self.next_sequence.lock().unwrap();
+            if sequence >= *next {
+                *next = sequence + 1;
+            }
+        }
+        self.results
+            .lock()
+            .unwrap()
+            .push_back(MockPublishMessageOutcome::Ack(sequence));
+    }
+
+    fn next_assigned_sequence(&self) -> u64 {
+        let mut seq = self.next_sequence.lock().unwrap();
+        let current = if *seq == 0 { 1 } else { *seq };
+        *seq = current + 1;
+        current
+    }
+
+    fn publish_message_semantic(
+        &self,
+        message: OutboundMessage,
+    ) -> Result<std::future::Ready<Result<PublishAck, PublishError>>, PublishError> {
+        let subject = message.subject.to_string();
+        let headers = message.headers.as_ref();
+        let batch_id = header_value(headers, NATS_BATCH_ID).map(str::to_string);
+        let is_batch_commit = header_value(headers, NATS_BATCH_COMMIT).is_some();
+
+        if let Some(expected_sequence) = expected_last_subject_sequence(headers)? {
+            let current_sequence = self.last_subject_sequence(&subject);
+            if current_sequence != expected_sequence {
+                if let Some(batch_id) = &batch_id {
+                    self.pending_batches.lock().unwrap().remove(batch_id);
+                }
+                return Ok(std::future::ready(Err(PublishError::new(
+                    PublishErrorKind::WrongLastSequence,
+                ))));
+            }
+        }
+
+        if let Some(message_id) = message_id(headers)
+            && let Some(sequence) = self.duplicate_sequence(message_id)
+        {
+            if let Some(batch_id) = &batch_id {
+                self.pending_batches.lock().unwrap().remove(batch_id);
+            }
+            return Ok(std::future::ready(Ok(publish_ack(sequence, true))));
+        }
+
+        let sequence = self.next_assigned_sequence();
+        let stored = MockPublishedOutboundMessage::new(message, sequence);
+        match (batch_id, is_batch_commit) {
+            (Some(batch_id), false) => {
+                self.pending_batches
+                    .lock()
+                    .unwrap()
+                    .entry(batch_id)
+                    .or_default()
+                    .push(stored);
+                Ok(std::future::ready(Err(empty_atomic_batch_member_ack_error())))
+            }
+            (Some(batch_id), true) => {
+                let mut pending = self
+                    .pending_batches
+                    .lock()
+                    .unwrap()
+                    .remove(&batch_id)
+                    .unwrap_or_default();
+                pending.push(stored);
+                self.published.lock().unwrap().extend(pending);
+                Ok(std::future::ready(Ok(publish_ack(sequence, false))))
+            }
+            (None, _) => {
+                self.published.lock().unwrap().push(stored);
+                Ok(std::future::ready(Ok(publish_ack(sequence, false))))
+            }
+        }
+    }
+
+    fn duplicate_sequence(&self, message_id: &str) -> Option<u64> {
+        let published = self.published.lock().unwrap();
+        let published_sequence = published
+            .iter()
+            .find(|message| message_id_from_headers(message.headers.as_ref()).as_deref() == Some(message_id))
+            .map(|message| message.sequence);
+        if published_sequence.is_some() {
+            return published_sequence;
+        }
+        self.pending_batches
+            .lock()
+            .unwrap()
+            .values()
+            .flatten()
+            .find(|message| message_id_from_headers(message.headers.as_ref()).as_deref() == Some(message_id))
+            .map(|message| message.sequence)
+    }
+}
+
+fn publish_ack(sequence: u64, duplicate: bool) -> PublishAck {
+    PublishAck {
+        stream: "mock-stream".to_string(),
+        sequence,
+        domain: String::new(),
+        duplicate,
+        value: None,
+    }
+}
+
+fn header_value(headers: Option<&HeaderMap>, name: impl async_nats::header::IntoHeaderName) -> Option<&str> {
+    headers.and_then(|headers| headers.get(name).map(|value| value.as_str()))
+}
+
+fn expected_last_subject_sequence(headers: Option<&HeaderMap>) -> Result<Option<u64>, PublishError> {
+    header_value(headers, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE)
+        .map(str::parse)
+        .transpose()
+        .map_err(|_| PublishError::new(PublishErrorKind::WrongLastSequence))
+}
+
+fn message_id(headers: Option<&HeaderMap>) -> Option<&str> {
+    header_value(headers, NATS_MESSAGE_ID)
+}
+
+fn message_id_from_headers(headers: Option<&HeaderMap>) -> Option<String> {
+    message_id(headers).map(str::to_string)
+}
+
+fn last_subject_sequence(messages: &[MockPublishedOutboundMessage], subject: &str) -> u64 {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.subject == subject)
+        .map(|message| message.sequence)
+        .unwrap_or_default()
+}
+
+fn empty_atomic_batch_member_ack_error() -> PublishError {
+    let source = serde_json::from_str::<PublishAck>("").unwrap_err();
+    PublishError::with_source(PublishErrorKind::Other, source)
+}
+
+impl JetStreamPublishMessage for MockJetStreamPublishMessage {
+    type PublishError = PublishError;
+    type AckFuture = std::future::Ready<Result<PublishAck, PublishError>>;
+
+    async fn publish_message(&self, message: OutboundMessage) -> Result<Self::AckFuture, PublishError> {
+        let outcome = self.results.lock().unwrap().pop_front();
+        match outcome {
+            Some(MockPublishMessageOutcome::PublishError(kind)) => Err(PublishError::new(kind)),
+            Some(MockPublishMessageOutcome::Ack(sequence)) => {
+                self.published
+                    .lock()
+                    .unwrap()
+                    .push(MockPublishedOutboundMessage::new(message, sequence));
+                Ok(std::future::ready(Ok(PublishAck {
+                    stream: "mock-stream".to_string(),
+                    sequence,
+                    domain: String::new(),
+                    duplicate: false,
+                    value: None,
+                })))
+            }
+            Some(MockPublishMessageOutcome::Duplicate(sequence)) => Ok(std::future::ready(Ok(PublishAck {
+                stream: "mock-stream".to_string(),
+                sequence,
+                domain: String::new(),
+                duplicate: true,
+                value: None,
+            }))),
+            Some(MockPublishMessageOutcome::AckError(kind)) => {
+                let sequence = self.next_assigned_sequence();
+                self.published
+                    .lock()
+                    .unwrap()
+                    .push(MockPublishedOutboundMessage::new(message, sequence));
+                Ok(std::future::ready(Err(PublishError::new(kind))))
+            }
+            None => self.publish_message_semantic(message),
+        }
+    }
+}
+
+impl JetStreamLastRawMessageBySubject for MockJetStreamPublishMessage {
+    async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|message| message.subject == subject)
+            .map(MockPublishedOutboundMessage::stream_message)
+            .ok_or_else(|| LastRawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
+    }
+}
+
+impl JetStreamGetStreamInfo for MockJetStreamPublishMessage {
+    async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
+        let published = self.published.lock().unwrap();
+        let last_sequence = published
+            .iter()
+            .map(|message| message.sequence)
+            .max()
+            .unwrap_or_default();
+        Ok(mock_stream_info(published.len() as u64, last_sequence))
+    }
+}
+
+impl JetStreamGetRawMessage for MockJetStreamPublishMessage {
+    async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, RawMessageError> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|message| message.sequence == sequence)
+            .map(MockPublishedOutboundMessage::stream_message)
+            .ok_or_else(|| RawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MockJetStreamKvStore {
     settings: Arc<Mutex<Result<MockKeyValueSettings, kv::StatusErrorKind>>>,
@@ -313,6 +631,35 @@ pub struct MockJetStreamKvStore {
     create_with_ttl_calls: Arc<Mutex<CreateWithTtlCalls>>,
     update_calls: Arc<Mutex<UpdateCalls>>,
     delete_calls: Arc<Mutex<DeleteCalls>>,
+    update_results_queue: Arc<Mutex<VecDeque<Result<u64, kv::UpdateErrorKind>>>>,
+    delete_results_queue: Arc<Mutex<VecDeque<Result<(), kv::DeleteErrorKind>>>>,
+    entry_results: Arc<Mutex<VecDeque<MockKvEntryOutcome>>>,
+    get_results: Arc<Mutex<VecDeque<MockKvGetOutcome>>>,
+    create_results: Arc<Mutex<VecDeque<Result<u64, kv::CreateErrorKind>>>>,
+    keys_result: Arc<Mutex<Result<Vec<String>, kv::WatchErrorKind>>>,
+    entry_calls: Arc<Mutex<Vec<String>>>,
+    get_calls: Arc<Mutex<Vec<String>>>,
+    create_calls: Arc<Mutex<Vec<(String, Bytes)>>>,
+    keys_calls: Arc<Mutex<u32>>,
+    bucket_name: Arc<Mutex<String>>,
+}
+
+#[derive(Clone, Debug)]
+pub enum MockKvEntryOutcome {
+    None,
+    Some {
+        value: Bytes,
+        revision: u64,
+        operation: kv::Operation,
+    },
+    Error(kv::EntryErrorKind),
+}
+
+#[derive(Clone, Debug)]
+pub enum MockKvGetOutcome {
+    None,
+    Some(Bytes),
+    Error(kv::EntryErrorKind),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -342,6 +689,17 @@ impl MockJetStreamKvStore {
             create_with_ttl_calls: Arc::new(Mutex::new(Vec::new())),
             update_calls: Arc::new(Mutex::new(Vec::new())),
             delete_calls: Arc::new(Mutex::new(Vec::new())),
+            update_results_queue: Arc::new(Mutex::new(VecDeque::new())),
+            delete_results_queue: Arc::new(Mutex::new(VecDeque::new())),
+            entry_results: Arc::new(Mutex::new(VecDeque::new())),
+            get_results: Arc::new(Mutex::new(VecDeque::new())),
+            create_results: Arc::new(Mutex::new(VecDeque::new())),
+            keys_result: Arc::new(Mutex::new(Ok(Vec::new()))),
+            entry_calls: Arc::new(Mutex::new(Vec::new())),
+            get_calls: Arc::new(Mutex::new(Vec::new())),
+            create_calls: Arc::new(Mutex::new(Vec::new())),
+            keys_calls: Arc::new(Mutex::new(0)),
+            bucket_name: Arc::new(Mutex::new("mock-bucket".to_string())),
         }
     }
 
@@ -376,6 +734,63 @@ impl MockJetStreamKvStore {
         *self.delete_result.lock().unwrap() = result;
     }
 
+    pub fn set_bucket_name(&self, name: impl Into<String>) {
+        *self.bucket_name.lock().unwrap() = name.into();
+    }
+
+    pub fn enqueue_update_result(&self, result: Result<u64, kv::UpdateErrorKind>) {
+        self.update_results_queue.lock().unwrap().push_back(result);
+    }
+
+    pub fn enqueue_delete_result(&self, result: Result<(), kv::DeleteErrorKind>) {
+        self.delete_results_queue.lock().unwrap().push_back(result);
+    }
+
+    pub fn enqueue_entry_none(&self) {
+        self.entry_results.lock().unwrap().push_back(MockKvEntryOutcome::None);
+    }
+
+    pub fn enqueue_entry(&self, value: Bytes, revision: u64, operation: kv::Operation) {
+        self.entry_results.lock().unwrap().push_back(MockKvEntryOutcome::Some {
+            value,
+            revision,
+            operation,
+        });
+    }
+
+    pub fn enqueue_entry_error(&self, kind: kv::EntryErrorKind) {
+        self.entry_results
+            .lock()
+            .unwrap()
+            .push_back(MockKvEntryOutcome::Error(kind));
+    }
+
+    pub fn enqueue_get_none(&self) {
+        self.get_results.lock().unwrap().push_back(MockKvGetOutcome::None);
+    }
+
+    pub fn enqueue_get_some(&self, value: Bytes) {
+        self.get_results
+            .lock()
+            .unwrap()
+            .push_back(MockKvGetOutcome::Some(value));
+    }
+
+    pub fn enqueue_get_error(&self, kind: kv::EntryErrorKind) {
+        self.get_results
+            .lock()
+            .unwrap()
+            .push_back(MockKvGetOutcome::Error(kind));
+    }
+
+    pub fn enqueue_create_result(&self, result: Result<u64, kv::CreateErrorKind>) {
+        self.create_results.lock().unwrap().push_back(result);
+    }
+
+    pub fn set_keys_result(&self, result: Result<Vec<String>, kv::WatchErrorKind>) {
+        *self.keys_result.lock().unwrap() = result;
+    }
+
     pub fn create_with_ttl_calls(&self) -> Vec<(String, Bytes, Duration)> {
         self.create_with_ttl_calls.lock().unwrap().clone()
     }
@@ -387,6 +802,22 @@ impl MockJetStreamKvStore {
     pub fn delete_calls(&self) -> Vec<(String, Option<u64>)> {
         self.delete_calls.lock().unwrap().clone()
     }
+
+    pub fn entry_calls(&self) -> Vec<String> {
+        self.entry_calls.lock().unwrap().clone()
+    }
+
+    pub fn get_calls(&self) -> Vec<String> {
+        self.get_calls.lock().unwrap().clone()
+    }
+
+    pub fn create_calls(&self) -> Vec<(String, Bytes)> {
+        self.create_calls.lock().unwrap().clone()
+    }
+
+    pub fn keys_calls(&self) -> u32 {
+        *self.keys_calls.lock().unwrap()
+    }
 }
 
 impl Default for MockJetStreamKvStore {
@@ -397,11 +828,12 @@ impl Default for MockJetStreamKvStore {
 
 impl JetStreamKeyValueStatus for MockJetStreamKvStore {
     async fn status(&self) -> Result<async_nats::jetstream::kv::bucket::Status, kv::StatusError> {
+        let bucket = self.bucket_name.lock().unwrap().clone();
         self.settings
             .lock()
             .unwrap()
             .clone()
-            .map(|settings| status_from_settings("bucket", settings))
+            .map(|settings| status_from_settings(&bucket, settings))
             .map_err(kv::StatusError::new)
     }
 }
@@ -422,14 +854,88 @@ impl JetStreamKeyValueUpdate for MockJetStreamKvStore {
             .lock()
             .unwrap()
             .push((key.to_string(), value, revision));
-        (*self.update_result.lock().unwrap()).map_err(kv::UpdateError::new)
+        let queued = self.update_results_queue.lock().unwrap().pop_front();
+        match queued {
+            Some(result) => result.map_err(kv::UpdateError::new),
+            None => (*self.update_result.lock().unwrap()).map_err(kv::UpdateError::new),
+        }
     }
 }
 
 impl JetStreamKeyValueDeleteExpectRevision for MockJetStreamKvStore {
     async fn delete_expect_revision(&self, key: &str, revision: Option<u64>) -> Result<(), kv::DeleteError> {
         self.delete_calls.lock().unwrap().push((key.to_string(), revision));
-        (*self.delete_result.lock().unwrap()).map_err(kv::DeleteError::new)
+        let queued = self.delete_results_queue.lock().unwrap().pop_front();
+        match queued {
+            Some(result) => result.map_err(kv::DeleteError::new),
+            None => (*self.delete_result.lock().unwrap()).map_err(kv::DeleteError::new),
+        }
+    }
+}
+
+impl JetStreamKvGet for MockJetStreamKvStore {
+    async fn get(&self, key: String) -> Result<Option<Bytes>, kv::EntryError> {
+        self.get_calls.lock().unwrap().push(key);
+        let outcome = self.get_results.lock().unwrap().pop_front();
+        match outcome {
+            Some(MockKvGetOutcome::None) | None => Ok(None),
+            Some(MockKvGetOutcome::Some(value)) => Ok(Some(value)),
+            Some(MockKvGetOutcome::Error(kind)) => Err(kv::EntryError::new(kind)),
+        }
+    }
+}
+
+impl JetStreamKvEntry for MockJetStreamKvStore {
+    async fn entry(&self, key: String) -> Result<Option<kv::Entry>, kv::EntryError> {
+        let key_for_entry = key.clone();
+        self.entry_calls.lock().unwrap().push(key);
+        let outcome = self.entry_results.lock().unwrap().pop_front();
+        let bucket = self.bucket_name.lock().unwrap().clone();
+        match outcome {
+            Some(MockKvEntryOutcome::None) | None => Ok(None),
+            Some(MockKvEntryOutcome::Some {
+                value,
+                revision,
+                operation,
+            }) => Ok(Some(kv::Entry {
+                bucket,
+                key: key_for_entry,
+                value,
+                revision,
+                delta: 0,
+                created: OffsetDateTime::UNIX_EPOCH,
+                operation,
+                seen_current: true,
+            })),
+            Some(MockKvEntryOutcome::Error(kind)) => Err(kv::EntryError::new(kind)),
+        }
+    }
+}
+
+impl JetStreamKvCreate for MockJetStreamKvStore {
+    async fn create(&self, key: &str, value: Bytes) -> Result<u64, kv::CreateError> {
+        self.create_calls.lock().unwrap().push((key.to_string(), value));
+        let queued = self.create_results.lock().unwrap().pop_front();
+        match queued {
+            Some(result) => result.map_err(kv::CreateError::new),
+            None => Ok(1),
+        }
+    }
+}
+
+impl JetStreamKvKeys for MockJetStreamKvStore {
+    type Keys = Iter<VecIntoIter<Result<String, kv::WatcherError>>>;
+
+    async fn keys(&self) -> Result<Self::Keys, kv::HistoryError> {
+        *self.keys_calls.lock().unwrap() += 1;
+        let result = self.keys_result.lock().unwrap().clone();
+        match result {
+            Ok(keys) => {
+                let items: Vec<Result<String, kv::WatcherError>> = keys.into_iter().map(Ok).collect();
+                Ok(futures::stream::iter(items.into_iter()))
+            }
+            Err(kind) => Err(kv::HistoryError::new(kind)),
+        }
     }
 }
 
@@ -571,6 +1077,39 @@ fn status_from_settings(bucket: &str, settings: MockKeyValueSettings) -> async_n
     }
 }
 
+fn mock_stream_info(messages: u64, last_sequence: u64) -> stream::Info {
+    let first_sequence = if messages == 0 { 0 } else { 1 };
+    serde_json::from_value(serde_json::json!({
+        "config": {
+            "name": "mock-stream",
+            "subjects": [],
+            "retention": "limits",
+            "max_consumers": -1,
+            "max_msgs": -1,
+            "max_bytes": -1,
+            "discard": "old",
+            "max_age": 0,
+            "storage": "file",
+            "num_replicas": 1
+        },
+        "created": "1970-01-01T00:00:00Z",
+        "state": {
+            "messages": messages,
+            "bytes": 0_u64,
+            "first_seq": first_sequence,
+            "first_ts": "1970-01-01T00:00:00Z",
+            "last_seq": last_sequence,
+            "last_ts": "1970-01-01T00:00:00Z",
+            "consumer_count": 0_usize,
+            "num_subjects": 0_u64
+        },
+        "cluster": null,
+        "mirror": null,
+        "sources": []
+    }))
+    .unwrap()
+}
+
 pub struct MockJetStreamConsumerFactory {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
     get_stream_fail_at: Arc<Mutex<Option<u32>>>,
@@ -578,6 +1117,9 @@ pub struct MockJetStreamConsumerFactory {
     get_stream_calls: Arc<Mutex<Vec<String>>>,
     last_raw_messages: Arc<Mutex<VecDeque<Result<StreamMessage, LastRawMessageError>>>>,
     last_raw_message_subjects: Arc<Mutex<Vec<String>>>,
+    info_result: Arc<Mutex<Option<stream::Info>>>,
+    raw_messages_by_sequence: Arc<Mutex<HashMap<u64, Result<StreamMessage, LastRawMessageErrorKind>>>>,
+    raw_message_calls: Arc<Mutex<Vec<u64>>>,
 }
 
 impl Clone for MockJetStreamConsumerFactory {
@@ -589,6 +1131,9 @@ impl Clone for MockJetStreamConsumerFactory {
             get_stream_calls: self.get_stream_calls.clone(),
             last_raw_messages: self.last_raw_messages.clone(),
             last_raw_message_subjects: self.last_raw_message_subjects.clone(),
+            info_result: self.info_result.clone(),
+            raw_messages_by_sequence: self.raw_messages_by_sequence.clone(),
+            raw_message_calls: self.raw_message_calls.clone(),
         }
     }
 }
@@ -602,6 +1147,9 @@ impl MockJetStreamConsumerFactory {
             get_stream_calls: Arc::new(Mutex::new(Vec::new())),
             last_raw_messages: Arc::new(Mutex::new(VecDeque::new())),
             last_raw_message_subjects: Arc::new(Mutex::new(Vec::new())),
+            info_result: Arc::new(Mutex::new(None)),
+            raw_messages_by_sequence: Arc::new(Mutex::new(HashMap::new())),
+            raw_message_calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -621,12 +1169,34 @@ impl MockJetStreamConsumerFactory {
         self.last_raw_messages.lock().unwrap().push_back(Err(error));
     }
 
+    pub fn set_info(&self, info: stream::Info) {
+        *self.info_result.lock().unwrap() = Some(info);
+    }
+
+    pub fn add_raw_message(&self, sequence: u64, message: StreamMessage) {
+        self.raw_messages_by_sequence
+            .lock()
+            .unwrap()
+            .insert(sequence, Ok(message));
+    }
+
+    pub fn add_raw_message_error(&self, sequence: u64, kind: LastRawMessageErrorKind) {
+        self.raw_messages_by_sequence
+            .lock()
+            .unwrap()
+            .insert(sequence, Err(kind));
+    }
+
     pub fn get_stream_calls(&self) -> Vec<String> {
         self.get_stream_calls.lock().unwrap().clone()
     }
 
     pub fn last_raw_message_subjects(&self) -> Vec<String> {
         self.last_raw_message_subjects.lock().unwrap().clone()
+    }
+
+    pub fn raw_message_calls(&self) -> Vec<u64> {
+        self.raw_message_calls.lock().unwrap().clone()
     }
 }
 
@@ -636,10 +1206,38 @@ impl Default for MockJetStreamConsumerFactory {
     }
 }
 
+#[derive(Clone)]
 pub struct MockJetStreamStream {
     consumers: Arc<Mutex<VecDeque<MockJetStreamConsumer>>>,
     last_raw_messages: Arc<Mutex<VecDeque<Result<StreamMessage, LastRawMessageError>>>>,
     last_raw_message_subjects: Arc<Mutex<Vec<String>>>,
+    info_result: Arc<Mutex<Option<stream::Info>>>,
+    raw_messages_by_sequence: Arc<Mutex<HashMap<u64, Result<StreamMessage, LastRawMessageErrorKind>>>>,
+    raw_message_calls: Arc<Mutex<Vec<u64>>>,
+}
+
+impl MockJetStreamStream {
+    pub fn set_info(&self, info: stream::Info) {
+        *self.info_result.lock().unwrap() = Some(info);
+    }
+
+    pub fn add_raw_message(&self, sequence: u64, message: StreamMessage) {
+        self.raw_messages_by_sequence
+            .lock()
+            .unwrap()
+            .insert(sequence, Ok(message));
+    }
+
+    pub fn add_raw_message_error(&self, sequence: u64, kind: LastRawMessageErrorKind) {
+        self.raw_messages_by_sequence
+            .lock()
+            .unwrap()
+            .insert(sequence, Err(kind));
+    }
+
+    pub fn raw_message_calls(&self) -> Vec<u64> {
+        self.raw_message_calls.lock().unwrap().clone()
+    }
 }
 
 impl JetStreamGetStream for MockJetStreamConsumerFactory {
@@ -669,6 +1267,9 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
             consumers: self.consumers.clone(),
             last_raw_messages: self.last_raw_messages.clone(),
             last_raw_message_subjects: self.last_raw_message_subjects.clone(),
+            info_result: self.info_result.clone(),
+            raw_messages_by_sequence: self.raw_messages_by_sequence.clone(),
+            raw_message_calls: self.raw_message_calls.clone(),
         })
     }
 }
@@ -695,6 +1296,27 @@ impl JetStreamLastRawMessageBySubject for MockJetStreamStream {
             .unwrap()
             .pop_front()
             .unwrap_or(Err(LastRawMessageError::new(LastRawMessageErrorKind::NoMessageFound)))
+    }
+}
+
+impl JetStreamGetStreamInfo for MockJetStreamStream {
+    async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
+        match self.info_result.lock().unwrap().clone() {
+            Some(info) => Ok(info),
+            None => Err(stream::InfoError::new(RequestErrorKind::Other)),
+        }
+    }
+}
+
+impl JetStreamGetRawMessage for MockJetStreamStream {
+    async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, RawMessageError> {
+        self.raw_message_calls.lock().unwrap().push(sequence);
+        let entry = self.raw_messages_by_sequence.lock().unwrap().get(&sequence).cloned();
+        match entry {
+            Some(Ok(message)) => Ok(message),
+            Some(Err(kind)) => Err(RawMessageError::new(kind)),
+            None => Err(RawMessageError::new(LastRawMessageErrorKind::NoMessageFound)),
+        }
     }
 }
 
@@ -832,7 +1454,6 @@ impl ObjectStoreGet for MockObjectStore {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use time::OffsetDateTime;
 
     fn make_nats_msg(subject: &str, payload: &[u8]) -> async_nats::Message {
         async_nats::Message {
@@ -945,6 +1566,334 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mock_publish_message_advances_default_sequence_after_explicit_ack() {
+        let publisher = MockJetStreamPublishMessage::new();
+        publisher.enqueue_ack_with_sequence(10);
+
+        let first = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("a"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        let second = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("b"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(first.sequence, 10);
+        assert_eq!(second.sequence, 11);
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_scripts_ack_level_errors() {
+        let publisher = MockJetStreamPublishMessage::new();
+        publisher.enqueue_wrong_last_sequence();
+        publisher.enqueue_ack_error(PublishErrorKind::Other);
+
+        let wrong_last_sequence = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+        let other = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(wrong_last_sequence.kind(), PublishErrorKind::WrongLastSequence);
+        assert_eq!(other.kind(), PublishErrorKind::Other);
+        assert_eq!(publisher.published_messages().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_scripts_outer_publish_errors_and_duplicates() {
+        let publisher = MockJetStreamPublishMessage::new();
+        publisher.enqueue_publish_error(PublishErrorKind::TimedOut);
+        publisher.enqueue_duplicate();
+
+        let publish_error = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap_err();
+        let duplicate = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(publish_error.kind(), PublishErrorKind::TimedOut);
+        assert_eq!(duplicate.sequence, 1);
+        assert!(duplicate.duplicate);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_rejects_invalid_expected_sequence_header() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        let error = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .header(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, "not-a-number")
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), PublishErrorKind::WrongLastSequence);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_enforces_expected_last_subject_sequence() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("first")
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("second")
+                    .expected_last_subject_sequence(1)
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let stale = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("stale")
+                    .expected_last_subject_sequence(1)
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+
+        assert_eq!(stale.kind(), PublishErrorKind::WrongLastSequence);
+        assert_eq!(publisher.last_subject_sequence("events.alpha"), 2);
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_rejects_duplicate_message_id_without_recording() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        let first = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-1")
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        let duplicate = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-1")
+                    .payload(Bytes::new())
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(first.sequence, 1);
+        assert_eq!(duplicate.sequence, 1);
+        assert!(duplicate.duplicate);
+        assert_eq!(publisher.published_messages().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_stages_atomic_batch_until_commit() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        let member = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-1")
+                    .header(NATS_BATCH_ID, "batch-1")
+                    .payload(Bytes::from_static(b"one"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+        assert_eq!(member.kind(), PublishErrorKind::Other);
+        assert!(publisher.published_messages().is_empty());
+
+        let commit = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-2")
+                    .header(NATS_BATCH_ID, "batch-1")
+                    .header(NATS_BATCH_COMMIT, "1")
+                    .payload(Bytes::from_static(b"two"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(commit.sequence, 2);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].payload, Bytes::from_static(b"one"));
+        assert_eq!(messages[1].payload, Bytes::from_static(b"two"));
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_drops_pending_batch_on_conflict() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-1")
+                    .header(NATS_BATCH_ID, "batch-1")
+                    .payload(Bytes::from_static(b"one"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+        let conflict = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-2")
+                    .expected_last_subject_sequence(99)
+                    .header(NATS_BATCH_ID, "batch-1")
+                    .payload(Bytes::from_static(b"two"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap_err();
+        let commit = publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-3")
+                    .header(NATS_BATCH_ID, "batch-1")
+                    .header(NATS_BATCH_COMMIT, "1")
+                    .payload(Bytes::from_static(b"three"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        assert_eq!(conflict.kind(), PublishErrorKind::WrongLastSequence);
+        assert_eq!(commit.sequence, 2);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].payload, Bytes::from_static(b"three"));
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_reads_committed_messages() {
+        let publisher = MockJetStreamPublishMessage::new();
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-1")
+                    .payload(Bytes::from_static(b"one"))
+                    .outbound_message("events.alpha"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id("event-2")
+                    .payload(Bytes::from_static(b"two"))
+                    .outbound_message("events.beta"),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+
+        let info = publisher.get_info().await.unwrap();
+        let raw = publisher.get_raw_message(1).await.unwrap();
+        let latest_alpha = publisher.get_last_raw_message_by_subject("events.alpha").await.unwrap();
+
+        assert_eq!(info.state.last_sequence, 2);
+        assert_eq!(raw.payload, Bytes::from_static(b"one"));
+        assert_eq!(latest_alpha.sequence, 1);
+    }
+
+    #[tokio::test]
+    async fn mock_publish_message_missing_reads_return_not_found() {
+        let publisher = MockJetStreamPublishMessage::new();
+
+        let latest = publisher
+            .get_last_raw_message_by_subject("events.missing")
+            .await
+            .unwrap_err();
+        let raw = publisher.get_raw_message(99).await.unwrap_err();
+
+        assert_eq!(latest.kind(), LastRawMessageErrorKind::NoMessageFound);
+        assert_eq!(raw.kind(), LastRawMessageErrorKind::NoMessageFound);
+    }
+
+    #[tokio::test]
     async fn mock_publisher_fails_when_configured() {
         let pub_mock = MockJetStreamPublisher::new();
         pub_mock.fail_next_js_publish();
@@ -1032,6 +1981,215 @@ mod tests {
 
         assert_eq!(error.kind(), LastRawMessageErrorKind::Other);
         assert_eq!(error.to_string(), "failed to get last raw message");
+    }
+
+    #[tokio::test]
+    async fn mock_stream_info_and_raw_messages_are_configurable_from_factory() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.set_info(mock_stream_info(3, 9));
+        factory.add_raw_message(
+            7,
+            StreamMessage {
+                subject: "stored.subject".into(),
+                sequence: 7,
+                headers: HeaderMap::new(),
+                payload: Bytes::from_static(b"seven"),
+                time: OffsetDateTime::UNIX_EPOCH,
+            },
+        );
+        factory.add_raw_message_error(8, LastRawMessageErrorKind::Other);
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+
+        let info = stream.get_info().await.unwrap();
+        let message = stream.get_raw_message(7).await.unwrap();
+        let configured_error = stream.get_raw_message(8).await.unwrap_err();
+        let missing = stream.get_raw_message(9).await.unwrap_err();
+
+        assert_eq!(info.state.messages, 3);
+        assert_eq!(info.state.last_sequence, 9);
+        assert_eq!(message.payload, Bytes::from_static(b"seven"));
+        assert_eq!(configured_error.kind(), LastRawMessageErrorKind::Other);
+        assert_eq!(missing.kind(), LastRawMessageErrorKind::NoMessageFound);
+        assert_eq!(factory.raw_message_calls(), vec![7, 8, 9]);
+    }
+
+    #[tokio::test]
+    async fn mock_stream_info_and_raw_messages_are_configurable_from_stream() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let stream = JetStreamGetStream::get_stream(&factory, "stream").await.unwrap();
+        let default_info_error = stream.get_info().await.unwrap_err();
+        stream.set_info(mock_stream_info(1, 4));
+        stream.add_raw_message(
+            4,
+            StreamMessage {
+                subject: "stored.subject".into(),
+                sequence: 4,
+                headers: HeaderMap::new(),
+                payload: Bytes::from_static(b"four"),
+                time: OffsetDateTime::UNIX_EPOCH,
+            },
+        );
+        stream.add_raw_message_error(5, LastRawMessageErrorKind::Other);
+
+        let info = stream.get_info().await.unwrap();
+        let message = stream.get_raw_message(4).await.unwrap();
+        let error = stream.get_raw_message(5).await.unwrap_err();
+
+        assert_eq!(default_info_error.kind(), RequestErrorKind::Other);
+        assert_eq!(info.state.first_sequence, 1);
+        assert_eq!(message.sequence, 4);
+        assert_eq!(error.kind(), LastRawMessageErrorKind::Other);
+        assert_eq!(stream.raw_message_calls(), vec![4, 5]);
+    }
+
+    #[tokio::test]
+    async fn mock_kv_status_uses_configured_bucket_name() {
+        let store = MockJetStreamKvStore::new();
+        store.set_bucket_name("custom-bucket");
+
+        let status = store.status().await.unwrap();
+
+        assert_eq!(status.bucket, "custom-bucket");
+        assert_eq!(status.info.config.name, "KV_custom-bucket");
+    }
+
+    #[tokio::test]
+    async fn mock_kv_store_records_core_operations_and_queued_results() {
+        let store = MockJetStreamKvStore::new();
+        store.enqueue_update_result(Ok(11));
+        store.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+        store.enqueue_delete_result(Ok(()));
+        store.enqueue_delete_result(Err(kv::DeleteErrorKind::TimedOut));
+        store.enqueue_create_result(Ok(12));
+        store.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+
+        assert_eq!(
+            store
+                .create_with_ttl("ttl-key", Bytes::from_static(b"ttl"), Duration::from_secs(5))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(store.update("key", Bytes::from_static(b"value"), 10).await.unwrap(), 11);
+        assert_eq!(
+            store
+                .update("key", Bytes::from_static(b"value"), 11)
+                .await
+                .unwrap_err()
+                .kind(),
+            kv::UpdateErrorKind::WrongLastRevision
+        );
+        store.delete_expect_revision("key", Some(11)).await.unwrap();
+        assert_eq!(
+            store.delete_expect_revision("key", None).await.unwrap_err().kind(),
+            kv::DeleteErrorKind::TimedOut
+        );
+        assert_eq!(store.create("new", Bytes::from_static(b"value")).await.unwrap(), 12);
+        assert_eq!(
+            store
+                .create("existing", Bytes::from_static(b"value"))
+                .await
+                .unwrap_err()
+                .kind(),
+            kv::CreateErrorKind::AlreadyExists
+        );
+        assert_eq!(store.create("fallback", Bytes::new()).await.unwrap(), 1);
+
+        assert_eq!(
+            store.create_with_ttl_calls(),
+            vec![(
+                "ttl-key".to_string(),
+                Bytes::from_static(b"ttl"),
+                Duration::from_secs(5)
+            )]
+        );
+        assert_eq!(
+            store.update_calls(),
+            vec![
+                ("key".to_string(), Bytes::from_static(b"value"), 10),
+                ("key".to_string(), Bytes::from_static(b"value"), 11),
+            ]
+        );
+        assert_eq!(
+            store.delete_calls(),
+            vec![("key".to_string(), Some(11)), ("key".to_string(), None)]
+        );
+        assert_eq!(
+            store.create_calls(),
+            vec![
+                ("new".to_string(), Bytes::from_static(b"value")),
+                ("existing".to_string(), Bytes::from_static(b"value")),
+                ("fallback".to_string(), Bytes::new()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_kv_store_reads_entries_gets_and_keys() {
+        let store = MockJetStreamKvStore::new();
+        store.set_bucket_name("custom-bucket");
+        store.enqueue_entry(Bytes::from_static(b"entry"), 21, kv::Operation::Put);
+        store.enqueue_entry_none();
+        store.enqueue_entry_error(kv::EntryErrorKind::TimedOut);
+        store.enqueue_get_some(Bytes::from_static(b"get"));
+        store.enqueue_get_none();
+        store.enqueue_get_error(kv::EntryErrorKind::Other);
+        store.set_keys_result(Ok(vec!["a".to_string(), "b".to_string()]));
+
+        let entry = store.entry("entry-key".to_string()).await.unwrap().unwrap();
+        let missing_entry = store.entry("missing-entry".to_string()).await.unwrap();
+        let entry_error = store.entry("bad-entry".to_string()).await.unwrap_err();
+        let value = store.get("get-key".to_string()).await.unwrap().unwrap();
+        let missing_value = store.get("missing-get".to_string()).await.unwrap();
+        let get_error = store.get("bad-get".to_string()).await.unwrap_err();
+        let keys: Vec<_> = store.keys().await.unwrap().collect().await;
+
+        assert_eq!(entry.bucket, "custom-bucket");
+        assert_eq!(entry.key, "entry-key");
+        assert_eq!(entry.value, Bytes::from_static(b"entry"));
+        assert_eq!(entry.revision, 21);
+        assert_eq!(entry.operation, kv::Operation::Put);
+        assert!(missing_entry.is_none());
+        assert_eq!(entry_error.kind(), kv::EntryErrorKind::TimedOut);
+        assert_eq!(value, Bytes::from_static(b"get"));
+        assert!(missing_value.is_none());
+        assert_eq!(get_error.kind(), kv::EntryErrorKind::Other);
+        assert_eq!(keys.into_iter().map(Result::unwrap).collect::<Vec<_>>(), vec!["a", "b"]);
+        assert_eq!(store.entry_calls(), vec!["entry-key", "missing-entry", "bad-entry"]);
+        assert_eq!(store.get_calls(), vec!["get-key", "missing-get", "bad-get"]);
+        assert_eq!(store.keys_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn mock_kv_store_surfaces_configured_errors() {
+        let store = MockJetStreamKvStore::new();
+        store.fail_status(kv::StatusErrorKind::TimedOut);
+        store.set_create_with_ttl_result(Err(kv::CreateErrorKind::InvalidKey));
+        store.set_update_result(Err(kv::UpdateErrorKind::InvalidKey));
+        store.set_delete_result(Err(kv::DeleteErrorKind::InvalidKey));
+        store.set_keys_result(Err(kv::WatchErrorKind::ConsumerCreate));
+
+        assert_eq!(store.status().await.unwrap_err().kind(), kv::StatusErrorKind::TimedOut);
+        assert_eq!(
+            store
+                .create_with_ttl("", Bytes::new(), Duration::from_secs(1))
+                .await
+                .unwrap_err()
+                .kind(),
+            kv::CreateErrorKind::InvalidKey
+        );
+        assert_eq!(
+            store.update("", Bytes::new(), 1).await.unwrap_err().kind(),
+            kv::UpdateErrorKind::InvalidKey
+        );
+        assert_eq!(
+            store.delete_expect_revision("", None).await.unwrap_err().kind(),
+            kv::DeleteErrorKind::InvalidKey
+        );
+        assert_eq!(
+            store.keys().await.unwrap_err().kind(),
+            kv::WatchErrorKind::ConsumerCreate
+        );
     }
 
     #[tokio::test]
