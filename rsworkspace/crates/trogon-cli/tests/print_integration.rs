@@ -15,6 +15,8 @@ use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunne
 use trogon_cli::session::TrogonSession;
 use trogon_cli::OutputFormat;
 
+const REQ_ID_HEADER: &str = "X-Req-Id";
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const PREFIX: &str = "test";
@@ -66,27 +68,31 @@ async fn spawn_fake_runner(
         let prompt_subj = format!("{PREFIX}.session.{sid}.agent.prompt");
         let mut sub_prompt = nats2.subscribe(prompt_subj).await.unwrap();
         if let Some(msg) = sub_prompt.next().await {
-            if let Some(reply) = msg.reply {
-                // Send text chunks via notifications
-                let notif_subj = format!("{PREFIX}.session.{sid}.client.session.update");
-                for chunk in &chunks {
-                    let ev = serde_json::json!({
-                        "sessionId": &sid,
-                        "update": { "sessionUpdate": "message_chunk", "chunk": chunk }
-                    });
-                    nats2
-                        .publish(notif_subj.clone(), serde_json::to_vec(&ev).unwrap().into())
-                        .await
-                        .ok();
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-                // Send Done
-                let done = serde_json::json!({ "stopReason": stop_reason });
+            let req_id = msg.headers.as_ref()
+                .and_then(|h| h.get(REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subj = format!("{PREFIX}.session.{sid}.agent.prompt.response.{req_id}");
+
+            // Send text chunks via notifications
+            let notif_subj = format!("{PREFIX}.session.{sid}.client.session.update");
+            for chunk in &chunks {
+                let ev = serde_json::json!({
+                    "sessionId": &sid,
+                    "update": { "sessionUpdate": "message_chunk", "chunk": chunk }
+                });
                 nats2
-                    .publish(reply, serde_json::to_vec(&done).unwrap().into())
+                    .publish(notif_subj.clone(), serde_json::to_vec(&ev).unwrap().into())
                     .await
                     .ok();
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
+            // Send Done on response subject
+            let done = serde_json::json!({ "stopReason": stop_reason });
+            nats2
+                .publish(resp_subj, serde_json::to_vec(&done).unwrap().into())
+                .await
+                .ok();
         }
     });
 }
@@ -152,13 +158,16 @@ async fn print_run_prompt_routed_to_session_subject() {
             let payload: serde_json::Value =
                 serde_json::from_slice(&msg.payload).unwrap_or_default();
             tx.send(payload.clone()).await.ok();
-            if let Some(reply) = msg.reply {
-                let done = serde_json::json!({ "stopReason": "end_turn" });
-                nats2
-                    .publish(reply, serde_json::to_vec(&done).unwrap().into())
-                    .await
-                    .ok();
-            }
+            let req_id = msg.headers.as_ref()
+                .and_then(|h| h.get(REQ_ID_HEADER))
+                .map(|v| v.as_str().to_string())
+                .unwrap_or_default();
+            let resp_subj = format!("{PREFIX}.session.{sid}.agent.prompt.response.{req_id}");
+            let done = serde_json::json!({ "stopReason": "end_turn" });
+            nats2
+                .publish(resp_subj, serde_json::to_vec(&done).unwrap().into())
+                .await
+                .ok();
         }
     });
 
@@ -213,13 +222,16 @@ async fn print_run_two_calls_get_distinct_session_ids() {
                     let ps = format!("{PREFIX}.session.{sid}.agent.prompt");
                     let mut sp = nats2.subscribe(ps).await.unwrap();
                     if let Some(pm) = sp.next().await {
-                        if let Some(r) = pm.reply {
-                            let done = serde_json::json!({ "stopReason": "end_turn" });
-                            nats2
-                                .publish(r, serde_json::to_vec(&done).unwrap().into())
-                                .await
-                                .ok();
-                        }
+                        let req_id = pm.headers.as_ref()
+                            .and_then(|h| h.get(REQ_ID_HEADER))
+                            .map(|v| v.as_str().to_string())
+                            .unwrap_or_default();
+                        let resp_subj = format!("{PREFIX}.session.{sid}.agent.prompt.response.{req_id}");
+                        let done = serde_json::json!({ "stopReason": "end_turn" });
+                        nats2
+                            .publish(resp_subj, serde_json::to_vec(&done).unwrap().into())
+                            .await
+                            .ok();
                     }
                 }
             }
