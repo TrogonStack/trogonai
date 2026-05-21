@@ -43,22 +43,53 @@ impl<T> SnapshotKvBucket for T where
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
+/// Source error with fixed call-site context for snapshot storage failures.
+pub struct SnapshotStoreSourceError {
+    context: &'static str,
+    source: BoxError,
+}
+
+impl SnapshotStoreSourceError {
+    fn new<E>(context: &'static str, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            context,
+            source: Box::new(source),
+        }
+    }
+
+    /// Returns the diagnostic operation context for the failed call.
+    pub const fn context(&self) -> &'static str {
+        self.context
+    }
+
+    /// Returns the typed source error returned by the storage or codec layer.
+    pub fn source(&self) -> &(dyn std::error::Error + 'static) {
+        self.source.as_ref()
+    }
+}
+
+impl std::fmt::Display for SnapshotStoreSourceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.context, self.source)
+    }
+}
+
+impl std::error::Error for SnapshotStoreSourceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source())
+    }
+}
+
+#[derive(Debug)]
 /// Error raised while reading, writing, or decoding snapshot state.
 pub enum SnapshotStoreError {
     /// JetStream Key/Value operation failed.
-    Kv {
-        /// Operation context for the failed Key/Value call.
-        context: &'static str,
-        /// Source error returned by the Key/Value client.
-        source: BoxError,
-    },
+    Kv(SnapshotStoreSourceError),
     /// Snapshot envelope or payload encoding failed.
-    Codec {
-        /// Operation context for the failed codec call.
-        context: &'static str,
-        /// Source error returned by the codec.
-        source: BoxError,
-    },
+    Codec(SnapshotStoreSourceError),
     /// A key used the snapshot namespace prefix but did not include a stream id.
     InvalidSnapshotKey {
         /// Invalid key observed in the Key/Value bucket.
@@ -141,28 +172,22 @@ impl SnapshotStoreError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::Kv {
-            context,
-            source: Box::new(source),
-        }
+        Self::Kv(SnapshotStoreSourceError::new(context, source))
     }
 
     fn codec_source<E>(context: &'static str, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::Codec {
-            context,
-            source: Box::new(source),
-        }
+        Self::Codec(SnapshotStoreSourceError::new(context, source))
     }
 }
 
 impl std::fmt::Display for SnapshotStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Kv { context, source } => write!(f, "KV error: {context}: {source}"),
-            Self::Codec { context, source } => write!(f, "Snapshot codec error: {context}: {source}"),
+            Self::Kv(source) => write!(f, "KV error: {source}"),
+            Self::Codec(source) => write!(f, "Snapshot codec error: {source}"),
             Self::InvalidSnapshotKey { key } => {
                 write!(f, "Invalid stream snapshot key: {key}")
             }
@@ -176,7 +201,7 @@ impl std::fmt::Display for SnapshotStoreError {
 impl std::error::Error for SnapshotStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Kv { source, .. } | Self::Codec { source, .. } => Some(source.as_ref()),
+            Self::Kv(source) | Self::Codec(source) => Some(source),
             Self::InvalidSnapshotKey { .. } | Self::MissingCheckpointName { .. } => None,
         }
     }

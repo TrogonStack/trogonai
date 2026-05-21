@@ -96,22 +96,53 @@ pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static
 }
 
 #[derive(Debug)]
+/// Source error with fixed call-site context for stream storage failures.
+pub struct StreamStoreSourceError {
+    context: &'static str,
+    source: BoxError,
+}
+
+impl StreamStoreSourceError {
+    fn new<E>(context: &'static str, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            context,
+            source: Box::new(source),
+        }
+    }
+
+    /// Returns the diagnostic operation context for the failed call.
+    pub const fn context(&self) -> &'static str {
+        self.context
+    }
+
+    /// Returns the typed source error returned by JetStream or envelope decoding.
+    pub fn source(&self) -> &(dyn std::error::Error + 'static) {
+        self.source.as_ref()
+    }
+}
+
+impl fmt::Display for StreamStoreSourceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.context, self.source)
+    }
+}
+
+impl std::error::Error for StreamStoreSourceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source())
+    }
+}
+
+#[derive(Debug)]
 /// Error raised while reading or appending stream events.
 pub enum StreamStoreError {
     /// JetStream read operation failed.
-    Read {
-        /// Operation context for the failed read.
-        context: &'static str,
-        /// Source error returned by JetStream or envelope decoding.
-        source: BoxError,
-    },
+    Read(StreamStoreSourceError),
     /// JetStream publish operation failed.
-    Publish {
-        /// Operation context for the failed publish.
-        context: &'static str,
-        /// Source error returned by JetStream or position decoding.
-        source: BoxError,
-    },
+    Publish(StreamStoreSourceError),
     /// JetStream rejected the expected last subject sequence.
     WrongExpectedVersion,
 }
@@ -121,30 +152,22 @@ impl StreamStoreError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::Read {
-            context,
-            source: Box::new(source),
-        }
+        Self::Read(StreamStoreSourceError::new(context, source))
     }
 
     pub(crate) fn publish_source<E>(context: &'static str, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::Publish {
-            context,
-            source: Box::new(source),
-        }
+        Self::Publish(StreamStoreSourceError::new(context, source))
     }
 }
 
 impl std::fmt::Display for StreamStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Read { context, source } => write!(f, "stream read error: {context}: {source}"),
-            Self::Publish { context, source } => {
-                write!(f, "stream publish error: {context}: {source}")
-            }
+            Self::Read(source) => write!(f, "stream read error: {source}"),
+            Self::Publish(source) => write!(f, "stream publish error: {source}"),
             Self::WrongExpectedVersion => {
                 write!(f, "stream publish error: wrong expected version")
             }
@@ -155,7 +178,7 @@ impl std::fmt::Display for StreamStoreError {
 impl std::error::Error for StreamStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read { source, .. } | Self::Publish { source, .. } => Some(source.as_ref()),
+            Self::Read(source) | Self::Publish(source) => Some(source),
             Self::WrongExpectedVersion => None,
         }
     }
@@ -349,10 +372,10 @@ where
         {
             Ok(None)
         }
-        Err(error) => Err(StreamStoreError::Read {
-            context: "failed to read latest subject message",
-            source: Box::new(error),
-        }),
+        Err(error) => Err(StreamStoreError::read_source(
+            "failed to read latest subject message",
+            error,
+        )),
     }
 }
 
@@ -850,7 +873,7 @@ mod tests {
             .await
             .expect_err("publish should fail");
 
-        assert!(matches!(error, StreamStoreError::Publish { .. }));
+        assert!(matches!(error, StreamStoreError::Publish(_)));
     }
 
     #[tokio::test]
@@ -862,7 +885,7 @@ mod tests {
             .await
             .expect_err("duplicate publish should fail");
 
-        assert!(matches!(error, StreamStoreError::Publish { .. }));
+        assert!(matches!(error, StreamStoreError::Publish(_)));
     }
 
     #[tokio::test]
@@ -874,7 +897,7 @@ mod tests {
             .await
             .expect_err("ack error should propagate");
 
-        assert!(matches!(error, StreamStoreError::Publish { .. }));
+        assert!(matches!(error, StreamStoreError::Publish(_)));
     }
 
     #[tokio::test]
@@ -983,7 +1006,7 @@ mod tests {
             .await
             .expect_err("error should propagate");
 
-        assert!(matches!(error, StreamStoreError::Read { .. }));
+        assert!(matches!(error, StreamStoreError::Read(_)));
     }
 
     #[tokio::test]
@@ -1038,6 +1061,6 @@ mod tests {
         let subject = StreamSubject::new("test.events.backup").unwrap();
         let error = subject_current_position(&stream, &subject).await.unwrap_err();
 
-        assert!(matches!(error, StreamStoreError::Read { .. }));
+        assert!(matches!(error, StreamStoreError::Read(_)));
     }
 }
