@@ -178,6 +178,7 @@ fn text_with_usage(text: &str) -> Vec<XaiEvent> {
         XaiEvent::Usage {
             prompt_tokens: 10,
             completion_tokens: 5,
+            cached_tokens: 0,
         },
         XaiEvent::Done,
     ]

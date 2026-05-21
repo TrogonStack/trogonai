@@ -34,6 +34,12 @@ pub struct SessionSnapshot {
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_input_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub total_cache_read_tokens: u64,
 }
 
 /// Per-message token usage written to the SESSIONS bucket.
@@ -49,6 +55,10 @@ pub struct MessageUsage {
 }
 
 fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
@@ -275,6 +285,9 @@ mod tests {
             tools: vec![],
             memory_path: None,
             agent_id: Some("agent-42".into()),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
             messages: vec![
                 SnapshotMessage {
                     role: "user".into(),
@@ -346,6 +359,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".into(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         }
     }
 

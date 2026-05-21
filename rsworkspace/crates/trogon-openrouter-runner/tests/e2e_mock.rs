@@ -425,7 +425,7 @@ async fn prompt_via_nats_sends_usage_notification() {
 
             h.http.push(vec![
                 OpenRouterEvent::TextDelta { text: "answer".to_string() },
-                OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+                OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -895,10 +895,9 @@ async fn cancel_via_nats_interrupts_prompt() {
                 "r.prompt",
             );
 
-            // Yield to let the prompt task start and enter the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for the TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");
             h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
@@ -1411,10 +1410,9 @@ async fn close_session_during_active_prompt_cancels_and_removes_session() {
                 "r.prompt",
             );
 
-            // Yield so the prompt task starts and enters the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for the TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Close the session while the prompt is still running.
             let close_subj = format!("acp.session.{sid}.agent.close");
@@ -4376,7 +4374,7 @@ async fn usage_update_notification_fires_after_tool_round_via_nats() {
             }]);
             // Call 2: final answer with usage event
             h.http.push(vec![
-                OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 10 },
+                OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
                 OpenRouterEvent::TextDelta { text: "done".to_string() },
             ]);
 
@@ -4623,10 +4621,10 @@ async fn cancel_during_second_http_call_of_tool_round_via_nats() {
                 "r.cancel2",
             );
 
-            // Yield until the agent has entered the second HTTP call's inner loop.
-            for _ in 0..20 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for: ToolCall InProgress + ToolCallUpdate Completed + AgentMessageChunk
+            // from the second HTTP call. That guarantees we're inside the second streaming
+            // loop while the slow stream is still pending.
+            h.expect_n_notifications(3).await;
 
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");
             h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
