@@ -1,8 +1,8 @@
 use super::Snapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReadSnapshotRequest<'a, SnapshotId: ?Sized> {
-    pub snapshot_id: &'a SnapshotId,
+pub struct ReadSnapshotRequest<'a, StreamId: ?Sized> {
+    pub stream_id: &'a StreamId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,12 +16,12 @@ impl<SnapshotPayload> ReadSnapshotResponse<SnapshotPayload> {
     }
 }
 
-pub trait SnapshotRead<SnapshotPayload, SnapshotId: ?Sized>: Send + Sync {
+pub trait SnapshotRead<SnapshotPayload, StreamId: ?Sized>: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn read_snapshot(
         &self,
-        request: ReadSnapshotRequest<'_, SnapshotId>,
+        request: ReadSnapshotRequest<'_, StreamId>,
     ) -> impl std::future::Future<Output = Result<ReadSnapshotResponse<SnapshotPayload>, Self::Error>> + Send;
 }
 
