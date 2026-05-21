@@ -282,6 +282,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         let mut stdout = std::io::stdout();
                         let ctrl_c = tokio::signal::ctrl_c();
                         tokio::pin!(ctrl_c);
+                        let mut response_buf = String::new();
 
                         loop {
                             tokio::select! {
@@ -295,11 +296,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                     match event {
                                         None => break,
                                         Some(StreamEvent::Text(text)) => {
-                                            print!("{text}");
-                                            let _ = stdout.flush();
+                                            response_buf.push_str(&text);
                                         }
                                         Some(StreamEvent::Thinking) => {}
                                         Some(StreamEvent::ToolCall(name)) => {
+                                            if !response_buf.is_empty() {
+                                                print!("{}", crate::markdown::render(&response_buf));
+                                                response_buf.clear();
+                                            }
                                             eprintln!("\n[tool: {name}]");
                                         }
                                         Some(StreamEvent::Diff(diff)) => {
@@ -310,6 +314,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             session_context_size = context_size;
                                         }
                                         Some(StreamEvent::Done(reason)) => {
+                                            if !response_buf.is_empty() {
+                                                print!("{}", crate::markdown::render(&response_buf));
+                                                response_buf.clear();
+                                            }
                                             if reason == "cancelled" {
                                                 eprintln!("\n[cancelled]");
                                             } else {
@@ -324,6 +332,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                                     );
                                                 }
                                             }
+                                            let _ = stdout.flush();
                                             break;
                                         }
                                     }
