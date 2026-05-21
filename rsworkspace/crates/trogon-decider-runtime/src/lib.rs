@@ -47,7 +47,7 @@
 //! let observed = StreamPosition::try_new(1)?;
 //! let precondition = StreamWritePrecondition::At(observed);
 //! # let _ = (event, precondition);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), trogon_decider_runtime::InvalidStreamPosition>(())
 //! ```
 #![cfg_attr(
     any(test, feature = "test-support"),
