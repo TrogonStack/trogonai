@@ -1092,6 +1092,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         state.cwd = req.cwd.to_string_lossy().into_owned();
         state.parent_session_id = Some(source_id.clone());
         state.branched_at_index = branch_at;
+        state.total_input_tokens = 0;
+        state.total_output_tokens = 0;
+        state.total_cache_creation_tokens = 0;
+        state.total_cache_read_tokens = 0;
         if let Err(e) = self.store.save(&new_id, &state).await {
             warn!(new_id, error = %e, "agent: failed to save forked session");
         }
