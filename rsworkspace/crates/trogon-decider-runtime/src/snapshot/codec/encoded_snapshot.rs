@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Snapshot, SnapshotType, StreamPosition};
+use crate::{Snapshot, StreamPosition};
 
 use super::{
     SnapshotDecodeError, SnapshotEncodeError, SnapshotEnvelopeDecodeError, SnapshotEnvelopeEncodeError,
@@ -9,23 +9,17 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodedSnapshot {
-    pub r#type: String,
     pub position: StreamPosition,
     pub payload: Vec<u8>,
 }
 
 impl EncodedSnapshot {
-    pub fn new(snapshot_type: impl Into<String>, position: StreamPosition, payload: Vec<u8>) -> Self {
-        Self {
-            r#type: snapshot_type.into(),
-            position,
-            payload,
-        }
+    pub fn new(position: StreamPosition, payload: Vec<u8>) -> Self {
+        Self { position, payload }
     }
 
     pub fn into_bytes(self) -> Result<Vec<u8>, SnapshotEnvelopeEncodeError> {
         serde_json::to_vec(&SnapshotEnvelope {
-            r#type: self.r#type,
             position: self.position.as_u64(),
             payload: self.payload,
         })
@@ -38,46 +32,91 @@ impl EncodedSnapshot {
         let position =
             StreamPosition::try_new(envelope.position).map_err(SnapshotEnvelopeDecodeError::position_source)?;
 
-        Ok(Self::new(envelope.r#type, position, envelope.payload))
+        Ok(Self::new(position, envelope.payload))
     }
 }
 
-pub fn encode_snapshot<T>(
-    snapshot: &Snapshot<T>,
-) -> Result<EncodedSnapshot, SnapshotEncodeError<<T as SnapshotPayloadEncode>::Error, <T as SnapshotType>::Error>>
+pub fn encode_snapshot<T>(snapshot: &Snapshot<T>) -> Result<EncodedSnapshot, SnapshotEncodeError>
 where
-    T: SnapshotPayloadEncode + SnapshotType,
+    T: SnapshotPayloadEncode,
+    T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let snapshot_type = T::snapshot_type().map_err(SnapshotEncodeError::snapshot_type)?;
-    let payload = snapshot.payload.encode().map_err(SnapshotEncodeError::payload)?;
+    let payload = snapshot.payload.encode().map_err(SnapshotEncodeError::new)?;
 
-    Ok(EncodedSnapshot::new(snapshot_type.as_str(), snapshot.position, payload))
+    Ok(EncodedSnapshot::new(snapshot.position, payload))
 }
 
-pub fn decode_snapshot<T>(
-    encoded: EncodedSnapshot,
-) -> Result<Snapshot<T>, SnapshotDecodeError<<T as SnapshotPayloadDecode>::Error, <T as SnapshotType>::Error>>
+pub fn decode_snapshot<T>(encoded: EncodedSnapshot) -> Result<Snapshot<T>, SnapshotDecodeError>
 where
-    T: SnapshotPayloadDecode + SnapshotType,
+    T: SnapshotPayloadDecode,
+    T::Error: std::error::Error + Send + Sync + 'static,
 {
-    let snapshot_type = T::snapshot_type().map_err(SnapshotDecodeError::snapshot_type)?;
-    if encoded.r#type != snapshot_type.as_str() {
-        return Err(SnapshotDecodeError::unexpected_type(snapshot_type, encoded.r#type));
-    }
-
-    let payload =
-        T::decode(SnapshotPayloadData::new(encoded.payload.as_slice())).map_err(SnapshotDecodeError::payload)?;
+    let payload = T::decode(SnapshotPayloadData::new(encoded.payload.as_slice())).map_err(SnapshotDecodeError::new)?;
 
     Ok(Snapshot::new(encoded.position, payload))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SnapshotEnvelope {
-    #[serde(rename = "type")]
-    r#type: String,
     position: u64,
     payload: Vec<u8>,
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    struct TestPayload {
+        id: String,
+    }
+
+    impl SnapshotPayloadEncode for TestPayload {
+        type Error = serde_json::Error;
+
+        fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+            serde_json::to_vec(self)
+        }
+    }
+
+    impl SnapshotPayloadDecode for TestPayload {
+        type Error = serde_json::Error;
+
+        fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+            serde_json::from_slice(payload.payload)
+        }
+    }
+
+    fn position(value: u64) -> StreamPosition {
+        StreamPosition::try_new(value).expect("test stream position must be non-zero")
+    }
+
+    #[test]
+    fn snapshot_round_trips_through_encoded_snapshot() {
+        let snapshot = Snapshot::new(
+            position(7),
+            TestPayload {
+                id: "backup".to_string(),
+            },
+        );
+
+        let encoded = encode_snapshot(&snapshot).unwrap();
+        let decoded = decode_snapshot::<TestPayload>(encoded).unwrap();
+
+        assert_eq!(decoded, snapshot);
+    }
+
+    #[test]
+    fn encoded_snapshot_round_trips_through_envelope_bytes() {
+        let encoded = EncodedSnapshot::new(position(7), br#"{"id":"backup"}"#.to_vec());
+        let expected = encoded.clone();
+
+        let json = String::from_utf8(encoded.into_bytes().unwrap()).unwrap();
+        let decoded = EncodedSnapshot::from_bytes(json.as_bytes()).unwrap();
+
+        assert!(json.contains("\"position\":7"));
+        assert!(json.contains("\"payload\""));
+        assert_eq!(decoded, expected);
+    }
+}
