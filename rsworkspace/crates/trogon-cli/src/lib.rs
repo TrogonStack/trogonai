@@ -1,4 +1,5 @@
 pub mod fs;
+pub mod markdown;
 pub mod nats;
 pub mod print;
 pub mod repl;

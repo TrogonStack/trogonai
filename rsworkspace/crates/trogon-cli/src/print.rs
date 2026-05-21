@@ -43,15 +43,11 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
         let out = serde_json::json!({"text": text, "stop_reason": stop_reason});
         writeln!(stdout, "{out}")?;
     } else {
-        let mut trailing_newline = false;
+        let mut text = String::new();
 
         while let Some(event) = rx.recv().await {
             match event {
-                StreamEvent::Text(text) => {
-                    trailing_newline = text.ends_with('\n');
-                    print!("{text}");
-                    let _ = stdout.flush();
-                }
+                StreamEvent::Text(t) => text.push_str(&t),
                 StreamEvent::Done(reason) => {
                     if reason == "error" {
                         session.close().await;
@@ -66,7 +62,9 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
             }
         }
 
-        if !trailing_newline {
+        let rendered = crate::markdown::render(&text);
+        print!("{rendered}");
+        if !rendered.ends_with('\n') {
             println!();
         }
         let _ = stdout.flush();
