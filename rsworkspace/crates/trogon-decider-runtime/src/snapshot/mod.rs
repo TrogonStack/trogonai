@@ -11,7 +11,7 @@ pub use codec::{
     encode_snapshot,
 };
 pub use read_snapshot::{ReadSnapshotRequest, ReadSnapshotResponse, SnapshotRead};
-pub use snapshot_type::{InvalidSnapshotTypeName, SnapshotType, SnapshotTypeName};
+pub use snapshot_type::SnapshotType;
 pub use write_snapshot::{SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse};
 
 #[derive(Debug, Clone, PartialEq)]
