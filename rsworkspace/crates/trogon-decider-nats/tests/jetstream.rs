@@ -2772,7 +2772,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         }
     )));
 
-    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("alpha")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("alpha")).await?;
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
         .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
@@ -2827,27 +2827,27 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
     );
 
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         0
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 2).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 2).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         0
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 1).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 1).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         1
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 3).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 3).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         1
     );
-    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 7).await?;
+    write_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 7).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         7
     );
     fixture
@@ -2856,12 +2856,12 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .delete(checkpoint_key::<TestSnapshot>(&config)?)
         .await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         0
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 1).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 1).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         1
     );
 
@@ -2888,7 +2888,7 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
             })
             .await,
     )?;
-    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("corrupt")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("corrupt")).await?;
     let deleted_corrupt: Option<Snapshot<TestSnapshot>> = fixture
         .store
         .read_snapshot(ReadSnapshotRequest { stream_id: "corrupt" })
@@ -2929,13 +2929,13 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         .put(checkpoint_key::<TestSnapshot>(&config)?, "not-a-number".into())
         .await?;
     assert!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config)
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config)
             .await
             .is_err()
     );
-    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 8).await?;
+    write_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 8).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         8
     );
 
@@ -3040,7 +3040,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
             ),
         })
         .await?;
-    persist_snapshot_change::<TestSnapshot>(fixture.store.snapshot_bucket(), SnapshotChange::delete("gamma")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("gamma")).await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
         read_snapshot_map(fixture.store.snapshot_bucket()).await?;
@@ -3065,7 +3065,7 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
     );
     assert!(!snapshot_map.contains_key("gamma"));
 
-    let mut listed = list_snapshots::<TestSnapshot>(fixture.store.snapshot_bucket())
+    let mut listed = list_snapshots::<TestSnapshot, _>(fixture.store.snapshot_bucket())
         .await?
         .into_iter()
         .map(|snapshot| (snapshot.position.as_u64(), snapshot.payload.value))
@@ -3095,7 +3095,7 @@ async fn jetstream_snapshot_store_concurrent_deletes_are_idempotent() -> TestRes
 
     let results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
-        async move { persist_snapshot_change::<TestSnapshot>(&bucket, SnapshotChange::delete("alpha")).await }
+        async move { persist_snapshot_change::<TestSnapshot, _>(&bucket, SnapshotChange::delete("alpha")).await }
     }))
     .await;
     for result in results {
@@ -3124,44 +3124,44 @@ async fn jetstream_snapshot_checkpoint_concurrent_advances_once_and_never_rewind
     let first_results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { maybe_advance_checkpoint::<TestSnapshot>(&bucket, &config, 1).await }
+        async move { maybe_advance_checkpoint::<TestSnapshot, _>(&bucket, &config, 1).await }
     }))
     .await;
     for result in first_results {
         result?;
     }
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         1
     );
 
     let second_results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { maybe_advance_checkpoint::<TestSnapshot>(&bucket, &config, 2).await }
+        async move { maybe_advance_checkpoint::<TestSnapshot, _>(&bucket, &config, 2).await }
     }))
     .await;
     for result in second_results {
         result?;
     }
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         2
     );
 
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 4).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 4).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         2
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 3).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 3).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         3
     );
-    maybe_advance_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 2).await?;
+    maybe_advance_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 2).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         3
     );
 
@@ -3177,14 +3177,14 @@ async fn jetstream_snapshot_checkpoint_concurrent_writes_are_idempotent() -> Tes
     let results = join_all((0..24).map(|_| {
         let bucket = fixture.store.snapshot_bucket().clone();
         let config = config.clone();
-        async move { write_checkpoint::<TestSnapshot>(&bucket, &config, 9).await }
+        async move { write_checkpoint::<TestSnapshot, _>(&bucket, &config, 9).await }
     }))
     .await;
     for result in results {
         result?;
     }
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         9
     );
 
@@ -3194,12 +3194,12 @@ async fn jetstream_snapshot_checkpoint_concurrent_writes_are_idempotent() -> Tes
         .delete(checkpoint_key::<TestSnapshot>(&config)?)
         .await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         0
     );
-    write_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config, 10).await?;
+    write_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config, 10).await?;
     assert_eq!(
-        read_checkpoint::<TestSnapshot>(fixture.store.snapshot_bucket(), &config).await?,
+        read_checkpoint::<TestSnapshot, _>(fixture.store.snapshot_bucket(), &config).await?,
         10
     );
 

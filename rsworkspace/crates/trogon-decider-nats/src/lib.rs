@@ -21,6 +21,7 @@ use async_nats::{
     jetstream::{self, kv},
     subject::ToSubject,
 };
+use trogon_nats::jetstream::JetStreamLastRawMessageBySubject;
 
 use crate::stream_store::{append_stream as append_subject_stream, read_subject_stream};
 pub use snapshot_store::{
@@ -387,10 +388,13 @@ where
 /// Missing subjects return `Ok(None)`, which lets resolvers distinguish a new
 /// stream from a stream whose current position can be used for optimistic
 /// concurrency.
-pub async fn subject_current_position(
-    stream: &jetstream::stream::Stream,
+pub async fn subject_current_position<S>(
+    stream: &S,
     subject: &StreamSubject,
-) -> Result<Option<StreamPosition>, StreamStoreError> {
+) -> Result<Option<StreamPosition>, StreamStoreError>
+where
+    S: JetStreamLastRawMessageBySubject,
+{
     match stream.get_last_raw_message_by_subject(subject.as_str()).await {
         Ok(message) => StreamPosition::try_new(message.sequence)
             .map(Some)
@@ -509,5 +513,53 @@ mod tests {
             .unwrap(),
             Some(9)
         );
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_returns_none_when_no_message_found() {
+        let factory = trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory::new();
+        let stream = trogon_nats::jetstream::JetStreamGetStream::get_stream(&factory, "TEST_STREAM")
+            .await
+            .unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let current = subject_current_position(&stream, &subject).await.unwrap();
+
+        assert_eq!(current, None);
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_returns_latest_sequence() {
+        let factory = trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message(async_nats::jetstream::message::StreamMessage {
+            subject: "test.events.backup".into(),
+            sequence: 17,
+            headers: async_nats::HeaderMap::new(),
+            payload: bytes::Bytes::from_static(b"{}"),
+            time: time::OffsetDateTime::UNIX_EPOCH,
+        });
+        let stream = trogon_nats::jetstream::JetStreamGetStream::get_stream(&factory, "TEST_STREAM")
+            .await
+            .unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let current = subject_current_position(&stream, &subject).await.unwrap();
+
+        assert_eq!(current, Some(position(17)));
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_propagates_non_no_message_errors() {
+        use async_nats::jetstream::stream::{LastRawMessageError, LastRawMessageErrorKind};
+        let factory = trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message_error(LastRawMessageError::new(LastRawMessageErrorKind::Other));
+        let stream = trogon_nats::jetstream::JetStreamGetStream::get_stream(&factory, "TEST_STREAM")
+            .await
+            .unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let error = subject_current_position(&stream, &subject).await.unwrap_err();
+
+        assert!(matches!(error, StreamStoreError::Read { .. }));
     }
 }

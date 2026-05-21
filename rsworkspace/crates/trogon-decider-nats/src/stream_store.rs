@@ -8,13 +8,14 @@ use async_nats::{
     HeaderMap,
     header::{IntoHeaderName, NATS_MESSAGE_ID},
     jetstream::{
-        self, Error as JetStreamError, ErrorCode, context, context::PublishErrorKind, message::PublishMessage,
+        Error as JetStreamError, ErrorCode, context, context::PublishErrorKind, message::PublishMessage,
         publish::PublishAck,
     },
 };
 use chrono::{DateTime, Utc};
+use std::future::IntoFuture;
 use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
-use trogon_nats::jetstream::JetStreamPublishMessage;
+use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo, JetStreamPublishMessage};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::StreamSubject;
@@ -109,7 +110,7 @@ pub async fn append_stream<J>(
     events: &[Event],
 ) -> Result<StreamPosition, StreamStoreError>
 where
-    J: JetStreamPublishMessage<PublishError = context::PublishError, AckFuture = context::PublishAckFuture>,
+    J: JetStreamPublishMessage<PublishError = context::PublishError>,
 {
     let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
@@ -151,10 +152,10 @@ where
         .map_err(|source| StreamStoreError::publish_source("failed to read stream append position", source))
 }
 
-async fn acknowledge_publish(
-    ack: context::PublishAckFuture,
-    context: &'static str,
-) -> Result<PublishAck, StreamStoreError> {
+async fn acknowledge_publish<F>(ack: F, context: &'static str) -> Result<PublishAck, StreamStoreError>
+where
+    F: IntoFuture<Output = Result<PublishAck, context::PublishError>>,
+{
     match ack.into_future().await {
         Ok(ack @ PublishAck { duplicate: false, .. }) => Ok(ack),
         Ok(PublishAck { duplicate: true, .. }) => Err(StreamStoreError::publish_source(
@@ -166,10 +167,10 @@ async fn acknowledge_publish(
     }
 }
 
-async fn acknowledge_batch_member_publish(
-    ack: context::PublishAckFuture,
-    context: &'static str,
-) -> Result<(), StreamStoreError> {
+async fn acknowledge_batch_member_publish<F>(ack: F, context: &'static str) -> Result<(), StreamStoreError>
+where
+    F: IntoFuture<Output = Result<PublishAck, context::PublishError>>,
+{
     match ack.into_future().await {
         Ok(PublishAck { duplicate: false, .. }) => Ok(()),
         Ok(PublishAck { duplicate: true, .. }) => Err(StreamStoreError::publish_source(
@@ -228,10 +229,10 @@ fn build_publish_message(
 }
 
 /// Reads all events from the JetStream stream starting at a stream sequence.
-pub async fn read_stream(
-    stream: &jetstream::stream::Stream,
-    from_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError> {
+pub async fn read_stream<S>(stream: &S, from_sequence: u64) -> Result<Vec<StreamEvent>, StreamStoreError>
+where
+    S: JetStreamGetStreamInfo + JetStreamGetRawMessage,
+{
     let info = stream
         .get_info()
         .await
@@ -239,42 +240,54 @@ pub async fn read_stream(
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
-pub(crate) async fn read_subject_stream(
-    stream: &jetstream::stream::Stream,
+pub(crate) async fn read_subject_stream<S>(
+    stream: &S,
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError>
+where
+    S: JetStreamGetRawMessage,
+{
     read_subject_range(stream, subject, from_sequence, to_sequence).await
 }
 
 /// Reads events from an inclusive JetStream stream sequence range.
-pub async fn read_stream_range(
-    stream: &jetstream::stream::Stream,
+pub async fn read_stream_range<S>(
+    stream: &S,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError>
+where
+    S: JetStreamGetRawMessage,
+{
     read_message_range(stream, from_sequence, to_sequence, |_| true).await
 }
 
-async fn read_subject_range(
-    stream: &jetstream::stream::Stream,
+async fn read_subject_range<S>(
+    stream: &S,
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError>
+where
+    S: JetStreamGetRawMessage,
+{
     read_message_range(stream, from_sequence, to_sequence, |message| {
         message.subject.as_str() == subject
     })
     .await
 }
 
-async fn read_message_range(
-    stream: &jetstream::stream::Stream,
+async fn read_message_range<S>(
+    stream: &S,
     from_sequence: u64,
     to_sequence: u64,
     mut include: impl FnMut(&StreamMessage) -> bool,
-) -> Result<Vec<StreamEvent>, StreamStoreError> {
+) -> Result<Vec<StreamEvent>, StreamStoreError>
+where
+    S: JetStreamGetRawMessage,
+{
     if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
         return Ok(Vec::new());
     }
@@ -293,10 +306,10 @@ async fn read_message_range(
     Ok(events)
 }
 
-async fn read_raw_message(
-    stream: &jetstream::stream::Stream,
-    sequence: u64,
-) -> Result<Option<StreamMessage>, StreamStoreError> {
+async fn read_raw_message<S>(stream: &S, sequence: u64) -> Result<Option<StreamMessage>, StreamStoreError>
+where
+    S: JetStreamGetRawMessage,
+{
     match stream.get_raw_message(sequence).await {
         Ok(message) => Ok(Some(message)),
         Err(source)
@@ -393,15 +406,22 @@ mod tests {
     use async_nats::{
         HeaderMap,
         header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
+        jetstream::{context::PublishErrorKind, message::StreamMessage, stream::LastRawMessageErrorKind},
     };
+    use bytes::Bytes;
+    use time::OffsetDateTime;
+    use trogon_nats::jetstream::JetStreamGetStream;
+    use trogon_nats::jetstream::mocks::{MockJetStreamConsumerFactory, MockJetStreamPublishMessage};
     use uuid::Uuid;
 
-    use trogon_decider_runtime::{Event, EventId, Headers};
+    use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 
     use super::{
-        NATS_BATCH_COMMIT, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, build_publish_message,
-        headers_from_nats_headers,
+        NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, StreamStoreError, TROGON_EVENT_HEADER_PREFIX,
+        TROGON_EVENT_TYPE, append_stream, build_publish_message, headers_from_nats_headers, read_stream,
+        read_stream_range,
     };
+    use crate::StreamSubject;
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
@@ -536,5 +556,229 @@ mod tests {
 
     fn read_stream_range_bounds(from_sequence: u64, to_sequence: u64) -> bool {
         from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence
+    }
+
+    fn make_event(id: u128, content: &[u8]) -> Event {
+        Event {
+            id: EventId::from(Uuid::from_u128(id)),
+            r#type: "test.event.v1".to_string(),
+            content: content.to_vec(),
+            headers: Headers::empty(),
+        }
+    }
+
+    fn make_subject(value: &str) -> StreamSubject {
+        StreamSubject::new(value).expect("subject must be valid")
+    }
+
+    fn make_stream_message(subject: &str, sequence: u64, event_id: Uuid) -> StreamMessage {
+        let mut headers = HeaderMap::new();
+        headers.insert(NATS_MESSAGE_ID, event_id.to_string().as_str());
+        headers.insert(TROGON_EVENT_TYPE, "test.event.v1");
+        StreamMessage {
+            subject: subject.into(),
+            sequence,
+            headers,
+            payload: Bytes::from_static(b"{}"),
+            time: OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn make_stream_info(last_sequence: u64) -> async_nats::jetstream::stream::Info {
+        serde_json::from_value(serde_json::json!({
+            "config": {
+                "name": "TEST_STREAM",
+                "subjects": [],
+                "retention": "limits",
+                "max_consumers": -1,
+                "max_msgs": -1,
+                "max_bytes": -1,
+                "discard": "old",
+                "max_age": 0,
+                "storage": "file",
+                "num_replicas": 1
+            },
+            "created": "1970-01-01T00:00:00Z",
+            "state": {
+                "messages": 0_u64,
+                "bytes": 0_u64,
+                "first_seq": 0_u64,
+                "first_ts": "1970-01-01T00:00:00Z",
+                "last_seq": last_sequence,
+                "last_ts": "1970-01-01T00:00:00Z",
+                "consumer_count": 0_usize,
+                "num_subjects": 0_u64
+            },
+            "cluster": null,
+            "mirror": null,
+            "sources": []
+        }))
+        .expect("test stream info must be valid")
+    }
+
+    #[tokio::test]
+    async fn append_stream_publishes_single_event_and_returns_position() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_ack_with_sequence(42);
+
+        let position = append_stream(&js, make_subject("test.events"), None, &[make_event(1, b"payload")])
+            .await
+            .expect("publish should succeed");
+
+        assert_eq!(position, StreamPosition::try_new(42).unwrap());
+        let messages = js.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "test.events");
+        let headers = messages[0].headers.clone().unwrap_or_default();
+        assert_eq!(headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), Some("1"));
+        assert_eq!(headers.get(NATS_BATCH_SEQUENCE).map(|v| v.as_str()), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn append_stream_publishes_batch_with_shared_batch_id() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_ack_with_sequence(10);
+        js.enqueue_ack_with_sequence(11);
+
+        append_stream(
+            &js,
+            make_subject("test.events"),
+            Some(0),
+            &[make_event(1, b"first"), make_event(2, b"second")],
+        )
+        .await
+        .expect("publish should succeed");
+
+        let messages = js.published_messages();
+        assert_eq!(messages.len(), 2);
+        let first_headers = messages[0].headers.clone().unwrap_or_default();
+        let second_headers = messages[1].headers.clone().unwrap_or_default();
+        let first_batch_id = first_headers.get(NATS_BATCH_ID).map(|v| v.as_str().to_string());
+        let second_batch_id = second_headers.get(NATS_BATCH_ID).map(|v| v.as_str().to_string());
+        assert!(first_batch_id.is_some());
+        assert_eq!(first_batch_id, second_batch_id);
+        assert_eq!(
+            first_headers.get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE).map(|v| v.as_str()),
+            Some("0")
+        );
+        assert_eq!(first_headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), None);
+        assert_eq!(second_headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn append_stream_maps_wrong_last_sequence_to_optimistic_concurrency() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_ack_error(PublishErrorKind::WrongLastSequence);
+
+        let error = append_stream(&js, make_subject("test.events"), Some(7), &[make_event(1, b"x")])
+            .await
+            .expect_err("publish should fail");
+
+        assert!(matches!(error, StreamStoreError::WrongExpectedVersion));
+    }
+
+    #[tokio::test]
+    async fn append_stream_maps_synchronous_publish_error_to_publish_error() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_publish_error(PublishErrorKind::TimedOut);
+
+        let error = append_stream(&js, make_subject("test.events"), None, &[make_event(1, b"x")])
+            .await
+            .expect_err("publish should fail");
+
+        assert!(matches!(error, StreamStoreError::Publish { .. }));
+    }
+
+    #[tokio::test]
+    async fn append_stream_rejects_duplicate_event_id_via_ack() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_duplicate();
+
+        let error = append_stream(&js, make_subject("test.events"), None, &[make_event(1, b"x")])
+            .await
+            .expect_err("duplicate publish should fail");
+
+        assert!(matches!(error, StreamStoreError::Publish { .. }));
+    }
+
+    #[tokio::test]
+    async fn append_stream_maps_ack_error_to_publish_error() {
+        let js = MockJetStreamPublishMessage::new();
+        js.enqueue_ack_error(PublishErrorKind::TimedOut);
+
+        let error = append_stream(&js, make_subject("test.events"), None, &[make_event(1, b"x")])
+            .await
+            .expect_err("ack error should propagate");
+
+        assert!(matches!(error, StreamStoreError::Publish { .. }));
+    }
+
+    #[tokio::test]
+    async fn read_stream_range_skips_no_message_found_gaps() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_raw_message(1, make_stream_message("test.events", 1, Uuid::from_u128(1)));
+        // sequence 2 missing → mock returns NoMessageFound by default
+        factory.add_raw_message(3, make_stream_message("test.events", 3, Uuid::from_u128(3)));
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let events = read_stream_range(&stream, 1, 3).await.expect("read should succeed");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].stream_position, StreamPosition::try_new(1).unwrap());
+        assert_eq!(events[1].stream_position, StreamPosition::try_new(3).unwrap());
+        assert_eq!(factory.raw_message_calls(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn read_stream_range_filters_by_subject_when_called_via_read_subject_range() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_raw_message(1, make_stream_message("test.events.a", 1, Uuid::from_u128(1)));
+        factory.add_raw_message(2, make_stream_message("test.events.b", 2, Uuid::from_u128(2)));
+        factory.add_raw_message(3, make_stream_message("test.events.a", 3, Uuid::from_u128(3)));
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let events = super::read_subject_range(&stream, "test.events.a", 1, 3)
+            .await
+            .expect("read should succeed");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].stream_id, "test.events.a");
+        assert_eq!(events[1].stream_id, "test.events.a");
+    }
+
+    #[tokio::test]
+    async fn read_stream_range_returns_empty_for_invalid_bounds() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        assert!(read_stream_range(&stream, 0, 1).await.unwrap().is_empty());
+        assert!(read_stream_range(&stream, 1, 0).await.unwrap().is_empty());
+        assert!(read_stream_range(&stream, 5, 3).await.unwrap().is_empty());
+        assert!(factory.raw_message_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_stream_range_propagates_non_no_message_errors() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_raw_message_error(1, LastRawMessageErrorKind::Other);
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let error = read_stream_range(&stream, 1, 1).await.expect_err("error should propagate");
+
+        assert!(matches!(error, StreamStoreError::Read { .. }));
+    }
+
+    #[tokio::test]
+    async fn read_stream_uses_info_last_sequence_as_upper_bound() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.set_info(make_stream_info(2));
+        factory.add_raw_message(1, make_stream_message("test.events", 1, Uuid::from_u128(1)));
+        factory.add_raw_message(2, make_stream_message("test.events", 2, Uuid::from_u128(2)));
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let events = read_stream(&stream, 1).await.expect("read should succeed");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(factory.raw_message_calls(), vec![1, 2]);
     }
 }

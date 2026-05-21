@@ -14,6 +14,31 @@ use trogon_decider_runtime::snapshot::{
     EncodedSnapshot, Snapshot, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType, decode_snapshot,
     encode_snapshot,
 };
+use trogon_nats::jetstream::{
+    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
+    JetStreamKvGet, JetStreamKvKeys,
+};
+
+/// Bound covering all KV bucket operations used by snapshot helpers.
+pub trait SnapshotKvBucket:
+    JetStreamKvGet
+    + JetStreamKvEntry
+    + JetStreamKvCreate
+    + JetStreamKvKeys
+    + JetStreamKeyValueUpdate
+    + JetStreamKeyValueDeleteExpectRevision
+{
+}
+
+impl<T> SnapshotKvBucket for T where
+    T: JetStreamKvGet
+        + JetStreamKvEntry
+        + JetStreamKvCreate
+        + JetStreamKvKeys
+        + JetStreamKeyValueUpdate
+        + JetStreamKeyValueDeleteExpectRevision
+{
+}
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -230,10 +255,11 @@ fn snapshot_position_from_value(value: &[u8]) -> Result<StreamPosition, Snapshot
         .map_err(|source| SnapshotStoreError::codec_source("failed to decode stream snapshot envelope", source))
 }
 
-async fn read_snapshot_entries<T>(bucket: &kv::Store) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
+async fn read_snapshot_entries<T, K>(bucket: &K) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: JetStreamKvGet + JetStreamKvKeys,
 {
     let mut keys = bucket
         .keys()
@@ -262,10 +288,11 @@ where
 }
 
 /// Reads the snapshot currently stored for the stream id.
-pub async fn read_snapshot<T>(bucket: &kv::Store, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot<T, K>(bucket: &K, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: JetStreamKvGet,
 {
     let Some(value) = bucket
         .get(snapshot_key::<T>(id))
@@ -279,19 +306,21 @@ where
 }
 
 /// Writes a snapshot for the stream id.
-pub async fn write_snapshot<T>(bucket: &kv::Store, id: &str, snapshot: Snapshot<T>) -> Result<(), SnapshotStoreError>
+pub async fn write_snapshot<T, K>(bucket: &K, id: &str, snapshot: Snapshot<T>) -> Result<(), SnapshotStoreError>
 where
     T: SnapshotPayloadEncode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: SnapshotKvBucket,
 {
     persist_snapshot_change(bucket, SnapshotChange::upsert(id, snapshot)).await
 }
 
 /// Lists snapshots in the payload type namespace.
-pub async fn list_snapshots<T>(bucket: &kv::Store) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
+pub async fn list_snapshots<T, K>(bucket: &K) -> Result<Vec<Snapshot<T>>, SnapshotStoreError>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: JetStreamKvGet + JetStreamKvKeys,
 {
     read_snapshot_entries(bucket)
         .await
@@ -299,10 +328,11 @@ where
 }
 
 /// Reads snapshots in the payload type namespace keyed by stream id.
-pub async fn read_snapshot_map<T>(bucket: &kv::Store) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
+pub async fn read_snapshot_map<T, K>(bucket: &K) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError>
 where
     T: SnapshotPayloadDecode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: JetStreamKvGet + JetStreamKvKeys,
 {
     read_snapshot_entries(bucket)
         .await
@@ -312,22 +342,24 @@ where
 /// Reads the configured checkpoint sequence.
 ///
 /// Missing or deleted checkpoint entries are treated as sequence `0`.
-pub async fn read_checkpoint<T>(bucket: &kv::Store, config: &NatsSnapshotConfig) -> Result<u64, SnapshotStoreError>
+pub async fn read_checkpoint<T, K>(bucket: &K, config: &NatsSnapshotConfig) -> Result<u64, SnapshotStoreError>
 where
     T: SnapshotType,
+    K: JetStreamKvEntry,
 {
-    let (_revision, sequence) = read_checkpoint_entry::<T>(bucket, config).await?;
+    let (_revision, sequence) = read_checkpoint_entry::<T, K>(bucket, config).await?;
     Ok(sequence)
 }
 
 /// Writes the configured checkpoint sequence unconditionally.
-pub async fn write_checkpoint<T>(
-    bucket: &kv::Store,
+pub async fn write_checkpoint<T, K>(
+    bucket: &K,
     config: &NatsSnapshotConfig,
     sequence: u64,
 ) -> Result<(), SnapshotStoreError>
 where
     T: SnapshotType,
+    K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     write_kv_value(bucket, &checkpoint_key::<T>(config)?, checkpoint_value(sequence)).await
 }
@@ -336,16 +368,17 @@ where
 ///
 /// This keeps concurrent snapshot workers from skipping gaps or rewinding the
 /// checkpoint while still allowing the winning writer to move it forward.
-pub async fn maybe_advance_checkpoint<T>(
-    bucket: &kv::Store,
+pub async fn maybe_advance_checkpoint<T, K>(
+    bucket: &K,
     config: &NatsSnapshotConfig,
     sequence: u64,
 ) -> Result<(), SnapshotStoreError>
 where
     T: SnapshotType,
+    K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     let expected_previous = sequence.saturating_sub(1);
-    let (revision, current_sequence) = read_checkpoint_entry::<T>(bucket, config).await?;
+    let (revision, current_sequence) = read_checkpoint_entry::<T, K>(bucket, config).await?;
     if current_sequence != expected_previous {
         return Ok(());
     }
@@ -376,10 +409,11 @@ where
 ///
 /// Upserts keep the highest snapshot position already present in the bucket;
 /// deletes are idempotent.
-pub async fn persist_snapshot_change<T>(bucket: &kv::Store, change: SnapshotChange<T>) -> Result<(), SnapshotStoreError>
+pub async fn persist_snapshot_change<T, K>(bucket: &K, change: SnapshotChange<T>) -> Result<(), SnapshotStoreError>
 where
     T: SnapshotPayloadEncode + SnapshotType,
     T::Error: std::error::Error + Send + Sync + 'static,
+    K: SnapshotKvBucket,
 {
     match change {
         SnapshotChange::Upsert { stream_id, snapshot } => {
@@ -399,12 +433,13 @@ fn checkpoint_value(sequence: u64) -> Vec<u8> {
     sequence.to_string().into_bytes()
 }
 
-async fn read_checkpoint_entry<T>(
-    bucket: &kv::Store,
+async fn read_checkpoint_entry<T, K>(
+    bucket: &K,
     config: &NatsSnapshotConfig,
 ) -> Result<(Option<u64>, u64), SnapshotStoreError>
 where
     T: SnapshotType,
+    K: JetStreamKvEntry,
 {
     let checkpoint_key = checkpoint_key::<T>(config)?;
     let Some(entry) = bucket
@@ -431,7 +466,10 @@ where
     Ok((Some(entry.revision), sequence))
 }
 
-async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError> {
+async fn write_kv_value<K>(bucket: &K, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError>
+where
+    K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
+{
     let value = Bytes::from(value);
     loop {
         if let Some(entry) = bucket
@@ -464,12 +502,15 @@ async fn write_kv_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result
     }
 }
 
-async fn write_snapshot_value(
-    bucket: &kv::Store,
+async fn write_snapshot_value<K>(
+    bucket: &K,
     key: &str,
     snapshot_position: StreamPosition,
     value: Vec<u8>,
-) -> Result<(), SnapshotStoreError> {
+) -> Result<(), SnapshotStoreError>
+where
+    K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
+{
     loop {
         let Some(entry) = bucket.entry(key.to_string()).await.map_err(|source| {
             SnapshotStoreError::kv_source("failed to read key-value entry for snapshot update", source)
@@ -500,7 +541,10 @@ async fn write_snapshot_value(
     }
 }
 
-async fn create_snapshot_value(bucket: &kv::Store, key: &str, value: Vec<u8>) -> Result<bool, SnapshotStoreError> {
+async fn create_snapshot_value<K>(bucket: &K, key: &str, value: Vec<u8>) -> Result<bool, SnapshotStoreError>
+where
+    K: JetStreamKvCreate,
+{
     match bucket.create(key, value.into()).await {
         Ok(_) => Ok(true),
         Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => Ok(false),
@@ -508,7 +552,10 @@ async fn create_snapshot_value(bucket: &kv::Store, key: &str, value: Vec<u8>) ->
     }
 }
 
-async fn delete_kv_value(bucket: &kv::Store, key: &str) -> Result<(), SnapshotStoreError> {
+async fn delete_kv_value<K>(bucket: &K, key: &str) -> Result<(), SnapshotStoreError>
+where
+    K: JetStreamKvEntry + JetStreamKeyValueDeleteExpectRevision,
+{
     loop {
         let Some(entry) = bucket
             .entry(key.to_string())
@@ -687,5 +734,349 @@ mod tests {
                 .to_string(),
             "Invalid stream snapshot key: snapshots.v2."
         );
+    }
+
+    mod kv_operations {
+        use super::*;
+        use bytes::Bytes;
+        use trogon_nats::jetstream::mocks::MockJetStreamKvStore;
+
+        fn snapshot_payload(id: &str) -> TestPayload {
+            TestPayload { id: id.to_string() }
+        }
+
+        fn encoded_snapshot_at(position_value: u64, id: &str) -> Vec<u8> {
+            snapshot_value(&Snapshot::new(position(position_value), snapshot_payload(id))).unwrap()
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_creates_entry_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(5), snapshot_payload("alpha")))
+                .await
+                .expect("write should succeed");
+
+            let calls = bucket.create_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "snapshots.v2.alpha");
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_skips_when_existing_position_is_at_or_above_new() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(10, "alpha")),
+                3,
+                kv::Operation::Put,
+            );
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(5), snapshot_payload("alpha")))
+                .await
+                .expect("skip should be silent");
+
+            assert!(bucket.update_calls().is_empty());
+            assert!(bucket.create_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_updates_when_existing_position_is_lower() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(3, "alpha")),
+                7,
+                kv::Operation::Put,
+            );
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(9), snapshot_payload("alpha")))
+                .await
+                .expect("update should succeed");
+
+            let updates = bucket.update_calls();
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0].0, "snapshots.v2.alpha");
+            assert_eq!(updates[0].2, 7);
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_retries_on_wrong_last_revision() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(1, "alpha")),
+                4,
+                kv::Operation::Put,
+            );
+            bucket.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(2, "alpha")),
+                5,
+                kv::Operation::Put,
+            );
+            bucket.enqueue_update_result(Ok(6));
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(10), snapshot_payload("alpha")))
+                .await
+                .expect("write should succeed after retry");
+
+            assert_eq!(bucket.update_calls().len(), 2);
+            assert_eq!(bucket.entry_calls().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_creates_when_entry_is_tombstone() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::new(), 4, kv::Operation::Delete);
+            bucket.enqueue_create_result(Ok(5));
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(2), snapshot_payload("alpha")))
+                .await
+                .expect("write should succeed");
+
+            assert_eq!(bucket.create_calls().len(), 1);
+            assert!(bucket.update_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn write_snapshot_retries_when_create_already_exists() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+            bucket.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(1, "alpha")),
+                2,
+                kv::Operation::Put,
+            );
+            bucket.enqueue_update_result(Ok(3));
+
+            write_snapshot(&bucket, "alpha", Snapshot::new(position(5), snapshot_payload("alpha")))
+                .await
+                .expect("write should succeed after race");
+
+            assert_eq!(bucket.create_calls().len(), 1);
+            assert_eq!(bucket.update_calls().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn persist_snapshot_change_delete_is_idempotent_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+
+            persist_snapshot_change::<TestPayload, _>(&bucket, SnapshotChange::delete("alpha"))
+                .await
+                .expect("delete should be idempotent");
+
+            assert!(bucket.delete_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn persist_snapshot_change_delete_is_idempotent_on_tombstone() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::new(), 3, kv::Operation::Delete);
+
+            persist_snapshot_change::<TestPayload, _>(&bucket, SnapshotChange::delete("alpha"))
+                .await
+                .expect("delete should be idempotent");
+
+            assert!(bucket.delete_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn persist_snapshot_change_delete_retries_on_wrong_last_revision() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(1, "alpha")),
+                3,
+                kv::Operation::Put,
+            );
+            bucket.enqueue_delete_result(Err(kv::DeleteErrorKind::WrongLastRevision));
+            bucket.enqueue_entry(
+                Bytes::from(encoded_snapshot_at(2, "alpha")),
+                5,
+                kv::Operation::Put,
+            );
+            bucket.enqueue_delete_result(Ok(()));
+
+            persist_snapshot_change::<TestPayload, _>(&bucket, SnapshotChange::delete("alpha"))
+                .await
+                .expect("delete should succeed after retry");
+
+            assert_eq!(bucket.delete_calls().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_creates_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 1)
+                .await
+                .expect("create should succeed");
+
+            let calls = bucket.create_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "_snapshot.snapshots.v2.checkpoint");
+            assert_eq!(calls[0].1, Bytes::from_static(b"1"));
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_updates_when_one_behind() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::from_static(b"4"), 9, kv::Operation::Put);
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 5)
+                .await
+                .expect("update should succeed");
+
+            let updates = bucket.update_calls();
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0].2, 9);
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_is_noop_when_not_one_behind() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::from_static(b"3"), 7, kv::Operation::Put);
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 7)
+                .await
+                .expect("noop should not error");
+
+            assert!(bucket.update_calls().is_empty());
+            assert!(bucket.create_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_tolerates_wrong_last_revision() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::from_static(b"1"), 4, kv::Operation::Put);
+            bucket.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 2)
+                .await
+                .expect("conflict should be silent");
+
+            assert_eq!(bucket.update_calls().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_tolerates_already_exists() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+            bucket.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 1)
+                .await
+                .expect("race should be silent");
+
+            assert_eq!(bucket.create_calls().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn maybe_advance_checkpoint_treats_tombstone_as_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::new(), 8, kv::Operation::Delete);
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            maybe_advance_checkpoint::<TestPayload, _>(&bucket, &config, 1)
+                .await
+                .expect("tombstone should create fresh checkpoint");
+
+            assert_eq!(bucket.create_calls().len(), 1);
+            assert!(bucket.update_calls().is_empty());
+        }
+
+        #[tokio::test]
+        async fn read_checkpoint_returns_zero_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            let sequence = read_checkpoint::<TestPayload, _>(&bucket, &config).await.unwrap();
+
+            assert_eq!(sequence, 0);
+        }
+
+        #[tokio::test]
+        async fn read_checkpoint_decodes_stored_sequence() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::from_static(b"42"), 1, kv::Operation::Put);
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            let sequence = read_checkpoint::<TestPayload, _>(&bucket, &config).await.unwrap();
+
+            assert_eq!(sequence, 42);
+        }
+
+        #[tokio::test]
+        async fn write_checkpoint_creates_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry_none();
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            write_checkpoint::<TestPayload, _>(&bucket, &config, 11)
+                .await
+                .expect("write should succeed");
+
+            let calls = bucket.create_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].1, Bytes::from_static(b"11"));
+        }
+
+        #[tokio::test]
+        async fn write_checkpoint_updates_when_present() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_entry(Bytes::from_static(b"4"), 3, kv::Operation::Put);
+            let config = NatsSnapshotConfig::with_checkpoint_name("checkpoint");
+
+            write_checkpoint::<TestPayload, _>(&bucket, &config, 5)
+                .await
+                .expect("write should succeed");
+
+            let updates = bucket.update_calls();
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0].1, Bytes::from_static(b"5"));
+            assert_eq!(updates[0].2, 3);
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_entries_lists_keys_and_decodes_values() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.set_keys_result(Ok(vec![
+                "snapshots.v2.alpha".to_string(),
+                "snapshots.v1.legacy".to_string(),
+                "snapshots.v2.beta".to_string(),
+            ]));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(3, "alpha")));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(7, "beta")));
+
+            let entries = list_snapshots::<TestPayload, _>(&bucket).await.unwrap();
+
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].position, position(3));
+            assert_eq!(entries[1].position, position(7));
+            assert_eq!(bucket.keys_calls(), 1);
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_entries_skips_missing_values() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.set_keys_result(Ok(vec![
+                "snapshots.v2.alpha".to_string(),
+                "snapshots.v2.beta".to_string(),
+            ]));
+            bucket.enqueue_get_none();
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(2, "beta")));
+
+            let entries = list_snapshots::<TestPayload, _>(&bucket).await.unwrap();
+
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].position, position(2));
+        }
     }
 }
