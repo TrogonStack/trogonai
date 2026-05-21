@@ -377,9 +377,7 @@ impl MockJetStreamPublishMessage {
         self.results
             .lock()
             .unwrap()
-            .push_back(MockPublishMessageOutcome::PublishError(
-                PublishErrorKind::WrongLastSequence,
-            ));
+            .push_back(MockPublishMessageOutcome::AckError(PublishErrorKind::WrongLastSequence));
     }
 
     pub fn enqueue_publish_error(&self, kind: PublishErrorKind) {
