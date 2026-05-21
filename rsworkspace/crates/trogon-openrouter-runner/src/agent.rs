@@ -1273,8 +1273,39 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let sessions = self.sessions.lock().await;
                 let s = sessions.get(session_id)
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-                let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
-                    .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content.clone() })
+                use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+                let portable: Vec<PortableMessage> = s.history.iter()
+                    .map(|m| {
+                        let mut blocks: Vec<PortableBlock> = Vec::new();
+                        if let Some(tool_call_id) = &m.tool_call_id {
+                            // role:"tool" message — a tool result
+                            blocks.push(PortableBlock::ToolResult {
+                                tool_call_id: tool_call_id.clone(),
+                                content: m.content.clone(),
+                            });
+                        } else if let Some(calls) = &m.tool_calls {
+                            if !m.content.is_empty() {
+                                blocks.push(PortableBlock::Text { text: m.content.clone() });
+                            }
+                            for tc in calls {
+                                let input = serde_json::from_str(&tc.arguments)
+                                    .unwrap_or(serde_json::Value::Object(Default::default()));
+                                blocks.push(PortableBlock::ToolCall {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    input,
+                                });
+                            }
+                        } else if !m.content.is_empty() {
+                            blocks.push(PortableBlock::Text { text: m.content.clone() });
+                        }
+                        let text = if m.content.is_empty() && blocks.iter().any(|b| matches!(b, PortableBlock::ToolCall { .. })) {
+                            "[tool call]".to_string()
+                        } else {
+                            m.content.clone()
+                        };
+                        PortableMessage { role: m.role.clone(), text, blocks }
+                    })
                     .collect();
                 let raw = serde_json::to_string(&portable)
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
@@ -1292,8 +1323,53 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let mut sessions = self.sessions.lock().await;
                 let s = sessions.get_mut(session_id)
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+                use trogon_runner_tools::portable_session::PortableBlock;
                 s.history = messages.into_iter()
-                    .map(|m| crate::client::Message { role: m.role, content: m.text, prompt_tokens: None, completion_tokens: None, tool_calls: None, tool_call_id: None })
+                    .flat_map(|m| -> Vec<crate::client::Message> {
+                        if m.blocks.is_empty() {
+                            return vec![crate::client::Message {
+                                role: m.role, content: m.text,
+                                prompt_tokens: None, completion_tokens: None,
+                                tool_calls: None, tool_call_id: None,
+                            }];
+                        }
+                        // ToolResult blocks each become a separate role:"tool" message
+                        let results: Vec<_> = m.blocks.iter()
+                            .filter_map(|b| if let PortableBlock::ToolResult { tool_call_id, content } = b {
+                                Some(crate::client::Message::tool_result(tool_call_id.clone(), content.clone()))
+                            } else { None })
+                            .collect();
+                        if !results.is_empty() {
+                            return results;
+                        }
+                        // ToolCall blocks → assistant message with tool_calls
+                        let calls: Vec<crate::client::AssembledToolCall> = m.blocks.iter()
+                            .filter_map(|b| if let PortableBlock::ToolCall { id, name, input } = b {
+                                Some(crate::client::AssembledToolCall {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    arguments: input.to_string(),
+                                })
+                            } else { None })
+                            .collect();
+                        if !calls.is_empty() {
+                            let text_content = m.blocks.iter()
+                                .filter_map(|b| if let PortableBlock::Text { text } = b { Some(text.clone()) } else { None })
+                                .collect::<Vec<_>>().join("\n");
+                            let mut msg = crate::client::Message::assistant_tool_calls(&calls);
+                            if !text_content.is_empty() { msg.content = text_content; }
+                            return vec![msg];
+                        }
+                        // Plain text blocks
+                        let text = m.blocks.iter()
+                            .filter_map(|b| if let PortableBlock::Text { text } = b { Some(text.as_str()) } else { None })
+                            .collect::<Vec<_>>().join("\n");
+                        vec![crate::client::Message {
+                            role: m.role, content: text,
+                            prompt_tokens: None, completion_tokens: None,
+                            tool_calls: None, tool_call_id: None,
+                        }]
+                    })
                     .collect();
                 Self::trim_history(&mut s.history, self.max_history);
                 let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();

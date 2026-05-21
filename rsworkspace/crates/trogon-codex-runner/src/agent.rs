@@ -528,10 +528,9 @@ where
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
             let ph = s.pending_history.take();
             s.first_turn = false;
-            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                role: "user".into(),
-                text: user_input.clone(),
-            });
+            s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
+                "user", user_input.clone(),
+            ));
             (s.thread_id.clone(), s.model.clone(), ph)
         };
 
@@ -555,6 +554,8 @@ where
 
         // Stream Codex events → ACP SessionNotifications.
         let mut assistant_text = String::new();
+        let mut tool_call_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
+        let mut tool_result_blocks: Vec<trogon_runner_tools::portable_session::PortableBlock> = Vec::new();
         let stop_reason = loop {
             let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
@@ -588,7 +589,7 @@ where
                 CodexEvent::ToolStarted { id, name, input } => {
                     let tool_call = ToolCall::new(id.clone(), name.clone())
                         .status(ToolCallStatus::InProgress)
-                        .raw_input(input)
+                        .raw_input(input.clone())
                         .kind(ToolKind::Execute);
                     let notif = SessionNotification::new(
                         session_id.clone(),
@@ -597,14 +598,21 @@ where
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool start notification");
                     }
+                    tool_call_blocks.push(
+                        trogon_runner_tools::portable_session::PortableBlock::ToolCall {
+                            id,
+                            name,
+                            input,
+                        },
+                    );
                 }
 
                 CodexEvent::ToolCompleted { id, output } => {
                     let update = ToolCallUpdate::new(
-                        id,
+                        id.clone(),
                         ToolCallUpdateFields::new()
                             .status(ToolCallStatus::Completed)
-                            .raw_output(serde_json::Value::String(output)),
+                            .raw_output(serde_json::Value::String(output.clone())),
                     );
                     let notif = SessionNotification::new(
                         session_id.clone(),
@@ -613,15 +621,39 @@ where
                     if let Err(e) = notifier.session_notification(notif).await {
                         warn!(session_id, error = %e, "codex: failed to send tool complete notification");
                     }
+                    tool_result_blocks.push(
+                        trogon_runner_tools::portable_session::PortableBlock::ToolResult {
+                            tool_call_id: id,
+                            content: output,
+                        },
+                    );
                 }
 
                 CodexEvent::TurnCompleted => {
+                    let text = std::mem::take(&mut assistant_text);
+                    let tool_calls = std::mem::take(&mut tool_call_blocks);
+                    let tool_results = std::mem::take(&mut tool_result_blocks);
                     let mut sessions = self.sessions.lock().await;
                     if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history.push(trogon_runner_tools::portable_session::PortableMessage {
-                            role: "assistant".into(),
-                            text: std::mem::take(&mut assistant_text),
-                        });
+                        if !tool_calls.is_empty() {
+                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                role: "assistant".to_string(),
+                                text: "[tool call]".to_string(),
+                                blocks: tool_calls,
+                            });
+                        }
+                        if !tool_results.is_empty() {
+                            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                                role: "user".to_string(),
+                                text: String::new(),
+                                blocks: tool_results,
+                            });
+                        }
+                        s.history.push(
+                            trogon_runner_tools::portable_session::PortableMessage::text_only(
+                                "assistant", text,
+                            ),
+                        );
                     }
                     break StopReason::EndTurn;
                 }
@@ -1589,10 +1621,7 @@ mod tests {
             .get_mut("e1")
             .unwrap()
             .history
-            .push(PortableMessage {
-                role: "user".into(),
-                text: "hello".into(),
-            });
+            .push(PortableMessage::text_only("user", "hello"));
 
         let raw_params = serde_json::value::RawValue::from_string(
             serde_json::json!({ "sessionId": "e1" }).to_string(),
@@ -1726,14 +1755,8 @@ mod tests {
         {
             let mut sessions = agent.sessions.lock().await;
             let src = sessions.get_mut("src").unwrap();
-            src.history.push(PortableMessage {
-                role: "user".into(),
-                text: "q".into(),
-            });
-            src.history.push(PortableMessage {
-                role: "assistant".into(),
-                text: "a".into(),
-            });
+            src.history.push(PortableMessage::text_only("user", "q"));
+            src.history.push(PortableMessage::text_only("assistant", "a"));
         }
 
         // Export from src.

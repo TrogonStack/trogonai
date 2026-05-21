@@ -1587,7 +1587,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let s = sessions.get(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
             let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
-                .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content_str().to_string() })
+                .map(|m| {
+                    use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+                    let text = m.content_str().to_string();
+                    let blocks = if !text.is_empty() {
+                        vec![PortableBlock::Text { text: text.clone() }]
+                    } else {
+                        vec![]
+                    };
+                    PortableMessage { role: m.role.clone(), text, blocks }
+                })
                 .collect();
             let raw = serde_json::to_string(&portable)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
@@ -1606,7 +1615,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let s = sessions.get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
             s.history = messages.into_iter()
-                .map(|m| Message { role: m.role, content: Some(m.text), prompt_tokens: None, completion_tokens: None })
+                .map(|m| {
+                    use trogon_runner_tools::portable_session::PortableBlock;
+                    let text = if !m.blocks.is_empty() {
+                        m.blocks.iter().map(|b| match b {
+                            PortableBlock::Text { text } => text.clone(),
+                            PortableBlock::ToolResult { content, .. } => content.clone(),
+                            PortableBlock::ToolCall { name, .. } => format!("[called: {name}]"),
+                        }).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n")
+                    } else {
+                        m.text
+                    };
+                    Message { role: m.role, content: if text.is_empty() { None } else { Some(text) }, prompt_tokens: None, completion_tokens: None }
+                })
                 .collect();
             s.last_response_id = None;
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();

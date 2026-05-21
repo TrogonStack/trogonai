@@ -255,7 +255,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         async move {
             let req_id = Uuid::now_v7().to_string();
             let subject = format!("{prefix}.session.{session_id}.agent.set_model");
-            let resp_subject = format!("{prefix}.session.{session_id}.agent.set_model.response.{req_id}");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
 
             let mut resp_rx = nats
                 .subscribe_bytes(resp_subject)
@@ -706,7 +706,10 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
-        nats.queue_request_ok(Bytes::from(b"{}".as_slice()));
+        // set_model uses subscribe_bytes + publish_with_req_id_bytes
+        let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(1);
+        tx.send(Bytes::from(b"{}".as_slice())).await.unwrap();
+        nats.add_subscription(rx);
         let result = session.set_model("claude-opus-4-7").await;
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
     }
@@ -719,9 +722,9 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
-        nats.queue_request_err("connection refused");
+        // No subscription queued — subscribe_bytes returns an error
         let err = session.set_model("claude-opus-4-7").await.unwrap_err();
-        assert!(err.to_string().contains("NATS error"), "got: {err}");
+        assert!(err.to_string().contains("subscribe set_model"), "got: {err}");
     }
 
     // ── MockSession::set_model ────────────────────────────────────────────────
