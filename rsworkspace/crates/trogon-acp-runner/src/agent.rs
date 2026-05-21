@@ -751,6 +751,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
             state.messages = updated;
             state.updated_at = now_iso8601();
+            state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+            state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+            state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+            state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
             let new_entries = audit_buf
                 .lock()
                 .map(|mut g| g.drain(..).collect::<Vec<_>>())
