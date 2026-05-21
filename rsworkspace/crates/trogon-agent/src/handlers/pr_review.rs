@@ -318,8 +318,12 @@ mod tests {
         use crate::tools::{DefaultToolDispatcher, ToolContext};
         use std::sync::Arc;
         let tool_ctx = Arc::new(ToolContext::for_test("http://localhost:9999", "", "", ""));
+        let end_turn = serde_json::json!({
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "done"}]
+        });
         AgentLoop {
-            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![])),
+            anthropic_client: Arc::new(SequencedMockAnthropicClient::new(vec![end_turn])),
             model: "test".to_string(),
             max_iterations: 1,
             tool_dispatcher: Arc::new(DefaultToolDispatcher::new(Arc::clone(&tool_ctx))),

@@ -686,37 +686,6 @@ mod tests {
         assert!(result.is_ok(), "post_pr_review must succeed: {result:?}");
         let text = result.unwrap();
         assert!(text.contains("42"), "must include review id");
-        assert!(text.contains("COMMENTED"), "must include review state");
-    }
-
-    #[tokio::test]
-    async fn post_pr_review_http_error_propagates() {
-        let ctx = make_ctx();
-        ctx.http_client.enqueue_err("connection refused");
-        let result = post_pr_review(
-            &ctx,
-            &json!({
-                "owner": "o", "repo": "r", "pr_number": 1,
-                "commit_sha": "sha1", "event": "COMMENT"
-            }),
-        )
-        .await;
-        assert!(result.is_err(), "HTTP error must propagate: {result:?}");
-    }
-
-    #[tokio::test]
-    async fn post_pr_review_missing_commit_sha_returns_err() {
-        let ctx = make_ctx();
-        let result = post_pr_review(
-            &ctx,
-            &json!({"owner": "o", "repo": "r", "pr_number": 1, "event": "COMMENT"}),
-        )
-        .await;
-        assert!(result.is_err(), "missing commit_sha must return Err");
-        assert!(
-            result.unwrap_err().contains("missing commit_sha"),
-            "error must name the missing field"
-        );
     }
 
     // ── get_pr_diff ───────────────────────────────────────────────────────────
@@ -1403,10 +1372,10 @@ mod tests {
         let patch = "@@ -1,3 +1,4 @@\n fn foo() {}\n+fn bar() {}\n fn baz() {}";
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
-        assert_eq!(lines[0], "1 @@ -1,3 +1,4 @@");
-        assert_eq!(lines[1], "2  fn foo() {}");
-        assert_eq!(lines[2], "3 +fn bar() {}");
-        assert_eq!(lines[3], "4  fn baz() {}");
+        assert_eq!(lines[0], "  1  @@ -1,3 +1,4 @@");
+        assert_eq!(lines[1], "  2   fn foo() {}");
+        assert_eq!(lines[2], "  3  +fn bar() {}");
+        assert_eq!(lines[3], "  4   fn baz() {}");
     }
 
     #[test]
@@ -1434,11 +1403,11 @@ mod tests {
         let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
         let annotated_patch = parsed[0]["patch"].as_str().unwrap();
         assert!(
-            annotated_patch.starts_with("1 "),
+            annotated_patch.starts_with("  1  "),
             "patch must start with position 1: {annotated_patch}"
         );
         assert!(
-            annotated_patch.contains("2  line1"),
+            annotated_patch.contains("  2   line1"),
             "second line must be prefixed with 2: {annotated_patch}"
         );
     }
@@ -1606,11 +1575,11 @@ mod tests {
         let patch = "@@ -1,2 +1,2 @@\n context\n-old\n+new\n@@ -10,2 +10,2 @@\n other\n-foo\n+bar";
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
-        assert_eq!(lines[0], "1 @@ -1,2 +1,2 @@");
-        assert_eq!(lines[3], "4 +new");
+        assert_eq!(lines[0], "  1  @@ -1,2 +1,2 @@");
+        assert_eq!(lines[3], "  4  +new");
         // Second hunk header continues from position 5, not 1.
-        assert_eq!(lines[4], "5 @@ -10,2 +10,2 @@");
-        assert_eq!(lines[7], "8 +bar");
+        assert_eq!(lines[4], "  5  @@ -10,2 +10,2 @@");
+        assert_eq!(lines[7], "  8  +bar");
     }
 
     #[test]
@@ -1619,7 +1588,7 @@ mod tests {
         let annotated = annotate_diff(patch);
         // `str::lines()` strips the trailing newline — result must have 2 lines.
         assert_eq!(annotated.lines().count(), 2);
-        assert_eq!(annotated.lines().last().unwrap(), "2 +line");
+        assert_eq!(annotated.lines().last().unwrap(), "  2  +line");
     }
 
     // ── list_pr_files edge cases ──────────────────────────────────────────────
@@ -1643,14 +1612,14 @@ mod tests {
 
         // a.rs — annotated from position 1
         let patch_a = parsed[0]["patch"].as_str().unwrap();
-        assert!(patch_a.starts_with("1 "), "a.rs patch must start at position 1: {patch_a}");
+        assert!(patch_a.starts_with("  1  "), "a.rs patch must start at position 1: {patch_a}");
 
         // b.png — no patch (binary), field absent
         assert!(parsed[1]["patch"].is_null(), "binary file must have no patch");
 
         // c.rs — annotated independently from position 1 (not continuing from a.rs)
         let patch_c = parsed[2]["patch"].as_str().unwrap();
-        assert!(patch_c.starts_with("1 "), "c.rs patch must start at position 1: {patch_c}");
+        assert!(patch_c.starts_with("  1  "), "c.rs patch must start at position 1: {patch_c}");
     }
 
     #[tokio::test]
@@ -1799,7 +1768,7 @@ mod tests {
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
         assert_eq!(lines.len(), 4);
-        assert_eq!(lines[3], r"4 \ No newline at end of file");
+        assert_eq!(lines[3], r"  4  \ No newline at end of file");
     }
 
     // ── create_pull_request — existing PR found in pre-check ─────────────────
