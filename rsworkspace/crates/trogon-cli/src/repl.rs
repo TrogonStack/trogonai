@@ -373,10 +373,12 @@ pub(crate) struct ModelSwitchOutcome {
 
 fn resolve_model_alias(input: &str) -> &str {
     match input {
-        "haiku"  => "claude-haiku-4-5-20251001",
-        "sonnet" => "claude-sonnet-4-6",
-        "opus"   => "claude-opus-4-7",
-        other    => other,
+        "haiku"      => "claude-haiku-4-5-20251001",
+        "sonnet"     => "claude-sonnet-4-6",
+        "opus"       => "claude-opus-4-7",
+        "grok"       => "grok-3",
+        "grok-mini"  => "grok-3-mini",
+        other        => other,
     }
 }
 
