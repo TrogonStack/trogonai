@@ -124,6 +124,35 @@ pub trait JetStreamLastRawMessageBySubject: Send + 'static {
     ) -> impl Future<Output = Result<StreamMessage, LastRawMessageError>> + Send;
 }
 
+pub trait JetStreamGetStreamInfo: Send + Sync + Clone + 'static {
+    fn get_info(&self) -> impl Future<Output = Result<stream::Info, stream::InfoError>> + Send;
+}
+
+pub trait JetStreamGetRawMessage: Send + Sync + Clone + 'static {
+    fn get_raw_message(
+        &self,
+        sequence: u64,
+    ) -> impl Future<Output = Result<StreamMessage, stream::RawMessageError>> + Send;
+}
+
+pub trait JetStreamKvGet: Send + Sync + Clone + 'static {
+    fn get(&self, key: String) -> impl Future<Output = Result<Option<Bytes>, kv::EntryError>> + Send;
+}
+
+pub trait JetStreamKvEntry: Send + Sync + Clone + 'static {
+    fn entry(&self, key: String) -> impl Future<Output = Result<Option<kv::Entry>, kv::EntryError>> + Send;
+}
+
+pub trait JetStreamKvCreate: Send + Sync + Clone + 'static {
+    fn create(&self, key: &str, value: Bytes) -> impl Future<Output = Result<u64, kv::CreateError>> + Send;
+}
+
+pub trait JetStreamKvKeys: Send + Sync + Clone + 'static {
+    type Keys: Stream<Item = Result<String, kv::WatcherError>> + Unpin + Send + 'static;
+
+    fn keys(&self) -> impl Future<Output = Result<Self::Keys, kv::HistoryError>> + Send;
+}
+
 pub trait JetStreamCreateConsumer: Send + 'static {
     type Error: Error + Send + Sync;
     type Consumer: JetStreamConsumer;
@@ -235,6 +264,7 @@ impl JetStreamGetStream for jetstream::Context {
     }
 }
 
+#[cfg(not(coverage))]
 impl JetStreamCreateConsumer for jetstream::stream::Stream {
     type Error = async_nats::jetstream::stream::ConsumerError;
     type Consumer = jetstream::consumer::Consumer<pull::Config>;
@@ -251,6 +281,51 @@ impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
     }
 }
 
+#[cfg(not(coverage))]
+impl JetStreamGetStreamInfo for jetstream::stream::Stream {
+    async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
+        jetstream::stream::Stream::get_info(self).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamGetRawMessage for jetstream::stream::Stream {
+    async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, stream::RawMessageError> {
+        jetstream::stream::Stream::get_raw_message(self, sequence).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamKvGet for kv::Store {
+    async fn get(&self, key: String) -> Result<Option<Bytes>, kv::EntryError> {
+        kv::Store::get(self, key).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamKvEntry for kv::Store {
+    async fn entry(&self, key: String) -> Result<Option<kv::Entry>, kv::EntryError> {
+        kv::Store::entry(self, key).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamKvCreate for kv::Store {
+    async fn create(&self, key: &str, value: Bytes) -> Result<u64, kv::CreateError> {
+        kv::Store::create(self, key, value).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl JetStreamKvKeys for kv::Store {
+    type Keys = kv::Keys;
+
+    async fn keys(&self) -> Result<Self::Keys, kv::HistoryError> {
+        kv::Store::keys(self).await
+    }
+}
+
+#[cfg(not(coverage))]
 impl JetStreamConsumer for jetstream::consumer::Consumer<pull::Config> {
     type StreamError = async_nats::jetstream::consumer::StreamError;
     type MessagesError = async_nats::jetstream::consumer::pull::MessagesError;
