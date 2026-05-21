@@ -251,7 +251,6 @@ impl JetStreamPublishMessage for jetstream::Context {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamGetStream for jetstream::Context {
     type Error = context::GetStreamError;
     type Stream = stream::Stream;
@@ -274,21 +273,18 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
     async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
         jetstream::stream::Stream::get_last_raw_message_by_subject(self, subject).await
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamGetStreamInfo for jetstream::stream::Stream {
     async fn get_info(&self) -> Result<stream::Info, stream::InfoError> {
         jetstream::stream::Stream::get_info(self).await
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamGetRawMessage for jetstream::stream::Stream {
     async fn get_raw_message(&self, sequence: u64) -> Result<StreamMessage, stream::RawMessageError> {
         jetstream::stream::Stream::get_raw_message(self, sequence).await
@@ -316,7 +312,6 @@ impl JetStreamKvCreate for kv::Store {
     }
 }
 
-#[cfg(not(coverage))]
 impl JetStreamKvKeys for kv::Store {
     type Keys = kv::Keys;
 

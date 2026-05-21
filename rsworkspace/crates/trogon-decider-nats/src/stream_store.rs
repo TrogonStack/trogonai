@@ -658,7 +658,9 @@ mod tests {
         assert!(first_batch_id.is_some());
         assert_eq!(first_batch_id, second_batch_id);
         assert_eq!(
-            first_headers.get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE).map(|v| v.as_str()),
+            first_headers
+                .get(NATS_EXPECTED_LAST_SUBJECT_SEQUENCE)
+                .map(|v| v.as_str()),
             Some("0")
         );
         assert_eq!(first_headers.get(NATS_BATCH_COMMIT).map(|v| v.as_str()), None);
@@ -763,7 +765,9 @@ mod tests {
         factory.add_raw_message_error(1, LastRawMessageErrorKind::Other);
         let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
 
-        let error = read_stream_range(&stream, 1, 1).await.expect_err("error should propagate");
+        let error = read_stream_range(&stream, 1, 1)
+            .await
+            .expect_err("error should propagate");
 
         assert!(matches!(error, StreamStoreError::Read { .. }));
     }

@@ -2772,7 +2772,8 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
         }
     )));
 
-    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("alpha")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("alpha"))
+        .await?;
     let deleted_alpha: Option<Snapshot<TestSnapshot>> = fixture
         .store
         .read_snapshot(ReadSnapshotRequest { stream_id: "alpha" })
@@ -2888,7 +2889,8 @@ async fn jetstream_snapshot_store_persists_lists_deletes_and_advances_checkpoint
             })
             .await,
     )?;
-    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("corrupt")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("corrupt"))
+        .await?;
     let deleted_corrupt: Option<Snapshot<TestSnapshot>> = fixture
         .store
         .read_snapshot(ReadSnapshotRequest { stream_id: "corrupt" })
@@ -3040,7 +3042,8 @@ async fn jetstream_snapshot_store_map_and_list_agree_after_mixed_changes() -> Te
             ),
         })
         .await?;
-    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("gamma")).await?;
+    persist_snapshot_change::<TestSnapshot, _>(fixture.store.snapshot_bucket(), SnapshotChange::delete("gamma"))
+        .await?;
 
     let snapshot_map: std::collections::BTreeMap<String, Snapshot<TestSnapshot>> =
         read_snapshot_map(fixture.store.snapshot_bucket()).await?;

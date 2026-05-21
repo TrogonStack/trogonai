@@ -766,11 +766,7 @@ mod tests {
         #[tokio::test]
         async fn write_snapshot_skips_when_existing_position_is_at_or_above_new() {
             let bucket = MockJetStreamKvStore::new();
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(10, "alpha")),
-                3,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(10, "alpha")), 3, kv::Operation::Put);
 
             write_snapshot(&bucket, "alpha", Snapshot::new(position(5), snapshot_payload("alpha")))
                 .await
@@ -783,11 +779,7 @@ mod tests {
         #[tokio::test]
         async fn write_snapshot_updates_when_existing_position_is_lower() {
             let bucket = MockJetStreamKvStore::new();
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(3, "alpha")),
-                7,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(3, "alpha")), 7, kv::Operation::Put);
 
             write_snapshot(&bucket, "alpha", Snapshot::new(position(9), snapshot_payload("alpha")))
                 .await
@@ -802,17 +794,9 @@ mod tests {
         #[tokio::test]
         async fn write_snapshot_retries_on_wrong_last_revision() {
             let bucket = MockJetStreamKvStore::new();
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(1, "alpha")),
-                4,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(1, "alpha")), 4, kv::Operation::Put);
             bucket.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(2, "alpha")),
-                5,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(2, "alpha")), 5, kv::Operation::Put);
             bucket.enqueue_update_result(Ok(6));
 
             write_snapshot(&bucket, "alpha", Snapshot::new(position(10), snapshot_payload("alpha")))
@@ -842,11 +826,7 @@ mod tests {
             let bucket = MockJetStreamKvStore::new();
             bucket.enqueue_entry_none();
             bucket.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(1, "alpha")),
-                2,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(1, "alpha")), 2, kv::Operation::Put);
             bucket.enqueue_update_result(Ok(3));
 
             write_snapshot(&bucket, "alpha", Snapshot::new(position(5), snapshot_payload("alpha")))
@@ -884,17 +864,9 @@ mod tests {
         #[tokio::test]
         async fn persist_snapshot_change_delete_retries_on_wrong_last_revision() {
             let bucket = MockJetStreamKvStore::new();
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(1, "alpha")),
-                3,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(1, "alpha")), 3, kv::Operation::Put);
             bucket.enqueue_delete_result(Err(kv::DeleteErrorKind::WrongLastRevision));
-            bucket.enqueue_entry(
-                Bytes::from(encoded_snapshot_at(2, "alpha")),
-                5,
-                kv::Operation::Put,
-            );
+            bucket.enqueue_entry(Bytes::from(encoded_snapshot_at(2, "alpha")), 5, kv::Operation::Put);
             bucket.enqueue_delete_result(Ok(()));
 
             persist_snapshot_change::<TestPayload, _>(&bucket, SnapshotChange::delete("alpha"))
