@@ -3176,6 +3176,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-cron-jobs-proto",
  "trogon-decider",
+ "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
  "trogon-service-config",
@@ -3223,8 +3224,6 @@ dependencies = [
 name = "trogon-decider-runtime"
 version = "0.1.0"
 dependencies = [
- "async-nats",
- "bytes",
  "chrono",
  "futures",
  "serde",
@@ -3232,7 +3231,6 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-decider",
- "trogon-nats",
  "trogon-std",
  "uuid",
 ]

@@ -23,13 +23,9 @@ impl EventStore {
         cron_jobs_bucket: kv::Store,
     ) -> Self {
         Self {
-            inner: JetStreamStore::new(
-                js,
-                events_stream,
-                command_snapshot_bucket,
-                NatsSnapshotConfig::without_checkpoint(),
-                JobEventSubjectResolver,
-            ),
+            inner: JetStreamStore::builder(js, events_stream, command_snapshot_bucket)
+                .with_snapshot_config(NatsSnapshotConfig::without_checkpoint())
+                .with_subject_resolver(JobEventSubjectResolver),
             cron_jobs_bucket,
         }
     }

@@ -518,7 +518,8 @@ async fn rebuild_jobs_from_stream(
 }
 
 fn decode_recorded_job_event(message: async_nats::jetstream::message::StreamMessage) -> Result<StreamEvent, CronError> {
-    record_stream_message(message)
+    let stream_id = message.subject.to_string();
+    record_stream_message(message, stream_id)
         .map_err(|source| CronError::event_source("failed to decode stored job event", source))
 }
 

@@ -234,11 +234,16 @@ impl From<MessageHeadersError> for JobSpecError {
     }
 }
 
-impl From<SnapshotStoreError> for CronError {
-    fn from(value: SnapshotStoreError) -> Self {
+impl<PayloadError> From<SnapshotStoreError<PayloadError>> for CronError
+where
+    PayloadError: std::error::Error + Send + Sync + 'static,
+{
+    fn from(value: SnapshotStoreError<PayloadError>) -> Self {
         match value {
-            SnapshotStoreError::Kv { context, source } => Self::Kv { context, source },
-            SnapshotStoreError::Codec { context, source } => Self::Event { context, source },
+            SnapshotStoreError::Kv(source) => Self::kv_source("failed to access stream snapshot storage", source),
+            SnapshotStoreError::Codec(source) => {
+                Self::event_source("failed to encode or decode stream snapshot", source)
+            }
             SnapshotStoreError::InvalidSnapshotKey { key } => {
                 Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
@@ -250,8 +255,11 @@ impl From<SnapshotStoreError> for CronError {
     }
 }
 
-impl From<JetStreamStoreError<CronError>> for CronError {
-    fn from(value: JetStreamStoreError<CronError>) -> Self {
+impl<SnapshotPayloadError> From<JetStreamStoreError<CronError, SnapshotPayloadError>> for CronError
+where
+    SnapshotPayloadError: std::error::Error + Send + Sync + 'static,
+{
+    fn from(value: JetStreamStoreError<CronError, SnapshotPayloadError>) -> Self {
         match value {
             JetStreamStoreError::ResolveSubject(source) => source,
             JetStreamStoreError::ReadStream(source) => {
@@ -260,14 +268,10 @@ impl From<JetStreamStoreError<CronError>> for CronError {
             JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append job event batch", source),
             JetStreamStoreError::Snapshot(source) => Self::from(source),
             JetStreamStoreError::Codec(source) => source,
-            JetStreamStoreError::OptimisticConcurrencyConflict {
-                stream_id,
-                expected,
-                current_position,
-            } => Self::OptimisticConcurrencyConflict {
-                id: stream_id,
-                expected,
-                current_position,
+            JetStreamStoreError::OptimisticConcurrencyConflict(source) => Self::OptimisticConcurrencyConflict {
+                id: source.stream_id,
+                expected: source.expected,
+                current_position: source.current_position,
             },
         }
     }
