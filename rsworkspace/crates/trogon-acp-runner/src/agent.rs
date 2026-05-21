@@ -1045,6 +1045,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 session_meta
                     .insert("branchedAtIndex".to_string(), serde_json::json!(idx));
             }
+            if state.total_input_tokens > 0 || state.total_output_tokens > 0 {
+                session_meta.insert("totalInputTokens".to_string(), serde_json::json!(state.total_input_tokens));
+                session_meta.insert("totalOutputTokens".to_string(), serde_json::json!(state.total_output_tokens));
+                session_meta.insert("totalCacheCreationTokens".to_string(), serde_json::json!(state.total_cache_creation_tokens));
+                session_meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(state.total_cache_read_tokens));
+            }
             if !session_meta.is_empty() {
                 info = info.meta(session_meta);
             }
