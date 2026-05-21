@@ -244,26 +244,26 @@ where
             .resolve_subject_state(self.events_stream(), stream_id)
             .await
             .map_err(JetStreamStoreError::ResolveSubject)?;
-        let current_position = subject_state.current_position;
+        let Some(current_position) = subject_state.current_position else {
+            return Ok(ReadStreamResponse {
+                current_position: None,
+                events: Vec::new(),
+            });
+        };
         let from_sequence = stream_read_from_to_sequence(request.from);
-        let to_sequence = current_position.map(|position| position.as_u64()).unwrap_or_default();
+        let to_sequence = current_position.as_u64();
         let events = read_subject_stream(
             self.events_stream(),
+            stream_id.as_ref(),
             subject_state.subject.as_str(),
             from_sequence,
             to_sequence,
         )
         .await
-        .map_err(JetStreamStoreError::ReadStream)?
-        .into_iter()
-        .map(|mut event| {
-            event.stream_id = stream_id.as_ref().to_string();
-            event
-        })
-        .collect();
+        .map_err(JetStreamStoreError::ReadStream)?;
 
         Ok(ReadStreamResponse {
-            current_position,
+            current_position: Some(current_position),
             events,
         })
     }

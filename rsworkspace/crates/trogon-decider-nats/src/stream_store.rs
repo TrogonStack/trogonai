@@ -242,6 +242,7 @@ where
 
 pub(crate) async fn read_subject_stream<S>(
     stream: &S,
+    stream_id: &str,
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
@@ -249,7 +250,7 @@ pub(crate) async fn read_subject_stream<S>(
 where
     S: JetStreamGetRawMessage,
 {
-    read_subject_range(stream, subject, from_sequence, to_sequence).await
+    read_subject_range_with_stream_id(stream, stream_id, subject, from_sequence, to_sequence).await
 }
 
 /// Reads events from an inclusive JetStream stream sequence range.
@@ -261,11 +262,19 @@ pub async fn read_stream_range<S>(
 where
     S: JetStreamGetRawMessage,
 {
-    read_message_range(stream, from_sequence, to_sequence, |_| true).await
+    read_message_range(
+        stream,
+        from_sequence,
+        to_sequence,
+        |_| true,
+        |message| message.subject.to_string(),
+    )
+    .await
 }
 
-async fn read_subject_range<S>(
+async fn read_subject_range_with_stream_id<S>(
     stream: &S,
+    stream_id: &str,
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
@@ -273,9 +282,14 @@ async fn read_subject_range<S>(
 where
     S: JetStreamGetRawMessage,
 {
-    read_message_range(stream, from_sequence, to_sequence, |message| {
-        message.subject.as_str() == subject
-    })
+    let stream_id = stream_id.to_string();
+    read_message_range(
+        stream,
+        from_sequence,
+        to_sequence,
+        |message| message.subject.as_str() == subject,
+        |_| stream_id.clone(),
+    )
     .await
 }
 
@@ -284,6 +298,7 @@ async fn read_message_range<S>(
     from_sequence: u64,
     to_sequence: u64,
     mut include: impl FnMut(&StreamMessage) -> bool,
+    mut stream_id: impl FnMut(&StreamMessage) -> String,
 ) -> Result<Vec<StreamEvent>, StreamStoreError>
 where
     S: JetStreamGetRawMessage,
@@ -300,7 +315,8 @@ where
         if !include(&message) {
             continue;
         }
-        events.push(record_stream_message(message)?);
+        let stream_id = stream_id(&message);
+        events.push(record_stream_message(message, stream_id)?);
     }
 
     Ok(events)
@@ -328,7 +344,10 @@ where
 ///
 /// The message must include the NATS message id and Trogon event type headers.
 /// User event headers are decoded from [`TROGON_EVENT_HEADER_PREFIX`].
-pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, StreamStoreError> {
+pub fn record_stream_message(
+    message: StreamMessage,
+    stream_id: impl Into<String>,
+) -> Result<StreamEvent, StreamStoreError> {
     let recorded_at = DateTime::<Utc>::from_timestamp(message.time.unix_timestamp(), message.time.nanosecond())
         .ok_or_else(|| {
             StreamStoreError::read_source(
@@ -342,13 +361,12 @@ pub fn record_stream_message(message: StreamMessage) -> Result<StreamEvent, Stre
         .parse::<EventId>()
         .map_err(|source| StreamStoreError::read_source("failed to read stream message event id", source))?;
     let event_type = required_header(headers, TROGON_EVENT_TYPE, TROGON_EVENT_TYPE)?.to_string();
-    let subject = message.subject.to_string();
     let stream_position = StreamPosition::try_new(message.sequence)
         .map_err(|source| StreamStoreError::read_source("failed to read stream message position", source))?;
     let headers = headers_from_nats_headers(headers)?;
 
     Ok(StreamEvent {
-        stream_id: subject,
+        stream_id: stream_id.into(),
         event: Event {
             id: event_id,
             r#type: event_type,
@@ -732,20 +750,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_stream_range_filters_by_subject_when_called_via_read_subject_range() {
+    async fn read_subject_stream_filters_by_subject() {
         let factory = MockJetStreamConsumerFactory::new();
         factory.add_raw_message(1, make_stream_message("test.events.a", 1, Uuid::from_u128(1)));
         factory.add_raw_message(2, make_stream_message("test.events.b", 2, Uuid::from_u128(2)));
         factory.add_raw_message(3, make_stream_message("test.events.a", 3, Uuid::from_u128(3)));
         let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
 
-        let events = super::read_subject_range(&stream, "test.events.a", 1, 3)
+        let events = super::read_subject_stream(&stream, "test.events.a", "test.events.a", 1, 3)
             .await
             .expect("read should succeed");
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].stream_id, "test.events.a");
         assert_eq!(events[1].stream_id, "test.events.a");
+    }
+
+    #[tokio::test]
+    async fn read_subject_stream_uses_caller_stream_id() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_raw_message(1, make_stream_message("test.events.a", 1, Uuid::from_u128(1)));
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let events = super::read_subject_stream(&stream, "a", "test.events.a", 1, 1)
+            .await
+            .expect("read should succeed");
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].stream_id, "a");
     }
 
     #[tokio::test]
