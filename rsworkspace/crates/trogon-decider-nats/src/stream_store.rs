@@ -99,94 +99,128 @@ pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static
     ) -> impl std::future::Future<Output = Result<SubjectState, Self::Error>> + Send;
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 /// Error raised while reading stream events.
 #[allow(missing_docs)]
 pub enum ReadStreamError {
-    #[error("failed to query stream info: {source}")]
-    QueryStreamInfo {
-        #[source]
-        source: InfoError,
-    },
-    #[error("failed to read latest subject position: {source}")]
-    ReadLatestSubjectPosition {
-        #[source]
-        source: InvalidStreamPosition,
-    },
-    #[error("failed to read latest subject message: {source}")]
-    ReadLatestSubjectMessage {
-        #[source]
-        source: LastRawMessageError,
-    },
-    #[error("failed to read stream message: {source}")]
-    ReadStreamMessage {
-        #[source]
-        source: RawMessageError,
-    },
-    #[error("failed to convert stream message timestamp into recorded event time: {subject}")]
+    QueryStreamInfo { source: InfoError },
+    ReadLatestSubjectPosition { source: InvalidStreamPosition },
+    ReadLatestSubjectMessage { source: LastRawMessageError },
+    ReadStreamMessage { source: RawMessageError },
     InvalidMessageTimestamp { subject: String },
-    #[error("failed to read stream message event id: {source}")]
-    ReadMessageEventId {
-        #[source]
-        source: uuid::Error,
-    },
-    #[error("failed to read stream message position: {source}")]
-    ReadMessagePosition {
-        #[source]
-        source: InvalidStreamPosition,
-    },
-    #[error("failed to read stream message event headers: event header '{header_name}' must have exactly one value")]
+    ReadMessageEventId { source: uuid::Error },
+    ReadMessagePosition { source: InvalidStreamPosition },
     InvalidEventHeaderValueCount { header_name: String },
-    #[error("failed to read stream message event headers: {source}")]
-    ReadMessageEventHeaders {
-        #[source]
-        source: FromEntriesError,
-    },
-    #[error("failed to read stream message event envelope: stream message is missing {header_name} header")]
+    ReadMessageEventHeaders { source: FromEntriesError },
     MissingMessageHeader { header_name: &'static str },
 }
 
-#[derive(Debug, thiserror::Error)]
+impl fmt::Display for ReadStreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::QueryStreamInfo { source } => write!(f, "failed to query stream info: {source}"),
+            Self::ReadLatestSubjectPosition { source } => {
+                write!(f, "failed to read latest subject position: {source}")
+            }
+            Self::ReadLatestSubjectMessage { source } => write!(f, "failed to read latest subject message: {source}"),
+            Self::ReadStreamMessage { source } => write!(f, "failed to read stream message: {source}"),
+            Self::InvalidMessageTimestamp { subject } => {
+                write!(
+                    f,
+                    "failed to convert stream message timestamp into recorded event time: {subject}"
+                )
+            }
+            Self::ReadMessageEventId { source } => write!(f, "failed to read stream message event id: {source}"),
+            Self::ReadMessagePosition { source } => {
+                write!(f, "failed to read stream message position: {source}")
+            }
+            Self::InvalidEventHeaderValueCount { header_name } => write!(
+                f,
+                "failed to read stream message event headers: event header '{header_name}' must have exactly one value"
+            ),
+            Self::ReadMessageEventHeaders { source } => {
+                write!(f, "failed to read stream message event headers: {source}")
+            }
+            Self::MissingMessageHeader { header_name } => {
+                write!(
+                    f,
+                    "failed to read stream message event envelope: stream message is missing {header_name} header"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReadStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::QueryStreamInfo { source } => Some(source),
+            Self::ReadLatestSubjectPosition { source } => Some(source),
+            Self::ReadLatestSubjectMessage { source } => Some(source),
+            Self::ReadStreamMessage { source } => Some(source),
+            Self::InvalidMessageTimestamp { .. } => None,
+            Self::ReadMessageEventId { source } => Some(source),
+            Self::ReadMessagePosition { source } => Some(source),
+            Self::InvalidEventHeaderValueCount { .. } => None,
+            Self::ReadMessageEventHeaders { source } => Some(source),
+            Self::MissingMessageHeader { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 /// Error raised while appending stream events.
 #[allow(missing_docs)]
 pub enum PublishStreamError {
-    #[error("failed to publish stream event: {source}")]
-    PublishEvent {
-        #[source]
-        source: context::PublishError,
-    },
-    #[error("failed to publish stream event batch: batch commit ack was not created")]
+    PublishEvent { source: context::PublishError },
     MissingBatchCommitAck,
-    #[error("failed to acknowledge stream event: {source}")]
-    AcknowledgeEvent {
-        #[source]
-        source: context::PublishError,
-    },
-    #[error("failed to acknowledge stream event batch commit: {source}")]
-    AcknowledgeBatchCommit {
-        #[source]
-        source: context::PublishError,
-    },
-    #[error("duplicate event id")]
+    AcknowledgeEvent { source: context::PublishError },
+    AcknowledgeBatchCommit { source: context::PublishError },
     DuplicateEventId,
-    #[error("failed to read stream append position: {source}")]
-    ReadAppendPosition {
-        #[source]
-        source: InvalidStreamPosition,
-    },
+    ReadAppendPosition { source: InvalidStreamPosition },
 }
 
-#[derive(Debug, thiserror::Error)]
+impl fmt::Display for PublishStreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublishEvent { source } => write!(f, "failed to publish stream event: {source}"),
+            Self::MissingBatchCommitAck => {
+                write!(
+                    f,
+                    "failed to publish stream event batch: batch commit ack was not created"
+                )
+            }
+            Self::AcknowledgeEvent { source } => write!(f, "failed to acknowledge stream event: {source}"),
+            Self::AcknowledgeBatchCommit { source } => {
+                write!(f, "failed to acknowledge stream event batch commit: {source}")
+            }
+            Self::DuplicateEventId => write!(f, "duplicate event id"),
+            Self::ReadAppendPosition { source } => write!(f, "failed to read stream append position: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for PublishStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PublishEvent { source } => Some(source),
+            Self::MissingBatchCommitAck => None,
+            Self::AcknowledgeEvent { source } => Some(source),
+            Self::AcknowledgeBatchCommit { source } => Some(source),
+            Self::DuplicateEventId => None,
+            Self::ReadAppendPosition { source } => Some(source),
+        }
+    }
+}
+
+#[derive(Debug)]
 /// Error raised while reading or appending stream events.
 pub enum StreamStoreError {
     /// JetStream read operation failed.
-    #[error("stream read error: {0}")]
-    Read(#[source] ReadStreamError),
+    Read(ReadStreamError),
     /// JetStream publish operation failed.
-    #[error("stream publish error: {0}")]
-    Publish(#[source] PublishStreamError),
+    Publish(PublishStreamError),
     /// JetStream rejected the expected last subject sequence.
-    #[error("stream publish error: wrong expected version")]
     WrongExpectedVersion,
 }
 
@@ -199,6 +233,28 @@ impl From<ReadStreamError> for StreamStoreError {
 impl From<PublishStreamError> for StreamStoreError {
     fn from(source: PublishStreamError) -> Self {
         Self::Publish(source)
+    }
+}
+
+impl std::fmt::Display for StreamStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(source) => write!(f, "stream read error: {source}"),
+            Self::Publish(source) => write!(f, "stream publish error: {source}"),
+            Self::WrongExpectedVersion => {
+                write!(f, "stream publish error: wrong expected version")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StreamStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read(source) => Some(source),
+            Self::Publish(source) => Some(source),
+            Self::WrongExpectedVersion => None,
+        }
     }
 }
 
@@ -335,7 +391,6 @@ where
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
-#[cfg(any(test, not(coverage)))]
 pub(crate) async fn read_subject_stream<S>(
     stream: &S,
     stream_id: &str,
@@ -550,10 +605,10 @@ mod tests {
 
     #[test]
     fn stream_subject_accepts_valid_subjects() {
-        let subject = StreamSubject::new("scheduler.schedules.events.backup").unwrap();
+        let subject = StreamSubject::new("cron.jobs.events.backup").unwrap();
 
-        assert_eq!(subject.as_str(), "scheduler.schedules.events.backup");
-        assert_eq!(subject.to_string(), "scheduler.schedules.events.backup");
+        assert_eq!(subject.as_str(), "cron.jobs.events.backup");
+        assert_eq!(subject.to_string(), "cron.jobs.events.backup");
     }
 
     #[test]
@@ -567,18 +622,18 @@ mod tests {
     fn build_publish_message_sets_trogon_event_type_header() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
-            .outbound_message("scheduler.schedules.events.backup");
+            .outbound_message("cron.jobs.events.backup");
         let headers = message.headers.unwrap_or_default();
 
         assert_eq!(
             headers.get(TROGON_EVENT_TYPE).map(|value| value.as_str()),
-            Some("trogonai.scheduler.schedules.v1.ScheduleCreated")
+            Some("trogon.cron.jobs.v1.JobAdded")
         );
         assert_eq!(
             headers.get(NATS_MESSAGE_ID).map(|value| value.as_str()),
@@ -590,13 +645,13 @@ mod tests {
     fn build_publish_message_maps_headers_to_trogon_headers() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
             headers: Headers::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-            .outbound_message("scheduler.schedules.events.backup")
+            .outbound_message("cron.jobs.events.backup")
             .headers
             .unwrap_or_default();
 
@@ -634,17 +689,17 @@ mod tests {
     fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
-            .outbound_message("scheduler.schedules.events.backup")
+            .outbound_message("cron.jobs.events.backup")
             .headers
             .unwrap_or_default();
         let second = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 1, 2)
-            .outbound_message("scheduler.schedules.events.backup")
+            .outbound_message("cron.jobs.events.backup")
             .headers
             .unwrap_or_default();
 
@@ -668,13 +723,13 @@ mod tests {
     fn build_publish_message_omits_occ_header_without_expected_sequence() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
+            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-            .outbound_message("scheduler.schedules.events.backup")
+            .outbound_message("cron.jobs.events.backup")
             .headers
             .unwrap_or_default();
 
