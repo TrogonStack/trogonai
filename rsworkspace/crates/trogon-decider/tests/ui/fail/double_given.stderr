@@ -1,0 +1,13 @@
+error[E0599]: no method named `given` found for struct `TestCase<TestCommand, NoHistory>` in the current scope
+  --> tests/ui/fail/double_given.rs:11:10
+   |
+ 9 | /     TestCase::<TestCommand>::new()
+10 | |         .given_no_history()
+11 | |         .given([]);
+   | |         -^^^^^ method not found in `TestCase<TestCommand, NoHistory>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `TestCase<C, Given<<C as Decider>::Event>>`
+           - `TestCase<C>`
