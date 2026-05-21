@@ -5,20 +5,21 @@
 //! encoded domain event body produced by `trogon-decider-runtime`.
 
 use async_nats::{
-    HeaderMap,
+    HeaderMap, Subject, SubjectError,
     header::{IntoHeaderName, NATS_MESSAGE_ID},
     jetstream::{
-        Error as JetStreamError, ErrorCode, context, context::PublishErrorKind, message::PublishMessage,
+        self, Error as JetStreamError, ErrorCode, context, context::PublishErrorKind, message::PublishMessage,
         publish::PublishAck,
     },
+    subject::ToSubject,
 };
 use chrono::{DateTime, Utc};
-use std::future::IntoFuture;
+use std::{fmt, future::IntoFuture};
 use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
-use trogon_nats::jetstream::{JetStreamGetRawMessage, JetStreamGetStreamInfo, JetStreamPublishMessage};
+use trogon_nats::jetstream::{
+    JetStreamGetRawMessage, JetStreamGetStreamInfo, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
+};
 use trogon_std::{NowV7, UuidV7Generator};
-
-use crate::StreamSubject;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
@@ -30,6 +31,69 @@ const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
 pub const TROGON_EVENT_HEADER_PREFIX: &str = "Trogon-Header-";
 /// Header that stores the domain event type.
 pub const TROGON_EVENT_TYPE: &str = "Trogon-Event-Type";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Validated JetStream subject used by the decider storage adapter.
+pub struct StreamSubject(Subject);
+
+impl StreamSubject {
+    /// Creates a subject after applying `async-nats` subject validation.
+    pub fn new(subject: impl AsRef<str>) -> Result<Self, SubjectError> {
+        Subject::validated(subject).map(Self)
+    }
+
+    /// Returns the validated subject as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Display for StreamSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl ToSubject for StreamSubject {
+    fn to_subject(&self) -> Subject {
+        self.0.clone()
+    }
+}
+
+impl std::str::FromStr for StreamSubject {
+    type Err = SubjectError;
+
+    fn from_str(subject: &str) -> Result<Self, Self::Err> {
+        Self::new(subject)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Resolved JetStream subject state for a decider stream.
+pub struct SubjectState {
+    /// JetStream subject used to store events for the requested stream.
+    pub subject: StreamSubject,
+    /// Latest recorded position for the subject, if the stream already exists.
+    pub current_position: Option<StreamPosition>,
+}
+
+/// Resolves a domain stream identifier to the JetStream subject that stores it.
+///
+/// Implementations usually compose a tenant or aggregate prefix with the
+/// caller's stream id, then use [`subject_current_position`] to fetch the
+/// subject's latest sequence. Keeping this resolver outside [`crate::JetStreamStore`]
+/// lets applications own their subject naming scheme.
+pub trait StreamSubjectResolver<StreamId: ?Sized>: Send + Sync + Clone + 'static {
+    /// Error raised while resolving a stream subject or reading its state.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Resolves the stream id into a subject and current position.
+    fn resolve_subject_state(
+        &self,
+        events_stream: &jetstream::stream::Stream,
+        stream_id: &StreamId,
+    ) -> impl std::future::Future<Output = Result<SubjectState, Self::Error>> + Send;
+}
 
 #[derive(Debug)]
 /// Error raised while reading or appending stream events.
@@ -253,6 +317,37 @@ where
     read_subject_range_with_stream_id(stream, stream_id, subject, from_sequence, to_sequence).await
 }
 
+/// Reads the latest stream position for a JetStream subject.
+///
+/// Missing subjects return `Ok(None)`, which lets resolvers distinguish a new
+/// stream from a stream whose current position can be used for optimistic
+/// concurrency.
+pub async fn subject_current_position<S>(
+    stream: &S,
+    subject: &StreamSubject,
+) -> Result<Option<StreamPosition>, StreamStoreError>
+where
+    S: JetStreamLastRawMessageBySubject,
+{
+    match stream.get_last_raw_message_by_subject(subject.as_str()).await {
+        Ok(message) => StreamPosition::try_new(message.sequence)
+            .map(Some)
+            .map_err(|source| StreamStoreError::read_source("failed to read latest subject position", source)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                async_nats::jetstream::stream::LastRawMessageErrorKind::NoMessageFound
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(StreamStoreError::Read {
+            context: "failed to read latest subject message",
+            source: Box::new(error),
+        }),
+    }
+}
+
 /// Reads events from an inclusive JetStream stream sequence range.
 pub async fn read_stream_range<S>(
     stream: &S,
@@ -424,7 +519,11 @@ mod tests {
     use async_nats::{
         HeaderMap,
         header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
-        jetstream::{context::PublishErrorKind, message::StreamMessage, stream::LastRawMessageErrorKind},
+        jetstream::{
+            context::PublishErrorKind,
+            message::StreamMessage,
+            stream::{LastRawMessageError, LastRawMessageErrorKind},
+        },
     };
     use bytes::Bytes;
     use time::OffsetDateTime;
@@ -435,11 +534,25 @@ mod tests {
     use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 
     use super::{
-        NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, StreamStoreError, TROGON_EVENT_HEADER_PREFIX,
-        TROGON_EVENT_TYPE, append_stream, build_publish_message, headers_from_nats_headers, read_stream,
-        read_stream_range,
+        NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, StreamStoreError, StreamSubject,
+        TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, build_publish_message, headers_from_nats_headers,
+        read_stream, read_stream_range, subject_current_position,
     };
-    use crate::StreamSubject;
+
+    #[test]
+    fn stream_subject_accepts_valid_subjects() {
+        let subject = StreamSubject::new("cron.jobs.events.backup").unwrap();
+
+        assert_eq!(subject.as_str(), "cron.jobs.events.backup");
+        assert_eq!(subject.to_string(), "cron.jobs.events.backup");
+    }
+
+    #[test]
+    fn stream_subject_rejects_malformed_subjects() {
+        for subject in ["", ".events", "events.", "events..backup", "events backup"] {
+            assert!(StreamSubject::new(subject).is_err(), "{subject}");
+        }
+    }
 
     #[test]
     fn build_publish_message_sets_trogon_event_type_header() {
@@ -898,5 +1011,46 @@ mod tests {
 
         assert_eq!(events.len(), 2);
         assert_eq!(factory.raw_message_calls(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_returns_none_when_no_message_found() {
+        let factory = MockJetStreamConsumerFactory::new();
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let current = subject_current_position(&stream, &subject).await.unwrap();
+
+        assert_eq!(current, None);
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_returns_latest_sequence() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message(async_nats::jetstream::message::StreamMessage {
+            subject: "test.events.backup".into(),
+            sequence: 17,
+            headers: async_nats::HeaderMap::new(),
+            payload: bytes::Bytes::from_static(b"{}"),
+            time: time::OffsetDateTime::UNIX_EPOCH,
+        });
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let current = subject_current_position(&stream, &subject).await.unwrap();
+
+        assert_eq!(current, Some(StreamPosition::try_new(17).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn subject_current_position_propagates_non_no_message_errors() {
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.add_last_raw_message_error(LastRawMessageError::new(LastRawMessageErrorKind::Other));
+        let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
+
+        let subject = StreamSubject::new("test.events.backup").unwrap();
+        let error = subject_current_position(&stream, &subject).await.unwrap_err();
+
+        assert!(matches!(error, StreamStoreError::Read { .. }));
     }
 }
