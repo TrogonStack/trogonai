@@ -2012,19 +2012,6 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     // ── PermissionChecker mocks ───────────────────────────────────────────────
 
-    struct DenyAllChecker;
-
-    impl PermissionChecker for DenyAllChecker {
-        fn check<'a>(
-            &'a self,
-            _tool_call_id: &'a str,
-            _tool_name: &'a str,
-            _tool_input: &'a serde_json::Value,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-            Box::pin(async { false })
-        }
-    }
-
     struct AllowAllChecker;
 
     impl PermissionChecker for AllowAllChecker {
