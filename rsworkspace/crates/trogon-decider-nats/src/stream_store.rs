@@ -314,7 +314,15 @@ pub(crate) async fn read_subject_stream<S>(
 where
     S: JetStreamGetRawMessage,
 {
-    read_subject_range_with_stream_id(stream, stream_id, subject, from_sequence, to_sequence).await
+    let stream_id = stream_id.to_string();
+    read_message_range(
+        stream,
+        from_sequence,
+        to_sequence,
+        |message| message.subject.as_str() == subject,
+        |_| stream_id.clone(),
+    )
+    .await
 }
 
 /// Reads the latest stream position for a JetStream subject.
@@ -363,27 +371,6 @@ where
         to_sequence,
         |_| true,
         |message| message.subject.to_string(),
-    )
-    .await
-}
-
-async fn read_subject_range_with_stream_id<S>(
-    stream: &S,
-    stream_id: &str,
-    subject: &str,
-    from_sequence: u64,
-    to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError>
-where
-    S: JetStreamGetRawMessage,
-{
-    let stream_id = stream_id.to_string();
-    read_message_range(
-        stream,
-        from_sequence,
-        to_sequence,
-        |message| message.subject.as_str() == subject,
-        |_| stream_id.clone(),
     )
     .await
 }
