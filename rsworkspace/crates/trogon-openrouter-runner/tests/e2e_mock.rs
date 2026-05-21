@@ -33,7 +33,8 @@ use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_openrouter_runner::{
     AgentConfig, AgentLoading, AssembledToolCall, FinishReason, Message as OaMessage,
-    OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier, SkillLoading, ToolDef,
+    OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier, SessionStoring,
+    SkillLoading, ToolDef,
 };
 
 // ── Inline HTTP client stub ───────────────────────────────────────────────────
@@ -150,6 +151,46 @@ impl TestNotifier {
 impl SessionNotifier for TestNotifier {
     async fn notify(&self, notification: SessionNotification) {
         self.notifications.lock().unwrap().push(notification);
+    }
+}
+
+// ── Inline session store: records full snapshots for cancel+KV tests ──────────
+
+struct RecordingStore {
+    saves: Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>,
+}
+
+impl RecordingStore {
+    fn new() -> (Self, Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>) {
+        let saves = Arc::new(Mutex::new(Vec::new()));
+        (Self { saves: Arc::clone(&saves) }, saves)
+    }
+}
+
+impl SessionStoring for RecordingStore {
+    fn save<'a>(
+        &'a self,
+        snapshot: &'a trogon_openrouter_runner::session_store::SessionSnapshot,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        let snap = snapshot.clone();
+        let saves = Arc::clone(&self.saves);
+        Box::pin(async move { saves.lock().unwrap().push(snap); })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {})
+    }
+
+    fn load<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<trogon_openrouter_runner::session_store::SessionSnapshot>> + Send + 'a>> {
+        Box::pin(async move { None })
     }
 }
 
@@ -4879,6 +4920,145 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
                 completed.tool_call_id.0.as_ref(),
                 "call_verify_id",
                 "ToolCallUpdate notification tool_call_id must match dispatched call id"
+            );
+        })
+        .await;
+}
+
+// ── cancel via NATS saves token totals to KV when usage received before cancel ──
+
+/// A prompt cancelled via NATS must persist accumulated token totals to the
+/// session store — verifies the full NATS dispatch stack for the cancel path.
+#[tokio::test]
+async fn cancel_saves_token_totals_to_kv() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let nats = MockNatsClient::new();
+            let http = TestHttpClient::new();
+            let notifier = TestNotifier::new();
+            let global_tx = nats.inject_messages();
+            let session_tx = nats.inject_messages();
+
+            let (store, saves) = RecordingStore::new();
+
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let agent =
+                OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
+                    .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let (_, io_task) =
+                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+            tokio::task::spawn_local(async move { let _ = io_task.await; });
+
+            // Create a session via NATS.
+            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 1 { break; }
+                assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
+                tokio::task::yield_now().await;
+            }
+            let sid: String = serde_json::from_slice::<serde_json::Value>(
+                &nats.published_payloads()[0],
+            )
+            .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // First call: Usage + ToolCallsReady → triggers tool dispatch + second call.
+            http.push(vec![
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 9,
+                    completion_tokens: 4,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+                OpenRouterEvent::ToolCallsReady {
+                    calls: vec![AssembledToolCall {
+                        id: "call_kv".to_string(),
+                        name: "list_directory".to_string(),
+                        arguments: r#"{"path":"."}"#.to_string(),
+                    }],
+                },
+            ]);
+            // Second call: slow — hangs until cancel fires.
+            http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            inject_req(
+                &session_tx,
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")]),
+                "r.prompt",
+            );
+
+            // Wait for the UsageUpdate notification (usage from call 1 was processed)
+            // and at least one AgentMessageChunk (call 2 is streaming = cancel_senders populated).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let notes = notifier.notifications.lock().unwrap();
+                let has_usage = notes.iter().any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
+                let has_chunk = notes.iter().any(|n| matches!(&n.update, SessionUpdate::AgentMessageChunk(_)));
+                if has_usage && has_chunk { break; }
+                drop(notes);
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for UsageUpdate + AgentMessageChunk"
+                );
+                tokio::task::yield_now().await;
+            }
+
+            // Send cancel via NATS (notification — no reply).
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            let msg = async_nats::Message {
+                subject: cancel_subj.into(),
+                reply: None,
+                payload: serde_json::to_vec(&CancelNotification::new(sid.clone()))
+                    .unwrap()
+                    .into(),
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            };
+            session_tx.unbounded_send(msg).unwrap();
+
+            // Wait for the prompt response (publish 2 = new_session + prompt).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 2 { break; }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for cancel prompt response"
+                );
+                tokio::task::yield_now().await;
+            }
+            let payloads = nats.published_payloads();
+            let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
+                "must return Cancelled: {:?}",
+                resp.stop_reason
+            );
+
+            // The store must have a snapshot with non-zero token totals.
+            // (1 save from new_session + 1 save from post-loop path = at least 2)
+            let stored = saves.lock().unwrap();
+            assert!(
+                stored.len() >= 2,
+                "store must be saved on new_session and after cancel; got {} saves",
+                stored.len()
+            );
+            let last = stored.last().unwrap();
+            assert_eq!(
+                last.total_input_tokens, 9,
+                "cancel path must persist accumulated input tokens to KV"
+            );
+            assert_eq!(
+                last.total_output_tokens, 4,
+                "cancel path must persist accumulated output tokens to KV"
             );
         })
         .await;

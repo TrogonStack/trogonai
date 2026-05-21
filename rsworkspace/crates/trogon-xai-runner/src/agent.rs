@@ -2290,6 +2290,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-tok".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+            total_input_tokens: 100,
+            total_output_tokens: 50,
+            total_cache_read_tokens: 25,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-tok", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "sess-tok")
+            .expect("session must appear in list after KV restore");
+        let meta = info.meta.as_ref().expect("meta must be present when token totals > 0");
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(100),
+            "totalInputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalOutputTokens").and_then(|v| v.as_u64()),
+            Some(50),
+            "totalOutputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "totalCacheReadTokens must be restored from KV snapshot"
+        );
+    }
+
+    #[tokio::test]
     async fn load_session_kv_empty_tools_re_enables_all() {
         use crate::session_store::mock::MockSessionStore;
         use crate::session_store::{SessionSnapshot, SessionStoring};
@@ -6880,5 +6938,49 @@ mod tests {
         assert_eq!(fork_snap.total_input_tokens, 0, "forked session must start with zero input tokens");
         assert_eq!(fork_snap.total_output_tokens, 0, "forked session must start with zero output tokens");
         assert_eq!(fork_snap.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
+    }
+
+    #[tokio::test]
+    async fn cache_read_tokens_accumulate_across_prompt() {
+        let agent = make_agent();
+        let sid = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap().session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 10 },
+            XaiEvent::TextDelta { text: "first".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("a")],
+        )).await.unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 15 },
+            XaiEvent::TextDelta { text: "second".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("b")],
+        )).await.unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == sid)
+            .expect("session must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "cache_read tokens must accumulate across prompts: 10 + 15 = 25"
+        );
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(40),
+            "input tokens must also accumulate: 20 + 20 = 40"
+        );
     }
 }
