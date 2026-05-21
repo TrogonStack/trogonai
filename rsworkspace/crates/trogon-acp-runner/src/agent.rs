@@ -1196,14 +1196,27 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
             let state = self.store.load(session_id).await
                 .map_err(|e| internal_error(e.to_string()))?;
-            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = state.messages.iter()
+            use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+            let portable: Vec<PortableMessage> = state.messages.iter()
                 .map(|m| {
-                    let text = m.content.iter().filter_map(|b| match b {
-                        AgentContentBlock::Text { text } => Some(text.as_str()),
-                        AgentContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                    let blocks: Vec<PortableBlock> = m.content.iter().filter_map(|b| match b {
+                        AgentContentBlock::Text { text } =>
+                            Some(PortableBlock::Text { text: text.clone() }),
+                        AgentContentBlock::ToolUse { id, name, input, .. } =>
+                            Some(PortableBlock::ToolCall { id: id.clone(), name: name.clone(), input: input.clone() }),
+                        AgentContentBlock::ToolResult { tool_use_id, content } =>
+                            Some(PortableBlock::ToolResult { tool_call_id: tool_use_id.clone(), content: content.clone() }),
+                        _ => None, // Thinking and Image are dropped — no cross-API equivalent
+                    }).collect();
+                    let text = blocks.iter().filter_map(|b| match b {
+                        PortableBlock::Text { text } => Some(text.as_str()),
+                        PortableBlock::ToolResult { content, .. } => Some(content.as_str()),
                         _ => None,
                     }).collect::<Vec<_>>().join("\n");
-                    trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text }
+                    // Pure-ToolUse or pure-Thinking turns produce no text; placeholder
+                    // prevents the receiving API from seeing an empty content block.
+                    let text = if text.is_empty() { "[tool call]".to_string() } else { text };
+                    PortableMessage { role: m.role.clone(), text, blocks }
                 })
                 .collect();
             let raw = serde_json::to_string(&portable)
@@ -1221,9 +1234,36 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
             let mut state = self.store.load(session_id).await.unwrap_or_default();
             state.messages = messages.into_iter()
-                .map(|m| Message {
-                    role: m.role,
-                    content: vec![AgentContentBlock::Text { text: m.text }],
+                .map(|m| {
+                    use trogon_runner_tools::portable_session::PortableBlock;
+                    let content: Vec<AgentContentBlock> = if !m.blocks.is_empty() {
+                        m.blocks.iter().filter_map(|b| match b {
+                            PortableBlock::Text { text } =>
+                                Some(AgentContentBlock::Text { text: text.clone() }),
+                            PortableBlock::ToolCall { id, name, input } =>
+                                Some(AgentContentBlock::ToolUse {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: input.clone(),
+                                    parent_tool_use_id: None,
+                                }),
+                            PortableBlock::ToolResult { tool_call_id, content } =>
+                                Some(AgentContentBlock::ToolResult {
+                                    tool_use_id: tool_call_id.clone(),
+                                    content: content.clone(),
+                                }),
+                        }).collect()
+                    } else {
+                        vec![AgentContentBlock::Text { text: m.text }]
+                    };
+                    // Anthropic requires ToolResult blocks in "user" messages.
+                    // Normalize role:"tool" (OpenAI convention) → "user".
+                    let role = if content.iter().any(|b| matches!(b, AgentContentBlock::ToolResult { .. })) {
+                        "user".to_string()
+                    } else {
+                        m.role
+                    };
+                    Message { role, content }
                 })
                 .collect();
             state.updated_at = now_iso8601();
@@ -1693,6 +1733,16 @@ mod tests {
         assert_eq!(portable.len(), 1);
         assert_eq!(portable[0].role, "user");
         assert_eq!(portable[0].text, "tool output here");
+        // blocks carries the structured ToolResult
+        use trogon_runner_tools::portable_session::PortableBlock;
+        assert_eq!(portable[0].blocks.len(), 1);
+        match &portable[0].blocks[0] {
+            PortableBlock::ToolResult { tool_call_id, content } => {
+                assert_eq!(tool_call_id, "call-1");
+                assert_eq!(content, "tool output here");
+            }
+            _ => panic!("expected PortableBlock::ToolResult"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
@@ -1743,8 +1793,9 @@ mod tests {
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_drops_tool_use_blocks() {
+    async fn ext_method_export_serializes_tool_use_as_portable_block() {
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+        use trogon_runner_tools::portable_session::PortableBlock;
 
         let store = MemorySessionStore::new();
         let store_clone = store.clone();
@@ -1783,7 +1834,18 @@ mod tests {
             serde_json::from_str(resp.0.get()).unwrap();
 
         assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "ToolUse block must be dropped (empty text)");
+        // text is a placeholder (no plain text to extract from ToolUse)
+        assert_eq!(portable[0].text, "[tool call]");
+        // blocks carries the structured tool call
+        assert_eq!(portable[0].blocks.len(), 1);
+        match &portable[0].blocks[0] {
+            PortableBlock::ToolCall { id, name, input } => {
+                assert_eq!(id, "call-x");
+                assert_eq!(name, "read_file");
+                assert_eq!(input["path"], "/tmp/foo");
+            }
+            _ => panic!("expected PortableBlock::ToolCall"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
@@ -1825,7 +1887,63 @@ mod tests {
             serde_json::from_str(resp.0.get()).unwrap();
 
         assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "Thinking block must be dropped (empty text)");
+        // Thinking has no cross-API equivalent; blocks is empty and text gets the placeholder.
+        assert!(portable[0].blocks.is_empty(), "Thinking must not appear in blocks");
+        assert_eq!(portable[0].text, "[tool call]", "placeholder used when no text survives");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_import_with_blocks_reconstructs_tool_use() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        // Import a message with blocks (as produced by an acp-runner export)
+        let params = make_import_params(
+            "s_blocks",
+            serde_json::json!([{
+                "role": "assistant",
+                "text": "[tool call]",
+                "blocks": [
+                    {"type": "tool_call", "id": "c1", "name": "read_file", "input": {"path": "/src/main.rs"}},
+                    {"type": "tool_result", "tool_call_id": "c1", "content": "fn main() {}"}
+                ]
+            }]),
+        );
+
+        agent.ext_method(ExtRequest::new("session/import", params)).await.unwrap();
+
+        let state = store_clone.load("s_blocks").await.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        assert_eq!(state.messages[0].content.len(), 2);
+        match &state.messages[0].content[0] {
+            AgentContentBlock::ToolUse { id, name, input, .. } => {
+                assert_eq!(id, "c1");
+                assert_eq!(name, "read_file");
+                assert_eq!(input["path"], "/src/main.rs");
+            }
+            _ => panic!("expected ToolUse"),
+        }
+        match &state.messages[0].content[1] {
+            AgentContentBlock::ToolResult { tool_use_id, content } => {
+                assert_eq!(tool_use_id, "c1");
+                assert_eq!(content, "fn main() {}");
+            }
+            _ => panic!("expected ToolResult"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
@@ -1852,5 +1970,49 @@ mod tests {
         ).unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "malformed messages must return Err");
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_import_normalizes_tool_role_to_user() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        // Simulate an export from openrouter-runner: tool result has role:"tool"
+        let params = make_import_params(
+            "s_norm",
+            serde_json::json!([{
+                "role": "tool",
+                "text": "file contents",
+                "blocks": [{"type": "tool_result", "tool_call_id": "c1", "content": "file contents"}]
+            }]),
+        );
+
+        agent.ext_method(ExtRequest::new("session/import", params)).await.unwrap();
+
+        let state = store_clone.load("s_norm").await.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        assert_eq!(state.messages[0].role, "user",
+            "role:tool from OpenAI format must be normalized to role:user for Anthropic");
+        match &state.messages[0].content[0] {
+            AgentContentBlock::ToolResult { tool_use_id, content } => {
+                assert_eq!(tool_use_id, "c1");
+                assert_eq!(content, "file contents");
+            }
+            _ => panic!("expected ToolResult block"),
+        }
     }
 }

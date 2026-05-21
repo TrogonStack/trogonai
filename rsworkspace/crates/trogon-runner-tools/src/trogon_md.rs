@@ -83,6 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_none_when_no_file_exists() {
+        let _guard = home_test_mutex().lock().unwrap();
         let dir = tmp_dir("none").await;
         let result = load_trogon_md(dir.to_str().unwrap()).await;
         assert!(result.is_none());
