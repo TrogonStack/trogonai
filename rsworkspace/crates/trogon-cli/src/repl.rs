@@ -165,6 +165,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                     continue;
                 }
 
+                // Erase the readline echo line and replace with a styled user block
+                eprint!("\x1b[1A\r\x1b[2K\x1b[1;35m┃\x1b[0m {line}\n");
+
                 if line.starts_with('/') {
                     let mut parts = line.splitn(2, ' ');
                     let cmd = parts.next().unwrap_or("");
