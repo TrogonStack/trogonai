@@ -255,7 +255,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         async move {
             let req_id = Uuid::now_v7().to_string();
             let subject = format!("{prefix}.session.{session_id}.agent.set_model");
-            let resp_subject = format!("{prefix}.session.{session_id}.agent.set_model.response.{req_id}");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
 
             let mut resp_rx = nats
                 .subscribe_bytes(resp_subject)
