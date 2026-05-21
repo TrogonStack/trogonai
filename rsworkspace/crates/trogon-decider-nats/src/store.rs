@@ -111,24 +111,51 @@ pub struct JetStreamStore<Resolver> {
     subject_resolver: Resolver,
 }
 
-impl<Resolver> JetStreamStore<Resolver> {
-    /// Creates a store from existing JetStream stream and Key/Value handles.
-    pub fn new(
+impl JetStreamStore<()> {
+    /// Starts building a store from existing JetStream stream and Key/Value handles.
+    pub fn builder(
         js: jetstream::Context,
         events_stream: jetstream::stream::Stream,
         snapshot_bucket: kv::Store,
-        snapshot_config: NatsSnapshotConfig,
-        subject_resolver: Resolver,
-    ) -> Self {
-        Self {
+    ) -> JetStreamStoreBuilder {
+        JetStreamStoreBuilder {
             js,
             events_stream,
             snapshot_bucket,
-            snapshot_config,
+            snapshot_config: NatsSnapshotConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+/// Builder for [`JetStreamStore`].
+pub struct JetStreamStoreBuilder {
+    js: jetstream::Context,
+    events_stream: jetstream::stream::Stream,
+    snapshot_bucket: kv::Store,
+    snapshot_config: NatsSnapshotConfig,
+}
+
+impl JetStreamStoreBuilder {
+    /// Configures snapshot checkpoint behavior.
+    pub fn with_snapshot_config(mut self, snapshot_config: NatsSnapshotConfig) -> Self {
+        self.snapshot_config = snapshot_config;
+        self
+    }
+
+    /// Completes the store with the application-owned subject resolver.
+    pub fn with_subject_resolver<Resolver>(self, subject_resolver: Resolver) -> JetStreamStore<Resolver> {
+        JetStreamStore {
+            js: self.js,
+            events_stream: self.events_stream,
+            snapshot_bucket: self.snapshot_bucket,
+            snapshot_config: self.snapshot_config,
             subject_resolver,
         }
     }
+}
 
+impl<Resolver> JetStreamStore<Resolver> {
     /// Returns the underlying JetStream context used for event publishes.
     pub fn as_jetstream(&self) -> &jetstream::Context {
         &self.js
@@ -309,6 +336,12 @@ mod tests {
 
     fn position(value: u64) -> StreamPosition {
         StreamPosition::try_new(value).expect("test position must be non-zero")
+    }
+
+    #[test]
+    fn builder_entrypoint_type_checks() {
+        let _builder: fn(jetstream::Context, jetstream::stream::Stream, kv::Store) -> JetStreamStoreBuilder =
+            JetStreamStore::builder;
     }
 
     #[test]
