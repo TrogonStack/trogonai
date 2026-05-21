@@ -491,6 +491,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 if let Some(ref model) = state.model {
                     a.set_model(model.clone());
                 }
+                if !state.cwd.is_empty() {
+                    a.set_cwd(state.cwd.clone());
+                }
                 if !state.mcp_servers.is_empty() {
                     let policy = state
                         .egress_policy

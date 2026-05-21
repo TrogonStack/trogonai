@@ -20,6 +20,9 @@ pub trait AgentRunner: Clone {
     /// Override the model for this runner.
     fn set_model(&mut self, model: String);
 
+    /// Override the working directory used by filesystem tools.
+    fn set_cwd(&mut self, cwd: String);
+
     /// Append MCP tool definitions and their dispatch entries.
     fn add_mcp_tools(
         &mut self,
@@ -62,6 +65,14 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
 
     fn set_model(&mut self, model: String) {
         self.model = model;
+    }
+
+    fn set_cwd(&mut self, cwd: String) {
+        self.tool_context = Arc::new(trogon_tools::ToolContext {
+            proxy_url: self.tool_context.proxy_url.clone(),
+            cwd,
+            http_client: self.tool_context.http_client.clone(),
+        });
     }
 
     fn add_mcp_tools(
@@ -349,6 +360,8 @@ pub mod mock {
         fn set_model(&mut self, model: String) {
             self.model = model;
         }
+
+        fn set_cwd(&mut self, _cwd: String) {}
 
         fn add_mcp_tools(
             &mut self,

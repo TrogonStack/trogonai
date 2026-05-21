@@ -180,15 +180,25 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                         biased;
                         bytes = resp_rx.recv() => {
                             let Some(bytes) = bytes else { break };
-                            let stop = serde_json::from_slice::<Value>(&bytes)
-                                .ok()
-                                .and_then(|v| {
-                                    v.get("stopReason")
-                                        .and_then(|s| s.as_str())
-                                        .map(|s| s.to_string())
-                                })
-                                .unwrap_or_else(|| "end_turn".to_string());
-                            let _ = tx.send(StreamEvent::Done(stop)).await;
+                            if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+                                // ACP error response serializes as {"code": <int>, "message": "..."}.
+                                // PromptResponse serializes as {"stopReason": "..."}.
+                                // If there's no stopReason but there is a code field, it's an error.
+                                if v.get("stopReason").is_none() && v.get("code").is_some() {
+                                    let msg = v.get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("unknown runner error");
+                                    let _ = tx.send(StreamEvent::Error(msg.to_string())).await;
+                                    break;
+                                }
+                                let stop = v.get("stopReason")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("end_turn")
+                                    .to_string();
+                                let _ = tx.send(StreamEvent::Done(stop)).await;
+                            } else {
+                                let _ = tx.send(StreamEvent::Done("end_turn".to_string())).await;
+                            }
                             break;
                         }
                         bytes = notif_rx.recv() => {
@@ -317,6 +327,8 @@ pub enum StreamEvent {
     Diff(String),
     /// Token usage update at the end of a turn.
     Usage { used_tokens: u64, context_size: u64 },
+    /// Runner returned an error response (e.g. API failure).
+    Error(String),
     Done(String),
 }
 
