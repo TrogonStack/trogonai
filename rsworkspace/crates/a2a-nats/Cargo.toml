@@ -13,8 +13,10 @@ async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
