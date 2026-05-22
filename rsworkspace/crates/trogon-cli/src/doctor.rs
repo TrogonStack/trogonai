@@ -75,6 +75,12 @@ pub async fn run(nats_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Print doctor checks without terminating the process (REPL `/doctor`).
+pub async fn print_checks(nats_url: &str) {
+    let checks = run_checks(nats_url).await;
+    print_summary(&checks);
+}
+
 async fn run_checks(nats_url: &str) -> Vec<DoctorCheck> {
     let mut checks = Vec::with_capacity(11);
 
