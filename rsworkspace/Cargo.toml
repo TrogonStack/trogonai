@@ -11,6 +11,10 @@ all = "deny"
 
 [workspace.dependencies]
 # Internal crates
+a2a-nats = { path = "crates/a2a-nats" }
+a2a-nats-agent = { path = "crates/a2a-nats-agent" }
+a2a-nats-server = { path = "crates/a2a-nats-server" }
+a2a-nats-stdio = { path = "crates/a2a-nats-stdio" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp-nats" }
@@ -19,6 +23,9 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
+
+# A2A
+a2a-types = { version = "=0.2.0" }
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
@@ -35,6 +42,7 @@ bytes = "=1.11.1"
 futures = "=0.3.32"
 futures-util = "=0.3.32"
 tokio = "=1.52.1"
+tokio-util = "=0.7.18"
 tokio-tungstenite = "=0.29.0"
 tower-http = { version = "=0.6.8", features = ["trace"] }
 
