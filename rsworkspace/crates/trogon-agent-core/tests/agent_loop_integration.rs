@@ -2527,6 +2527,224 @@ async fn run_chat_real_todo_read_empty_store_result_sent_back() {
     assert_eq!(text, "no todos found");
 }
 
+// ── PR 10: parallel tool execution in run_chat_streaming ─────────────────────
+//
+// `execute_tools_streaming` runs tools concurrently via `join_all` when there
+// is no `permission_checker`. These tests cover that parallel path end-to-end.
+
+fn sse_two_tool_use(id_a: &str, path_a: &str, id_b: &str, path_b: &str) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": id_a, "name": "read_file"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_a}\"}}") }
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 1,
+            "content_block": {"type": "tool_use", "id": id_b, "name": "read_file"}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": format!("{{\"path\":\"{path_b}\"}}") }
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 1})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 20}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+/// `run_chat_streaming` with two `read_file` tool blocks — both are dispatched
+/// concurrently and both tool_results appear in the follow-up request.
+/// Covers the parallel (`join_all`) branch of `execute_tools_streaming`.
+#[tokio::test]
+async fn run_chat_streaming_parallel_tools_all_results_sent_back() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("alpha.txt"), "content_alpha").await.unwrap();
+    tokio::fs::write(dir.path().join("beta.txt"), "content_beta").await.unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: both file contents must be present (proves both tools ran).
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("content_alpha")
+            .body_contains("content_beta");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("parallel done"));
+    });
+
+    // First call: two tool_use blocks in one streaming response.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_use("tu_pa", "alpha.txt", "tu_pb", "beta.txt"));
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let result = agent
+        .run_chat_streaming(vec![Message::user_text("read both files")], &[], None, tx, None)
+        .await;
+
+    assert!(result.is_ok(), "parallel tool execution must succeed: {result:?}");
+    let msgs = result.unwrap();
+    let tool_result_msg = msgs.iter().find(|m| {
+        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    });
+    assert!(tool_result_msg.is_some(), "expected a tool_results message in history");
+    let result_count = tool_result_msg.unwrap().content.iter()
+        .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        .count();
+    assert_eq!(result_count, 2, "expected 2 tool results, got {result_count}");
+}
+
+/// `run_chat_streaming` with two parallel tool calls emits `ToolCallStarted`
+/// and `ToolCallFinished` for each tool — both events carry the correct tool id.
+#[tokio::test]
+async fn run_chat_streaming_parallel_tools_emit_events_for_each() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("x.txt"), "x_content").await.unwrap();
+    tokio::fs::write(dir.path().join("y.txt"), "y_content").await.unwrap();
+
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("events ok"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_use("tu_evx", "x.txt", "tu_evy", "y.txt"));
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    agent
+        .run_chat_streaming(vec![Message::user_text("read x and y")], &[], None, tx, None)
+        .await
+        .unwrap();
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+
+    let started_ids: Vec<String> = events.iter()
+        .filter_map(|e| if let AgentEvent::ToolCallStarted { id, .. } = e { Some(id.clone()) } else { None })
+        .collect();
+    let finished_ids: Vec<String> = events.iter()
+        .filter_map(|e| if let AgentEvent::ToolCallFinished { id, .. } = e { Some(id.clone()) } else { None })
+        .collect();
+
+    assert_eq!(started_ids.len(), 2, "expected 2 ToolCallStarted events, got {}", started_ids.len());
+    assert_eq!(finished_ids.len(), 2, "expected 2 ToolCallFinished events, got {}", finished_ids.len());
+    assert!(started_ids.contains(&"tu_evx".to_string()), "tu_evx must have a ToolCallStarted");
+    assert!(started_ids.contains(&"tu_evy".to_string()), "tu_evy must have a ToolCallStarted");
+    assert!(finished_ids.contains(&"tu_evx".to_string()), "tu_evx must have a ToolCallFinished");
+    assert!(finished_ids.contains(&"tu_evy".to_string()), "tu_evy must have a ToolCallFinished");
+}
+
+/// The tool_results message preserves the original tool call order even though
+/// `execute_tools_streaming` runs tools concurrently via `join_all`.
+#[tokio::test]
+async fn run_chat_streaming_parallel_tools_order_preserved() {
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("first.txt"), "first_content").await.unwrap();
+    tokio::fs::write(dir.path().join("second.txt"), "second_content").await.unwrap();
+
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn("order ok"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_two_tool_use("tu_ord1", "first.txt", "tu_ord2", "second.txt"));
+    });
+
+    let mut agent = make_agent(&server.base_url());
+    agent.tool_context = Arc::new(ToolContext {
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        cwd: dir.path().to_string_lossy().into_owned(),
+        http_client: reqwest::Client::new(),
+    });
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let msgs = agent
+        .run_chat_streaming(vec![Message::user_text("read in order")], &[], None, tx, None)
+        .await
+        .unwrap();
+
+    let tool_result_msg = msgs.iter().find(|m| {
+        m.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    }).expect("expected a tool_results message");
+
+    let results: Vec<&ContentBlock> = tool_result_msg.content.iter()
+        .filter(|b| matches!(b, ContentBlock::ToolResult { .. }))
+        .collect();
+
+    assert_eq!(results.len(), 2, "expected 2 results");
+    // First result must correspond to tu_ord1 (first.txt).
+    if let ContentBlock::ToolResult { tool_use_id, content, .. } = results[0] {
+        assert_eq!(tool_use_id, "tu_ord1", "first result must match first tool call");
+        assert!(content.contains("first_content"), "first result must contain first file content");
+    } else {
+        panic!("first result is not a ToolResult");
+    }
+    // Second result must correspond to tu_ord2 (second.txt).
+    if let ContentBlock::ToolResult { tool_use_id, content, .. } = results[1] {
+        assert_eq!(tool_use_id, "tu_ord2", "second result must match second tool call");
+        assert!(content.contains("second_content"), "second result must contain second file content");
+    } else {
+        panic!("second result is not a ToolResult");
+    }
+}
+
 /// Two-turn interaction: the agent first calls `todo_write` to create a todo,
 /// then calls `todo_read` to confirm it appears in the list — both tool results
 /// pass through the real dispatch pipeline against the same temp directory.
