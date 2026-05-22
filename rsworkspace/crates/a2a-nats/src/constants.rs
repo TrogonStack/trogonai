@@ -28,9 +28,6 @@ pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 /// NATS message header carrying the [`crate::ReqId`] across the request/reply boundary.
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
-/// NATS message header carrying the resubscribe start sequence for `tasks/resubscribe`.
-pub const RESUBSCRIBE_START_SEQ_HEADER: &str = "X-Resubscribe-Start-Seq";
-
 #[cfg(test)]
 pub const TEST_TASK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -70,6 +67,5 @@ mod tests {
     #[test]
     fn headers_use_x_prefix() {
         assert!(REQ_ID_HEADER.starts_with("X-"));
-        assert!(RESUBSCRIBE_START_SEQ_HEADER.starts_with("X-"));
     }
 }

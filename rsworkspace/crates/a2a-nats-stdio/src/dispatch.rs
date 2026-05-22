@@ -192,7 +192,11 @@ pub async fn dispatch_request<N, J>(
             };
             match client.tasks_resubscribe(&task_id, p.last_seq).await {
                 Err(e) => client_err_to_frame(id, e),
-                Ok(mut stream) => {
+                Ok((snapshot, mut stream)) => {
+                    let result = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
+                    let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
+                    let _ = tx.send(bootstrap_frame).await;
+
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(event) => {
@@ -467,8 +471,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tasks_resubscribe_empty_stream() {
+    async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
         let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.tasks.resubscribe", task_response("task1"));
+
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
@@ -485,6 +491,9 @@ mod tests {
         )
         .await;
         drop(chan_tx);
+
+        let first = chan_rx.recv().await.expect("expected bootstrap frame");
+        assert!(matches!(first, OutboundFrame::Response(_)));
         assert!(chan_rx.recv().await.is_none());
     }
 
