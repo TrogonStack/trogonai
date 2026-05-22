@@ -12,7 +12,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::Value;
 use trogon_nats::RequestClient;
@@ -125,9 +125,20 @@ where
                 Err(e) => return jsonrpc_parse_error(&id, &e.to_string()),
             };
             match client.tasks_resubscribe(&task_id, last_seq).await {
-                Ok(stream) => {
+                Ok((snapshot, stream)) => {
+                    let snapshot_event = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id.clone(),
+                        "result": snapshot,
+                    });
+                    let snapshot_sse = futures::stream::once(async move {
+                        Ok::<Event, Infallible>(
+                            Event::default()
+                                .data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
+                        )
+                    });
                     let sse_stream = typed_event_stream_to_sse(stream, id);
-                    sse_response(sse_stream)
+                    sse_response(snapshot_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
             }

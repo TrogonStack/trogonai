@@ -2,7 +2,7 @@ use a2a_types::{
     AgentCard, CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
     GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest,
     ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, SendMessageRequest,
-    SendMessageResponse, Task, TaskPushNotificationConfig,
+    SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
 };
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
@@ -12,7 +12,7 @@ use crate::agent_id::A2aAgentId;
 use crate::config::Config;
 use crate::nats::subjects::agent::{
     AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushDeleteSubject, PushGetSubject, PushListSubject,
-    PushSetSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject,
+    PushSetSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
 };
 use super::streaming::StreamingRequest;
 use crate::req_id::ReqId;
@@ -98,8 +98,15 @@ where
         &self,
         task_id: &A2aTaskId,
         last_seq: u64,
-    ) -> Result<TypedEventStream, ClientError> {
-        open_resubscribe_stream(&self.js, self.prefix(), task_id, last_seq).await
+    ) -> Result<(Task, TypedEventStream), ClientError> {
+        let subject = TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string();
+        let req_id = ReqId::new();
+        let req = SubscribeToTaskRequest { id: task_id.as_str().to_owned(), tenant: String::new() };
+        let snapshot: Task =
+            send_unary(&self.nats, &subject, "tasks/resubscribe", &req, &req_id, self.config.operation_timeout())
+                .await?;
+        let stream = open_resubscribe_stream(&self.js, self.prefix(), task_id, last_seq).await?;
+        Ok((snapshot, stream))
     }
 
     pub async fn push_set(&self, req: &TaskPushNotificationConfig) -> Result<TaskPushNotificationConfig, ClientError> {
@@ -335,8 +342,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tasks_resubscribe_returns_stream() {
+    async fn tasks_resubscribe_returns_snapshot_and_stream() {
         let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.tasks.resubscribe", task_response("task-r"));
+
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
@@ -346,7 +355,23 @@ mod tests {
 
         let result = client.tasks_resubscribe(&task_id, 42).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().last_seq(), 42);
+        let (snapshot, stream) = result.unwrap();
+        assert_eq!(snapshot.id, "task-r");
+        assert_eq!(stream.last_seq(), 42);
+    }
+
+    #[tokio::test]
+    async fn tasks_resubscribe_rpc_failure_does_not_open_consumer() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_request();
+
+        let js = MockJetStreamConsumerFactory::new();
+
+        let client = make_client(nats, js);
+        let task_id = A2aTaskId::new("task-r").unwrap();
+
+        let result = client.tasks_resubscribe(&task_id, 0).await;
+        assert!(matches!(result, Err(ClientError::Transport(_))));
     }
 
     #[tokio::test]
