@@ -32,10 +32,12 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::check_tool_permission;
+use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
 };
+use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -486,15 +488,146 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             sessions.remove(&oldest_id);
         }
     }
+}
 
-    fn trim_history(history: &mut Vec<Message>, max: usize) {
-        while history.len() > max {
+fn trim_openrouter_history(history: &mut Vec<Message>, max: usize) {
+    while history.len() > max {
+        history.remove(0);
+        while history.first().map(|m| m.role != "user").unwrap_or(false) {
             history.remove(0);
-            while history.first().map(|m| m.role != "user").unwrap_or(false) {
-                history.remove(0);
-            }
         }
     }
+}
+
+fn openrouter_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
+    history
+        .iter()
+        .map(|m| {
+            if m.role == "tool" {
+                WireMessage {
+                    role: "user".into(),
+                    content: vec![WireContentBlock::ToolResult {
+                        tool_use_id: m.tool_call_id.clone().unwrap_or_default(),
+                        content: m.content.clone(),
+                    }],
+                }
+            } else if let Some(calls) = &m.tool_calls {
+                let mut content: Vec<WireContentBlock> = calls
+                    .iter()
+                    .map(|c| WireContentBlock::ToolUse {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        input: serde_json::from_str(&c.arguments).unwrap_or(serde_json::json!({})),
+                        parent_tool_use_id: None,
+                    })
+                    .collect();
+                if !m.content.is_empty() {
+                    content.insert(
+                        0,
+                        WireContentBlock::Text {
+                            text: m.content.clone(),
+                        },
+                    );
+                }
+                WireMessage {
+                    role: m.role.clone(),
+                    content,
+                }
+            } else {
+                WireMessage {
+                    role: m.role.clone(),
+                    content: vec![WireContentBlock::Text {
+                        text: m.content.clone(),
+                    }],
+                }
+            }
+        })
+        .collect()
+}
+
+fn openrouter_history_from_wire(wire: Vec<WireMessage>) -> Vec<Message> {
+    wire.into_iter()
+        .flat_map(|m| openrouter_wire_message_to_local(m))
+        .collect()
+}
+
+fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
+    if m.role == "user"
+        && m.content.iter().all(|b| matches!(b, WireContentBlock::ToolResult { .. }))
+    {
+        return m
+            .content
+            .into_iter()
+            .filter_map(|b| match b {
+                WireContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                } => Some(Message::tool_result(tool_use_id, content)),
+                _ => None,
+            })
+            .collect();
+    }
+
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+    for block in m.content {
+        match block {
+            WireContentBlock::Text { text } => text_parts.push(text),
+            WireContentBlock::ToolUse { id, name, input, .. } => {
+                tool_calls.push(crate::client::ToolCallMessage {
+                    id,
+                    name,
+                    arguments: input.to_string(),
+                });
+            }
+            WireContentBlock::ToolResult {
+                tool_use_id,
+                content,
+            } => {
+                return vec![Message::tool_result(tool_use_id, content)];
+            }
+            _ => {}
+        }
+    }
+
+    if m.role == "assistant" && !tool_calls.is_empty() {
+        vec![Message {
+            role: m.role,
+            content: text_parts.join("\n"),
+            prompt_tokens: None,
+            completion_tokens: None,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+        }]
+    } else {
+        vec![Message {
+            role: m.role,
+            content: text_parts.join("\n"),
+            prompt_tokens: None,
+            completion_tokens: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]
+    }
+}
+
+async fn compact_or_trim_openrouter_history(
+    nats: &Option<async_nats::Client>,
+    history: &mut Vec<Message>,
+    max: usize,
+) {
+    if let Some(nats) = nats {
+        let (token_budget, threshold_pct) = compaction_settings_from_env();
+        let wire = openrouter_history_to_wire(history);
+        match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            Ok(Some(compacted)) => {
+                *history = openrouter_history_from_wire(compacted);
+                return;
+            }
+            Ok(None) | Err(_) => {}
+        }
+    }
+    trim_openrouter_history(history, max);
 }
 
 #[async_trait(?Send)]
@@ -1063,6 +1196,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             messages.push(Message::user(user_input.clone()));
         }
 
+        if let Some(nats) = &self.execution_nats {
+            let (token_budget, threshold_pct) = compaction_settings_from_env();
+            let wire = openrouter_history_to_wire(&messages);
+            match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+                Ok(Some(compacted)) => {
+                    messages = openrouter_history_from_wire(compacted);
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.history = messages.clone();
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
+
         // Prepend system message if present (not stored in history to keep it clean).
         let mut wire_messages: Vec<Message> = Vec::new();
         if let Some(ref sp) = session_system_prompt {
@@ -1312,7 +1460,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     messages.push(msg);
                 }
                 s.history = messages;
-                Self::trim_history(&mut s.history, self.max_history);
+                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
+                    .await;
                 if let Some(store) = &self.session_store {
                     let snapshot = self.build_snapshot(&session_id, s);
                     store.save(&snapshot).await;
@@ -1389,7 +1538,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.history = messages.into_iter()
                     .map(|m| crate::client::Message { role: m.role, content: m.text, prompt_tokens: None, completion_tokens: None, tool_calls: None, tool_call_id: None })
                     .collect();
-                Self::trim_history(&mut s.history, self.max_history);
+                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
+                    .await;
                 let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
                 Ok(ExtResponse::new(raw.into()))
             }
@@ -1568,7 +1718,7 @@ mod tests {
             Message::user("c"),
             Message::assistant("d"),
         ];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 2);
+        trim_openrouter_history(&mut history, 2);
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "c");
         assert_eq!(history[1].content, "d");
@@ -1591,7 +1741,7 @@ mod tests {
             Message::user("q2"),
             Message::assistant("a2"),
         ];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 3);
+        trim_openrouter_history(&mut history, 3);
         assert_eq!(history.len(), 2, "must skip all non-user messages between turns");
         assert_eq!(history[0].content, "q2");
         assert_eq!(history[1].content, "a2");
@@ -1611,7 +1761,7 @@ mod tests {
             Message::user("q2"),
             Message::assistant("reply2"),
         ];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 3);
+        trim_openrouter_history(&mut history, 3);
         assert_eq!(history.len(), 2, "must trim entire tool round turn");
         assert_eq!(history[0].content, "q2");
         assert_eq!(history[1].content, "reply2");
@@ -1620,28 +1770,28 @@ mod tests {
     #[test]
     fn trim_history_no_op_when_under_limit() {
         let mut history = vec![Message::user("a"), Message::assistant("b")];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 5);
+        trim_openrouter_history(&mut history, 5);
         assert_eq!(history.len(), 2);
     }
 
     #[test]
     fn trim_history_no_op_when_at_limit() {
         let mut history = vec![Message::user("a"), Message::assistant("b")];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 2);
+        trim_openrouter_history(&mut history, 2);
         assert_eq!(history.len(), 2);
     }
 
     #[test]
     fn trim_history_clears_all_when_max_is_zero() {
         let mut history = vec![Message::user("a"), Message::assistant("b")];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 0);
+        trim_openrouter_history(&mut history, 0);
         assert!(history.is_empty());
     }
 
     #[test]
     fn trim_history_empty_is_noop() {
         let mut history: Vec<Message> = vec![];
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::trim_history(&mut history, 5);
+        trim_openrouter_history(&mut history, 5);
         assert!(history.is_empty());
     }
 

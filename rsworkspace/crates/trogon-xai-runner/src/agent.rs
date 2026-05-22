@@ -32,8 +32,10 @@ use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, Snapsh
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 use trogon_runner_tools::check_tool_permission;
+use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
+use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -1067,7 +1069,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
+        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1082,6 +1084,22 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.cwd.clone(),
             )
         };
+
+        if let Some(nats) = &self.execution_nats {
+            let (token_budget, threshold_pct) = compaction_settings_from_env();
+            let wire = xai_history_to_wire(&history);
+            match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+                Ok(Some(compacted)) => {
+                    history = xai_history_from_wire(compacted);
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.history = history.clone();
+                        s.last_response_id = None;
+                    }
+                }
+                Ok(None) | Err(_) => {}
+            }
+        }
 
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = match (trogon_md, session_system_prompt) {
@@ -1610,7 +1628,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     };
                     s.history.push(assistant_msg);
                 }
-                trim_history(&mut s.history, self.max_history);
+                compact_or_trim_xai_history(&self.execution_nats, &mut s.history, self.max_history)
+                    .await;
                 // Update the stored response ID from this turn.
                 // If bash rounds ran but the final round returned no ID, clear the
                 // stored ID — a stale ID from a previous prompt would cause the next
@@ -1744,6 +1763,63 @@ fn build_full_history_input(
     }
     items.push(InputItem::user(user_input.to_string()));
     items
+}
+
+/// Convert xAI session history to compactor wire format.
+fn xai_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
+    history
+        .iter()
+        .map(|m| WireMessage {
+            role: m.role.clone(),
+            content: vec![WireContentBlock::Text {
+                text: m.content_str().to_string(),
+            }],
+        })
+        .collect()
+}
+
+/// Restore xAI session history from compactor wire format.
+fn xai_history_from_wire(wire: Vec<WireMessage>) -> Vec<Message> {
+    wire.into_iter()
+        .map(|m| {
+            let text = m
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    WireContentBlock::Text { text } => Some(text.as_str()),
+                    WireContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Message {
+                role: m.role,
+                content: if text.is_empty() { None } else { Some(text) },
+                prompt_tokens: None,
+                completion_tokens: None,
+            }
+        })
+        .collect()
+}
+
+/// Try NATS compaction when over token budget; fall back to message-count trim.
+async fn compact_or_trim_xai_history(
+    nats: &Option<async_nats::Client>,
+    history: &mut Vec<Message>,
+    max: usize,
+) {
+    if let Some(nats) = nats {
+        let (token_budget, threshold_pct) = compaction_settings_from_env();
+        let wire = xai_history_to_wire(history);
+        match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            Ok(Some(compacted)) => {
+                *history = xai_history_from_wire(compacted);
+                return;
+            }
+            Ok(None) | Err(_) => {}
+        }
+    }
+    trim_history(history, max);
 }
 
 /// Trim `history` in-place so it contains at most `max` messages.
