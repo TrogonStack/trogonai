@@ -22,6 +22,19 @@
 //! domain rejection as a storage problem, and it lets storage adapters stay
 //! focused on backend-specific read, append, and snapshot operations.
 //!
+//! # Event Replay Boundaries
+//!
+//! [`EventDecode`] can return [`EventDecodeOutcome::Skipped`] when a stored
+//! event envelope does not belong to the decider's event set. The runtime treats
+//! that as an ownership boundary, not a corrupt payload: replay applies only the
+//! events the decider can own, while malformed payloads for owned event types
+//! still surface as decode errors.
+//!
+//! Keeping that decision in the domain codec prevents storage adapters from
+//! knowing every event enum or migration rule. Adapters only preserve the stored
+//! [`EventType`] and bytes; application codecs decide whether those bytes are
+//! part of the current decider's history.
+//!
 //! # Position Semantics
 //!
 //! [`StreamPosition`] is a comparable stream high-watermark. It is not a
@@ -62,7 +75,10 @@ pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
-pub use event::{Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamEvent};
+pub use event::{
+    Event, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventPayloadError,
+    EventType, StreamEvent,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
