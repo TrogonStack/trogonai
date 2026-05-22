@@ -17,12 +17,13 @@ use crate::tui_client::{ActiveClientState, TuiClient};
 use crate::RunnerSwitcher;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
-pub async fn run_interactive<SF, F, SW>(
+pub async fn run_interactive<SF, F, SW, RS>(
     factory: SF,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
     switcher: SW,
+    registry: trogon_registry::Registry<RS>,
     nats: async_nats::Client,
     _config: Config,
     nats_url: String,
@@ -33,21 +34,23 @@ where
     SF: SessionFactory,
     F: Fs,
     SW: RunnerSwitcher,
+    RS: trogon_registry::RegistryStore,
 {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(run_interactive_inner(
-            factory, prefix, cwd, fs, switcher, nats, nats_url, stream, resume,
+            factory, prefix, cwd, fs, switcher, registry, nats, nats_url, stream, resume,
         ))
         .await
 }
 
-async fn run_interactive_inner<SF, F, SW>(
+async fn run_interactive_inner<SF, F, SW, RS>(
     factory: SF,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
     switcher: SW,
+    registry: trogon_registry::Registry<RS>,
     nats: async_nats::Client,
     nats_url: String,
     stream: bool,
@@ -57,6 +60,7 @@ where
     SF: SessionFactory,
     F: Fs,
     SW: RunnerSwitcher,
+    RS: trogon_registry::RegistryStore,
 {
     let (notification_tx, mut notification_rx) = mpsc::channel::<SessionNotification>(64);
     tokio::task::spawn_local(async move {
@@ -89,6 +93,7 @@ where
         cwd,
         fs,
         switcher,
+        registry,
         Some(supervisor),
         stream,
         resume,

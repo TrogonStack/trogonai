@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::client_supervisor::AcpClientSupervisor;
+use trogon_registry::{Registry, RegistryStore};
 
 const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
@@ -138,12 +139,13 @@ fn join_continuation(s: &str) -> String {
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
-pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
+pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStore>(
     factory: SF,
     prefix: &str,
     cwd: PathBuf,
     fs: F,
     mut switcher: SW,
+    registry: Registry<RS>,
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
@@ -297,6 +299,33 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             }
                             Err(e) => eprintln!("error listing sessions: {e}"),
                         }
+                    } else if cmd == "/model" && arg.is_empty() {
+                        match format_model_catalog(
+                            &registry,
+                            &prefix,
+                            &current_model(&fs),
+                            session.session_id(),
+                        )
+                        .await
+                        {
+                            Ok(text) => println!("{text}"),
+                            Err(e) => eprintln!("error listing models: {e}"),
+                        }
+                    } else if cmd == "/status" {
+                        let text = format_status(
+                            &registry,
+                            &prefix,
+                            &current_model(&fs),
+                            session.session_id(),
+                            session_used_tokens,
+                            session_context_size,
+                        )
+                        .await;
+                        println!("{text}");
+                    } else if cmd == "/doctor" {
+                        let url = std::env::var("NATS_URL")
+                            .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+                        crate::doctor::print_checks(&url).await;
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
                         let cwd_str = cwd
@@ -832,6 +861,8 @@ fn handle_slash_command<F: Fs>(
             format!("\
 Commands:
   {m}/help{r}               show this help
+  {m}/doctor{r}             run health checks (same as `trogon doctor`)
+  {m}/status{r}             prefix, model, tokens, registered runners
   {m}/cost{r}               show token usage for this session
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
@@ -868,12 +899,9 @@ Ctrl+D    quit")
 
         "/model" => {
             if arg.is_empty() {
-                let model = read_config(fs)
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("claude-sonnet-4-6")
-                    .to_string();
-                format!("current model: {model}\nchange with: \x1b[35m/model\x1b[0m <model-id>")
+                "use /model with no args in the REPL for the full registry listing\n\
+                 (config file model shown here only in unit tests)"
+                    .to_string()
             } else {
                 let model = arg.trim();
                 let mut cfg = read_config(fs);
@@ -885,8 +913,122 @@ Ctrl+D    quit")
             }
         }
 
+        "/doctor" => "run `trogon doctor` from the shell for full health checks".to_string(),
+
+        "/status" => "use /status in the REPL for live session status".to_string(),
+
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
+}
+
+fn runner_display_name(prefix: &str, agent_type: &str) -> String {
+    match prefix {
+        "acp.claude" => "Claude".into(),
+        "acp.grok" => "Grok".into(),
+        "acp.openrouter" => "OpenRouter".into(),
+        "acp.codex" => "Codex".into(),
+        _ => agent_type.to_string(),
+    }
+}
+
+pub(crate) async fn format_model_catalog<RS: RegistryStore>(
+    registry: &Registry<RS>,
+    current_prefix: &str,
+    current_model: &str,
+    session_id: &str,
+) -> Result<String, String> {
+    let all = registry.list_all().await.map_err(|e| e.to_string())?;
+    let mut by_prefix: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+
+    for cap in all {
+        let prefix = cap
+            .metadata
+            .get("acp_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&cap.agent_type)
+            .to_string();
+        let label = runner_display_name(&prefix, &cap.agent_type);
+        let models = cap
+            .metadata
+            .get("models")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        by_prefix
+            .entry(format!("{label} ({prefix})"))
+            .or_default()
+            .extend(models.into_iter().map(|id| (id.clone(), id)));
+    }
+
+    let mut out = String::new();
+    for (group, models) in by_prefix {
+        out.push_str(&group);
+        out.push('\n');
+        for (id, _) in models {
+            let alias = match id.as_str() {
+                "claude-sonnet-4-6" => Some("sonnet"),
+                "claude-opus-4-7" => Some("opus"),
+                "claude-haiku-4-5-20251001" => Some("haiku"),
+                "grok-3" => Some("grok"),
+                "grok-3-mini" => Some("grok-mini"),
+                "o4-mini" => Some("o4-mini"),
+                "o3" => Some("o3"),
+                "gpt-4o" => Some("gpt-4o"),
+                _ => None,
+            };
+            if let Some(a) = alias {
+                out.push_str(&format!("  {a:<10} → {id}\n"));
+            } else {
+                out.push_str(&format!("  {id}\n"));
+            }
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "Current session: {current_model} on {current_prefix} ({session_id})"
+    ));
+    Ok(out)
+}
+
+pub(crate) async fn format_status<RS: RegistryStore>(
+    registry: &Registry<RS>,
+    prefix: &str,
+    model: &str,
+    session_id: &str,
+    used_tokens: u64,
+    context_size: u64,
+) -> String {
+    let runners = registry
+        .list_all()
+        .await
+        .map(|all| {
+            all.iter()
+                .filter_map(|c| c.metadata.get("acp_prefix").and_then(|v| v.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|_| "unknown".into());
+
+    let tokens = if context_size == 0 {
+        format!("{used} tokens used (context size unknown)", used = fmt_tokens(used_tokens))
+    } else {
+        let pct = used_tokens * 100 / context_size;
+        format!(
+            "{used}/{ctx} tokens ({pct}%)",
+            used = fmt_tokens(used_tokens),
+            ctx = fmt_tokens(context_size),
+            pct = pct,
+        )
+    };
+
+    format!(
+        "prefix: {prefix}\nmodel:   {model}\nsession: {session_id}\n{tokens}\nrunners: {runners}"
+    )
 }
 
 // ── /config ───────────────────────────────────────────────────────────────────
@@ -1349,6 +1491,8 @@ mod tests {
         assert!(out.contains("/compact"));
         assert!(out.contains("/config"));
         assert!(out.contains("/model"));
+        assert!(out.contains("/doctor"));
+        assert!(out.contains("/status"));
         assert!(out.contains("/init"));
     }
 
@@ -1512,11 +1656,10 @@ mod tests {
     }
 
     #[test]
-    fn slash_model_without_arg_shows_current_model() {
+    fn slash_model_without_arg_shows_registry_hint() {
         let fs = MockFs::new();
         let out = handle_slash_command("/model", "", 0, 0, Path::new("/tmp"), &fs);
-        assert!(out.contains("current model"), "got: {out}");
-        assert!(out.contains("claude-sonnet-4-6"), "expected default model: {out}");
+        assert!(out.contains("registry listing"), "got: {out}");
     }
 
     #[test]
@@ -1525,9 +1668,6 @@ mod tests {
         let out = handle_slash_command("/model", "claude-opus-4-7", 0, 0, Path::new("/tmp"), &fs);
         assert!(out.contains("claude-opus-4-7"), "got: {out}");
         assert!(out.contains("cost estimates updated"), "got: {out}");
-        // Verify it was actually persisted.
-        let check = handle_slash_command("/model", "", 0, 0, Path::new("/tmp"), &fs);
-        assert!(check.contains("claude-opus-4-7"), "model not persisted: {check}");
     }
 
     #[test]
