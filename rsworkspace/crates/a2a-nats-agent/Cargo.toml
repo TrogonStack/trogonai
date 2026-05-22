@@ -7,6 +7,10 @@ edition = "2024"
 name = "a2a-nats-agent"
 path = "src/main.rs"
 
+[[example]]
+name = "echo"
+path = "examples/echo.rs"
+
 [lints]
 workspace = true
 
@@ -23,6 +27,8 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
+futures = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+uuid = { workspace = true }
