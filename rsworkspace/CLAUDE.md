@@ -111,6 +111,8 @@ Anthropic / xAI / OpenAI API
 
 **`trogon-cli`** — Terminal REPL. `CrossRunnerSwitcher` handles `/model` cross-runner switches: exports history via `session/export` ext_method, opens new session on target runner, imports via `session/import`. `/init` always uses the startup runner (Claude) via an ephemeral session, never the currently active model.
 
+**Session resume:** `trogon --continue` loads the last session for the current project from `~/.local/share/trogon/sessions.json` (any runner prefix). `trogon --session-id <id> --prefix <p>` attaches directly. `/model` always creates a new session on the target runner; to return to a prior Claude session after using Grok, switch back (`/model sonnet`) then `/resume <session-id>` or use the per-prefix entries in the index.
+
 **`trogon-compactor`** — Context compaction. Triggered at 85% of the context window. Summarizes the oldest portion of history into a structured checkpoint.
 
 **`trogon-wasm-runtime`** — WASM-based bash execution environment. Terminals are stateful (persist `cd`, env vars across calls). The bash tool reuses the same terminal per session via `terminal_id`.

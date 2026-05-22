@@ -1,17 +1,20 @@
 use crate::nats::NatsClient;
 use crate::tool_update::map_tool_call_update;
 use agent_client_protocol::{
-    ContentBlock, ExtRequest, ExtResponse, NewSessionRequest, PromptRequest, SessionNotification,
-    SessionUpdate, TextContent, ToolCallStatus,
+    ContentBlock, ExtRequest, ExtResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate,
+    TextContent, ToolCallStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const SESSION_NEW_TIMEOUT: Duration = Duration::from_secs(15);
+const LOAD_SESSION_TIMEOUT: Duration = Duration::from_secs(15);
+const LIST_SESSIONS_TIMEOUT: Duration = Duration::from_secs(15);
 const EXT_METHOD_TIMEOUT: Duration = Duration::from_secs(30);
 const COMPACT_TIMEOUT: Duration = Duration::from_secs(120);
 const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
@@ -111,6 +114,15 @@ async fn ext_method<N: NatsClient>(
     serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid ext response: {e}"))
 }
 
+/// Summary row for `/sessions` and session listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub cwd: String,
+    pub title: Option<String>,
+    pub updated_at: Option<String>,
+}
+
 // ── Session trait ─────────────────────────────────────────────────────────────
 
 /// Abstraction over an ACP session. Allows injecting a mock in tests.
@@ -130,6 +142,16 @@ pub trait Session: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_;
+
+    fn load_session(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
+    fn list_sessions(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_;
 
     fn set_mode(
         &self,
@@ -502,6 +524,78 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
+    fn load_session(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        let session_id = session_id.to_string();
+        let cwd = cwd.to_path_buf();
+        let prefix = self.prefix.clone();
+        let nats = &self.nats;
+        async move {
+            if session_id.contains('.') {
+                return Err(anyhow::anyhow!("invalid session id: {session_id}"));
+            }
+            let subject = format!("{prefix}.session.{session_id}.agent.load");
+            let req = LoadSessionRequest::new(session_id, cwd);
+            let payload = serde_json::to_vec(&req)?;
+
+            let bytes = tokio::time::timeout(
+                LOAD_SESSION_TIMEOUT,
+                nats.request_bytes(subject, payload.into()),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out waiting for session load"))?
+            .map_err(|e| anyhow::anyhow!("NATS error loading session: {e}"))?;
+
+            if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+                if v.get("code").is_some() {
+                    let msg = v
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown runner error");
+                    return Err(anyhow::anyhow!("load session failed: {msg}"));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn list_sessions(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+        let prefix = self.prefix.clone();
+        let nats = &self.nats;
+        async move {
+            let subject = format!("{prefix}.agent.session.list");
+            let req = ListSessionsRequest::new();
+            let payload = serde_json::to_vec(&req)?;
+
+            let bytes = tokio::time::timeout(
+                LIST_SESSIONS_TIMEOUT,
+                nats.request_bytes(subject, payload.into()),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timed out waiting for session list"))?
+            .map_err(|e| anyhow::anyhow!("NATS error listing sessions: {e}"))?;
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&bytes)
+                .map_err(|e| anyhow::anyhow!("invalid list sessions response: {e}"))?;
+
+            Ok(resp
+                .sessions
+                .into_iter()
+                .map(|info| SessionSummary {
+                    session_id: info.session_id.to_string(),
+                    cwd: info.cwd.to_string_lossy().into_owned(),
+                    title: info.title,
+                    updated_at: info.updated_at,
+                })
+                .collect())
+        }
+    }
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
         let subject = format!("{}.session.{}.agent.close", self.prefix, self.session_id);
         let session_id = self.session_id.clone();
@@ -758,6 +852,20 @@ pub mod mock {
             }
         }
 
+        fn load_session(
+            &self,
+            _session_id: &str,
+            _cwd: &Path,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            async move { Ok(()) }
+        }
+
+        fn list_sessions(
+            &self,
+        ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+            async move { Ok(vec![]) }
+        }
+
         fn set_mode(
             &self,
             _mode: &str,
@@ -800,6 +908,20 @@ pub mod mock {
 
         fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
             (**self).compact()
+        }
+
+        fn load_session(
+            &self,
+            session_id: &str,
+            cwd: &Path,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            (**self).load_session(session_id, cwd)
+        }
+
+        fn list_sessions(
+            &self,
+        ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
+            (**self).list_sessions()
         }
 
         fn set_mode(

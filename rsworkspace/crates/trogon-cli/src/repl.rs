@@ -1,5 +1,6 @@
 use crate::fs::Fs;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
+use crate::session_store::{SessionIndex, new_session_entry};
 use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -144,12 +145,41 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     mut switcher: SW,
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     stream: bool,
+    resume: Option<crate::session_store::SessionEntry>,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
-    let mut session = factory.create_session(&prefix, cwd.clone()).await?;
+    let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+
+    let resumed = resume.is_some();
+    let mut session = if let Some(entry) = resume {
+        prefix = entry.prefix.clone();
+        match activate_session(&factory, &prefix, &entry.session_id, &cwd).await {
+            Ok(s) => {
+                eprintln!(
+                    "resumed session {} on {prefix}",
+                    s.session_id()
+                );
+                s
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: could not resume {}: {e} — starting fresh",
+                    entry.session_id
+                );
+                factory.create_session(&prefix, cwd.clone()).await?
+            }
+        }
+    } else {
+        factory.create_session(&prefix, cwd.clone()).await?
+    };
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
+        if resumed {
+            if let Err(e) = sup.rebind(&prefix, session.session_id()).await {
+                eprintln!("warning: permission client rebind failed: {e}");
+            }
+        }
     }
 
     let history_path = expand_tilde(HISTORY_PATH);
@@ -195,9 +225,73 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                 if let Some(ref sup) = client_supervisor {
                                     sup.set_session(session.session_id());
                                 }
+                                persist_session_index(
+                                    &fs,
+                                    &project_dir,
+                                    &prefix,
+                                    session.session_id(),
+                                    &current_model(&fs),
+                                );
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
                             Err(e) => eprintln!("error: {e}"),
+                        }
+                    } else if cmd == "/resume" {
+                        if arg.is_empty() {
+                            eprintln!("usage: /resume <session-id>");
+                        } else {
+                            let target = arg.trim();
+                            match activate_session(&factory, &prefix, target, &cwd).await {
+                                Ok(s) => {
+                                    session.close().await;
+                                    session = s;
+                                    session_used_tokens = 0;
+                                    session_context_size = 0;
+                                    if let Some(ref sup) = client_supervisor {
+                                        sup.set_session(session.session_id());
+                                    }
+                                    persist_session_index(
+                                        &fs,
+                                        &project_dir,
+                                        &prefix,
+                                        session.session_id(),
+                                        &current_model(&fs),
+                                    );
+                                    eprintln!("resumed session {}", session.session_id());
+                                }
+                                Err(e) => eprintln!("error resuming session: {e}"),
+                            }
+                        }
+                    } else if cmd == "/sessions" {
+                        match session.list_sessions().await {
+                            Ok(list) if list.is_empty() => {
+                                println!("no sessions on runner {prefix}");
+                            }
+                            Ok(list) => {
+                                let index = SessionIndex::load(&fs);
+                                println!(
+                                    "{:<36}  {:<20}  {}",
+                                    "session_id", "updated", "cwd"
+                                );
+                                for s in list {
+                                    let updated = s.updated_at.as_deref().unwrap_or("-");
+                                    let model = index
+                                        .get_for_prefix(&project_dir, &prefix)
+                                        .filter(|e| e.session_id == s.session_id)
+                                        .map(|e| e.model.as_str())
+                                        .unwrap_or("-");
+                                    let label = s
+                                        .title
+                                        .as_deref()
+                                        .filter(|t| !t.is_empty())
+                                        .unwrap_or(&s.cwd);
+                                    println!(
+                                        "{:<36}  {:<20}  {}  [model: {model}]",
+                                        s.session_id, updated, label
+                                    );
+                                }
+                            }
+                            Err(e) => eprintln!("error listing sessions: {e}"),
                         }
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
@@ -218,7 +312,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Ok(outcome) => {
                                 if outcome.same_runner {
                                     match session.set_model(&model_id).await {
-                                        Ok(()) => println!("Model set to {model_id}"),
+                                        Ok(()) => {
+                                            println!("Model set to {model_id}");
+                                            persist_session_index(
+                                                &fs,
+                                                &project_dir,
+                                                &prefix,
+                                                session.session_id(),
+                                                &model_id,
+                                            );
+                                        }
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
                                 } else {
@@ -237,7 +340,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                         }
                                     }
                                     match session.set_model(&model_id).await {
-                                        Ok(()) => println!("Switched to {model_id}"),
+                                        Ok(()) => {
+                                            println!("Switched to {model_id}");
+                                            persist_session_index(
+                                                &fs,
+                                                &project_dir,
+                                                &prefix,
+                                                session.session_id(),
+                                                &model_id,
+                                            );
+                                        }
                                         Err(e) => eprintln!("Error setting model on new runner: {e}"),
                                     }
                                 }
@@ -481,6 +593,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                                     );
                                                 }
                                                 eprintln!();
+                                                persist_session_index(
+                                                    &fs,
+                                                    &project_dir,
+                                                    &prefix,
+                                                    session.session_id(),
+                                                    &current_model(&fs),
+                                                );
                                             }
                                             let _ = stdout.flush();
                                             break;
@@ -510,6 +629,39 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
 
     let _ = rl.save_history(&history_path);
     Ok(())
+}
+
+async fn activate_session<SF: SessionFactory>(
+    factory: &SF,
+    prefix: &str,
+    session_id: &str,
+    cwd: &Path,
+) -> anyhow::Result<SF::Sess> {
+    let session = factory.attach_session(prefix, session_id.to_string());
+    session.load_session(session_id, cwd).await?;
+    Ok(session)
+}
+
+fn current_model<F: Fs>(fs: &F) -> String {
+    read_config(fs)
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-sonnet-4-6")
+        .to_string()
+}
+
+fn persist_session_index<F: Fs>(
+    fs: &F,
+    project: &Path,
+    prefix: &str,
+    session_id: &str,
+    model: &str,
+) {
+    let mut index = SessionIndex::load(fs);
+    index.record(project, new_session_entry(prefix, session_id, model));
+    if let Err(e) = index.save(fs) {
+        eprintln!("warning: could not save session index: {e}");
+    }
 }
 
 // ── /model handler ────────────────────────────────────────────────────────────
@@ -570,6 +722,8 @@ Commands:
   {m}/help{r}               show this help
   {m}/cost{r}               show token usage for this session
   {m}/clear{r}              start a new session (clears conversation history)
+  {m}/sessions{r}           list sessions on the current runner
+  {m}/resume{r} <id>        resume a session by id on the current runner
   {m}/compact{r}            force context compaction now
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
