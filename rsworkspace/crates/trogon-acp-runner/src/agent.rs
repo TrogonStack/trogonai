@@ -1235,17 +1235,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
             let state = self.store.load(session_id).await
                 .map_err(|e| internal_error(e.to_string()))?;
-            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = state.messages.iter()
-                .map(|m| {
-                    let text = m.content.iter().filter_map(|b| match b {
-                        AgentContentBlock::Text { text } => Some(text.as_str()),
-                        AgentContentBlock::ToolResult { content, .. } => Some(content.as_str()),
-                        _ => None,
-                    }).collect::<Vec<_>>().join("\n");
-                    trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text }
-                })
-                .collect();
-            let raw = serde_json::to_string(&portable)
+            let raw = trogon_runner_tools::portable_session::export_json_from_wire(&state.messages)
                 .map_err(|e| internal_error(e.to_string()))?;
             return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| internal_error(e.to_string()))?.into()));
@@ -1255,16 +1245,22 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
-            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_value(params["messages"].clone())
-                    .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let messages_json = params["messages"].to_string();
+            let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
+                .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
             let mut state = self.store.load(session_id).await.unwrap_or_default();
-            state.messages = messages.into_iter()
-                .map(|m| Message {
-                    role: m.role,
-                    content: vec![AgentContentBlock::Text { text: m.text }],
-                })
-                .collect();
+            state.messages = match parsed {
+                trogon_runner_tools::portable_session::ParsedExport::V1(msgs) => msgs
+                    .into_iter()
+                    .map(|m| Message {
+                        role: m.role,
+                        content: vec![AgentContentBlock::Text { text: m.text }],
+                    })
+                    .collect(),
+                trogon_runner_tools::portable_session::ParsedExport::V2(exp) => {
+                    trogon_runner_tools::portable_session::v2_to_messages(&exp)
+                }
+            };
             state.updated_at = now_iso8601();
             self.store.save(session_id, &state).await
                 .map_err(|e| internal_error(e.to_string()))?;

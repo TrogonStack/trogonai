@@ -22,6 +22,12 @@ pub use permission::{
     ModePermissionChecker, PermissionReq, PermissionTx, RulesPermissionChecker,
 };
 pub use permission_bridge::handle_permission_request_nats;
+pub use portable_session::{
+    export_json_from_wire, message_to_v2, messages_need_v2, messages_to_export_v2,
+    messages_to_v1, parse_export_json, text_to_v2, v1_to_messages, v2_message_to_text,
+    v2_to_messages, ParsedExport, PortableBlock, PortableExportV2, PortableMessage,
+    PortableMessageV2, EXPORT_VERSION_V2,
+};
 pub use session_store::{
     AllowedToolsSessionStore, AuditEntry, AuditOutcome, NatsSessionStore, SessionState,
     SessionStore, StoredMcpServer, TodoItem, append_audit_entries,

@@ -558,21 +558,28 @@ where
             );
         }
 
-        let (thread_id, model, pending_history) = {
+        let (thread_id, model, pending_history, cwd, prepend_trogon) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
             s.first_turn = false;
             s.history.push(trogon_runner_tools::portable_session::PortableMessage {
                 role: "user".into(),
                 text: user_input.clone(),
             });
-            (s.thread_id.clone(), s.model.clone(), ph)
+            (
+                s.thread_id.clone(),
+                s.model.clone(),
+                ph,
+                s.cwd.clone(),
+                prepend_trogon,
+            )
         };
 
-        let user_input = if let Some(prior) = pending_history {
+        let mut user_input = if let Some(prior) = pending_history {
             let formatted = prior
                 .iter()
                 .map(|m| format!("[{}]: {}", m.role, m.text))
@@ -582,6 +589,12 @@ where
         } else {
             user_input
         };
+
+        if prepend_trogon {
+            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
+                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
+            }
+        }
 
         let proc = self.process().await?;
         let mut event_rx = proc
@@ -752,9 +765,23 @@ where
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
-            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_value(params["messages"].clone())
-                    .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let messages_json = params["messages"].to_string();
+            let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
+                .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> = match parsed {
+                trogon_runner_tools::portable_session::ParsedExport::V1(msgs) => msgs,
+                trogon_runner_tools::portable_session::ParsedExport::V2(exp) => exp
+                    .messages
+                    .iter()
+                    .map(trogon_runner_tools::portable_session::v2_message_to_text)
+                    .collect(),
+            };
+            if messages.is_empty() {
+                return Err(Error::new(
+                    ErrorCode::InvalidParams.into(),
+                    "import requires at least one message",
+                ));
+            }
             let mut sessions = self.sessions.lock().await;
             let s = sessions.get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;

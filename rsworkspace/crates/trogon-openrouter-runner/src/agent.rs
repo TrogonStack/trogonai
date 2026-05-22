@@ -1516,10 +1516,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let sessions = self.sessions.lock().await;
                 let s = sessions.get(session_id)
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-                let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
-                    .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content.clone() })
-                    .collect();
-                let raw = serde_json::to_string(&portable)
+                let wire = openrouter_history_to_wire(&s.history);
+                let raw = trogon_runner_tools::portable_session::export_json_from_wire(&wire)
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()))
@@ -1529,15 +1527,30 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     serde_json::from_str(args.params.get()).unwrap_or_default();
                 let session_id = params["sessionId"].as_str()
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
-                let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                    serde_json::from_value(params["messages"].clone())
-                        .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+                let messages_json = params["messages"].to_string();
+                let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
+                    .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
                 let mut sessions = self.sessions.lock().await;
                 let s = sessions.get_mut(session_id)
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-                s.history = messages.into_iter()
-                    .map(|m| crate::client::Message { role: m.role, content: m.text, prompt_tokens: None, completion_tokens: None, tool_calls: None, tool_call_id: None })
-                    .collect();
+                s.history = match parsed {
+                    trogon_runner_tools::portable_session::ParsedExport::V1(msgs) => msgs
+                        .into_iter()
+                        .map(|m| crate::client::Message {
+                            role: m.role,
+                            content: m.text,
+                            prompt_tokens: None,
+                            completion_tokens: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        })
+                        .collect(),
+                    trogon_runner_tools::portable_session::ParsedExport::V2(exp) => {
+                        openrouter_history_from_wire(
+                            trogon_runner_tools::portable_session::v2_to_messages(&exp),
+                        )
+                    }
+                };
                 compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
                     .await;
                 let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();

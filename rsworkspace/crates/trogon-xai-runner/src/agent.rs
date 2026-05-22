@@ -1705,10 +1705,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let sessions = self.sessions.lock().await;
             let s = sessions.get(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-            let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> = s.history.iter()
-                .map(|m| trogon_runner_tools::portable_session::PortableMessage { role: m.role.clone(), text: m.content_str().to_string() })
-                .collect();
-            let raw = serde_json::to_string(&portable)
+            let wire = xai_history_to_wire(&s.history);
+            let raw = trogon_runner_tools::portable_session::export_json_from_wire(&wire)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()));
@@ -1718,15 +1716,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
-            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-                serde_json::from_value(params["messages"].clone())
-                    .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let messages_json = params["messages"].to_string();
+            let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
+                .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
             let mut sessions = self.sessions.lock().await;
             let s = sessions.get_mut(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-            s.history = messages.into_iter()
-                .map(|m| Message { role: m.role, content: Some(m.text), prompt_tokens: None, completion_tokens: None })
-                .collect();
+            s.history = match parsed {
+                trogon_runner_tools::portable_session::ParsedExport::V1(msgs) => msgs
+                    .into_iter()
+                    .map(|m| Message { role: m.role, content: Some(m.text), prompt_tokens: None, completion_tokens: None })
+                    .collect(),
+                trogon_runner_tools::portable_session::ParsedExport::V2(exp) => {
+                    xai_history_from_wire(trogon_runner_tools::portable_session::v2_to_messages(&exp))
+                }
+            };
             s.last_response_id = None;
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
