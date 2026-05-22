@@ -40,6 +40,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                 StreamEvent::Thinking
                 | StreamEvent::ToolCall(_)
                 | StreamEvent::Diff(_)
+                | StreamEvent::ToolFinished { .. }
                 | StreamEvent::Usage { .. } => {}
             }
         }
@@ -66,6 +67,7 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
                 StreamEvent::Thinking
                 | StreamEvent::ToolCall(_)
                 | StreamEvent::Diff(_)
+                | StreamEvent::ToolFinished { .. }
                 | StreamEvent::Usage { .. } => {}
             }
         }
