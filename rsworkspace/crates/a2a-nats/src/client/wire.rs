@@ -1,30 +1,93 @@
-//! Client-side JSON-RPC content-mode wire helpers.
-
-pub use crate::wire::{WireError, decode_response, encode_request, merge_jsonrpc_headers};
-
-use async_nats::header::HeaderMap;
-use jsonrpc_nats::{Encoded, RequestId};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 
 use crate::jsonrpc::JsonRpcId;
 
-pub fn encode_client_request<Req: Serialize>(method: &str, id: JsonRpcId, params: &Req) -> Result<Encoded, WireError> {
-    let request_id = match id {
-        JsonRpcId::Number(n) => RequestId::Number(n),
-        JsonRpcId::String(s) => RequestId::String(s),
-        JsonRpcId::Null => {
-            return Err(WireError::Codec(jsonrpc_nats::CodecError::RequestWithoutId));
-        }
-    };
-    encode_request(method, request_id, params)
+#[derive(Debug, Serialize)]
+pub struct JsonRpcRequest<P> {
+    pub jsonrpc: &'static str,
+    pub id: JsonRpcId,
+    pub method: &'static str,
+    pub params: P,
 }
 
-pub fn decode_client_response<Res: DeserializeOwned>(
-    headers: &HeaderMap,
-    body: &[u8],
-) -> Result<Result<Res, (i32, String)>, WireError> {
-    decode_response(headers, body)
+impl<P> JsonRpcRequest<P> {
+    pub fn new(id: JsonRpcId, method: &'static str, params: P) -> Self {
+        Self { jsonrpc: "2.0", id, method, params }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum JsonRpcResponse<R> {
+    Success(JsonRpcSuccess<R>),
+    Error(JsonRpcErrorEnvelope),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcSuccess<R> {
+    pub result: R,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcErrorEnvelope {
+    pub error: JsonRpcErrorBody,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonRpcErrorBody {
+    pub code: i32,
+    pub message: String,
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    struct DummyParams {
+        value: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    struct DummyResult {
+        answer: i32,
+    }
+
+    #[test]
+    fn jsonrpc_request_serializes_with_version_and_method() {
+        let req = JsonRpcRequest::new(JsonRpcId::Number(1), "tasks/get", DummyParams { value: "x".into() });
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["jsonrpc"], "2.0");
+        assert_eq!(v["method"], "tasks/get");
+        assert_eq!(v["id"], 1);
+    }
+
+    #[test]
+    fn jsonrpc_response_deserializes_success() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"result":{"answer":42}}"#;
+        let resp: JsonRpcResponse<DummyResult> = serde_json::from_str(json).unwrap();
+        assert!(matches!(resp, JsonRpcResponse::Success(s) if s.result.answer == 42));
+    }
+
+    #[test]
+    fn jsonrpc_response_deserializes_error() {
+        let json = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"not found"}}"#;
+        let resp: JsonRpcResponse<DummyResult> = serde_json::from_str(json).unwrap();
+        assert!(matches!(resp, JsonRpcResponse::Error(e) if e.error.code == -32001));
+    }
+
+    #[test]
+    fn jsonrpc_error_body_captures_message() {
+        let json = r#"{"code":-32050,"message":"agent down"}"#;
+        let body: JsonRpcErrorBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.code, -32050);
+        assert_eq!(body.message, "agent down");
+    }
+
+    #[test]
+    fn jsonrpc_request_string_id() {
+        let req = JsonRpcRequest::new(JsonRpcId::String("abc".into()), "message/send", DummyParams { value: "y".into() });
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["id"], "abc");
+    }
+}

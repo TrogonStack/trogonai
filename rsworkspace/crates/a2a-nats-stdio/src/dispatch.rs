@@ -1,15 +1,15 @@
-use a2a::event::StreamResponse;
-use a2a::types::{
-    CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
-    ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
+use a2a_nats::client::{
+    CancelTaskRequest, Client, ClientError, DeleteTaskPushNotificationConfigRequest,
+    GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
+    SendMessageRequest, TaskPushNotificationConfig,
 };
-use a2a_nats::client::{A2aClient, ClientError};
 use a2a_nats::task_id::A2aTaskId;
+use a2a_types::StreamResponse;
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::mpsc;
-use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
+use trogon_nats::RequestClient;
 
 use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, OutboundResponse, RpcId};
 
@@ -26,11 +26,6 @@ fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
         ClientError::UnsupportedOperation => (a2a_nats::error::UNSUPPORTED_OPERATION, err.to_string()),
         ClientError::ContentTypeNotSupported => (a2a_nats::error::CONTENT_TYPE_NOT_SUPPORTED, err.to_string()),
         ClientError::InvalidAgentResponse => (a2a_nats::error::INVALID_AGENT_RESPONSE, err.to_string()),
-        ClientError::ExtendedAgentCardNotConfigured => {
-            (a2a_nats::error::EXTENDED_AGENT_CARD_NOT_CONFIGURED, err.to_string())
-        }
-        ClientError::ExtensionSupportRequired(_) => (a2a_nats::error::EXTENSION_SUPPORT_REQUIRED, err.to_string()),
-        ClientError::VersionNotSupported(_) => (a2a_nats::error::VERSION_NOT_SUPPORTED, err.to_string()),
         ClientError::AgentUnavailable => (a2a_nats::error::AGENT_UNAVAILABLE, err.to_string()),
         ClientError::JsonRpc { code, message } => (*code, message.clone()),
         _ => (-32603, err.to_string()),
@@ -39,21 +34,18 @@ fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, OutboundFrame> {
-    serde_json::from_value(params)
-        .map_err(|e| OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, e.to_string())))
+    serde_json::from_value(params).map_err(|e| {
+        OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, e.to_string()))
+    })
 }
 
-/// `method` is the JSON-RPC method this notification is associated with —
-/// `message/stream` for the streaming send path, `tasks/resubscribe` for the
-/// resubscribe path. Clients route notifications by method, so emitting the
-/// wrong one makes the resubscribe stream invisible to compliant callers.
-fn stream_event_to_frame(id: &RpcId, method: &'static str, event: &StreamResponse) -> OutboundFrame {
+fn stream_event_to_frame(id: &RpcId, event: &StreamResponse) -> OutboundFrame {
     let params = serde_json::to_value(event).unwrap_or(Value::Null);
-    OutboundFrame::Notification(OutboundNotification::new(id.clone(), method, params))
+    OutboundFrame::Notification(OutboundNotification::new(id.clone(), "message/stream", params))
 }
 
 pub async fn dispatch_request<N, J>(
-    client: &A2aClient<N, J>,
+    client: &Client<N, J>,
     id: RpcId,
     method: &str,
     params: Value,
@@ -99,19 +91,12 @@ pub async fn dispatch_request<N, J>(
                 Ok((bootstrap, mut stream)) => {
                     let result = serde_json::to_value(&bootstrap).unwrap_or(Value::Null);
                     let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
-                    // If the bootstrap response can't reach stdout there is no
-                    // point pumping the JetStream loop — the caller never saw
-                    // the opening `result` and would interpret subsequent
-                    // notifications as unsolicited. Bail before consuming the
-                    // stream so events stay on the server.
-                    if tx.send(bootstrap_frame).await.is_err() {
-                        return;
-                    }
+                    let _ = tx.send(bootstrap_frame).await;
 
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(event) => {
-                                let frame = stream_event_to_frame(&id, "message/stream", &event);
+                                let frame = stream_event_to_frame(&id, &event);
                                 if tx.send(frame).await.is_err() {
                                     return;
                                 }
@@ -179,13 +164,9 @@ pub async fn dispatch_request<N, J>(
         }
 
         "tasks/resubscribe" => {
-            // Match the A2A wire shape used by sibling task RPCs and
-            // `SubscribeToTaskRequest`: `id` is the task id; `lastSeq` is the
-            // stdio-bridge-specific resume cursor.
             #[derive(serde::Deserialize)]
-            #[serde(rename_all = "camelCase")]
             struct ResubParams {
-                id: String,
+                task_id: String,
                 #[serde(default)]
                 last_seq: u64,
             }
@@ -196,7 +177,7 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            let task_id = match A2aTaskId::new(&p.id) {
+            let task_id = match A2aTaskId::new(&p.task_id) {
                 Ok(t) => t,
                 Err(e) => {
                     let _ = tx
@@ -211,20 +192,11 @@ pub async fn dispatch_request<N, J>(
             };
             match client.tasks_resubscribe(&task_id, p.last_seq).await {
                 Err(e) => client_err_to_frame(id, e),
-                Ok((snapshot, mut stream)) => {
-                    let result = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
-                    let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
-                    // Same rationale as message/stream — without the snapshot
-                    // landing on stdout, the caller has no anchor to attach
-                    // the resubscribe notifications to.
-                    if tx.send(bootstrap_frame).await.is_err() {
-                        return;
-                    }
-
+                Ok(mut stream) => {
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(event) => {
-                                let frame = stream_event_to_frame(&id, "tasks/resubscribe", &event);
+                                let frame = stream_event_to_frame(&id, &event);
                                 if tx.send(frame).await.is_err() {
                                     return;
                                 }
@@ -334,4 +306,224 @@ fn make_with_id(frame: OutboundFrame, id: &RpcId) -> OutboundFrame {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use a2a_nats::client::Client;
+    use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
+    use bytes::Bytes;
+    use serde_json::json;
+    use trogon_nats::AdvancedMockNatsClient;
+    use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
+
+    use crate::wire::RpcError;
+
+    fn test_config() -> Config {
+        Config::new(
+            A2aPrefix::new("a2a".to_string()).unwrap(),
+            NatsConfig { servers: vec!["localhost:4222".to_string()], auth: trogon_nats::NatsAuth::None },
+        )
+    }
+
+    fn make_client(
+        nats: AdvancedMockNatsClient,
+        js: MockJetStreamConsumerFactory,
+    ) -> Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+        let agent_id = A2aAgentId::new("bot").unwrap();
+        Client::new(test_config(), agent_id, nats, js)
+    }
+
+    fn task_response(task_id: &str) -> Bytes {
+        let task = a2a_types::Task {
+            id: task_id.to_string(),
+            status: Some(a2a_types::TaskStatus {
+                state: a2a_types::TaskState::Completed.into(),
+                message: None,
+                timestamp: None,
+            }),
+            ..Default::default()
+        };
+        serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "x",
+            "result": task
+        }))
+        .unwrap()
+        .into()
+    }
+
+    fn send_message_response_bytes(task_id: &str) -> Bytes {
+        let task = a2a_types::Task {
+            id: task_id.to_string(),
+            ..Default::default()
+        };
+        let response = a2a_types::SendMessageResponse {
+            payload: Some(a2a_types::send_message_response::Payload::Task(task)),
+        };
+        serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "x",
+            "result": response
+        }))
+        .unwrap()
+        .into()
+    }
+
+    async fn dispatch(
+        client: &Client<AdvancedMockNatsClient, MockJetStreamConsumerFactory>,
+        id: RpcId,
+        method: &str,
+        params: Value,
+    ) -> OutboundFrame {
+        let (tx, mut rx) = mpsc::channel(8);
+        dispatch_request(client, id, method, params, &tx).await;
+        drop(tx);
+        rx.recv().await.expect("expected at least one frame")
+    }
+
+    #[tokio::test]
+    async fn tasks_get_success() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.tasks.get", task_response("t1"));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(
+            &client,
+            RpcId::Number(1),
+            "tasks/get",
+            json!({"id": "t1", "tenant": ""}),
+        )
+        .await;
+        assert!(matches!(frame, OutboundFrame::Response(_)));
+    }
+
+    #[tokio::test]
+    async fn tasks_get_error_maps_to_rpc_error() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.fail_next_request();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(
+            &client,
+            RpcId::Number(2),
+            "tasks/get",
+            json!({"id": "t1", "tenant": ""}),
+        )
+        .await;
+        assert!(matches!(frame, OutboundFrame::Error(_)));
+    }
+
+    #[tokio::test]
+    async fn tasks_cancel_success() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.tasks.cancel", task_response("tc"));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(
+            &client,
+            RpcId::String("x".into()),
+            "tasks/cancel",
+            json!({"id": "tc", "tenant": ""}),
+        )
+        .await;
+        assert!(matches!(frame, OutboundFrame::Response(_)));
+    }
+
+    #[tokio::test]
+    async fn message_send_success() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.message.send", send_message_response_bytes("ms"));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(
+            &client,
+            RpcId::Number(3),
+            "message/send",
+            json!({"message": {"messageId": "m1", "role": "ROLE_USER", "parts": []}}),
+        )
+        .await;
+        assert!(matches!(frame, OutboundFrame::Response(_)), "got: {}", serde_json::to_string(&frame).unwrap());
+    }
+
+    #[tokio::test]
+    async fn message_stream_emits_bootstrap_then_events() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response("a2a.agent.bot.message.stream", send_message_response_bytes("ms2"));
+
+        let js = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.add_consumer(consumer);
+        drop(tx);
+
+        let client = make_client(nats, js);
+        let (chan_tx, mut chan_rx) = mpsc::channel(16);
+        dispatch_request(
+            &client,
+            RpcId::Number(4),
+            "message/stream",
+            json!({"message": {"messageId": "m2", "role": "ROLE_USER", "parts": []}}),
+            &chan_tx,
+        )
+        .await;
+        drop(chan_tx);
+
+        let first = chan_rx.recv().await.expect("bootstrap frame");
+        assert!(matches!(first, OutboundFrame::Response(_)));
+    }
+
+    #[tokio::test]
+    async fn tasks_resubscribe_empty_stream() {
+        let nats = AdvancedMockNatsClient::new();
+        let js = MockJetStreamConsumerFactory::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.add_consumer(consumer);
+        drop(tx);
+
+        let client = make_client(nats, js);
+        let (chan_tx, mut chan_rx) = mpsc::channel(8);
+        dispatch_request(
+            &client,
+            RpcId::Number(5),
+            "tasks/resubscribe",
+            json!({"task_id": "task1", "last_seq": 0}),
+            &chan_tx,
+        )
+        .await;
+        drop(chan_tx);
+        assert!(chan_rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn agent_card_success() {
+        let nats = AdvancedMockNatsClient::new();
+        let card = a2a_types::AgentCard {
+            name: "BotA".into(),
+            description: "desc".into(),
+            version: "1.0".into(),
+            capabilities: Some(a2a_types::AgentCapabilities::default()),
+            ..Default::default()
+        };
+        nats.set_response(
+            "a2a.agent.bot.agent.card",
+            serde_json::to_vec(&serde_json::json!({
+                "jsonrpc": "2.0", "id": "x", "result": card
+            }))
+            .unwrap()
+            .into(),
+        );
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(&client, RpcId::Number(6), "agent/getAuthenticatedExtendedCard", json!({})).await;
+        assert!(matches!(frame, OutboundFrame::Response(_)));
+    }
+
+    #[tokio::test]
+    async fn unknown_method_returns_method_not_found() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(&client, RpcId::Number(7), "bogus/method", json!({})).await;
+        assert!(matches!(frame, OutboundFrame::Error(OutboundError { error: RpcError { code: -32601, .. }, .. })));
+    }
+
+    #[tokio::test]
+    async fn invalid_params_returns_error() {
+        let nats = AdvancedMockNatsClient::new();
+        let client = make_client(nats, MockJetStreamConsumerFactory::new());
+        let frame = dispatch(&client, RpcId::Number(8), "tasks/get", json!("not an object")).await;
+        assert!(matches!(frame, OutboundFrame::Error(OutboundError { error: RpcError { code: -32602, .. }, .. })));
+    }
+}

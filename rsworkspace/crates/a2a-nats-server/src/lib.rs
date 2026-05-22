@@ -1,9 +1,9 @@
-//! Default A2A-over-NATS agent runtime entry point.
-
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-
-pub mod noop_handler;
+pub mod handlers;
+pub mod router;
 pub mod runtime;
+pub mod sse;
 
-pub use noop_handler::NoopHandler;
-pub use runtime::RuntimeError;
+pub use runtime::{RuntimeError, run};
+
+#[cfg(test)]
+mod tests;

@@ -1,64 +1,98 @@
-//! Env-parsing entry point shared by main.rs.
-//!
-//! Splits the validation half (pure, testable, runs under coverage) from the
-//! NATS-connect-and-serve half (gated to `cfg(not(coverage))` because the
-//! upstream `trogon-nats` crate also gates `NatsJetStreamClient` out during
-//! coverage builds).
+use std::fmt;
+use std::net::SocketAddr;
 
-use a2a_nats::{
-    A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
-    apply_timeout_overrides,
-};
-use trogon_std::env::ReadEnv;
+use a2a_nats::client::Client;
+use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, Config, NatsConfig};
+use tracing::info;
+use trogon_nats::jetstream::NatsJetStreamClient;
+use trogon_std::env::SystemEnv;
+use trogon_std::signal::shutdown_signal;
 
-pub const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
+use crate::router;
 
-#[derive(Debug, thiserror::Error)]
+const DEFAULT_BIND: &str = "0.0.0.0:8080";
+const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
+const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
+
+#[derive(Debug)]
 pub enum RuntimeError {
-    #[error("A2A_AGENT_ID env var is required but not set")]
     MissingAgentId,
-    #[error("invalid agent id")]
-    InvalidAgentId(#[source] AgentIdError),
-    #[error("invalid A2A prefix")]
-    InvalidPrefix(#[source] a2a_nats::A2aPrefixError),
-    #[error("NATS connection failed")]
-    NatsConnect(#[source] trogon_nats::ConnectError),
-    #[error("JetStream provisioning failed")]
-    Provision(#[source] a2a_nats::jetstream::ProvisionError),
-    #[error("bridge error")]
-    Bridge(#[source] a2a_nats::server::BridgeError),
+    InvalidAgentId(AgentIdError),
+    InvalidPrefix(A2aPrefixError),
+    InvalidBind(std::net::AddrParseError),
+    NatsConnect(trogon_nats::ConnectError),
+    Io(std::io::Error),
 }
 
-/// Validated, ready-to-use configuration assembled from environment variables.
-pub struct ValidatedRuntimeConfig {
-    pub prefix: A2aPrefix,
-    pub agent_id: A2aAgentId,
-    pub nats_config: NatsConfig,
-    pub config: Config,
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
+            Self::InvalidAgentId(e) => write!(f, "invalid agent id: {e}"),
+            Self::InvalidPrefix(e) => write!(f, "invalid A2A prefix: {e}"),
+            Self::InvalidBind(e) => write!(f, "invalid bind address: {e}"),
+            Self::NatsConnect(e) => write!(f, "NATS connection failed: {e}"),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+        }
+    }
 }
 
-/// Parse environment into a typed runtime configuration. Pure and testable
-/// without a real NATS server.
-pub fn parse_env<E: ReadEnv>(env: &E) -> Result<ValidatedRuntimeConfig, RuntimeError> {
-    let prefix_raw = env
-        .var(ENV_A2A_PREFIX)
-        .unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_string());
-    let prefix = A2aPrefix::new(prefix_raw).map_err(RuntimeError::InvalidPrefix)?;
-
-    let agent_id_raw = env.var(ENV_A2A_AGENT_ID).map_err(|_| RuntimeError::MissingAgentId)?;
-    let agent_id = A2aAgentId::new(&agent_id_raw).map_err(RuntimeError::InvalidAgentId)?;
-
-    let nats_config = NatsConfig::from_env(env);
-    let base_config = Config::new(prefix.clone(), nats_config.clone());
-    let config = apply_timeout_overrides(base_config, env);
-
-    Ok(ValidatedRuntimeConfig {
-        prefix,
-        agent_id,
-        nats_config,
-        config,
-    })
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidAgentId(e) => Some(e),
+            Self::InvalidPrefix(e) => Some(e),
+            Self::InvalidBind(e) => Some(e),
+            Self::NatsConnect(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::MissingAgentId => None,
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests;
+pub async fn run() -> Result<(), RuntimeError> {
+    let env = SystemEnv;
+
+    let raw_prefix = trogon_std::env::ReadEnv::var(&env, a2a_nats::ENV_A2A_PREFIX)
+        .unwrap_or_else(|_| a2a_nats::DEFAULT_A2A_PREFIX.to_string());
+    let prefix = A2aPrefix::new(raw_prefix).map_err(RuntimeError::InvalidPrefix)?;
+
+    let raw_agent_id = trogon_std::env::ReadEnv::var(&env, ENV_AGENT_ID)
+        .map_err(|_| RuntimeError::MissingAgentId)?;
+    let agent_id = A2aAgentId::new(raw_agent_id).map_err(RuntimeError::InvalidAgentId)?;
+
+    let bind_addr: SocketAddr = trogon_std::env::ReadEnv::var(&env, ENV_HTTP_BIND)
+        .unwrap_or_else(|_| DEFAULT_BIND.to_string())
+        .parse()
+        .map_err(RuntimeError::InvalidBind)?;
+
+    let nats_config = NatsConfig::from_env(&env);
+    let connect_timeout = a2a_nats::nats_connect_timeout(&env);
+    let nats_client = trogon_nats::connect(&nats_config, connect_timeout)
+        .await
+        .map_err(RuntimeError::NatsConnect)?;
+
+    let js_context = async_nats::jetstream::new(nats_client.clone());
+    let js_client = NatsJetStreamClient::new(js_context);
+
+    let a2a_config = Config::new(prefix, nats_config);
+    let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
+
+    let client = Client::new(a2a_config, agent_id, nats_client, js_client);
+
+    let app = router::build(client);
+
+    let listener = tokio::net::TcpListener::bind(bind_addr)
+        .await
+        .map_err(RuntimeError::Io)?;
+
+    info!(address = %bind_addr, "A2A NATS server listening");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            shutdown_signal().await;
+            info!("Shutdown signal received");
+        })
+        .await
+        .map_err(RuntimeError::Io)
+}

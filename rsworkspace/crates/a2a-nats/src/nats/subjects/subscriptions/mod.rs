@@ -1,5 +1,3 @@
-//! Wildcard subscription subjects (server-side accept filters and JetStream consumer sources).
-
 pub mod agent_all;
 pub mod task_all_events;
 pub mod task_one_events;
