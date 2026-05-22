@@ -111,6 +111,12 @@ struct XaiSession {
     parent_session_id: Option<String>,
     /// Message index at which the branch was made. None for full forks.
     branched_at_index: Option<usize>,
+    /// Cumulative input tokens billed across all prompts in this session.
+    total_input_tokens: u64,
+    /// Cumulative output tokens billed across all prompts in this session.
+    total_output_tokens: u64,
+    /// Cumulative cache-read input tokens across all prompts in this session.
+    total_cache_read_tokens: u64,
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -440,6 +446,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             agent_id: self.agent_id.clone(),
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
+            total_input_tokens: session.total_input_tokens,
+            total_output_tokens: session.total_output_tokens,
+            total_cache_read_tokens: session.total_cache_read_tokens,
         }
     }
 
@@ -653,6 +662,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
 
@@ -737,6 +749,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
+                        total_input_tokens: snap.total_input_tokens,
+                        total_output_tokens: snap.total_output_tokens,
+                        total_cache_read_tokens: snap.total_cache_read_tokens,
                     },
                 );
                 info!(session_id, "xai: load_session restored from KV snapshot");
@@ -813,6 +828,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
 
@@ -860,14 +878,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             .iter()
             .map(|(id, s)| {
                 let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
-                if s.parent_session_id.is_some() || s.branched_at_index.is_some() {
-                    let mut meta = serde_json::Map::new();
-                    if let Some(ref parent_id) = s.parent_session_id {
-                        meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                let mut meta = serde_json::Map::new();
+                if let Some(ref parent_id) = s.parent_session_id {
+                    meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                }
+                if let Some(idx) = s.branched_at_index {
+                    meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                }
+                if s.total_input_tokens > 0 {
+                    meta.insert("totalInputTokens".to_string(), serde_json::json!(s.total_input_tokens));
+                    meta.insert("totalOutputTokens".to_string(), serde_json::json!(s.total_output_tokens));
+                    if s.total_cache_read_tokens > 0 {
+                        meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(s.total_cache_read_tokens));
                     }
-                    if let Some(idx) = s.branched_at_index {
-                        meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
-                    }
+                }
+                if !meta.is_empty() {
                     info = info.meta(meta);
                 }
                 info
@@ -1165,6 +1190,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let mut continuations: u32 = 0;
         const MAX_CONTINUATIONS: u32 = 5;
 
+        // Per-prompt token accumulators. Sum across all outer-loop iterations
+        // (tool rounds + continuations) so the total reflects all billed API calls.
+        let mut prompt_input_total: u64 = 0;
+        let mut prompt_output_total: u64 = 0;
+        let mut prompt_cache_read_total: u64 = 0;
+
         // Outer loop — normally executes once. Re-runs when:
         //   Stale-ID retry: a stale `previous_response_id` causes an error →
         //          retry with full history and no ID (transparent recovery).
@@ -1300,12 +1331,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     XaiEvent::Usage {
                         prompt_tokens,
                         completion_tokens,
+                        cached_tokens,
                     } => {
                         info!(
                             session_id,
-                            prompt_tokens, completion_tokens, "xai: token usage"
+                            prompt_tokens, completion_tokens, cached_tokens, "xai: token usage"
                         );
                         current_turn_usage = Some((prompt_tokens, completion_tokens));
+                        prompt_input_total += prompt_tokens;
+                        prompt_output_total += completion_tokens;
+                        prompt_cache_read_total += cached_tokens;
                         let notif = SessionNotification::new(
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
@@ -1520,11 +1555,27 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 } else if tool_rounds > 0 {
                     s.last_response_id = None;
                 }
+                s.total_input_tokens += prompt_input_total;
+                s.total_output_tokens += prompt_output_total;
+                s.total_cache_read_tokens += prompt_cache_read_total;
             }
             // If session was closed during streaming, silently discard history update.
             if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
                 let snapshot = self.build_snapshot(&session_id, s);
                 store.save(&snapshot).await;
+            }
+        } else if prompt_input_total > 0 {
+            // Canceled but tokens were already billed — save them so list_sessions
+            // reflects accurate cumulative usage even for canceled prompts.
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.total_input_tokens += prompt_input_total;
+                s.total_output_tokens += prompt_output_total;
+                s.total_cache_read_tokens += prompt_cache_read_total;
+                if let Some(store) = &self.session_store {
+                    let snapshot = self.build_snapshot(&session_id, s);
+                    store.save(&snapshot).await;
+                }
             }
         }
 
@@ -1815,6 +1866,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
     }
@@ -1834,6 +1888,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
     }
@@ -1898,6 +1955,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
     }
@@ -1917,6 +1977,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
     }
@@ -1936,6 +1999,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
             },
         );
     }
@@ -2160,6 +2226,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         let resp = agent
@@ -2206,6 +2275,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         assert_eq!(agent.test_session_count().await, 0, "session must not be in memory before load");
@@ -2239,6 +2311,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-tok".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+            total_input_tokens: 100,
+            total_output_tokens: 50,
+            total_cache_read_tokens: 25,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-tok", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "sess-tok")
+            .expect("session must appear in list after KV restore");
+        let meta = info.meta.as_ref().expect("meta must be present when token totals > 0");
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(100),
+            "totalInputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalOutputTokens").and_then(|v| v.as_u64()),
+            Some(50),
+            "totalOutputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "totalCacheReadTokens must be restored from KV snapshot"
+        );
+    }
+
+    #[tokio::test]
     async fn load_session_kv_empty_tools_re_enables_all() {
         use crate::session_store::mock::MockSessionStore;
         use crate::session_store::{SessionSnapshot, SessionStoring};
@@ -2263,6 +2393,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         agent
@@ -2326,6 +2459,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         agent
@@ -2367,6 +2503,9 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         let resp = agent
@@ -4029,6 +4168,7 @@ mod tests {
             XaiEvent::Usage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
+                cached_tokens: 0,
             },
             XaiEvent::TextDelta {
                 text: "answer".to_string(),
@@ -4780,6 +4920,7 @@ mod tests {
             XaiEvent::Usage {
                 prompt_tokens: 42,
                 completion_tokens: 10,
+                cached_tokens: 0,
             },
             XaiEvent::Done,
         ]);
@@ -5806,7 +5947,7 @@ mod tests {
 
         agent.client.push_response(vec![
             XaiEvent::TextDelta { text: "Hello!".into() },
-            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 },
+            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cached_tokens: 0 },
             XaiEvent::Done,
         ]);
         agent
@@ -6688,5 +6829,179 @@ mod tests {
         ).unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "malformed messages must return Err");
+    }
+
+    // ── token tracking ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn token_totals_accumulate_across_continuation_rounds() {
+        // Two outer-loop iterations: Incomplete on first call, Done on second.
+        // Each call reports Usage → totals must sum across both.
+        let (agent, store) = make_agent_with_store();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cached_tokens: 0 },
+            XaiEvent::Finished {
+                reason: crate::client::FinishReason::Incomplete,
+                incomplete_reason: Some("max_output_tokens".to_string()),
+            },
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cached_tokens: 0 },
+            XaiEvent::TextDelta { text: "done".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::from("continue")],
+        )).await.unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let snap = saves.last().expect("at least one save after prompt");
+        assert_eq!(snap.total_input_tokens, 30, "input tokens must sum across both rounds");
+        assert_eq!(snap.total_output_tokens, 13, "output tokens must sum across both rounds");
+        assert_eq!(snap.total_cache_read_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_saves_tokens_when_usage_received_before_cancel() {
+        // Emits Usage on first (continuation-triggering) response, then the second
+        // stream blocks forever so cancel() fires while usage has already accumulated.
+        let (agent, store) = make_agent_with_store();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::Usage { prompt_tokens: 7, completion_tokens: 3, cached_tokens: 0 },
+            XaiEvent::Finished {
+                reason: crate::client::FinishReason::Incomplete,
+                incomplete_reason: Some("max_output_tokens".to_string()),
+            },
+        ]);
+        agent.client.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+
+        let prompt_fut = agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::from("hi")],
+        ));
+        let cancel_fut = async {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            agent.cancel(CancelNotification::new(session_id.clone())).await.unwrap();
+        };
+
+        let (result, _) = tokio::join!(prompt_fut, cancel_fut);
+        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
+
+        let saves = store.saves.lock().unwrap();
+        // new_session save + cancel-path save (because prompt_input_total > 0)
+        assert!(saves.len() >= 2, "cancel must trigger store.save when usage accumulated");
+        let last = saves.last().unwrap();
+        assert_eq!(last.total_input_tokens, 7, "cancelled prompt must persist accumulated input tokens");
+        assert_eq!(last.total_output_tokens, 3, "cancelled prompt must persist accumulated output tokens");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        let agent = make_agent();
+        agent.test_insert_session("tok1", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cached_tokens: 3 },
+            XaiEvent::TextDelta { text: "answer".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            "tok1",
+            vec![ContentBlock::from("hello")],
+        )).await.unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "tok1")
+            .expect("tok1 must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be set after prompt with usage");
+        assert_eq!(meta["totalInputTokens"], 42, "totalInputTokens must equal accumulated input");
+        assert_eq!(meta["totalOutputTokens"], 7, "totalOutputTokens must equal accumulated output");
+        assert_eq!(meta["totalCacheReadTokens"], 3, "totalCacheReadTokens must equal accumulated cache reads");
+    }
+
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        let (agent, store) = make_agent_with_store();
+        let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let src_id = src.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cached_tokens: 0 },
+            XaiEvent::TextDelta { text: "text".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::from("prompt")],
+        )).await.unwrap();
+
+        let fork_resp = agent.fork_session(ForkSessionRequest::new(src_id.clone(), "/fork")).await.unwrap();
+        let fork_id = fork_resp.session_id.to_string();
+
+        let saves = store.saves.lock().unwrap();
+        let fork_snap = saves.iter().find(|s| s.id == fork_id)
+            .expect("fork snapshot must be saved to store");
+        assert_eq!(fork_snap.total_input_tokens, 0, "forked session must start with zero input tokens");
+        assert_eq!(fork_snap.total_output_tokens, 0, "forked session must start with zero output tokens");
+        assert_eq!(fork_snap.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
+    }
+
+    #[tokio::test]
+    async fn cache_read_tokens_accumulate_across_prompt() {
+        let agent = make_agent();
+        let sid = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap().session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 10 },
+            XaiEvent::TextDelta { text: "first".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("a")],
+        )).await.unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 15 },
+            XaiEvent::TextDelta { text: "second".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("b")],
+        )).await.unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == sid)
+            .expect("session must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "cache_read tokens must accumulate across prompts: 10 + 15 = 25"
+        );
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(40),
+            "input tokens must also accumulate: 20 + 20 = 40"
+        );
     }
 }

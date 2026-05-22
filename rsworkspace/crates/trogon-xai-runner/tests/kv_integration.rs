@@ -335,6 +335,9 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         parent_session_id: None,
         branched_at_index: None,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
     }
 }
 

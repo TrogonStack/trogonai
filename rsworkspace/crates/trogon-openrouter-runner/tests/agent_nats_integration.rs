@@ -10,13 +10,13 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use agent_client_protocol::{
-    Agent as _, BlobResourceContents, CloseSessionRequest, ContentBlock, EmbeddedResource,
-    EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest, PromptRequest, ResourceLink,
-    SessionNotification, TextResourceContents,
+    Agent as _, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
+    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest,
+    PromptRequest, ResourceLink, SessionNotification, TextResourceContents,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
-use futures_util::stream::{self, LocalBoxStream};
+use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
@@ -141,7 +141,7 @@ impl OpenRouterHttpClient for UsageHttpClient {
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]))
     }
 }
@@ -1499,6 +1499,290 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
             Some("act like a pirate"),
             "_meta.systemPrompt must be stored in the session state"
         );
+        })
+        .await;
+}
+
+// ── token tracking persisted to KV ───────────────────────────────────────────
+
+/// After a prompt with token usage, `totalInputTokens` and `totalOutputTokens`
+/// must appear in the SESSIONS KV snapshot.
+#[tokio::test]
+async fn token_totals_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("track my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
+            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+        })
+        .await;
+}
+
+/// After forking a session that has token totals, the fork's KV snapshot must
+/// not carry the parent's totals (zero values are omitted from JSON).
+#[tokio::test]
+async fn fork_session_token_totals_absent_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src.session_id,
+                    vec![ContentBlock::from("prompt")],
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert!(
+                v.get("total_input_tokens").is_none(),
+                "fork must not inherit parent's total_input_tokens; got: {v}"
+            );
+            assert!(
+                v.get("total_output_tokens").is_none(),
+                "fork must not inherit parent's total_output_tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cache tokens in KV ────────────────────────────────────────────────────────
+
+/// HTTP client that returns non-zero cache_read and cache_creation tokens.
+struct CacheUsageHttpClient;
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for CacheUsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        Box::pin(stream::iter(vec![
+            OpenRouterEvent::TextDelta {
+                text: "cached".to_string(),
+            },
+            OpenRouterEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cache_read_tokens: 30,
+                cache_creation_tokens: 15,
+            },
+        ]))
+    }
+}
+
+/// After a prompt with non-zero cache_read_tokens and cache_creation_tokens,
+/// both fields must be persisted to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cache_tokens_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", CacheUsageHttpClient)
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("use cache")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_cache_read_tokens"], 30,
+                "total_cache_read_tokens must be 30; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_creation_tokens"], 15,
+                "total_cache_creation_tokens must be 15; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cancel path persists tokens to KV ────────────────────────────────────────
+
+/// HTTP client that emits Usage + text then blocks forever.
+/// Signals `ready` when `chat_stream` is invoked so the test can send cancel
+/// after Usage has been processed.
+struct SlowCancelHttpClient {
+    ready: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for SlowCancelHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        self.ready.notify_one();
+        let initial = stream::iter(vec![
+            OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            },
+            OpenRouterEvent::Usage {
+                prompt_tokens: 12,
+                completion_tokens: 7,
+                cache_read_tokens: 25,
+                cache_creation_tokens: 10,
+            },
+        ]);
+        Box::pin(initial.chain(stream::pending()))
+    }
+}
+
+/// When a prompt is cancelled after the OpenRouter Usage event has been
+/// received, the cancel path must persist the billed tokens to the SESSIONS KV
+/// bucket.
+#[tokio::test]
+async fn cancel_prompt_token_totals_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let agent = Arc::new(
+        OpenRouterAgent::with_deps(
+            NoOpNotifier,
+            "test-model",
+            "dummy-key",
+            SlowCancelHttpClient {
+                ready: Arc::clone(&ready),
+            },
+        )
+        .with_session_store(Arc::new(store)),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let session_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let agent_prompt = Arc::clone(&agent);
+            let sid_for_prompt = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid_for_prompt,
+                        vec![ContentBlock::from("partial call")],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // `chat_stream` was called → Usage event is in the stream buffer.
+            // Cancel fires after Usage has been processed by the streaming loop.
+            ready.notified().await;
+            agent
+                .cancel(CancelNotification::new(session_id.clone()))
+                .await
+                .unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist after cancel with billed tokens");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 12,
+                "cancel path must persist input tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 7,
+                "cancel path must persist output tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_read_tokens"], 25,
+                "cancel path must persist cache_read tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_creation_tokens"], 10,
+                "cancel path must persist cache_creation tokens; got: {v}"
+            );
         })
         .await;
 }

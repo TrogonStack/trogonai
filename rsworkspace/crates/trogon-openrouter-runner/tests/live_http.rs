@@ -237,7 +237,7 @@ async fn happy_path_text_delta_finish_usage_done() {
     assert_eq!(events.len(), 4);
     assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hello, world!"));
     assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3 }));
+    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, .. }));
     assert!(matches!(&events[3], OpenRouterEvent::Done));
 }
 
@@ -456,7 +456,7 @@ async fn usage_in_separate_chunk_after_finish() {
 
     assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hi"));
     assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 2 }));
+    assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 2, .. }));
     assert!(matches!(&events[3], OpenRouterEvent::Done));
 }
 
@@ -864,8 +864,11 @@ async fn cancel_before_first_chunk_returns_cancelled() {
                     .unwrap()
             });
 
-            // Yield to let the prompt task start, then immediately cancel.
-            tokio::task::yield_now().await;
+            // Poll until the cancel sender is registered, then fire cancel.
+            loop {
+                if agent.test_cancel_channels_len().await > 0 { break; }
+                tokio::task::yield_now().await;
+            }
             agent
                 .cancel(CancelNotification::new(session_id))
                 .await
