@@ -13,7 +13,6 @@ use crate::jetstream::consumers::stream_events_consumer;
 use crate::jetstream::streams::events_stream_name;
 use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
-use crate::task_id::A2aTaskId;
 
 use super::error::ClientError;
 use super::event_stream::{TypedEventStream, build_event_stream};
@@ -54,7 +53,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = stream_events_consumer(prefix, &placeholder_task_id(), req_id);
+    let consumer_config = stream_events_consumer(prefix, req_id);
 
     let last_seq = Arc::new(Mutex::new(0u64));
 
@@ -85,14 +84,9 @@ where
     }
 }
 
-fn placeholder_task_id() -> A2aTaskId {
-    A2aTaskId::new("_bootstrap").expect("static bootstrap id is valid")
-}
-
 pub async fn open_task_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
-    task_id: &A2aTaskId,
     req_id: &ReqId,
 ) -> Result<TypedEventStream, ClientError>
 where
@@ -110,7 +104,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = stream_events_consumer(prefix, task_id, req_id);
+    let consumer_config = stream_events_consumer(prefix, req_id);
 
     let last_seq = Arc::new(Mutex::new(0u64));
 
@@ -276,10 +270,9 @@ mod tests {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
 
-        let task_id = A2aTaskId::new("task-1").unwrap();
         let req_id = test_req_id();
 
-        let stream = open_task_stream(&js, &test_prefix(), &task_id, &req_id).await;
+        let stream = open_task_stream(&js, &test_prefix(), &req_id).await;
         assert!(stream.is_ok());
     }
 
@@ -288,10 +281,9 @@ mod tests {
         let js = MockJetStreamConsumerFactory::new();
         js.fail_get_stream_at(1);
 
-        let task_id = A2aTaskId::new("task-1").unwrap();
         let req_id = test_req_id();
 
-        let result = open_task_stream(&js, &test_prefix(), &task_id, &req_id).await;
+        let result = open_task_stream(&js, &test_prefix(), &req_id).await;
         assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
     }
 
