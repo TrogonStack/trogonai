@@ -73,16 +73,16 @@ Concrete work items derived from **The Take** and **What's Missing**. Ordered so
 
 Goal: prove the substrate, not the policy model. Throwaway-safe.
 
-- [ ] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
-- [ ] Queue-group consumer on `mcp.gateway.request.>`; tenant comes from JWT claim (or account scope) in the envelope, not the subject.
-- [ ] JSON-RPC parser; identity extraction from NATS message headers / inbound JWT.
-- [ ] CEL evaluator embedded; one hardcoded rule covering `tools/call`.
-- [ ] SpiceDB client + one `CheckPermission` call per `tools/call`.
-- [ ] Reply correlation: forward to `mcp.server.{id}.<method>`, await reply, return to original inbox.
-- [ ] Audit envelope publisher to JetStream stream `MCP_AUDIT`; subject `mcp.audit.{outcome}.{direction}.{method_root}` (tenant in envelope payload).
+- [x] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
+- [x] Queue-group consumer on `mcp.gateway.request.>`; optional tenant via message header `trogon-mcp-tenant` (JWT / account-scoped tenancy in envelope still per Block A/B).
+- [x] JSON-RPC parser; metadata from message headers (JWT claim wiring still open).
+- [x] CEL gate (`mcp.method == "tools/call"`) selecting when the SpiceDB hook runs on `tools/call`.
+- [ ] SpiceDB client + one `CheckPermission` call per `tools/call` (Phase 1 has `PermissionChecker` + allow-all stub only).
+- [x] Reply correlation: ingress `reply` inbox preserved; gateway issues `request_with_headers` to `mcp.server.{id}.{method}` with the same payload; ingress without reply is forwarded as core publish only.
+- [x] Audit JSON envelope to JetStream (default stream `MCP_AUDIT`; subjects `{prefix}.audit.{outcome}.request.{method_root}`, tenant field in envelope when header present).
 - [ ] End-to-end test against an existing `mcp-nats` server (the test fixture in `mcp-nats/tests/transport.rs` is a good starting point).
 - [ ] Baseline latency measurement — P50, P99 added by the gateway vs. direct `mcp-nats` call. Establishes the budget for Phase 2+.
-- [ ] "Explain this decision" trace mode — given a request id, return the rules fired, the SpiceDB check result, the rewrites applied. Equivalent of `agctl trace`. Day-one, not later.
+- [x] In-memory trace by JSON-RPC request id (`trace::TraceStore`) — stand-in until `agctl trace`-style export (KV/service) lands.
 
 ### Block E — Phase 2 (CEL hardening + catalog shaping + redaction)
 
