@@ -265,7 +265,7 @@ async fn nats_factory_create_session_via_real_nats() {
 
     let factory = NatsSessionFactory::new(nats);
     let session = factory
-        .create_session(PREFIX, std::env::current_dir().unwrap())
+        .create_session(PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -336,7 +336,7 @@ async fn compact_export_compactor_import_round_trip() {
 
     let factory = NatsSessionFactory::new(nats);
     let session = factory
-        .create_session(PREFIX, std::env::current_dir().unwrap())
+        .create_session(PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 

@@ -3,6 +3,7 @@ pub mod doctor;
 pub mod fs;
 pub mod markdown;
 pub mod nats;
+pub mod mcp;
 pub mod print;
 pub mod repl;
 pub mod runtime;
@@ -17,6 +18,7 @@ pub use nats::NatsClient;
 pub use print::OutputFormat;
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
+pub use mcp::{McpConfig, McpManager, McpServerConfig};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;
