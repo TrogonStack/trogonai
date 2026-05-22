@@ -32,12 +32,14 @@ dependencies = [
  "a2a-types",
  "async-nats",
  "async-trait",
+ "futures",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]
