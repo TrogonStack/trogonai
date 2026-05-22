@@ -1,30 +1,33 @@
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
 #[derive(Debug)]
-pub struct SnapshotEncodeError {
-    source: BoxError,
+pub struct SnapshotEncodeError<Source> {
+    source: Source,
 }
 
-impl SnapshotEncodeError {
-    pub(super) fn new<E>(source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self {
-            source: Box::new(source),
-        }
+impl<Source> SnapshotEncodeError<Source> {
+    pub(super) fn new(source: Source) -> Self {
+        Self { source }
+    }
+
+    pub fn source(&self) -> &Source {
+        &self.source
     }
 }
 
-impl std::fmt::Display for SnapshotEncodeError {
+impl<Source> std::fmt::Display for SnapshotEncodeError<Source>
+where
+    Source: std::fmt::Display,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "failed to encode snapshot payload: {}", self.source)
     }
 }
 
-impl std::error::Error for SnapshotEncodeError {
+impl<Source> std::error::Error for SnapshotEncodeError<Source>
+where
+    Source: std::error::Error + 'static,
+{
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source.as_ref())
+        Some(&self.source)
     }
 }
 

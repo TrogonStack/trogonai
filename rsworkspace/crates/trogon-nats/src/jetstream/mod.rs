@@ -29,14 +29,16 @@ pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
-    JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
-    JetStreamKeyValueUpdate, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
-    JsMessageOf,
+    JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
+    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
+    JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
+    JetStreamPublisher, JsMessageOf,
 };
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{
     AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamContext,
-    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublisher, MockJetStreamStream, MockJsMessage,
-    MockObjectStore,
+    MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage, MockJetStreamPublisher,
+    MockJetStreamStream, MockJsMessage, MockKvEntryOutcome, MockKvGetOutcome, MockObjectStore,
+    MockPublishedOutboundMessage,
 };
