@@ -228,7 +228,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         let dest = root.join("TROGON.md");
                         if fs.read_to_string(&dest).is_ok() && !force {
                             println!(
-                                "TROGON.md already exists at {}\nRun /init --force to overwrite.",
+                                "TROGON.md already exists at {}\nRun \x1b[35m/init --force\x1b[0m to overwrite.",
                                 dest.display()
                             );
                         } else {
@@ -381,18 +381,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             if reason == "cancelled" {
                                                 eprintln!("\n[cancelled]");
                                             } else if reason == "maxTurnRequests" {
-                                                eprintln!("\n\x1b[33m[max tool rounds reached — try rephrasing or using /compact]\x1b[0m");
+                                                eprintln!("\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m");
                                             } else {
                                                 println!();
                                                 if session_context_size > 0 {
                                                     let pct = session_used_tokens * 100 / session_context_size;
                                                     eprintln!(
-                                                        "\x1b[2m[tokens: {}/{} ({}%)]\x1b[0m",
+                                                        "\x1b[90m[tokens: {}/{} ({}%)]\x1b[0m",
                                                         fmt_tokens(session_used_tokens),
                                                         fmt_tokens(session_context_size),
                                                         pct,
                                                     );
                                                 }
+                                                eprintln!();
                                             }
                                             let _ = stdout.flush();
                                             break;
@@ -469,21 +470,24 @@ fn handle_slash_command<F: Fs>(
     fs: &F,
 ) -> String {
     match cmd {
-        "/help" => "\
+        "/help" => {
+            let m = "\x1b[35m";
+            let r = "\x1b[0m";
+            format!("\
 Commands:
-  /help               show this help
-  /cost               show token usage for this session
-  /clear              start a new session (clears conversation history)
-  /compact            force context compaction now
-  /config             show config  |  /config set <key> <value>
-  /model              show current model  |  /model <id> change model
-  /init               analyze project with AI and generate TROGON.md
-  /init --force       overwrite existing TROGON.md
+  {m}/help{r}               show this help
+  {m}/cost{r}               show token usage for this session
+  {m}/clear{r}              start a new session (clears conversation history)
+  {m}/compact{r}            force context compaction now
+  {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
+  {m}/model{r}              show current model  |  {m}/model{r} <id> change model
+  {m}/init{r}               analyze project with AI and generate TROGON.md
+  {m}/init --force{r}       overwrite existing TROGON.md
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
-Ctrl+D    quit"
-            .to_string(),
+Ctrl+D    quit")
+        }
 
         "/cost" => {
             if context_size == 0 {
@@ -509,7 +513,7 @@ Ctrl+D    quit"
                     .and_then(|v| v.as_str())
                     .unwrap_or("claude-sonnet-4-6")
                     .to_string();
-                format!("current model: {model}\nchange with: /model <model-id>")
+                format!("current model: {model}\nchange with: \x1b[35m/model\x1b[0m <model-id>")
             } else {
                 let model = arg.trim();
                 let mut cfg = read_config(fs);
@@ -521,7 +525,7 @@ Ctrl+D    quit"
             }
         }
 
-        other => format!("unknown command: {other}  (type /help for a list)"),
+        other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
 }
 
