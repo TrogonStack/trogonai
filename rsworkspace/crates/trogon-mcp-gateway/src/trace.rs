@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
+use crate::authz::IdentitySource;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct DecisionTrace {
     pub subject_in: String,
@@ -12,6 +14,10 @@ pub struct DecisionTrace {
     pub jsonrpc_method: String,
     pub cel_requires_spicedb: bool,
     pub spicedb_allowed: Option<bool>,
+    pub tenant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_sub: Option<String>,
+    pub identity_source: IdentitySource,
 }
 
 #[derive(Clone, Default)]

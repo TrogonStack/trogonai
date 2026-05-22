@@ -3,6 +3,7 @@
 pub mod audit;
 pub mod authz;
 pub mod gateway;
+pub mod jwt;
 pub mod policy;
 pub mod rpc_codes;
 pub mod spicedb;

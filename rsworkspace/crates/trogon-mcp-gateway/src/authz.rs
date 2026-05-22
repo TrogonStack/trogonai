@@ -3,10 +3,30 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use serde::Serialize;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentitySource {
+    Jwt,
+    LegacyHeader,
+    Anonymous,
+}
+
+#[derive(Clone, Debug)]
+pub struct GatewayIdentity {
+    pub tenant: Option<String>,
+    pub caller_sub: Option<String>,
+    pub issuer: Option<String>,
+    pub jti: Option<String>,
+    pub source: IdentitySource,
+}
 
 #[derive(Clone, Debug)]
 pub struct AuthzContext<'a> {
     pub tenant: Option<&'a str>,
+    pub caller_sub: Option<&'a str>,
+    pub identity_source: IdentitySource,
     pub server_id: &'a str,
     pub jsonrpc_method: &'a str,
     pub tool_name: Option<&'a str>,

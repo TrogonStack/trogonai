@@ -7,6 +7,8 @@ use async_nats::jetstream::stream;
 use serde::Serialize;
 use tracing::warn;
 
+use crate::authz::IdentitySource;
+
 #[derive(Debug, Serialize)]
 pub struct AuditEnvelope {
     pub subject_in: String,
@@ -15,6 +17,11 @@ pub struct AuditEnvelope {
     pub direction: &'static str,
     pub jsonrpc_method: String,
     pub tenant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_sub: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jwt_issuer: Option<String>,
+    pub identity_source: IdentitySource,
     pub request_id: Option<serde_json::Value>,
 }
 
