@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::ToolContext;
 
 const MAX_OUTPUT: usize = 4 * 1024;
+const MAX_COMMIT_MESSAGE_BYTES: usize = 10_000;
 
 async fn run_git(cwd: &str, args: &[&str]) -> String {
     let output = tokio::process::Command::new("git")
@@ -58,6 +59,15 @@ pub async fn commit(ctx: &ToolContext, input: &Value) -> String {
         Some(m) if !m.trim().is_empty() => m,
         _ => return "Error: `message` is required for git_commit".to_string(),
     };
+    if message.contains('\0') {
+        return "Error: commit message must not contain NUL bytes".to_string();
+    }
+    if message.len() > MAX_COMMIT_MESSAGE_BYTES {
+        return format!(
+            "Error: commit message too long ({} bytes, max {MAX_COMMIT_MESSAGE_BYTES})",
+            message.len()
+        );
+    }
 
     if input.get("all").and_then(|v| v.as_bool()) == Some(true) {
         let staged = run_git(&ctx.cwd, &["add", "-A"]).await;

@@ -94,8 +94,9 @@ pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
     }
     candidates.reverse();
 
+    let count = candidates.len();
     for (i, path) in candidates.into_iter().enumerate() {
-        let label = if i == 0 {
+        let label = if i + 1 == count {
             "project root".into()
         } else {
             format!("ancestor {}", path.parent().map(|p| p.display().to_string()).unwrap_or_default())

@@ -63,6 +63,13 @@ fn extract_output(raw: Option<&Value>, _content: Option<&[ToolCallContent]>) -> 
                 return s.to_string();
             }
         }
+        // Non-string JSON value (object/array) — serialize so the output is visible.
+        if !raw.is_null() {
+            let serialized = raw.to_string();
+            if !serialized.is_empty() {
+                return serialized;
+            }
+        }
     }
     String::new()
 }

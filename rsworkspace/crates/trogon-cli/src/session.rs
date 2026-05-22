@@ -480,9 +480,25 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let export_params = json!({ "sessionId": session_id });
             let export_val =
                 ext_method(nats, &prefix, "session/export", export_params).await?;
-            let portable: Vec<PortableMessage> = serde_json::from_value(export_val).map_err(|e| {
-                anyhow::anyhow!("session/export returned invalid messages: {e}")
-            })?;
+            let export_str = serde_json::to_string(&export_val)
+                .map_err(|e| anyhow::anyhow!("session/export encode error: {e}"))?;
+            let portable: Vec<PortableMessage> =
+                match trogon_runner_tools::parse_export_json(&export_str)
+                    .map_err(|e| anyhow::anyhow!("session/export returned invalid messages: {e}"))?
+                {
+                    trogon_runner_tools::ParsedExport::V1(v1) => v1
+                        .into_iter()
+                        .map(|m| PortableMessage { role: m.role, text: m.text })
+                        .collect(),
+                    trogon_runner_tools::ParsedExport::V2(v2) => v2
+                        .messages
+                        .iter()
+                        .map(|m| {
+                            let pm = trogon_runner_tools::v2_message_to_text(m);
+                            PortableMessage { role: pm.role, text: pm.text }
+                        })
+                        .collect(),
+                };
 
             if portable.is_empty() {
                 return Ok(CompactResult {

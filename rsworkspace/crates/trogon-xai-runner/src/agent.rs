@@ -1088,16 +1088,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
-            match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
-                Ok(Some(compacted)) => {
-                    history = xai_history_from_wire(compacted);
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history = history.clone();
-                        s.last_response_id = None;
-                    }
-                }
-                Ok(None) | Err(_) => {}
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+                history = xai_history_from_wire(compacted);
+                // Intentionally not writing back to s.history here: the post-turn
+                // compact_or_trim_xai_history will persist the compacted history after
+                // the response is appended.  Writing here would race with concurrent
+                // prompts that also hold the lock and append to s.history.
             }
         }
 
