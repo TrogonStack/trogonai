@@ -214,13 +214,17 @@ where
                 message = scheduler_watcher.next() => {
                     match message {
                         Some(Ok(message)) => {
-                            let (change, rollback) = match handle_scheduler_message(&mut desired_jobs, &message).await {
+                            let scheduler_event = match handle_scheduler_message(&mut desired_jobs, &message).await {
                                 Ok(result) => result,
                                 Err(error) => {
                                     tracing::error!(error = %error, "Failed to apply scheduler event");
                                     nak_scheduler_message(&message).await;
                                     continue;
                                 }
+                            };
+                            let Some((change, rollback)) = scheduler_event else {
+                                ack_scheduler_message(&message).await;
+                                continue;
                             };
                             if let Err(error) = apply_scheduler_change(&self.schedule_publisher, &change).await {
                                 tracing::error!(error = %error, "Failed to publish scheduler change");
@@ -392,10 +396,16 @@ async fn rebuild_scheduler_state_from_stream(
         let reached_bootstrap_tail = sequence >= last_sequence;
 
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
             .decode::<v1::JobEvent>()
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
+        let Some(data) = data.into_decoded() else {
+            if reached_bootstrap_tail {
+                break;
+            }
+            continue;
+        };
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let _ = apply_scheduler_event(&mut desired_jobs, &stream_id, &data)?;
         if reached_bootstrap_tail {
             break;
@@ -485,18 +495,21 @@ fn apply_scheduler_event(
 async fn handle_scheduler_message(
     desired_jobs: &mut DesiredJobs,
     message: &jetstream::Message,
-) -> Result<(SchedulerChange, DesiredJobsRollback), CronError> {
+) -> Result<Option<(SchedulerChange, DesiredJobsRollback)>, CronError> {
     let event = decode_recorded_watch_message(message)?;
-    let stream_id = job_id_from_event_subject(event.stream_id())?;
     let data = event
         .decode::<v1::JobEvent>()
         .map_err(|source| CronError::event_source("failed to decode watched scheduler event payload", source))?;
+    let Some(data) = data.into_decoded() else {
+        return Ok(None);
+    };
+    let stream_id = job_id_from_event_subject(event.stream_id())?;
     let rollback = DesiredJobsRollback {
         stream_id: stream_id.clone(),
         previous: desired_jobs.get(&stream_id).cloned(),
     };
     match apply_scheduler_event(desired_jobs, &stream_id, &data) {
-        Ok(change) => Ok((change, rollback)),
+        Ok(change) => Ok(Some((change, rollback))),
         Err(error) => {
             rollback.clone().restore(desired_jobs);
             Err(error)

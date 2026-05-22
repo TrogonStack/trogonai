@@ -18,8 +18,8 @@ use crate::stream::{
     StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
-    Decider, Event, EventDecode, EventEncode, EventId, EventIdentity, EventType, Events, Headers, StreamEvent,
-    WritePrecondition,
+    Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
+    StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
 use trogon_std::{NowV7, UuidV7Generator};
@@ -821,10 +821,15 @@ where
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     for stream_event in stream_events {
-        let event = stream_event
+        match stream_event
             .decode::<C::Event>()
-            .map_err(ReplayStreamError::DecodeEvent)?;
-        state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
+            .map_err(ReplayStreamError::DecodeEvent)?
+        {
+            EventDecodeOutcome::Decoded(event) => {
+                state = C::evolve(state, &event).map_err(ReplayStreamError::Evolve)?;
+            }
+            EventDecodeOutcome::Skipped => {}
+        }
     }
 
     Ok(state)
@@ -844,8 +849,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        Decision, EventData, EventDecode, EventEncode, EventIdentity, EventType, ReadSnapshotResponse,
-        ReadStreamResponse, SnapshotType, StreamEvent, WriteSnapshotResponse,
+        Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventType,
+        ReadSnapshotResponse, ReadStreamResponse, SnapshotType, StreamEvent, WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -1202,8 +1207,12 @@ mod tests {
     impl EventDecode for TestEvent {
         type Error = serde_json::Error;
 
-        fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
-            serde_json::from_slice(event.payload)
+        fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
+            if event.event_type == "ignored" {
+                return Ok(EventDecodeOutcome::Skipped);
+            }
+
+            serde_json::from_slice(event.payload).map(EventDecodeOutcome::Decoded)
         }
     }
 
@@ -1319,6 +1328,17 @@ mod tests {
             },
         );
         event.event.content = b"not-json".to_vec();
+        event
+    }
+
+    fn skipped_stream_event(sequence: u64) -> StreamEvent {
+        let mut event = stream_event(
+            sequence,
+            TestEvent::Removed {
+                id: "alpha".to_string(),
+            },
+        );
+        event.event.r#type = "ignored".to_string();
         event
     }
 
@@ -1938,6 +1958,34 @@ mod tests {
             runtime.stream_write_preconditions.lock().unwrap().as_slice(),
             &[StreamWritePrecondition::At(position(7))]
         );
+    }
+
+    #[test]
+    fn replay_skips_events_outside_the_decider_event_set() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(2)),
+            stream_events: vec![
+                skipped_stream_event(1),
+                stream_event(
+                    2,
+                    TestEvent::Registered {
+                        id: "alpha".to_string(),
+                    },
+                ),
+            ],
+            stream_position: position(3),
+            ..Default::default()
+        };
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+        assert_eq!(result.state, TestState::Present { enabled: false });
+        assert_eq!(
+            runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+            &[StreamWritePrecondition::At(position(2))]
+        );
+        assert_eq!(runtime.appended_events.lock().unwrap()[0].r#type, "state_changed");
     }
 
     #[test]

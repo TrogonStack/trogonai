@@ -12,7 +12,7 @@ mod stream_event;
 
 use crate::headers::Headers;
 
-pub use codec::{EventData, EventDecode, EventEncode, EventPayloadError};
+pub use codec::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError};
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;
@@ -34,7 +34,9 @@ pub struct Event {
 mod tests {
     use super::*;
     use crate::headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError};
-    use crate::{EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamPosition};
+    use crate::{
+        EventData, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, StreamPosition,
+    };
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize, de::DeserializeOwned};
     use std::str::FromStr;
@@ -104,8 +106,8 @@ mod tests {
     impl EventDecode for TestEvent {
         type Error = serde_json::Error;
 
-        fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
-            decode_json(event.payload)
+        fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
+            decode_json(event.payload).map(EventDecodeOutcome::Decoded)
         }
     }
 
@@ -149,6 +151,8 @@ mod tests {
         assert_eq!(event.r#type, "TestEvent");
         assert_eq!(
             TestEvent::decode(EventData::new(&event.r#type, &event.content))
+                .unwrap()
+                .into_decoded()
                 .unwrap()
                 .value,
             "beta"
@@ -216,6 +220,8 @@ mod tests {
         assert_eq!(
             TestEvent::decode(EventData::new(&event.r#type, &event.content))
                 .unwrap()
+                .into_decoded()
+                .unwrap()
                 .id,
             "alpha"
         );
@@ -226,7 +232,10 @@ mod tests {
             stream_position: position(1),
             recorded_at: DateTime::<Utc>::from_timestamp(1_700_000_001, 0).unwrap(),
         };
-        assert_eq!(recorded.decode::<TestEvent>().unwrap().id, "alpha");
+        assert_eq!(
+            recorded.decode::<TestEvent>().unwrap().into_decoded().unwrap().id,
+            "alpha"
+        );
     }
 
     #[test]
@@ -239,7 +248,10 @@ mod tests {
 
         let generated = encode_event(&event, &UuidV7Generator, &headers);
         assert_eq!(
-            TestEvent::decode(EventData::new(&generated.r#type, &generated.content)).unwrap(),
+            TestEvent::decode(EventData::new(&generated.r#type, &generated.content))
+                .unwrap()
+                .into_decoded()
+                .unwrap(),
             event
         );
         assert_eq!(
@@ -259,7 +271,7 @@ mod tests {
 
         assert_eq!(recorded.stream_id(), "alpha");
         assert_eq!(recorded.stream_position, position(7));
-        assert_eq!(recorded.decode::<TestEvent>().unwrap(), event);
+        assert_eq!(recorded.decode::<TestEvent>().unwrap().into_decoded().unwrap(), event);
         assert_eq!(recorded.event.headers, headers);
     }
 

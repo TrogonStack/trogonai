@@ -387,13 +387,20 @@ where
         }
         let reached_tail = sequence >= info.state.last_sequence;
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event.decode::<v1::JobEvent>().map_err(|source| {
             CronError::event_source(
                 "failed to decode job event during cron jobs read-model catch-up",
                 source,
             )
         })?;
+        let Some(data) = data.into_decoded() else {
+            write_read_model_checkpoint(&bucket, sequence).await?;
+            if reached_tail {
+                break;
+            }
+            continue;
+        };
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         if let Some(change) = apply_event_to_read_model_state(&mut states, &stream_id, &data)? {
             apply_projection_change(&bucket, &change).await?;
         }
@@ -430,6 +437,9 @@ pub(crate) async fn project_appended_events(
     for event in events {
         let decoded = v1::JobEvent::decode(EventData::new(&event.r#type, &event.content))
             .map_err(|source| CronError::event_source("failed to decode job event for cron jobs read model", source))?;
+        let Some(decoded) = decoded.into_decoded() else {
+            continue;
+        };
         if let Some(change) = apply_event_to_read_model_state(&mut states, job_id, &decoded)? {
             apply_projection_change(bucket, &change).await?;
         }
@@ -502,10 +512,16 @@ async fn rebuild_jobs_from_stream(
         }
         let reached_tail = sequence >= last_sequence;
         let event = decode_recorded_watch_message(&message)?;
-        let stream_id = job_id_from_event_subject(event.stream_id())?;
         let data = event
             .decode::<v1::JobEvent>()
             .map_err(|source| CronError::event_source("failed to decode recorded job event payload", source))?;
+        let Some(data) = data.into_decoded() else {
+            if reached_tail {
+                break;
+            }
+            continue;
+        };
+        let stream_id = job_id_from_event_subject(event.stream_id())?;
         apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
         if reached_tail {
             break;
@@ -564,18 +580,19 @@ fn prepare_watched_projection_change(
         }
     };
 
-    let stream_id = match job_id_from_event_subject(event.stream_id()) {
-        Ok(stream_id) => stream_id,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to derive watched cron job stream id from subject");
-            return None;
-        }
-    };
-
     let data = match event.decode::<v1::JobEvent>() {
         Ok(data) => data,
         Err(error) => {
             tracing::error!(error = %error, "Failed to decode watched cron job event payload");
+            return None;
+        }
+    };
+    let data = data.into_decoded()?;
+
+    let stream_id = match job_id_from_event_subject(event.stream_id()) {
+        Ok(stream_id) => stream_id,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to derive watched cron job stream id from subject");
             return None;
         }
     };

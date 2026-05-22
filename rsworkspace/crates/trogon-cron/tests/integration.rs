@@ -430,7 +430,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let events = stream
         .events
         .iter()
-        .map(|event| event.decode::<v1::JobEvent>().unwrap())
+        .map(|event| event.decode::<v1::JobEvent>().unwrap().into_decoded().unwrap())
         .collect::<Vec<_>>();
     assert!(matches!(&events[0].event, Some(JobEventCase::JobAdded(_))));
     assert!(matches!(&events[1].event, Some(JobEventCase::JobPaused(_))));

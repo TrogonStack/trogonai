@@ -63,7 +63,8 @@ pub mod snapshot;
 pub mod stream;
 
 pub use event::{
-    Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventPayloadError, EventType, StreamEvent,
+    Event, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventPayloadError,
+    EventType, StreamEvent,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;

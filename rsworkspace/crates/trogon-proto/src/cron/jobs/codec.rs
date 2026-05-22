@@ -1,7 +1,7 @@
 use buffa::Message as _;
 use trogon_decider_runtime::{
-    EventData, EventDecode, EventEncode, EventIdentity, EventPayloadError, EventType, SnapshotPayloadData,
-    SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventPayloadError, EventType,
+    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
 };
 
 use super::{JobEventCase, state_v1, v1};
@@ -35,7 +35,7 @@ impl EventEncode for v1::JobEvent {
 impl EventDecode for v1::JobEvent {
     type Error = JobEventPayloadError;
 
-    fn decode(event: EventData<'_>) -> Result<Self, Self::Error> {
+    fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
         decode_job_event_payload(event)
     }
 }
@@ -58,8 +58,11 @@ fn encode_job_event_payload(event: &v1::JobEvent) -> Result<Vec<u8>, JobEventPay
         .ok_or(JobEventPayloadError::MissingEvent)
 }
 
-fn decode_job_event_payload(event: EventData<'_>) -> Result<v1::JobEvent, JobEventPayloadError> {
-    decode_job_event_case(event).map(|event| v1::JobEvent { event: Some(event) })
+fn decode_job_event_payload(event: EventData<'_>) -> Result<EventDecodeOutcome<v1::JobEvent>, JobEventPayloadError> {
+    match decode_job_event_case(event)? {
+        Some(event) => Ok(EventDecodeOutcome::Decoded(v1::JobEvent { event: Some(event) })),
+        None => Ok(EventDecodeOutcome::Skipped),
+    }
 }
 
 fn job_event_type(event: &v1::JobEvent) -> Result<&'static str, JobEventPayloadError> {
@@ -79,16 +82,16 @@ fn encode_job_event_case(event: &JobEventCase) -> Vec<u8> {
     }
 }
 
-fn decode_job_event_case(event: EventData<'_>) -> Result<JobEventCase, JobEventPayloadError> {
+fn decode_job_event_case(event: EventData<'_>) -> Result<Option<JobEventCase>, JobEventPayloadError> {
     let Some(event) = decode_event_case::<v1::JobAdded, JobEventCase>(&event)
         .or_else(|| decode_event_case::<v1::JobPaused, JobEventCase>(&event))
         .or_else(|| decode_event_case::<v1::JobResumed, JobEventCase>(&event))
         .or_else(|| decode_event_case::<v1::JobRemoved, JobEventCase>(&event))
     else {
-        return Err(JobEventPayloadError::unknown_event_type(event.event_type));
+        return Ok(None);
     };
 
-    event.map_err(JobEventPayloadError::Decode)
+    event.map(Some).map_err(JobEventPayloadError::Decode)
 }
 
 fn job_event_case_type(event: &JobEventCase) -> &'static str {
@@ -124,7 +127,7 @@ impl SnapshotPayloadDecode for state_v1::State {
 mod tests {
     use buffa::{Message as _, MessageField};
     use trogon_decider_runtime::{
-        EventData, EventDecode, EventEncode, EventType, SnapshotPayloadData, SnapshotPayloadDecode,
+        EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, SnapshotPayloadData, SnapshotPayloadDecode,
         SnapshotPayloadEncode,
     };
 
@@ -188,14 +191,15 @@ mod tests {
         ))
         .unwrap();
 
+        let decoded = decoded.into_decoded().unwrap();
         assert!(matches!(decoded.event, Some(JobEventCase::JobAdded(_))));
     }
 
     #[test]
-    fn event_decode_rejects_unknown_event_type() {
+    fn event_decode_skips_unknown_event_type() {
         assert!(matches!(
             <v1::JobEvent as EventDecode>::decode(EventData::new("trogon.cron.jobs.v1.Unknown", &[])),
-            Err(JobEventPayloadError::UnknownEventType { event_type }) if event_type == "trogon.cron.jobs.v1.Unknown"
+            Ok(EventDecodeOutcome::Skipped)
         ));
     }
 

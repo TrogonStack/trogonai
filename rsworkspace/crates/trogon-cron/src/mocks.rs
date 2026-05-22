@@ -477,6 +477,9 @@ impl StreamAppend<str> for MockCronStore {
                 .map_err(|source| CronError::event_source("failed to decode mocked job event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
+            let Some(event) = event.into_decoded() else {
+                continue;
+            };
             match &event.event {
                 Some(JobEventCase::JobAdded(inner)) => {
                     let details = inner.job.as_option().ok_or_else(|| {

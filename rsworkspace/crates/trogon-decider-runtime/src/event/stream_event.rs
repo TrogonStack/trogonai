@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{Event, EventData, EventDecode, StreamPosition};
+use crate::{Event, EventData, EventDecode, EventDecodeOutcome, StreamPosition};
 
 /// Event envelope returned from a concrete stream.
 ///
@@ -25,7 +25,7 @@ impl StreamEvent {
     }
 
     /// Decodes the enclosed event payload as a domain event.
-    pub fn decode<E>(&self) -> Result<E, E::Error>
+    pub fn decode<E>(&self) -> Result<EventDecodeOutcome<E>, E::Error>
     where
         E: EventDecode,
     {
