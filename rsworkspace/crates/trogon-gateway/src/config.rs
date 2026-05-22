@@ -13,7 +13,10 @@ use crate::source::linear::config::LinearWebhookSecret;
 use crate::source::microsoft_graph::MicrosoftGraphClientState;
 use crate::source::notion::NotionVerificationToken;
 use crate::source::sentry::SentryClientSecret;
-use crate::source::slack::config::SlackSigningSecret;
+use crate::source::slack::config::{
+    SlackAppToken, SlackSigningSecret, SlackSocketModeConfig as SlackSocketModeSourceConfig, SlackTransportConfig,
+    SlackWebhookConfig as SlackWebhookSourceConfig,
+};
 use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
@@ -69,6 +72,17 @@ impl fmt::Display for DurationTooLong {
 impl std::error::Error for DurationTooLong {}
 
 const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
+
+#[derive(Debug)]
+struct SlackTransportConflict;
+
+impl fmt::Display for SlackTransportConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("configure exactly one of webhook or socket_mode")
+    }
+}
+
+impl std::error::Error for SlackTransportConflict {}
 
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(untagged)]
@@ -434,7 +448,7 @@ struct DiscordConfig {
 struct SlackConfig {
     status: Option<String>,
     #[config(default = {})]
-    integrations: BTreeMap<String, SourceIntegrationInput<SlackWebhookConfig>>,
+    integrations: BTreeMap<String, SlackIntegrationInput>,
 }
 
 #[derive(Config)]
@@ -514,6 +528,18 @@ struct SourceIntegrationInput<T> {
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct SlackIntegrationInput {
+    status: Option<String>,
+    subject_prefix: Option<String>,
+    stream_name: Option<String>,
+    stream_max_age_secs: Option<u64>,
+    nats_ack_timeout_secs: Option<u64>,
+    webhook: Option<SlackWebhookConfig>,
+    socket_mode: Option<SlackSocketModeConfig>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GithubWebhookConfig {
     webhook_secret: Option<SecretInput>,
 }
@@ -523,6 +549,12 @@ struct GithubWebhookConfig {
 struct SlackWebhookConfig {
     signing_secret: Option<SecretInput>,
     timestamp_max_drift_secs: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SlackSocketModeConfig {
+    app_token: Option<SecretInput>,
 }
 
 #[derive(serde::Deserialize)]
@@ -877,25 +909,6 @@ fn resolve_slack_integrations(
         if !resolve_integration_source_status("slack", &id, integration.status.as_deref(), errors) {
             continue;
         }
-        let Some(webhook) = integration.webhook else {
-            continue;
-        };
-        let Some(secret) = require_integration_value("slack", &id, "signing_secret", webhook.signing_secret, errors)
-        else {
-            continue;
-        };
-        let signing_secret = match SlackSigningSecret::new(secret) {
-            Ok(secret) => secret,
-            Err(error) => {
-                errors.push(ConfigValidationError::invalid_integration(
-                    "slack",
-                    &id,
-                    "signing_secret",
-                    error,
-                ));
-                continue;
-            }
-        };
         let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
             CommonIntegrationFieldsInput {
                 source: "slack",
@@ -912,35 +925,109 @@ fn resolve_slack_integrations(
         ) else {
             continue;
         };
-        let timestamp_max_drift = match NonZeroDuration::from_secs(
-            webhook
-                .timestamp_max_drift_secs
-                .unwrap_or(DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS),
-        ) {
-            Ok(duration) => duration,
-            Err(error) => {
-                errors.push(ConfigValidationError::invalid_integration(
-                    "slack",
-                    &id,
-                    "timestamp_max_drift_secs",
-                    error,
-                ));
-                continue;
-            }
+        let transport = match resolve_slack_transport(&id, integration.webhook, integration.socket_mode, errors) {
+            Some(transport) => transport,
+            None => continue,
         };
         integrations.push(SourceIntegration::new(
             id,
             crate::source::slack::SlackConfig {
-                signing_secret,
                 subject_prefix,
                 stream_name,
                 stream_max_age,
                 nats_ack_timeout,
-                timestamp_max_drift,
+                transport,
             },
         ));
     }
     integrations
+}
+
+fn resolve_slack_transport(
+    id: &SourceIntegrationId,
+    webhook: Option<SlackWebhookConfig>,
+    socket_mode: Option<SlackSocketModeConfig>,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<SlackTransportConfig> {
+    match (webhook, socket_mode) {
+        (Some(webhook), None) => resolve_slack_webhook_transport(id, webhook, errors),
+        (None, Some(socket_mode)) => resolve_slack_socket_mode_transport(id, socket_mode, errors),
+        (Some(_), Some(_)) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "transport",
+                SlackTransportConflict,
+            ));
+            None
+        }
+        (None, None) => None,
+    }
+}
+
+fn resolve_slack_webhook_transport(
+    id: &SourceIntegrationId,
+    webhook: SlackWebhookConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<SlackTransportConfig> {
+    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, errors)?;
+    let signing_secret = match SlackSigningSecret::new(secret) {
+        Ok(secret) => secret,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "signing_secret",
+                error,
+            ));
+            return None;
+        }
+    };
+    let timestamp_max_drift = match NonZeroDuration::from_secs(
+        webhook
+            .timestamp_max_drift_secs
+            .unwrap_or(DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS),
+    ) {
+        Ok(duration) => duration,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "timestamp_max_drift_secs",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(SlackTransportConfig::Webhook(SlackWebhookSourceConfig {
+        signing_secret,
+        timestamp_max_drift,
+    }))
+}
+
+fn resolve_slack_socket_mode_transport(
+    id: &SourceIntegrationId,
+    socket_mode: SlackSocketModeConfig,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Option<SlackTransportConfig> {
+    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, errors)?;
+    let app_token = match SlackAppToken::new(token) {
+        Ok(token) => token,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid_integration(
+                "slack",
+                id,
+                "app_token",
+                error,
+            ));
+            return None;
+        }
+    };
+
+    Some(SlackTransportConfig::SocketMode(SlackSocketModeSourceConfig {
+        app_token,
+    }))
 }
 
 fn resolve_telegram_integrations(
@@ -1869,6 +1956,15 @@ signing_secret = "{secret}"
         )
     }
 
+    fn slack_socket_mode_toml(token: &str) -> String {
+        format!(
+            r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "{token}"
+"#
+        )
+    }
+
     fn telegram_toml(secret: &str) -> String {
         format!(
             r#"
@@ -2274,6 +2370,68 @@ TROGON_SOURCE_DISCORD_BOT_TOKEN = "Bot my-bot-token"
         let f = write_toml(&slack_toml("slack-signing-secret"));
         let cfg = load(Some(f.path())).expect("load failed");
         assert!(!cfg.slack.is_empty());
+        assert!(cfg.slack[0].config.webhook().is_some());
+        assert!(cfg.slack[0].config.socket_mode().is_none());
+    }
+
+    #[test]
+    fn slack_socket_mode_resolves_with_valid_app_token() {
+        let f = write_toml(&slack_socket_mode_toml("xapp-test-token"));
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(!cfg.slack.is_empty());
+        assert!(cfg.slack[0].config.webhook().is_none());
+        assert!(cfg.slack[0].config.socket_mode().is_some());
+    }
+
+    #[test]
+    fn slack_socket_mode_missing_app_token_is_invalid() {
+        let toml = r#"
+[sources.slack.integrations.primary.socket_mode]
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: missing app_token")))
+        );
+    }
+
+    #[test]
+    fn slack_disabled_socket_mode_integration_is_skipped() {
+        let toml = r#"
+[sources.slack.integrations.primary]
+status = "disabled"
+
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        assert!(cfg.slack.is_empty());
+    }
+
+    #[test]
+    fn slack_socket_mode_rejects_non_app_token() {
+        let f = write_toml(&slack_socket_mode_toml("xoxb-bot-token"));
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid app_token: must start with xapp-")))
+        );
+    }
+
+    #[test]
+    fn slack_integration_rejects_webhook_and_socket_mode_together() {
+        let toml = r#"
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+        let f = write_toml(toml);
+        let result = load(Some(f.path()));
+        assert!(
+            matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: invalid transport: configure exactly one of webhook or socket_mode")))
+        );
     }
 
     #[test]
