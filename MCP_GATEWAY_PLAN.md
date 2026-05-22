@@ -77,7 +77,7 @@ Goal: prove the substrate, not the policy model. Throwaway-safe.
 
 - [x] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
 - [x] Queue-group consumer on `mcp.gateway.request.>`; optional tenant via message header `trogon-mcp-tenant` (JWT / account-scoped tenancy in envelope still per Block A/B).
-- [x] JSON-RPC parser; metadata from message headers (JWT claim wiring still open).
+- [x] JSON-RPC parser; metadata from message headers; **verified workload JWT** ingress (`MCP_GATEWAY_JWT_*`, JWKS / static RSA PEM / HS256; phased `off` / `validate` / `require` on SpiceDB-gated RPC; **`trogon-mcp-tenant` stripped on egress when JWT ingress is active**; SpiceDB subject prefers JWT `sub` over forgeable tenant header).
 - [x] CEL gate (`mcp.method == "tools/call" || mcp.method == "resources/read"`) selecting when the SpiceDB hook runs on those methods.
 - [x] SpiceDB client (`spicedb-rs-client`) + one `CheckPermission` per gated `tools/call` or `resources/read` when `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (allow-all when unset).
 - [x] Reply correlation: ingress `reply` inbox preserved; gateway issues `request_with_headers` to `mcp.server.{id}.{method}` with the same payload; ingress without reply is forwarded as core publish only.
