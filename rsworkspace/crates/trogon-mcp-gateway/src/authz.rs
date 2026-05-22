@@ -13,6 +13,17 @@ pub enum IdentitySource {
     Anonymous,
 }
 
+impl IdentitySource {
+    #[must_use]
+    pub fn as_otel_snake_case(self) -> &'static str {
+        match self {
+            IdentitySource::Jwt => "jwt",
+            IdentitySource::LegacyHeader => "legacy_header",
+            IdentitySource::Anonymous => "anonymous",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GatewayIdentity {
     pub tenant: Option<String>,

@@ -4,13 +4,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
-use rsa::BigUint;
-use rsa::RsaPublicKey;
-use rsa::pkcs8::EncodePublicKey;
-use serde::Deserialize;
+
+use jsonwebtoken::{
+    Algorithm, DecodingKey, Validation, decode, decode_header,
+    jwk::{AlgorithmParameters, EllipticCurve, JwkSet},
+};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -147,7 +145,7 @@ impl JwtIngressConfig {
 
 #[derive(Clone, Debug)]
 struct JwkCacheEntry {
-    keys: Vec<(Option<String>, Vec<u8>)>,
+    keys: JwkSet,
     fetched_at: Instant,
 }
 
@@ -316,11 +314,11 @@ impl JwtValidator {
         self.cfg.bearer_header_name.trim().to_ascii_lowercase()
     }
 
-    async fn load_jwk_entries(&self, uri: &str) -> Result<Vec<(Option<String>, Vec<u8>)>, ValidateErr> {
+    async fn load_jwk_set_cached(&self, uri: &str) -> Result<JwkSet, ValidateErr> {
         let mut cache = self.jwks_cache.lock().await;
         let now_ok = cache
             .as_ref()
-            .map(|c| c.fetched_at.elapsed() < JWKS_CACHE_TTL && !c.keys.is_empty())
+            .map(|c| c.fetched_at.elapsed() < JWKS_CACHE_TTL && !c.keys.keys.is_empty())
             .unwrap_or(false);
         if !now_ok {
             let body = self
@@ -334,31 +332,16 @@ impl JwtValidator {
                 .text()
                 .await
                 .map_err(|e| ValidateErr::new(false, format!("jwks body ({e})")))?;
-            let doc: JwkDoc =
+            let doc: JwkSet =
                 serde_json::from_str(&body).map_err(|e| ValidateErr::new(false, format!("jwks json ({e})")))?;
-            let mut out = Vec::new();
-            for jwk in doc.keys {
-                if jwk.kty != "RSA" {
-                    continue;
-                }
-                let Some(ref n_b64) = jwk.n else {
-                    continue;
-                };
-                let Some(ref e_b64) = jwk.e else {
-                    continue;
-                };
-                let der = jwk_rsa_to_spki_der(n_b64, e_b64)
-                    .map_err(|msg| ValidateErr::new(false, msg))?;
-                out.push((jwk.kid, der));
-            }
-            if out.is_empty() {
-                return Err(ValidateErr::new(false, "JWKS contained no RSA keys".into()));
+            if doc.keys.is_empty() {
+                return Err(ValidateErr::new(false, "JWKS keys array is empty".into()));
             }
             *cache = Some(JwkCacheEntry {
-                keys: out.clone(),
+                keys: doc.clone(),
                 fetched_at: Instant::now(),
             });
-            Ok(out)
+            Ok(doc)
         } else {
             Ok(cache.as_ref().expect("jwks cache").keys.clone())
         }
@@ -438,27 +421,20 @@ async fn decoding_key_for_token(
                 ))
             }
         }
+        Algorithm::ES256 | Algorithm::ES384 => {
+            let Some(uri) = validator.cfg.jwks_uri.clone() else {
+                return Err(ValidateErr::new(
+                    false,
+                    "token uses EC signature but MCP_GATEWAY_JWT_JWKS_URI is not configured".into(),
+                ));
+            };
+            jwks_decoding_key(validator, alg, uri, kid).await
+        }
         _ => Err(ValidateErr::new(
             false,
             format!("unsupported jwt algorithm {:?}", alg),
         )),
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct JwkDoc {
-    keys: Vec<Jwk>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct Jwk {
-    kty: String,
-    kid: Option<String>,
-    alg: Option<String>,
-    r#use: Option<String>,
-    n: Option<String>,
-    e: Option<String>,
 }
 
 async fn jwks_decoding_key(
@@ -467,22 +443,53 @@ async fn jwks_decoding_key(
     uri: String,
     kid_hint: Option<&str>,
 ) -> Result<DecodingKey, ValidateErr> {
-    let keys = validator.load_jwk_entries(&uri).await?;
-    let der = pick_jwk_rsa_der(&keys, kid_hint)?;
-    let _ = alg; // Alg already matched by decoder; JWKS-derived key is interchangeable for RS*.
-    Ok(DecodingKey::from_rsa_der(&der))
+    let jwks = validator.load_jwk_set_cached(&uri).await?;
+    let jwk = pick_jwk(&jwks, alg, kid_hint)?;
+    DecodingKey::from_jwk(jwk).map_err(|e| ValidateErr::new(false, format!("jwks decoding key ({e})")))
 }
 
-fn pick_jwk_rsa_der(entries: &[(Option<String>, Vec<u8>)], kid_hint: Option<&str>) -> Result<Vec<u8>, ValidateErr> {
-    if let Some(kid) = kid_hint
-        && let Some((_, der)) = entries
-            .iter()
-            .find(|(k, _)| k.as_ref().is_some_and(|x| x == kid))
-    {
-        return Ok(der.clone());
+fn jwk_compatible_with_alg(jwk: &jsonwebtoken::jwk::Jwk, alg: Algorithm) -> bool {
+    match (&jwk.algorithm, alg) {
+        (
+            AlgorithmParameters::RSA(_),
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512,
+        ) => true,
+        (AlgorithmParameters::EllipticCurve(ec), Algorithm::ES256) => {
+            ec.curve == EllipticCurve::P256
+        }
+        (AlgorithmParameters::EllipticCurve(ec), Algorithm::ES384) => {
+            ec.curve == EllipticCurve::P384
+        }
+        _ => false,
     }
-    if entries.len() == 1 {
-        return Ok(entries[0].1.clone());
+}
+
+fn pick_jwk<'a>(
+    jwks: &'a JwkSet,
+    alg: Algorithm,
+    kid_hint: Option<&str>,
+) -> Result<&'a jsonwebtoken::jwk::Jwk, ValidateErr> {
+    let compat: Vec<&jsonwebtoken::jwk::Jwk> = jwks
+        .keys
+        .iter()
+        .filter(|k| jwk_compatible_with_alg(k, alg))
+        .collect();
+    if compat.is_empty() {
+        return Err(ValidateErr::new(
+            false,
+            "JWKS contained no keys compatible with the token algorithm".into(),
+        ));
+    }
+    if let Some(kid) = kid_hint
+        && let Some(jwk) = compat
+            .iter()
+            .copied()
+            .find(|j| j.common.key_id.as_deref() == Some(kid))
+    {
+        return Ok(jwk);
+    }
+    if compat.len() == 1 {
+        return Ok(compat[0]);
     }
     Err(ValidateErr::new(
         false,
@@ -490,23 +497,7 @@ fn pick_jwk_rsa_der(entries: &[(Option<String>, Vec<u8>)], kid_hint: Option<&str
     ))
 }
 
-fn jwk_rsa_to_spki_der(n_b64: &str, e_b64: &str) -> Result<Vec<u8>, String> {
-    let n_raw = decode_b64_url(n_b64)?;
-    let e_raw = decode_b64_url(e_b64)?;
-    let n = BigUint::from_bytes_be(&n_raw);
-    let e = BigUint::from_bytes_be(&e_raw);
-    let pub_key = RsaPublicKey::new(n, e).map_err(|e| format!("invalid RSA modulus/exponent ({e})"))?;
-    pub_key
-        .to_public_key_der()
-        .map(|d| d.as_bytes().to_vec())
-        .map_err(|e| format!("pkcs8 der ({e})"))
-}
 
-fn decode_b64_url(s: &str) -> Result<Vec<u8>, String> {
-    URL_SAFE_NO_PAD
-        .decode(s.as_bytes())
-        .map_err(|e| format!("base64 ({e})"))
-}
 
 #[cfg(test)]
 mod tests {

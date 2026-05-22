@@ -8,7 +8,8 @@ use async_nats::Message;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
-use tracing::{info, warn};
+use tracing::{Instrument, info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
 use crate::audit::{self, AuditEnvelope};
@@ -20,6 +21,10 @@ use crate::subject::gateway_to_server_subject;
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
+const HEADER_VERIFIED_SUB: &str = "trogon-mcp-verified-sub";
+const HEADER_VERIFIED_TENANT: &str = "trogon-mcp-verified-tenant";
+const HEADER_IDENTITY_SOURCE: &str = "trogon-mcp-identity-source";
+const HEADER_JWT_ISSUER: &str = "trogon-mcp-jwt-issuer";
 const AUTHZ_BEARER_PREFIX: &str = "bearer ";
 
 #[derive(Debug)]
@@ -102,6 +107,38 @@ async fn handle_ingress(
     settings: &GatewaySettings,
     msg: Message,
 ) -> Result<(), GatewayError> {
+    handle_ingress_inner(
+        client,
+        policy,
+        checker,
+        traces,
+        jetstream,
+        settings,
+        msg.clone(),
+    )
+    .instrument(tracing::info_span!(
+        "mcp_gateway.handle_ingress",
+        gateway.subject_in = %msg.subject,
+        gateway.jsonrpc.method = tracing::field::Empty,
+        gateway.identity.source = tracing::field::Empty,
+        gateway.identity.issuer_present = tracing::field::Empty,
+        gateway.jwt.required_for_gate = tracing::field::Empty,
+        gateway.spicedb.required = tracing::field::Empty,
+        gateway.spicedb.allowed = tracing::field::Empty,
+    ))
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_ingress_inner(
+    client: &async_nats::Client,
+    policy: &SpicedbGatePolicy,
+    checker: &Arc<dyn PermissionChecker>,
+    traces: &TraceStore,
+    jetstream: &jetstream::Context,
+    settings: &GatewaySettings,
+    msg: Message,
+) -> Result<(), GatewayError> {
     let prefix = settings.mcp.prefix_str();
     let backend_subject =
         gateway_to_server_subject(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
@@ -118,9 +155,20 @@ async fn handle_ingress(
         .requires_spicedb_for_method(&jsonrpc_method)
         .map_err(|e| GatewayError(e.to_string()))?;
 
+    tracing::Span::current().record("gateway.jsonrpc.method", jsonrpc_method.as_str());
+    tracing::Span::current().record(
+        "gateway.spicedb.required",
+        tracing::field::display(requires_spicedb),
+    );
+
     let bearer_h = settings.jwt.bearer_header_name_normalized();
     let bearer = bearer_token_from_headers(msg.headers.as_ref(), bearer_h.as_str());
     let jwt_strict = settings.jwt.jwt_required_for_gate(requires_spicedb);
+
+    tracing::Span::current().record(
+        "gateway.jwt.required_for_gate",
+        tracing::field::display(jwt_strict),
+    );
     let gateway_identity = match settings
         .jwt
         .resolve(bearer.as_deref(), legacy_tenant_hdr.as_deref(), jwt_strict)
@@ -148,6 +196,23 @@ async fn handle_ingress(
             return Ok(());
         }
     };
+
+    let span = tracing::Span::current();
+    span.record(
+        "gateway.identity.source",
+        gateway_identity.source.as_otel_snake_case(),
+    );
+    span.record(
+        "gateway.identity.issuer_present",
+        tracing::field::display(gateway_identity.issuer.is_some()),
+    );
+    if let Some(sub) = gateway_identity.caller_sub.as_deref() {
+        span.set_attribute("trogon.enduser.id", sub.to_string());
+    }
+    span.set_attribute(
+        "trogon.gateway.identity.source",
+        gateway_identity.source.as_otel_snake_case(),
+    );
 
     let tool_call = if jsonrpc_method == "tools/call" {
         tools_call_name(&msg.payload)
@@ -222,8 +287,16 @@ async fn handle_ingress(
         }
     }
 
+    if requires_spicedb && let Some(allowed) = spicedb_allowed {
+        tracing::Span::current().record(
+            "gateway.spicedb.allowed",
+            tracing::field::display(allowed),
+        );
+    }
+
     let base_headers = msg.headers.clone().unwrap_or_default();
     let mut outbound_headers = egress_header_map(base_headers, settings.jwt.jwt_controls_transport());
+    append_verified_gateway_identity_headers(&mut outbound_headers, &gateway_identity);
     inject_trace_context(&mut outbound_headers);
 
     if msg.reply.is_none() {
@@ -509,6 +582,22 @@ fn bearer_from_authorization_header_value(raw: &str) -> Option<String> {
         }
     } else {
         None
+    }
+}
+
+fn append_verified_gateway_identity_headers(headers: &mut async_nats::HeaderMap, identity: &GatewayIdentity) {
+    if identity.source != IdentitySource::Jwt {
+        return;
+    }
+    if let Some(ref sub) = identity.caller_sub {
+        headers.insert(HEADER_VERIFIED_SUB, sub.as_str());
+    }
+    if let Some(ref tenant) = identity.tenant {
+        headers.insert(HEADER_VERIFIED_TENANT, tenant.as_str());
+    }
+    headers.insert(HEADER_IDENTITY_SOURCE, identity.source.as_otel_snake_case());
+    if let Some(ref iss) = identity.issuer {
+        headers.insert(HEADER_JWT_ISSUER, iss.as_str());
     }
 }
 

@@ -10,7 +10,7 @@ Operators run this service so MCP JSON-RPC crosses a single NATS chokepoint (`ga
 
 Clients that already targeted `{prefix}.server.{id}.{method}` must instead publish (or NATS-request) onto `{prefix}.gateway.request.{id}.{method}` — the gateway rewrites to the server lane and preserves inbox reply semantics when a reply inbox is attached.
 
-Optional header **`trogon-mcp-tenant`** seeds JetStream audit JSON when no verified JWT carries a tenant claim, and still acts as the SpiceDB subject `object_id` for legacy callers when **`MCP_GATEWAY_JWT_MODE=off`** (or absent). When JWT ingress is **validate** or **require**, forgeable **`trogon-mcp-tenant`** is stripped before messages reach **`server.*`**, SpiceDB principals prefer the JWT **`sub`** (caller id), and audit/traces carry **`caller_sub`** / **`identity_source`**.
+Optional header **`trogon-mcp-tenant`** seeds JetStream audit JSON when no verified JWT carries a tenant claim, and still acts as the SpiceDB subject `object_id` for legacy callers when **`MCP_GATEWAY_JWT_MODE=off`** (or absent). When JWT ingress is **validate** or **require**, forgeable **`trogon-mcp-tenant`** is stripped before messages reach **`server.*`**, SpiceDB principals prefer the JWT **`sub`** (caller id), and audit/traces carry **`caller_sub`** / **`identity_source`**. When identity resolves as JWT, the gateway attaches trusted downstream **`server.*`** headers: **`trogon-mcp-verified-sub`**, optional **`trogon-mcp-verified-tenant`**, **`trogon-mcp-identity-source`** (`jwt`), and optional **`trogon-mcp-jwt-issuer`**.
 
 See **Verified JWT** below and align tuples in SpiceDB with gateway resource naming documented here.
 
@@ -21,7 +21,7 @@ See **Verified JWT** below and align tuples in SpiceDB with gateway resource nam
 | `MCP_GATEWAY_JWT_MODE` | **`off`** (default), **`validate`**, or **`require`**. **`require`** enforces Bearer JWT on SpiceDB-gated methods (`tools/call`, `resources/read`). |
 | `MCP_GATEWAY_JWT_ISSUERS` | Comma-separated `iss` allow-list (required when mode ≠ off). |
 | `MCP_GATEWAY_JWT_AUDIENCE` | Expected `aud` (default `trogon-mcp-gateway`). |
-| `MCP_GATEWAY_JWT_JWKS_URI` | HTTPS JWKS URL for RSA keys (cached ~5 minutes). |
+| `MCP_GATEWAY_JWT_JWKS_URI` | HTTPS JWKS URL for **`RS256`/RSA** and **`ES256`** (P-256) / **`ES384`** (P-384) keys (cached ~5 minutes). |
 | `MCP_GATEWAY_JWT_RSA_PUBLIC_KEY_PEM` | PEM for a single static RSA key (alternative to JWKS). |
 | `MCP_GATEWAY_JWT_HS256_SECRET` | Raw secret bytes for **`HS256`** (dev/smoke paths). Configure **one or more** of JWKS / RSA PEM / HS256 when mode ≠ off. |
 | `MCP_GATEWAY_JWT_LEEWAY_SECS` | Clock skew (default `60`). |
@@ -38,11 +38,11 @@ See **Verified JWT** below and align tuples in SpiceDB with gateway resource nam
 | `MCP_GATEWAY_AUDIT_STREAM` | JetStream stream name (default `MCP_AUDIT`) |
 | `MCP_GATEWAY_SKIP_AUDIT_STREAM_INIT` | Truthy ⇒ skip bootstrap `get_or_create_stream` |
 
-Audit payloads include **`identity_source`** (**`jwt`**, **`legacy_header`**, **`anonymous`**) plus optional **`caller_sub`** and **`jwt_issuer`** when present.
+Audit payloads include **`identity_source`** (**`jwt`**, **`legacy_header`**, **`anonymous`**) plus optional **`caller_sub`** and **`jwt_issuer`** when present. Ingress handling runs under tracing span **`mcp_gateway.handle_ingress`** recording JSON-RPC method, PDP requirement and allow outcome, JWT strict gate, issuer presence, and identity source (`gateway.*` field names); exporters wired through **`trogon-telemetry`** also receive **`trogon.enduser.id`** and **`trogon.gateway.identity.source`** on that span where applicable.
 
 ## SpiceDB (gated `tools/call` and `resources/read`)
 
-When `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (host:port without scheme, or full `http://` / `https://` URL per `spicedb-rs-client`), the gateway runs `CheckPermission` for **`tools/call`** and **`resources/read`** after a hardcoded CEL gate. Omit the variable for allow-all Phase-1 behaviour.
+When `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (host:port without scheme, or full `http://` / `https://` URL per `spicedb-rs-client`), authorized requests use SpiceDB **`CheckBulkPermissions`** (single item; same PDP outcome as **`CheckPermission`**) plus consistency **`at_least_as_fresh`** from the gateway's cached **`ZedToken`** once a successful check returns **`checked_at`**, otherwise **`minimize_latency`**. Omit the endpoint for allow-all Phase-1 behaviour.
 
 ### Tuple shapes (defaults; override via env below)
 

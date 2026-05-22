@@ -4,6 +4,7 @@ use std::error::Error;
 use std::io;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use trogon_std::{
     env::SystemEnv,
@@ -54,6 +55,7 @@ async fn build_permission_checker<E: trogon_std::env::ReadEnv>(
             tool_call_permission: sb.tool_call_permission,
             resource_read_permission: sb.resource_read_permission,
             anonymous_subject_object_id: sb.anonymous_subject_object_id,
+            check_zed_token_cache: Arc::new(Mutex::new(None)),
         },
     )))
 }
