@@ -458,4 +458,29 @@ mod tests {
         assert_eq!(json["sessionId"], "new-sess");
         assert_eq!(json["messages"], serde_json::json!([{"role": "user", "content": "hello"}]));
     }
+
+    #[tokio::test]
+    async fn import_payload_passes_v2_export_unchanged() {
+        let (_container, port) = start_nats().await;
+        let nats_bg = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+        let v2_export = br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","Text":"hi"}]}]}"#;
+        mock_responder(nats_bg.clone(), "acp.src.agent.ext.session/export", v2_export).await;
+        mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"v2-sess"}"#).await;
+        let import_rx =
+            capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let registry = Registry::new(MockRegistryStore::new());
+        registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
+
+        let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
+        switcher.switch_model("acp.src", "src-session", "gpt-4", "/ws").await.unwrap();
+
+        let import_body = import_rx.await.expect("import responder captured payload");
+        let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();
+        assert_eq!(json["sessionId"], "v2-sess");
+        assert_eq!(json["messages"]["version"], 2);
+    }
 }
