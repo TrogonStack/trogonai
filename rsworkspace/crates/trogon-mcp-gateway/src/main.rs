@@ -1,6 +1,7 @@
 mod config;
 
 use std::error::Error;
+use std::io;
 use std::sync::Arc;
 
 use tracing::{error, info};
@@ -14,6 +15,48 @@ use trogon_telemetry::{ResourceAttribute, ServiceName};
 use config::GatewayCliConfig;
 
 type BoxError = Box<dyn Error + Send + Sync>;
+
+fn config_err_box(msg: String) -> BoxError {
+    Box::new(io::Error::other(msg))
+}
+
+async fn build_permission_checker<E: trogon_std::env::ReadEnv>(
+    env: &E,
+) -> Result<Arc<dyn trogon_mcp_gateway::authz::PermissionChecker>, BoxError> {
+    let Some(sb) =
+        config::spicedb_connect_config(env).map_err(config_err_box)?
+    else {
+        info!("MCP gateway authorization: allow-all (SpiceDB not configured)");
+        return Ok(Arc::new(trogon_mcp_gateway::authz::AllowAllPermissionChecker));
+    };
+
+    info!(
+        endpoint = %sb.endpoint,
+        insecure = sb.insecure,
+        "MCP gateway SpiceDB authorization (tools/call, resources/read)"
+    );
+
+    let mut builder = spicedb_rs_client::ClientBuilder::new(sb.endpoint);
+    if let Some(token) = sb.token {
+        builder = builder.with_token(token);
+    }
+
+    let client = builder.insecure(sb.insecure).connect().await.map_err(|e| {
+        config_err_box(format!("failed to connect to SpiceDB ({e}); check MCP_GATEWAY_SPICEDB_*"))
+    })?;
+
+    Ok(Arc::new(trogon_mcp_gateway::spicedb::SpicedbPermissionChecker::new(
+        trogon_mcp_gateway::spicedb::SpicedbCheckerRuntime {
+            client,
+            tool_resource_object_type: sb.tool_resource_object_type,
+            resource_object_type: sb.resource_object_type,
+            subject_object_type: sb.subject_object_type,
+            tool_call_permission: sb.tool_call_permission,
+            resource_read_permission: sb.resource_read_permission,
+            anonymous_subject_object_id: sb.anonymous_subject_object_id,
+        },
+    )))
+}
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
@@ -32,10 +75,11 @@ async fn main() -> Result<(), BoxError> {
         &SystemFs,
     );
 
+    let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
+        build_permission_checker(&SystemEnv).await?;
+
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
-    let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
-        Arc::new(trogon_mcp_gateway::authz::AllowAllPermissionChecker);
     let traces = trogon_mcp_gateway::trace::TraceStore::default();
 
     let settings = trogon_mcp_gateway::gateway::GatewaySettings {

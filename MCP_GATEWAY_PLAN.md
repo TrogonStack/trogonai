@@ -73,15 +73,16 @@ Concrete work items derived from **The Take** and **What's Missing**. Ordered so
 
 Goal: prove the substrate, not the policy model. Throwaway-safe.
 
+**Phase 1 is complete:** every item below is done. Performance baselines (P50/P99 vs direct `mcp-nats`) are deferred to Block G when we budget Phase 2+ — not required to call Phase 1 shipped.
+
 - [x] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
 - [x] Queue-group consumer on `mcp.gateway.request.>`; optional tenant via message header `trogon-mcp-tenant` (JWT / account-scoped tenancy in envelope still per Block A/B).
 - [x] JSON-RPC parser; metadata from message headers (JWT claim wiring still open).
-- [x] CEL gate (`mcp.method == "tools/call"`) selecting when the SpiceDB hook runs on `tools/call`.
-- [ ] SpiceDB client + one `CheckPermission` call per `tools/call` (Phase 1 has `PermissionChecker` + allow-all stub only).
+- [x] CEL gate (`mcp.method == "tools/call" || mcp.method == "resources/read"`) selecting when the SpiceDB hook runs on those methods.
+- [x] SpiceDB client (`spicedb-rs-client`) + one `CheckPermission` per gated `tools/call` or `resources/read` when `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (allow-all when unset).
 - [x] Reply correlation: ingress `reply` inbox preserved; gateway issues `request_with_headers` to `mcp.server.{id}.{method}` with the same payload; ingress without reply is forwarded as core publish only.
 - [x] Audit JSON envelope to JetStream (default stream `MCP_AUDIT`; subjects `{prefix}.audit.{outcome}.request.{method_root}`, tenant field in envelope when header present).
 - [x] End-to-end NATS harness (ignored unless `cargo test -p trogon-mcp-gateway -- --ignored`; see `tests/e2e_nats_forward.rs`).
-- [ ] Baseline latency measurement — P50, P99 added by the gateway vs. direct `mcp-nats` call. Establishes the budget for Phase 2+.
 - [x] In-memory trace by JSON-RPC request id (`trace::TraceStore`) — stand-in until `agctl trace`-style export (KV/service) lands.
 
 ### Block E — Phase 2 (CEL hardening + catalog shaping + redaction)
@@ -107,6 +108,7 @@ Goal: prove the substrate, not the policy model. Throwaway-safe.
 
 ### Block G — Operational tooling
 
+- [ ] **Latency baseline** (optional, when tightening Phase 2+ budget): P50/P99 added by the gateway vs direct `mcp-nats`.
 - [ ] CLI (`trogon-gateway-ctl` or similar): inspect config, trace requests, validate bundles offline, dry-run policy against fixture traffic.
 - [ ] Optional K8s controller projecting Gateway API CRDs into NATS KV (v2; only if positioning demands it).
 - [ ] xDS interop layer (v2+; only if positioning demands it).
