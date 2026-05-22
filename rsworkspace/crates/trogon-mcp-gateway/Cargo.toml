@@ -21,3 +21,7 @@ tracing = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 trogon-telemetry = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+uuid = { workspace = true }

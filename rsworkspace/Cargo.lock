@@ -3265,6 +3265,7 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trogon-telemetry",
+ "uuid",
 ]
 
 [[package]]
