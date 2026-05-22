@@ -9,6 +9,9 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Context, Editor, Helper};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use crate::client_supervisor::AcpClientSupervisor;
 
 const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
@@ -139,10 +142,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     cwd: PathBuf,
     fs: F,
     mut switcher: SW,
+    client_supervisor: Option<Rc<AcpClientSupervisor>>,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
     let mut session = factory.create_session(&prefix, cwd.clone()).await?;
+    if let Some(ref sup) = client_supervisor {
+        sup.set_session(session.session_id());
+    }
 
     let history_path = expand_tilde(HISTORY_PATH);
     if let Some(dir) = history_path.parent() {
@@ -184,14 +191,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                 session_context_size = 0;
                                 session_mode = std::env::var("TROGON_MODE")
                                     .unwrap_or_else(|_| "acceptEdits".into());
+                                if let Some(ref sup) = client_supervisor {
+                                    sup.set_session(session.session_id());
+                                }
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
-                        let cwd_str = cwd.to_str().unwrap_or(".");
-                        match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, cwd_str).await {
+                        let cwd_str = cwd
+                            .canonicalize()
+                            .unwrap_or_else(|_| cwd.clone())
+                            .to_string_lossy()
+                            .into_owned();
+                        match apply_model_switch(
+                            &mut switcher,
+                            &prefix,
+                            session.session_id(),
+                            &model_id,
+                            &cwd_str,
+                        )
+                        .await
+                        {
                             Ok(outcome) => {
                                 if outcome.same_runner {
                                     match session.set_model(&model_id).await {
@@ -200,11 +222,23 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                     }
                                 } else {
                                     session.close().await;
-                                    session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
-                                    prefix = outcome.new_prefix;
+                                    session =
+                                        factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+                                    prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
-                                    println!("Switched to {model_id}");
+                                    if let Some(ref sup) = client_supervisor {
+                                        if let Err(e) = sup
+                                            .rebind(&outcome.new_prefix, session.session_id())
+                                            .await
+                                        {
+                                            eprintln!("error rebinding permission client: {e}");
+                                        }
+                                    }
+                                    match session.set_model(&model_id).await {
+                                        Ok(()) => println!("Switched to {model_id}"),
+                                        Err(e) => eprintln!("Error setting model on new runner: {e}"),
+                                    }
                                 }
                             }
                             Err(e) => eprintln!("Error switching model: {e}"),

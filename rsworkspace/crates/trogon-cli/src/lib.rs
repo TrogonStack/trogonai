@@ -1,3 +1,4 @@
+pub mod client_supervisor;
 pub mod doctor;
 pub mod fs;
 pub mod markdown;
