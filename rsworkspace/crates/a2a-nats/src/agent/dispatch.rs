@@ -18,6 +18,22 @@ pub enum A2aMethod {
 }
 
 impl A2aMethod {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MessageSend => "message/send",
+            Self::MessageStream => "message/stream",
+            Self::TasksGet => "tasks/get",
+            Self::TasksList => "tasks/list",
+            Self::TasksCancel => "tasks/cancel",
+            Self::TasksResubscribe => "tasks/resubscribe",
+            Self::PushNotificationSet => "tasks/pushNotificationConfig/set",
+            Self::PushNotificationGet => "tasks/pushNotificationConfig/get",
+            Self::PushNotificationList => "tasks/pushNotificationConfig/list",
+            Self::PushNotificationDelete => "tasks/pushNotificationConfig/delete",
+            Self::AgentCard => "agent/card",
+        }
+    }
+
     /// Resolve the method from the full NATS subject string and the known prefix/agent_id
     /// component length.
     ///

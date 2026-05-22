@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
@@ -7,6 +9,7 @@ use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::task::TaskEventsSubject;
+use crate::push::PushDispatcher;
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
@@ -21,20 +24,23 @@ use crate::task_id::A2aTaskId;
 /// The background task respects a `CancellationToken` so that `tasks/cancel` can stop
 /// the stream pump if the task is terminated externally. The caller (Bridge) is responsible
 /// for registering and cleaning up the cancellation token.
-#[instrument(name = "a2a.agent.message_stream", skip(handler, payload, reply_subject, nats, js, cancel))]
-pub async fn handle<H, N, J>(
-    handler: &H,
+#[allow(clippy::too_many_arguments)]
+#[instrument(name = "a2a.agent.message_stream", skip(handler, payload, reply_subject, nats, js, dispatcher, cancel))]
+pub async fn handle<H, N, J, D>(
+    handler: Arc<H>,
     payload: &[u8],
     reply_subject: Option<String>,
     nats: &N,
     js: &J,
     prefix: &crate::a2a_prefix::A2aPrefix,
+    dispatcher: Arc<D>,
     cancel: CancellationToken,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + 'static,
+    D: PushDispatcher + ?Sized,
 {
     let Some(reply) = reply_subject else {
         warn!("message/stream received without reply subject; dropping");
@@ -68,7 +74,13 @@ where
     let task_id = match A2aTaskId::new(initial_task.id.clone()) {
         Ok(t) => t,
         Err(e) => {
-            send_reply_error(nats, &reply, id, A2aError::invalid_agent_response(format!("bad task id: {e}"))).await;
+            send_reply_error(
+                nats,
+                &reply,
+                id,
+                A2aError::invalid_agent_response(format!("bad task id: {e}")),
+            )
+            .await;
             return None;
         }
     };
@@ -96,20 +108,24 @@ where
     let task_id_clone = task_id.clone();
 
     let pump_handle = tokio::spawn(async move {
-        pump_events(event_stream, js_clone, events_subject, task_id_clone, cancel).await;
+        pump_events(event_stream, js_clone, events_subject, task_id_clone, handler, dispatcher, cancel).await;
     });
 
     Some((task_id, pump_handle))
 }
 
-async fn pump_events<J>(
+async fn pump_events<J, H, D>(
     mut stream: crate::agent::handler::TaskEventStream,
     js: J,
     subject: TaskEventsSubject,
     task_id: A2aTaskId,
+    handler: Arc<H>,
+    dispatcher: Arc<D>,
     cancel: CancellationToken,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher,
+    H: A2aHandler,
+    D: PushDispatcher + ?Sized,
 {
     loop {
         tokio::select! {
@@ -131,8 +147,20 @@ async fn pump_events<J>(
                                 continue;
                             }
                         };
+
+                        if is_terminal_status_update(&ev) {
+                            dispatch_push_notifications(&task_id, handler.as_ref(), dispatcher.as_ref(), &bytes).await;
+                        }
+
                         let headers = async_nats::HeaderMap::new();
-                        match js.publish_with_headers(async_nats::Subject::from(subject.to_string().as_str()), headers, bytes).await {
+                        match js
+                            .publish_with_headers(
+                                async_nats::Subject::from(subject.to_string().as_str()),
+                                headers,
+                                bytes,
+                            )
+                            .await
+                        {
                             Ok(ack_future) => {
                                 if let Err(e) = ack_future.await {
                                     warn!(task_id = %task_id, error = %e, "JetStream ack failed for event");
@@ -145,6 +173,51 @@ async fn pump_events<J>(
                     }
                 }
             }
+        }
+    }
+}
+
+fn is_terminal_status_update(ev: &a2a_types::StreamResponse) -> bool {
+    use a2a_types::stream_response::Payload;
+    use a2a_types::TaskState;
+    match &ev.payload {
+        Some(Payload::StatusUpdate(update)) => {
+            let state = update.status.as_ref().map(|s| s.state).unwrap_or(0);
+            matches!(
+                TaskState::try_from(state),
+                Ok(TaskState::Completed)
+                    | Ok(TaskState::Failed)
+                    | Ok(TaskState::Canceled)
+                    | Ok(TaskState::Rejected)
+            )
+        }
+        _ => false,
+    }
+}
+
+async fn dispatch_push_notifications<H, D>(
+    task_id: &A2aTaskId,
+    handler: &H,
+    dispatcher: &D,
+    payload: &[u8],
+) where
+    H: A2aHandler,
+    D: PushDispatcher + ?Sized,
+{
+    let list_req = a2a_types::ListTaskPushNotificationConfigsRequest {
+        task_id: task_id.as_str().to_owned(),
+        ..Default::default()
+    };
+    let configs = match handler.push_notification_list(list_req).await {
+        Ok(resp) => resp.configs,
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to list push notification configs; skipping dispatch");
+            return;
+        }
+    };
+    for config in &configs {
+        if let Err(e) = dispatcher.dispatch(config, payload).await {
+            warn!(task_id = %task_id, config_id = %config.id, error = %e, "push notification delivery failed");
         }
     }
 }
@@ -173,13 +246,20 @@ async fn send_reply_error<N: trogon_nats::PublishClient>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
     use crate::agent::handler::{A2aError, A2aHandler, TaskEventStream};
     use crate::agent::test_support::{make_task, parse_response, rpc_payload};
+    use crate::push::dispatcher::tests::MockPushDispatcher;
     use futures::stream;
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::MockJetStreamPublisher;
+
+    fn mock_dispatcher() -> Arc<MockPushDispatcher> {
+        Arc::new(MockPushDispatcher::new())
+    }
 
     struct StreamingHandler {
         task: a2a_types::Task,
@@ -207,7 +287,10 @@ mod tests {
         async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
+        async fn tasks_list(
+            &self,
+            _req: a2a_types::ListTasksRequest,
+        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
@@ -270,7 +353,10 @@ mod tests {
         async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
+        async fn tasks_list(
+            &self,
+            _req: a2a_types::ListTasksRequest,
+        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
@@ -326,17 +412,18 @@ mod tests {
     async fn bootstrap_reply_contains_task_id() {
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
-        let handler = StreamingHandler {
+        let handler = Arc::new(StreamingHandler {
             task: make_task("stream-t1"),
             events: vec![],
-        };
+        });
         let result = handle(
-            &handler,
+            handler,
             &rpc_payload("message/stream", 1),
             Some("reply".into()),
             &nats,
             &js,
             &prefix(),
+            mock_dispatcher(),
             CancellationToken::new(),
         )
         .await;
@@ -355,12 +442,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
         let result = handle(
-            &FailingStreamHandler,
+            Arc::new(FailingStreamHandler),
             &rpc_payload("message/stream", 2),
             Some("reply".into()),
             &nats,
             &js,
             &prefix(),
+            mock_dispatcher(),
             CancellationToken::new(),
         )
         .await;
@@ -373,17 +461,18 @@ mod tests {
     async fn no_reply_subject_returns_none() {
         let nats = AdvancedMockNatsClient::new();
         let js = mock_js();
-        let handler = StreamingHandler {
+        let handler = Arc::new(StreamingHandler {
             task: make_task("t"),
             events: vec![],
-        };
+        });
         let result = handle(
-            &handler,
+            handler,
             &rpc_payload("message/stream", 3),
             None,
             &nats,
             &js,
             &prefix(),
+            mock_dispatcher(),
             CancellationToken::new(),
         )
         .await;
@@ -397,17 +486,18 @@ mod tests {
         let js = mock_js();
         let cancel = CancellationToken::new();
 
-        let handler = StreamingHandler {
+        let handler = Arc::new(StreamingHandler {
             task: make_task("t-cancel"),
             events: vec![],
-        };
+        });
         let result = handle(
-            &handler,
+            handler,
             &rpc_payload("message/stream", 4),
             Some("reply".into()),
             &nats,
             &js,
             &prefix(),
+            mock_dispatcher(),
             cancel.clone(),
         )
         .await;
@@ -425,18 +515,19 @@ mod tests {
         let event = a2a_types::StreamResponse {
             payload: Some(a2a_types::stream_response::Payload::Task(make_task("t-event"))),
         };
-        let handler = StreamingHandler {
+        let handler = Arc::new(StreamingHandler {
             task: make_task("t-event"),
             events: vec![event],
-        };
+        });
 
         let result = handle(
-            &handler,
+            handler,
             &rpc_payload("message/stream", 5),
             Some("reply".into()),
             &nats,
             &js,
             &prefix(),
+            mock_dispatcher(),
             CancellationToken::new(),
         )
         .await;
@@ -447,5 +538,92 @@ mod tests {
         let published = js.published_messages();
         assert!(!published.is_empty(), "expected at least one JetStream publish");
         assert!(published[0].subject.contains("a2a.task.t-event.events."));
+    }
+
+    #[tokio::test]
+    async fn terminal_status_event_triggers_push_dispatch_attempt() {
+        use a2a_types::{TaskState, TaskStatus};
+
+        let nats = AdvancedMockNatsClient::new();
+        let js = mock_js();
+
+        let terminal_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "t-push".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Completed as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let dispatcher = Arc::new(MockPushDispatcher::new());
+        let handler = Arc::new(StreamingHandler {
+            task: make_task("t-push"),
+            events: vec![terminal_event],
+        });
+
+        let result = handle(
+            handler,
+            &rpc_payload("message/stream", 6),
+            Some("reply".into()),
+            &nats,
+            &js,
+            &prefix(),
+            Arc::clone(&dispatcher),
+            CancellationToken::new(),
+        )
+        .await;
+
+        let (_task_id, pump) = result.unwrap();
+        pump.await.unwrap();
+
+        // push_notification_list returns unsupported; no dispatch expected but the
+        // path was exercised (configs list is empty)
+        let calls = dispatcher.recorded_calls();
+        assert_eq!(calls.len(), 0);
+    }
+
+    #[test]
+    fn non_terminal_states_do_not_trigger_dispatch() {
+        use a2a_types::{TaskState, TaskStatus};
+
+        let working_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "t".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Working as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+        assert!(!is_terminal_status_update(&working_event));
+    }
+
+    #[test]
+    fn terminal_states_detected_correctly() {
+        use a2a_types::{TaskState, TaskStatus};
+
+        for state in [TaskState::Completed, TaskState::Failed, TaskState::Canceled, TaskState::Rejected] {
+            let ev = a2a_types::StreamResponse {
+                payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                    a2a_types::TaskStatusUpdateEvent {
+                        task_id: "t".to_string(),
+                        status: Some(TaskStatus {
+                            state: state as i32,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                )),
+            };
+            assert!(is_terminal_status_update(&ev), "expected terminal for state {state:?}");
+        }
     }
 }

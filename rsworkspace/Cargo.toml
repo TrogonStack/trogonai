@@ -68,10 +68,14 @@ tracing-subscriber = "=0.3.23"
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
 
+# HTTP client
+reqwest = { version = "0.12", default-features = false }
+
 # Misc
 tempfile = "=3.27.0"
 time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
+sha2 = "=0.10.8"
 
 [profile.release]
 lto = "thin"

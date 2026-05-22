@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt as _;
 use tokio::sync::Semaphore;
@@ -9,8 +10,11 @@ use tracing::{info, warn};
 use crate::agent::dispatch::A2aMethod;
 use crate::agent::handler::A2aHandler;
 use crate::agent::{agent_card, message_send, message_stream, push_notification, tasks_cancel, tasks_get, tasks_list, tasks_resubscribe};
+use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
+use crate::audit::envelope::{AuditEnvelope, AuditOutcome};
 use crate::config::Config;
 use crate::nats::subjects::wildcards::AgentAllSubject;
+use crate::push::{HttpPushDispatcher, PushDispatcher};
 use crate::task_id::A2aTaskId;
 
 /// Errors that can occur while running the `Bridge`.
@@ -60,6 +64,8 @@ pub struct Bridge<H, N, J> {
     nats: N,
     js: J,
     semaphore: Arc<Semaphore>,
+    audit_emitter: Arc<dyn AuditEmitter>,
+    push_dispatcher: Arc<dyn PushDispatcher>,
 }
 
 impl<H, N, J> Bridge<H, N, J>
@@ -70,13 +76,26 @@ where
 {
     pub fn new(config: Config, handler: H, nats: N, js: J) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
+        let http_client = reqwest::Client::new();
         Self {
             config,
             handler: Arc::new(handler),
             nats,
             js,
             semaphore,
+            audit_emitter: Arc::new(NoopAuditEmitter),
+            push_dispatcher: Arc::new(HttpPushDispatcher::new(http_client)),
         }
+    }
+
+    pub fn with_audit_emitter(mut self, emitter: Arc<dyn AuditEmitter>) -> Self {
+        self.audit_emitter = emitter;
+        self
+    }
+
+    pub fn with_push_dispatcher(mut self, dispatcher: Arc<dyn PushDispatcher>) -> Self {
+        self.push_dispatcher = dispatcher;
+        self
     }
 
     pub async fn run_with_agent_id(
@@ -99,6 +118,7 @@ where
 
         let in_flight = InFlightTasks::default();
         let prefix_arc = Arc::new(prefix.clone());
+        let agent_id_arc = Arc::new(agent_id.clone());
 
         loop {
             tokio::select! {
@@ -127,6 +147,9 @@ where
                             let js = self.js.clone();
                             let in_flight = in_flight.clone();
                             let prefix_inner = Arc::clone(&prefix_arc);
+                            let agent_id_inner = Arc::clone(&agent_id_arc);
+                            let audit_emitter = Arc::clone(&self.audit_emitter);
+                            let push_dispatcher = Arc::clone(&self.push_dispatcher);
                             let payload = msg.payload.to_vec();
                             let reply = msg.reply.map(|s| s.to_string());
 
@@ -140,6 +163,9 @@ where
                                     js,
                                     in_flight,
                                     &prefix_inner,
+                                    &agent_id_inner,
+                                    audit_emitter,
+                                    push_dispatcher,
                                 )
                                 .await;
                                 drop(permit);
@@ -164,22 +190,43 @@ async fn dispatch<H, N, J>(
     js: J,
     in_flight: InFlightTasks,
     prefix: &crate::a2a_prefix::A2aPrefix,
+    agent_id: &crate::agent_id::A2aAgentId,
+    audit_emitter: Arc<dyn AuditEmitter>,
+    push_dispatcher: Arc<dyn PushDispatcher>,
 ) where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + 'static,
 {
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let start_instant = std::time::Instant::now();
+
+    let method_name = method.as_ref().map(A2aMethod::as_str);
+
     match method {
         None => {
             warn!("unknown A2A method; dropping message");
+            return;
         }
         Some(A2aMethod::MessageSend) => {
             message_send::handle(handler.as_ref(), payload, reply, &nats).await;
         }
         Some(A2aMethod::MessageStream) => {
             let cancel = CancellationToken::new();
-            if let Some((task_id, pump)) =
-                message_stream::handle(handler.as_ref(), payload, reply, &nats, &js, prefix, cancel.clone()).await
+            if let Some((task_id, pump)) = message_stream::handle(
+                Arc::clone(&handler),
+                payload,
+                reply,
+                &nats,
+                &js,
+                prefix,
+                push_dispatcher,
+                cancel.clone(),
+            )
+            .await
             {
                 in_flight.register(task_id.clone(), cancel);
                 tokio::spawn(async move {
@@ -219,6 +266,45 @@ async fn dispatch<H, N, J>(
             agent_card::handle(handler.as_ref(), payload, reply, &nats).await;
         }
     }
+
+    let latency_ms = start_instant.elapsed().as_millis() as u64;
+    if let Some(method_str) = method_name {
+        let req_id = crate::jsonrpc::extract_request_id(payload).map(|id| id.to_string());
+        let raw_params = extract_params_bytes(payload);
+        let outcome = extract_response_outcome(payload);
+        let envelope = AuditEnvelope::new(
+            agent_id,
+            method_str,
+            req_id,
+            started_at,
+            latency_ms,
+            outcome,
+            raw_params.as_deref(),
+        );
+        let prefix = prefix.clone();
+        let agent_id = agent_id.clone();
+        tokio::spawn(async move {
+            audit_emitter.publish(&prefix, &agent_id, envelope).await;
+        });
+    }
+}
+
+fn extract_params_bytes(payload: &[u8]) -> Option<Vec<u8>> {
+    let v: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    let params = v.get("params")?;
+    serde_json::to_vec(params).ok()
+}
+
+fn extract_response_outcome(payload: &[u8]) -> AuditOutcome {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return AuditOutcome::Ok;
+    };
+    if let Some(err) = v.get("error") {
+        let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-32603) as i32;
+        let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+        return AuditOutcome::Err { code, message };
+    }
+    AuditOutcome::Ok
 }
 
 fn extract_task_id(payload: &[u8]) -> Option<A2aTaskId> {
@@ -335,12 +421,17 @@ mod tests {
         assert!(extract_task_id(&payload).is_none());
     }
 
+    fn test_agent_id() -> crate::agent_id::A2aAgentId {
+        crate::agent_id::A2aAgentId::new("bot").unwrap()
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_method_is_noop() {
         let nats = AdvancedMockNatsClient::new();
         let handler = Arc::new(stub());
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
+        let agent_id = test_agent_id();
         dispatch(
             None,
             b"{}",
@@ -350,6 +441,9 @@ mod tests {
             MockJetStreamPublisher::new(),
             in_flight,
             &prefix,
+            &agent_id,
+            Arc::new(crate::audit::emitter::NoopAuditEmitter),
+            Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
         )
         .await;
         assert!(nats.published_messages().is_empty());
@@ -364,6 +458,7 @@ mod tests {
         let handler = Arc::new(handler_stub);
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
+        let agent_id = test_agent_id();
         dispatch(
             Some(A2aMethod::MessageSend),
             &rpc_payload("message/send", 1),
@@ -373,6 +468,9 @@ mod tests {
             MockJetStreamPublisher::new(),
             in_flight,
             &prefix,
+            &agent_id,
+            Arc::new(crate::audit::emitter::NoopAuditEmitter),
+            Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["reply"]);
@@ -386,6 +484,7 @@ mod tests {
         let handler = Arc::new(handler_stub);
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
+        let agent_id = test_agent_id();
         dispatch(
             Some(A2aMethod::TasksGet),
             &rpc_payload("tasks/get", 2),
@@ -395,6 +494,9 @@ mod tests {
             MockJetStreamPublisher::new(),
             in_flight,
             &prefix,
+            &agent_id,
+            Arc::new(crate::audit::emitter::NoopAuditEmitter),
+            Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
         )
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
@@ -595,6 +697,8 @@ mod tests {
             handler: Arc::new(handler_stub),
             nats: nats.clone(),
             js: MockJetStreamPublisher::new(),
+            audit_emitter: Arc::new(crate::audit::emitter::NoopAuditEmitter),
+            push_dispatcher: Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
         };
 
         let agent_id = crate::agent_id::A2aAgentId::new("bot").unwrap();

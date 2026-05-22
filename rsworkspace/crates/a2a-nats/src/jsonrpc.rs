@@ -16,6 +16,16 @@ pub enum JsonRpcId {
     Null,
 }
 
+impl std::fmt::Display for JsonRpcId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(n) => write!(f, "{n}"),
+            Self::String(s) => f.write_str(s),
+            Self::Null => f.write_str("null"),
+        }
+    }
+}
+
 /// Extracts the JSON-RPC id from a raw payload, returning `None` if absent or malformed.
 ///
 /// Distinguishes `id: null` (valid JSON-RPC, returns `Some(JsonRpcId::Null)`) from
