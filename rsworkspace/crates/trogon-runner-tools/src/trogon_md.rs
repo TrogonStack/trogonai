@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
@@ -61,6 +61,68 @@ async fn load_global() -> Option<String> {
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(home).join(".config/trogon/TROGON.md");
     tokio::fs::read_to_string(&path).await.ok()
+}
+
+/// One layer in the TROGON.md hierarchy (global → repo root → cwd).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrogonMdLayer {
+    pub path: PathBuf,
+    pub exists: bool,
+    pub label: String,
+}
+
+/// List TROGON.md paths from global config through ancestors of `cwd` (root-first).
+pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
+    let mut layers = Vec::new();
+
+    if let Some(home) = std::env::var("HOME").ok() {
+        let path = PathBuf::from(home).join(".config/trogon/TROGON.md");
+        layers.push(TrogonMdLayer {
+            exists: tokio::fs::metadata(&path).await.is_ok(),
+            label: "global".into(),
+            path,
+        });
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut dir = PathBuf::from(cwd);
+    loop {
+        candidates.push(dir.join("TROGON.md"));
+        if !dir.pop() {
+            break;
+        }
+    }
+    candidates.reverse();
+
+    for (i, path) in candidates.into_iter().enumerate() {
+        let label = if i == 0 {
+            "project root".into()
+        } else {
+            format!("ancestor {}", path.parent().map(|p| p.display().to_string()).unwrap_or_default())
+        };
+        layers.push(TrogonMdLayer {
+            exists: tokio::fs::metadata(&path).await.is_ok(),
+            label,
+            path,
+        });
+    }
+
+    layers
+}
+
+/// Project-local TROGON.md path: nearest existing file walking up from `cwd`, else `cwd/TROGON.md`.
+pub fn project_trogon_md_path(cwd: &Path) -> PathBuf {
+    let mut dir = cwd.to_path_buf();
+    loop {
+        let candidate = dir.join("TROGON.md");
+        if candidate.is_file() {
+            return candidate;
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    cwd.join("TROGON.md")
 }
 
 #[cfg(test)]

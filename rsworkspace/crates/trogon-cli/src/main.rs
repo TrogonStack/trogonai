@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
         }
         let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
         let options = PrintOptions { print_tools: args.print_tools };
-        let mut session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
+        let session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
         if args.dangerously_skip_permissions {
             if let Err(e) = session.set_mode("bypassPermissions").await {
                 eprintln!("warning: could not set bypassPermissions: {e}");

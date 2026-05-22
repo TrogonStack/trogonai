@@ -134,6 +134,23 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "git_commit",
+            "Create a git commit. Stages `paths` (or all changes with all=true) then runs `git commit -m`.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "Commit message (required)" },
+                    "paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Files to stage before committing"
+                    },
+                    "all": { "type": "boolean", "description": "Stage all changes (`git add -A`) before committing" }
+                },
+                "required": ["message"]
+            }),
+        ),
+        tool_def(
             "fetch_url",
             "Fetch the content of a URL. HTML is converted to plain text by default. Response is truncated at 8KB.",
             json!({
@@ -213,6 +230,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_status"    => git::status(ctx, input).await,
         "git_diff"      => git::diff(ctx, input).await,
         "git_log"       => git::log(ctx, input).await,
+        "git_commit"    => git::commit(ctx, input).await,
         "fetch_url"     => web::fetch_url(ctx, input).await,
         "notebook_edit" => fs::notebook_edit(ctx, input).await,
         "search_files"  => search::search_files(ctx, input).await,
@@ -366,6 +384,13 @@ mod tests {
         let ctx = test_ctx();
         let result = dispatch_tool(&ctx, "git_log", &json!({})).await;
         assert!(!result.starts_with("Error running git"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_git_commit_to_git() {
+        let ctx = test_ctx();
+        let result = dispatch_tool(&ctx, "git_commit", &json!({"message": "test"})).await;
+        assert!(!result.contains("Unknown tool"), "got: {result}");
     }
 
     #[tokio::test]

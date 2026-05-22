@@ -52,10 +52,38 @@ pub async fn log(ctx: &ToolContext, _input: &Value) -> String {
     run_git(&ctx.cwd, &["log", "--oneline", "-20"]).await
 }
 
+/// Stage changed files and create a commit. Requires a non-empty `message`.
+pub async fn commit(ctx: &ToolContext, input: &Value) -> String {
+    let message = match input.get("message").and_then(|v| v.as_str()) {
+        Some(m) if !m.trim().is_empty() => m,
+        _ => return "Error: `message` is required for git_commit".to_string(),
+    };
+
+    if input.get("all").and_then(|v| v.as_bool()) == Some(true) {
+        let staged = run_git(&ctx.cwd, &["add", "-A"]).await;
+        if staged.starts_with("Error running git") {
+            return staged;
+        }
+    } else if let Some(paths) = input.get("paths").and_then(|v| v.as_array()) {
+        for path in paths {
+            let Some(p) = path.as_str() else {
+                return "Error: `paths` must be an array of strings".to_string();
+            };
+            let added = run_git(&ctx.cwd, &["add", "--", p]).await;
+            if added.starts_with("Error running git") {
+                return added;
+            }
+        }
+    }
+
+    run_git(&ctx.cwd, &["commit", "-m", message]).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use tempfile::TempDir;
 
     fn ctx() -> ToolContext {
         ToolContext {
@@ -132,6 +160,54 @@ mod tests {
         };
         let result = diff(&large_ctx, &json!({"args": "--staged"})).await;
         assert!(result.contains("truncated at 4KB"), "expected truncation, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn git_commit_requires_message() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        let ctx = ctx_in(dir.path());
+        let result = commit(&ctx, &json!({})).await;
+        assert!(result.contains("message"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn git_commit_stages_and_commits() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        tokio::fs::write(dir.path().join("a.txt"), "hello").await.unwrap();
+        let ctx = ctx_in(dir.path());
+        let result = commit(
+            &ctx,
+            &json!({"message": "add a", "paths": ["a.txt"]}),
+        )
+        .await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        let log_out = log(&ctx, &json!({})).await;
+        assert!(log_out.contains("add a"), "got: {log_out}");
+    }
+
+    async fn init_repo(path: &std::path::Path) {
+        for args in [
+            &["init", "-b", "main"][..],
+            &["config", "user.email", "test@test.com"][..],
+            &["config", "user.name", "Test"][..],
+        ] {
+            tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .await
+                .unwrap();
+        }
+    }
+
+    fn ctx_in(path: &std::path::Path) -> ToolContext {
+        ToolContext {
+            proxy_url: String::new(),
+            cwd: path.to_string_lossy().into_owned(),
+            http_client: reqwest::Client::new(),
+        }
     }
 
     #[tokio::test]

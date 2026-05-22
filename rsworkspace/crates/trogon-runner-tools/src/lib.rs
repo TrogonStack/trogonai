@@ -32,4 +32,4 @@ pub use session_store::{
     AllowedToolsSessionStore, AuditEntry, AuditOutcome, NatsSessionStore, SessionState,
     SessionStore, StoredMcpServer, TodoItem, append_audit_entries,
 };
-pub use trogon_md::{FsTrogonMdLoader, TrogonMdLoading};
+pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path};

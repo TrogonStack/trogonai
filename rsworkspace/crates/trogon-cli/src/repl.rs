@@ -435,6 +435,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             &cwd,
                         )
                         .await;
+                    } else if cmd == "/memory" {
+                        handle_memory_command(arg, &cwd, &fs).await;
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -814,7 +816,7 @@ pub(crate) struct ModelSwitchOutcome {
     pub new_session_id: String,
 }
 
-fn resolve_model_alias(input: &str) -> String {
+pub fn resolve_model_alias(input: &str) -> String {
     match input {
         "haiku" => "claude-haiku-4-5-20251001".into(),
         "sonnet" => "claude-sonnet-4-6".into(),
@@ -872,6 +874,7 @@ Commands:
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
+  {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
 
@@ -917,8 +920,64 @@ Ctrl+D    quit")
 
         "/status" => "use /status in the REPL for live session status".to_string(),
 
+        "/memory" => {
+            "use /memory in the REPL to list or show TROGON.md hierarchy".to_string()
+        }
+
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
+}
+
+async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
+    let arg = arg.trim();
+    let layers = trogon_runner_tools::list_trogon_md_hierarchy(
+        &cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()).to_string_lossy(),
+    )
+    .await;
+
+    if arg.is_empty() || arg == "list" {
+        println!("TROGON.md hierarchy (general → specific):");
+        for layer in &layers {
+            let status = if layer.exists { "present" } else { "missing" };
+            println!("  [{status}] {} — {}", layer.label, layer.path.display());
+        }
+        let project = trogon_runner_tools::project_trogon_md_path(cwd);
+        println!("\nProject memory file: {}", project.display());
+        println!("  /memory show     — print merged or project file");
+        println!("  /memory edit     — print path to open in $EDITOR");
+        return;
+    }
+
+    if arg == "edit" {
+        let project = trogon_runner_tools::project_trogon_md_path(cwd);
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".into());
+        println!("Project memory: {}", project.display());
+        println!("Global memory:  ~/.config/trogon/TROGON.md");
+        println!("Open with: {editor} {}", project.display());
+        if !project.exists() {
+            println!("File does not exist yet — run \x1b[35m/init\x1b[0m to generate it.");
+        }
+        return;
+    }
+
+    if arg == "show" || arg.starts_with("show ") {
+        let path = if arg == "show" {
+            trogon_runner_tools::project_trogon_md_path(cwd)
+        } else {
+            PathBuf::from(arg.trim_start_matches("show ").trim())
+        };
+        match fs.read_to_string(&path) {
+            Ok(content) => {
+                println!("--- {} ---", path.display());
+                println!("{content}");
+            }
+            Err(e) => eprintln!("could not read {}: {e}", path.display()),
+        }
+        return;
+    }
+
+    println!("unknown /memory subcommand: {arg}");
+    println!("usage: /memory [list|show|edit]");
 }
 
 fn runner_display_name(prefix: &str, agent_type: &str) -> String {
@@ -1494,6 +1553,7 @@ mod tests {
         assert!(out.contains("/doctor"));
         assert!(out.contains("/status"));
         assert!(out.contains("/init"));
+        assert!(out.contains("/memory"));
     }
 
     #[test]
