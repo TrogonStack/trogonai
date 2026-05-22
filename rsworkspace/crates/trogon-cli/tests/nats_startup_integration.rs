@@ -5,15 +5,7 @@
 //! Run with:
 //!   cargo test -p trogon-cli --test nats_startup_integration
 
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
-
 use testcontainers_modules::nats::Nats;
-
-static PATH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-fn path_lock() -> &'static Mutex<()> {
-    PATH_LOCK.get_or_init(|| Mutex::new(()))
-}
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_cli::connect_or_start_nats;
 
@@ -26,82 +18,29 @@ async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     (container, port)
 }
 
-/// When NATS is already running, connects immediately and returns no child process.
+/// When NATS is already running, connects and returns a usable client.
 #[tokio::test]
-async fn already_running_connects_without_spawning_child() {
+async fn connects_to_running_nats() {
     let (_container, port) = start_nats().await;
     let url = format!("nats://127.0.0.1:{port}");
 
-    let (client, child) = connect_or_start_nats(&url, Duration::from_secs(3))
+    let client = connect_or_start_nats(&url)
         .await
         .expect("should connect to running NATS");
 
-    assert!(child.is_none(), "no child should be spawned when NATS is already up");
     client.flush().await.expect("client should be usable");
 }
 
-/// When nothing is listening and nats-server is not in PATH, returns a helpful error.
+/// When nothing is listening, returns an error with actionable guidance.
 #[tokio::test]
-async fn nats_server_not_in_path_returns_error() {
+async fn nothing_listening_returns_clear_error() {
     let url = "nats://127.0.0.1:14222"; // nothing listening here
 
-    let result = connect_or_start_nats_with_empty_path(url, Duration::from_secs(1)).await;
+    let err = connect_or_start_nats(url)
+        .await
+        .expect_err("should fail when NATS is not running");
 
-    let err = result.expect_err("should fail when nats-server is not in PATH");
     let msg = err.to_string();
-    assert!(msg.contains("nats-server is not in PATH"), "unexpected error: {msg}");
-    assert!(msg.contains("https://docs.nats.io"), "should include install URL: {msg}");
-}
-
-/// When a fake nats-server binary is in PATH but never accepts connections,
-/// the function times out and returns a clear error.
-#[tokio::test]
-async fn fake_nats_server_that_never_listens_returns_timeout_error() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let fake_bin = dir.path().join("nats-server");
-
-    // A script that exists but never binds a port.
-    std::fs::write(&fake_bin, "#!/bin/sh\nsleep 60\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&fake_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    let url = "nats://127.0.0.1:14223"; // nothing listening here
-    let timeout = Duration::from_millis(600); // short so the test is fast
-
-    let result = connect_or_start_nats_with_path(url, timeout, dir.path()).await;
-
-    let err = result.expect_err("should time out");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("not accepting connections"),
-        "unexpected error: {msg}"
-    );
-}
-
-// ── Helpers that override PATH ────────────────────────────────────────────────
-
-async fn connect_or_start_nats_with_empty_path(
-    url: &str,
-    timeout: Duration,
-) -> anyhow::Result<(async_nats::Client, Option<trogon_cli::KillOnDrop>)> {
-    connect_or_start_nats_with_path(url, timeout, std::path::Path::new("")).await
-}
-
-async fn connect_or_start_nats_with_path(
-    url: &str,
-    timeout: Duration,
-    path_dir: &std::path::Path,
-) -> anyhow::Result<(async_nats::Client, Option<trogon_cli::KillOnDrop>)> {
-    // Temporarily replace PATH so Command::new("nats-server") resolves (or not)
-    // as we control. Restore it afterward even if we panic.
-    let _guard = path_lock().lock().unwrap();
-    let old_path = std::env::var_os("PATH").unwrap_or_default();
-    // SAFETY: guarded by PATH_LOCK so no other test mutates PATH concurrently
-    unsafe { std::env::set_var("PATH", path_dir) };
-    let result = connect_or_start_nats(url, timeout).await;
-    unsafe { std::env::set_var("PATH", old_path) };
-    result
+    assert!(msg.contains("nats-server --jetstream"), "should suggest jetstream flag: {msg}");
+    assert!(msg.contains("TROGON_NATS_URL"), "should mention env var: {msg}");
 }
