@@ -1,3 +1,4 @@
+pub mod doctor;
 pub mod fs;
 pub mod markdown;
 pub mod nats;

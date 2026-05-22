@@ -11,6 +11,8 @@ use trogon_cli::{
 enum Command {
     /// Start the local dev stack (NATS, wasm runtime, runners)
     Dev,
+    /// Run health checks on the Trogon stack
+    Doctor,
 }
 
 #[derive(Parser)]
@@ -37,6 +39,10 @@ struct Args {
     /// json emits a single line: {"text":"...","stop_reason":"..."}
     #[arg(long, default_value = "text")]
     output_format: String,
+
+    /// Run health checks on NATS, registry, runners, and compactor
+    #[arg(long)]
+    doctor: bool,
 }
 
 fn trogon_dev_script() -> anyhow::Result<PathBuf> {
@@ -68,6 +74,10 @@ async fn main() -> anyhow::Result<()> {
 
     if matches!(args.command, Some(Command::Dev)) {
         return run_dev_stack();
+    }
+
+    if args.doctor || matches!(args.command, Some(Command::Doctor)) {
+        return trogon_cli::doctor::run(&args.nats_url).await;
     }
 
     let cwd = std::env::current_dir()?;
