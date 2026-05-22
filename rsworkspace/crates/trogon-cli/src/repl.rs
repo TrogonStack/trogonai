@@ -185,7 +185,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Err(e) => eprintln!("error: {e}"),
                         }
                     } else if cmd == "/model" && !arg.is_empty() {
-                        let model_id = resolve_model_alias(arg.trim()).to_string();
+                        let model_id = resolve_model_alias(arg.trim());
                         let cwd_str = cwd.to_str().unwrap_or(".");
                         match apply_model_switch(&mut switcher, &prefix, session.session_id(), &model_id, cwd_str).await {
                             Ok(outcome) => {
@@ -434,14 +434,19 @@ pub(crate) struct ModelSwitchOutcome {
     pub new_session_id: String,
 }
 
-fn resolve_model_alias(input: &str) -> &str {
+fn resolve_model_alias(input: &str) -> String {
     match input {
-        "haiku"      => "claude-haiku-4-5-20251001",
-        "sonnet"     => "claude-sonnet-4-6",
-        "opus"       => "claude-opus-4-7",
-        "grok"       => "grok-3",
-        "grok-mini"  => "grok-3-mini",
-        other        => other,
+        "haiku" => "claude-haiku-4-5-20251001".into(),
+        "sonnet" => "claude-sonnet-4-6".into(),
+        "opus" => "claude-opus-4-7".into(),
+        "grok" => "grok-3".into(),
+        "grok-mini" => "grok-3-mini".into(),
+        "openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
+            .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        "codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
+        "o3" => "o3".into(),
+        "gpt-4o" => "gpt-4o".into(),
+        other => other.into(),
     }
 }
 
@@ -1397,5 +1402,51 @@ mod tests {
             .unwrap();
         assert!(!outcome.same_runner, "cross-runner must not be same_runner");
         assert_ne!(outcome.new_prefix, "acp");
+    }
+
+    // ── resolve_model_alias ───────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_model_alias_claude_shortcuts() {
+        assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
+        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-7");
+        assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn resolve_model_alias_grok_shortcuts() {
+        assert_eq!(resolve_model_alias("grok"), "grok-3");
+        assert_eq!(resolve_model_alias("grok-mini"), "grok-3-mini");
+    }
+
+    #[test]
+    fn resolve_model_alias_codex_and_openrouter_defaults() {
+        unsafe {
+            std::env::remove_var("OPENROUTER_DEFAULT_MODEL");
+            std::env::remove_var("CODEX_DEFAULT_MODEL");
+        }
+        assert_eq!(resolve_model_alias("openrouter"), "anthropic/claude-sonnet-4");
+        assert_eq!(resolve_model_alias("codex"), "o4-mini");
+    }
+
+    #[test]
+    fn resolve_model_alias_env_overrides() {
+        unsafe {
+            std::env::set_var("OPENROUTER_DEFAULT_MODEL", "openai/gpt-4o");
+            std::env::set_var("CODEX_DEFAULT_MODEL", "o3");
+        }
+        assert_eq!(resolve_model_alias("openrouter"), "openai/gpt-4o");
+        assert_eq!(resolve_model_alias("codex"), "o3");
+        unsafe {
+            std::env::remove_var("OPENROUTER_DEFAULT_MODEL");
+            std::env::remove_var("CODEX_DEFAULT_MODEL");
+        }
+    }
+
+    #[test]
+    fn resolve_model_alias_passthrough() {
+        assert_eq!(resolve_model_alias("o3"), "o3");
+        assert_eq!(resolve_model_alias("gpt-4o"), "gpt-4o");
+        assert_eq!(resolve_model_alias("custom/model-id"), "custom/model-id");
     }
 }

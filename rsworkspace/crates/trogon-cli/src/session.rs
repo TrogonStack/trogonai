@@ -129,7 +129,12 @@ impl<N: NatsClient> TrogonSession<N> {
             .ok_or_else(|| anyhow::anyhow!("session response missing sessionId: {resp}"))?
             .to_string();
 
-        Ok(Self { nats, session_id, prefix: prefix.to_string() })
+        let session = Self { nats, session_id, prefix: prefix.to_string() };
+        let mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "acceptEdits".into());
+        if let Err(e) = session.set_mode(&mode).await {
+            tracing::warn!(error = %e, mode = %mode, "failed to set session mode");
+        }
+        Ok(session)
     }
 }
 
@@ -654,6 +659,17 @@ mod tests {
     use bytes::Bytes;
     use serde_json::json;
 
+    /// Queue NATS mocks required by `TrogonSession::new` (session.new + default set_mode).
+    async fn queue_new_session_setup(nats: &MockNatsClient, session_id: &str) {
+        let resp = json!({"sessionId": session_id});
+        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        nats.add_subscription(rx);
+        tokio::spawn(async move {
+            let _ = tx.send(Bytes::from_static(b"{}")).await;
+        });
+    }
+
     // ── render_diff ───────────────────────────────────────────────────────────
 
     #[test]
@@ -765,8 +781,7 @@ mod tests {
     #[tokio::test]
     async fn set_model_sends_nats_request_and_returns_ok() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "s1"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
@@ -780,8 +795,7 @@ mod tests {
     #[tokio::test]
     async fn set_model_returns_error_on_nats_failure() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "s1"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
@@ -814,8 +828,7 @@ mod tests {
     #[tokio::test]
     async fn new_session_extracts_session_id_from_response() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "test-session-42"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "test-session-42").await;
 
         let session =
             TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
@@ -850,8 +863,7 @@ mod tests {
     #[tokio::test]
     async fn prompt_streams_text_events_and_done() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "s1"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "s1").await;
 
         // Two subscriptions: notif channel + inbox (reply) channel.
         let (notif_tx, notif_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
@@ -948,8 +960,7 @@ mod tests {
     #[tokio::test]
     async fn compact_publishes_to_compactor_subject() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "s1"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
@@ -967,8 +978,7 @@ mod tests {
     #[tokio::test]
     async fn nats_factory_create_session_returns_session_with_correct_id() {
         let nats = MockNatsClient::new();
-        let resp = json!({"sessionId": "factory-created-session"});
-        nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
+        queue_new_session_setup(&nats, "factory-created-session").await;
 
         let factory = NatsSessionFactory::new(nats);
         let session = factory
