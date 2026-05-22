@@ -464,7 +464,7 @@ mod tests {
         let (_container, port) = start_nats().await;
         let nats_bg = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
 
-        let v2_export = br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","Text":"hi"}]}]}"#;
+        let v2_export = br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","text":"hi"}]}]}"#;
         mock_responder(nats_bg.clone(), "acp.src.agent.ext.session/export", v2_export).await;
         mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"v2-sess"}"#).await;
         let import_rx =
@@ -482,5 +482,9 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();
         assert_eq!(json["sessionId"], "v2-sess");
         assert_eq!(json["messages"]["version"], 2);
+        // Verify the text block is parseable by the import handler
+        let block = &json["messages"]["messages"][0]["blocks"][0];
+        assert_eq!(block["type"], "text");
+        assert_eq!(block["text"], "hi");
     }
 }
