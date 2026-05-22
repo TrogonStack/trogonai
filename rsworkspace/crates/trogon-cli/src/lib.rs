@@ -40,7 +40,7 @@ pub async fn connect_or_start_nats(
         return Ok((client, None));
     }
 
-    let child = match Command::new("nats-server").args(["-p", "4222"]).spawn() {
+    let child = match Command::new("nats-server").args(["-p", "4222", "-js"]).spawn() {
         Ok(c) => c,
         Err(_) => {
             return Err(anyhow::anyhow!(

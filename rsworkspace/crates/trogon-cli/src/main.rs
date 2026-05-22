@@ -1,14 +1,23 @@
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use std::time::Duration;
 use trogon_cli::{
     connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, NatsSessionFactory,
     OutputFormat, RealFs,
 };
 
+#[derive(Subcommand)]
+enum Command {
+    /// Start the local dev stack (NATS, wasm runtime, runners)
+    Dev,
+}
+
 #[derive(Parser)]
 #[command(name = "trogon", about = "Trogon AI CLI")]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// NATS server URL (overrides TROGON_NATS_URL)
     #[arg(long, env = "TROGON_NATS_URL", default_value = "nats://localhost:4222")]
     nats_url: String,
@@ -30,9 +39,37 @@ struct Args {
     output_format: String,
 }
 
+fn trogon_dev_script() -> anyhow::Result<PathBuf> {
+    if let Ok(path) = std::env::var("TROGON_DEV_SCRIPT") {
+        return Ok(PathBuf::from(path));
+    }
+    let exe = std::env::current_exe()?;
+    let release_dir = exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("could not resolve trogon binary directory"))?;
+    let script = release_dir.join("../../scripts/trogon-dev.sh");
+    script
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("trogon dev script not found at {}", script.display()))
+}
+
+fn run_dev_stack() -> anyhow::Result<()> {
+    let script = trogon_dev_script()?;
+    let status = std::process::Command::new("bash").arg(script).status()?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    if matches!(args.command, Some(Command::Dev)) {
+        return run_dev_stack();
+    }
+
     let cwd = std::env::current_dir()?;
 
     let (nats, _child) = connect_or_start_nats(&args.nats_url, Duration::from_secs(3)).await?;
