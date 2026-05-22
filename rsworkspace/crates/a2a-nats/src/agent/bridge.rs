@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use futures::StreamExt as _;
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -58,6 +59,7 @@ pub struct Bridge<H, N, J> {
     handler: Arc<H>,
     nats: N,
     js: J,
+    semaphore: Arc<Semaphore>,
 }
 
 impl<H, N, J> Bridge<H, N, J>
@@ -67,11 +69,13 @@ where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync + 'static,
 {
     pub fn new(config: Config, handler: H, nats: N, js: J) -> Self {
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
         Self {
             config,
             handler: Arc::new(handler),
             nats,
             js,
+            semaphore,
         }
     }
 
@@ -109,6 +113,14 @@ where
                             break;
                         }
                         Some(msg) => {
+                            let permit = match Arc::clone(&self.semaphore).acquire_owned().await {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    warn!("A2A backpressure semaphore closed; shutting down bridge");
+                                    break;
+                                }
+                            };
+
                             let method = A2aMethod::from_subject(msg.subject.as_str(), prefix_len);
                             let handler = Arc::clone(&self.handler);
                             let nats = self.nats.clone();
@@ -130,6 +142,7 @@ where
                                     &prefix_inner,
                                 )
                                 .await;
+                                drop(permit);
                             });
                         }
                     }
@@ -386,5 +399,239 @@ mod tests {
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
         assert_eq!(body["result"]["id"], "tg1");
+    }
+
+    #[tokio::test]
+    async fn concurrency_limit_blocks_excess_handlers() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct BlockingHandler {
+            // Number of handlers currently inside message_send (incremented at entry, decremented at exit).
+            in_flight_count: Arc<AtomicUsize>,
+            // Total invocations that completed (incremented just before returning).
+            completed_count: Arc<AtomicUsize>,
+            // Semaphore with 0 permits; each handler blocks until a permit is added.
+            gate: Arc<Semaphore>,
+        }
+
+        #[async_trait::async_trait]
+        impl crate::agent::handler::A2aHandler for BlockingHandler {
+            async fn message_send(
+                &self,
+                _req: a2a_types::SendMessageRequest,
+            ) -> Result<a2a_types::SendMessageResponse, crate::agent::handler::A2aError> {
+                self.in_flight_count.fetch_add(1, Ordering::SeqCst);
+                let _permit = self.gate.acquire().await.unwrap();
+                self.in_flight_count.fetch_sub(1, Ordering::SeqCst);
+                self.completed_count.fetch_add(1, Ordering::SeqCst);
+                Ok(a2a_types::SendMessageResponse { payload: None })
+            }
+
+            async fn message_stream(
+                &self,
+                _req: a2a_types::SendMessageRequest,
+            ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn tasks_get(
+                &self,
+                _req: a2a_types::GetTaskRequest,
+            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn tasks_list(
+                &self,
+                _req: a2a_types::ListTasksRequest,
+            ) -> Result<a2a_types::ListTasksResponse, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn tasks_cancel(
+                &self,
+                _req: a2a_types::CancelTaskRequest,
+            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn tasks_resubscribe(
+                &self,
+                _req: a2a_types::SubscribeToTaskRequest,
+            ) -> Result<a2a_types::Task, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn push_notification_set(
+                &self,
+                _req: a2a_types::TaskPushNotificationConfig,
+            ) -> Result<a2a_types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn push_notification_get(
+                &self,
+                _req: a2a_types::GetTaskPushNotificationConfigRequest,
+            ) -> Result<a2a_types::TaskPushNotificationConfig, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn push_notification_list(
+                &self,
+                _req: a2a_types::ListTaskPushNotificationConfigsRequest,
+            ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn push_notification_delete(
+                &self,
+                _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+            ) -> Result<(), crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+
+            async fn agent_card(
+                &self,
+                _req: a2a_types::GetExtendedAgentCardRequest,
+            ) -> Result<a2a_types::AgentCard, crate::agent::handler::A2aError> {
+                Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
+            }
+        }
+
+        let in_flight_count = Arc::new(AtomicUsize::new(0));
+        let completed_count = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(Semaphore::new(0));
+
+        let handler = BlockingHandler {
+            in_flight_count: Arc::clone(&in_flight_count),
+            completed_count: Arc::clone(&completed_count),
+            gate: Arc::clone(&gate),
+        };
+
+        let nats = AdvancedMockNatsClient::new();
+        let inject = nats.inject_messages();
+
+        let bridge = Bridge::new(
+            Config::for_test("a2a").with_max_concurrent_client_tasks(2),
+            handler,
+            nats.clone(),
+            MockJetStreamPublisher::new(),
+        );
+
+        let agent_id = crate::agent_id::A2aAgentId::new("bot").unwrap();
+        let shutdown = CancellationToken::new();
+        let shutdown_clone = shutdown.clone();
+
+        let bridge_handle = tokio::spawn(async move {
+            bridge.run_with_agent_id(&agent_id, shutdown_clone).await
+        });
+
+        let msg_subject = "a2a.agent.bot.message.send";
+        let payload = bytes::Bytes::from(rpc_payload("message/send", 1));
+
+        for _ in 0..3 {
+            inject
+                .unbounded_send(async_nats::Message {
+                    subject: msg_subject.into(),
+                    reply: Some("_INBOX.reply".into()),
+                    payload: payload.clone(),
+                    headers: None,
+                    length: payload.len(),
+                    status: None,
+                    description: None,
+                })
+                .unwrap();
+        }
+
+        // Wait until exactly 2 handlers are in-flight (the 3rd is blocked by the bridge semaphore).
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if in_flight_count.load(Ordering::SeqCst) == 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for 2 handlers to be in-flight");
+
+        assert_eq!(in_flight_count.load(Ordering::SeqCst), 2);
+
+        // Release all 3 gates so every in-flight and queued handler can finish.
+        gate.add_permits(3);
+
+        // Wait until all 3 messages have been handled end-to-end.
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if completed_count.load(Ordering::SeqCst) == 3 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for all handlers to finish");
+
+        shutdown.cancel();
+        bridge_handle.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn permit_released_after_handler_returns() {
+        let nats = AdvancedMockNatsClient::new();
+        let inject = nats.inject_messages();
+
+        let handler_stub = stub();
+        handler_stub.lock().unwrap().message_send_result =
+            Some(Ok(a2a_types::SendMessageResponse { payload: None }));
+
+        let config = Config::for_test("a2a").with_max_concurrent_client_tasks(1);
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
+        let semaphore_observe = Arc::clone(&semaphore);
+
+        let bridge = Bridge {
+            semaphore,
+            config,
+            handler: Arc::new(handler_stub),
+            nats: nats.clone(),
+            js: MockJetStreamPublisher::new(),
+        };
+
+        let agent_id = crate::agent_id::A2aAgentId::new("bot").unwrap();
+        let shutdown = CancellationToken::new();
+        let shutdown_clone = shutdown.clone();
+
+        let bridge_handle = tokio::spawn(async move {
+            bridge.run_with_agent_id(&agent_id, shutdown_clone).await
+        });
+
+        let payload = bytes::Bytes::from(rpc_payload("message/send", 10));
+        inject
+            .unbounded_send(async_nats::Message {
+                subject: "a2a.agent.bot.message.send".into(),
+                reply: None,
+                payload: payload.clone(),
+                headers: None,
+                length: payload.len(),
+                status: None,
+                description: None,
+            })
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if semaphore_observe.available_permits() == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for permit to be released");
+
+        assert_eq!(semaphore_observe.available_permits(), 1);
+
+        shutdown.cancel();
+        bridge_handle.await.unwrap().unwrap();
     }
 }
