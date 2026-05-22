@@ -80,7 +80,7 @@ Goal: prove the substrate, not the policy model. Throwaway-safe.
 - [ ] SpiceDB client + one `CheckPermission` call per `tools/call` (Phase 1 has `PermissionChecker` + allow-all stub only).
 - [x] Reply correlation: ingress `reply` inbox preserved; gateway issues `request_with_headers` to `mcp.server.{id}.{method}` with the same payload; ingress without reply is forwarded as core publish only.
 - [x] Audit JSON envelope to JetStream (default stream `MCP_AUDIT`; subjects `{prefix}.audit.{outcome}.request.{method_root}`, tenant field in envelope when header present).
-- [ ] End-to-end test against an existing `mcp-nats` server (the test fixture in `mcp-nats/tests/transport.rs` is a good starting point).
+- [x] End-to-end NATS harness (ignored unless `cargo test -p trogon-mcp-gateway -- --ignored`; see `tests/e2e_nats_forward.rs`).
 - [ ] Baseline latency measurement — P50, P99 added by the gateway vs. direct `mcp-nats` call. Establishes the budget for Phase 2+.
 - [x] In-memory trace by JSON-RPC request id (`trace::TraceStore`) — stand-in until `agctl trace`-style export (KV/service) lands.
 
