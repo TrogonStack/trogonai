@@ -15,7 +15,7 @@ pub mod tui_client;
 
 pub use fs::{Fs, RealFs};
 pub use nats::NatsClient;
-pub use print::OutputFormat;
+pub use print::{OutputFormat, PrintExitCode, PrintOptions};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
 pub use mcp::{McpConfig, McpManager, McpServerConfig};

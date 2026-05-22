@@ -3,9 +3,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
 use trogon_cli::{
-    connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, NatsSessionFactory,
-    OutputFormat, RealFs, SessionEntry, SessionIndex,
+    connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession, CrossRunnerSwitcher,
+    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
 };
+use trogon_cli::Session as _;
 
 #[derive(Subcommand)]
 enum Command {
@@ -39,6 +40,18 @@ struct Args {
     /// json emits a single line: {"text":"...","stop_reason":"..."}
     #[arg(long, default_value = "text")]
     output_format: String,
+
+    /// Emit NDJSON tool lines during --print: {"type":"tool","name":"...","output":"..."}
+    #[arg(long)]
+    print_tools: bool,
+
+    /// Set bypassPermissions before the prompt (skips permission gates — use with care)
+    #[arg(long)]
+    dangerously_skip_permissions: bool,
+
+    /// Model id for --print (resolved via aliases; uses --prefix runner)
+    #[arg(long)]
+    model: Option<String>,
 
     /// Run health checks on NATS, registry, runners, and compactor
     #[arg(long)]
@@ -110,12 +123,22 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
         let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
-        let session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
-        let result = trogon_cli::print::run(session, &prompt, format).await;
-        if let Err(e) = result {
-            eprintln!("error: {e}");
-            std::process::exit(1);
+        let options = PrintOptions { print_tools: args.print_tools };
+        let mut session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
+        if args.dangerously_skip_permissions {
+            if let Err(e) = session.set_mode("bypassPermissions").await {
+                eprintln!("warning: could not set bypassPermissions: {e}");
+            }
         }
+        if let Some(model) = &args.model {
+            let model_id = resolve_model_alias(model);
+            if let Err(e) = session.set_model(&model_id).await {
+                eprintln!("error: could not set model: {e}");
+                std::process::exit(1);
+            }
+        }
+        let code = trogon_cli::print::run(session, &prompt, format, options).await;
+        std::process::exit(code as i32);
     } else {
         let acp_prefix = AcpPrefix::new(&args.prefix)
             .map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
