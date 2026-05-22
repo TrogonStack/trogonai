@@ -1,7 +1,7 @@
 //! Integration tests for slash commands that require a real NATS connection.
 //!
 //! Covers /clear (session factory creates a distinct session_id), /compact
-//! (publishes to compactor subject), and NatsSessionFactory (create + attach).
+//! (export → compactor → import), and NatsSessionFactory (create + attach).
 //!
 //! Requires Docker. Run with:
 //!   cargo test -p trogon-cli --test slash_commands_integration
@@ -11,7 +11,8 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
-use trogon_cli::session::{NatsSessionFactory, SessionFactory, StreamEvent, TrogonSession};
+use agent_client_protocol::ExtResponse;
+use trogon_cli::session::{CompactResult, NatsSessionFactory, SessionFactory, StreamEvent, TrogonSession};
 use trogon_cli::Session as _;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,6 +80,29 @@ async fn drain_until_done(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) {
             }
         }
     }
+}
+
+const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
+
+/// Respond once on `subject` with `response_bytes` (core NATS request-reply).
+async fn mock_responder(nats: async_nats::Client, subject: &'static str, response_bytes: &'static [u8]) {
+    let mut sub = nats.subscribe(subject).await.expect("subscribe");
+    tokio::spawn(async move {
+        if let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                nats.publish(reply, response_bytes.into()).await.ok();
+            }
+        }
+    });
+}
+
+fn ext_response(body: &str) -> Vec<u8> {
+    let resp = ExtResponse::new(
+        serde_json::value::RawValue::from_string(body.to_string())
+            .unwrap()
+            .into(),
+    );
+    serde_json::to_vec(&resp).unwrap()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -280,19 +304,35 @@ async fn nats_factory_successive_creates_return_distinct_ids() {
 
 // ── /compact ──────────────────────────────────────────────────────────────────
 
-/// session.compact() publishes to `{prefix}.compactor.compact` with the
-/// correct session_id in the payload.
+/// session.compact() exports messages, calls trogon.compactor.compact, and imports
+/// compacted messages back into the session.
 #[tokio::test]
-async fn compact_publishes_to_compactor_subject_with_session_id() {
+async fn compact_export_compactor_import_round_trip() {
     let (_container, port) = start_nats().await;
     let nats = connect(port).await;
+    let nats_bg = connect(port).await;
 
-    // Fake runner handles one session.new
-    spawn_fake_runner_multi(nats.clone(), "compact-sess", 1).await;
+    spawn_fake_runner_multi(nats_bg.clone(), "compact-sess", 1).await;
+    mock_responder(
+        nats_bg.clone(),
+        "test.agent.ext.session/export",
+        &ext_response(r#"[{"role":"user","text":"hello"}]"#),
+    )
+    .await;
+    mock_responder(
+        nats_bg.clone(),
+        COMPACT_SUBJECT,
+        br#"{"messages":[{"role":"user","content":[{"type":"text","text":"summary"}]}],"compacted":true,"tokens_before":500,"tokens_after":100}"#,
+    )
+    .await;
+    mock_responder(
+        nats_bg.clone(),
+        "test.agent.ext.session/import",
+        &ext_response("{}"),
+    )
+    .await;
 
-    // Subscribe to the compactor subject BEFORE calling compact()
-    let compact_subj = format!("{PREFIX}.compactor.compact");
-    let mut compact_sub = nats.subscribe(compact_subj.clone()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     let factory = NatsSessionFactory::new(nats);
     let session = factory
@@ -300,43 +340,68 @@ async fn compact_publishes_to_compactor_subject_with_session_id() {
         .await
         .unwrap();
 
-    let expected_id = session.session_id().to_string();
-
-    session.compact().await.unwrap();
-
-    let msg = tokio::time::timeout(TIMEOUT, compact_sub.next())
-        .await
-        .expect("timed out waiting for compact message")
-        .expect("compact subject had no message");
-
-    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let result = session.compact().await.unwrap();
     assert_eq!(
-        payload["sessionId"].as_str().unwrap(),
-        expected_id,
-        "compact payload must include the session_id"
+        result,
+        CompactResult {
+            compacted: true,
+            tokens_before: 500,
+            tokens_after: 100,
+        }
     );
 }
 
-/// compact() on a session created via attach_session also sends to the right
-/// subject with the correct session_id.
+/// compact() on a session created via attach_session uses the attached session id
+/// when exporting and importing.
 #[tokio::test]
 async fn compact_on_attached_session_uses_correct_session_id() {
     let (_container, port) = start_nats().await;
     let nats = connect(port).await;
+    let nats_bg = connect(port).await;
 
-    let compact_subj = format!("{PREFIX}.compactor.compact");
-    let mut compact_sub = nats.subscribe(compact_subj).await.unwrap();
+    let export_subj = "test.agent.ext.session/export";
+    let import_subj = "test.agent.ext.session/import";
+    let mut export_sub = nats_bg.subscribe(export_subj).await.unwrap();
+    let mut import_sub = nats_bg.subscribe(import_subj).await.unwrap();
+    mock_responder(
+        nats_bg.clone(),
+        COMPACT_SUBJECT,
+        br#"{"messages":[],"compacted":false,"tokens_before":10,"tokens_after":10}"#,
+    )
+    .await;
 
     let factory = NatsSessionFactory::new(nats);
     let session = factory.attach_session(PREFIX, "attached-for-compact".to_string());
 
-    session.compact().await.unwrap();
+    let compact_handle = tokio::spawn(async move { session.compact().await.unwrap() });
 
-    let msg = tokio::time::timeout(TIMEOUT, compact_sub.next())
+    let export_msg = tokio::time::timeout(TIMEOUT, export_sub.next())
         .await
-        .expect("timed out")
-        .expect("no compact message");
+        .expect("timed out waiting for export")
+        .expect("no export message");
+    let export_req: serde_json::Value = serde_json::from_slice(&export_msg.payload).unwrap();
+    assert_eq!(
+        export_req["params"]["sessionId"].as_str().unwrap(),
+        "attached-for-compact"
+    );
+    if let Some(reply) = export_msg.reply {
+        nats_bg
+            .publish(reply, ext_response("[]").into())
+            .await
+            .unwrap();
+    }
 
-    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-    assert_eq!(payload["sessionId"].as_str().unwrap(), "attached-for-compact");
+    let result = compact_handle.await.unwrap();
+    assert_eq!(
+        result,
+        CompactResult {
+            compacted: false,
+            tokens_before: 0,
+            tokens_after: 0,
+        }
+    );
+
+    // Empty export skips compactor import — import subject should not be called.
+    let import_result = tokio::time::timeout(Duration::from_millis(200), import_sub.next()).await;
+    assert!(import_result.is_err(), "import should not be called for empty export");
 }
