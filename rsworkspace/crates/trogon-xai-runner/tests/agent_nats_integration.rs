@@ -9,12 +9,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent as _, CloseSessionRequest, ContentBlock, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, SessionNotification, SetSessionModelRequest,
+    Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
+    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
-use futures_util::stream::{self, LocalBoxStream};
+use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
@@ -84,6 +84,7 @@ impl XaiHttpClient for ReplyWithUsageHttpClient {
             XaiEvent::Usage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
+                cached_tokens: 0,
             },
             XaiEvent::TextDelta {
                 text: "Hello with usage!".to_string(),
@@ -817,6 +818,284 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
                 state["system_prompt"].as_str(),
                 Some("act like a pirate"),
                 "_meta.systemPrompt must be stored in the session state"
+            );
+        })
+        .await;
+}
+
+// ── token tracking persisted to KV ───────────────────────────────────────────
+
+/// After a prompt with token usage, `totalInputTokens` and `totalOutputTokens`
+/// must appear in the SESSIONS KV snapshot.
+#[tokio::test]
+async fn token_totals_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyWithUsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("track my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
+            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+        })
+        .await;
+}
+
+/// After forking a session that has token totals, the fork's KV snapshot must
+/// not carry the parent's totals (zero values are omitted from JSON).
+#[tokio::test]
+async fn fork_session_token_totals_absent_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", ReplyWithUsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src.session_id,
+                    vec![ContentBlock::from("prompt")],
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert!(
+                v.get("total_input_tokens").is_none(),
+                "fork must not inherit parent's total_input_tokens; got: {v}"
+            );
+            assert!(
+                v.get("total_output_tokens").is_none(),
+                "fork must not inherit parent's total_output_tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cache_read_tokens in KV ───────────────────────────────────────────────────
+
+/// HTTP client that returns a Usage event with non-zero cached_tokens.
+struct CacheReadUsageHttpClient;
+
+#[async_trait(?Send)]
+impl XaiHttpClient for CacheReadUsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        Box::pin(stream::iter(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cached_tokens: 50,
+            },
+            XaiEvent::TextDelta {
+                text: "cached reply".to_string(),
+            },
+        ]))
+    }
+}
+
+/// After a prompt where the xAI Usage event has `cached_tokens > 0`,
+/// `total_cache_read_tokens` must be persisted to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cache_read_tokens_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        XaiAgent::with_deps(NoOpNotifier, "grok-4", "dummy-key", CacheReadUsageHttpClient)
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("use cache")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_cache_read_tokens"], 50,
+                "total_cache_read_tokens must be 50 when cached_tokens=50; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cancel path persists tokens to KV ────────────────────────────────────────
+
+/// HTTP client that emits Usage + partial text then blocks forever.
+/// Signals `ready` when the stream is set up so the test can time the cancel.
+struct SlowCancelHttpClient {
+    ready: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait(?Send)]
+impl XaiHttpClient for SlowCancelHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        self.ready.notify_one();
+        let initial = stream::iter(vec![
+            XaiEvent::Usage {
+                prompt_tokens: 20,
+                completion_tokens: 8,
+                cached_tokens: 15,
+            },
+            XaiEvent::TextDelta {
+                text: "partial".to_string(),
+            },
+        ]);
+        Box::pin(initial.chain(stream::pending()))
+    }
+}
+
+/// When a prompt is cancelled after the xAI Usage event has been received
+/// (but before the stream ends), the cancel path must persist the billed
+/// tokens to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cancel_prompt_token_totals_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let agent = Arc::new(
+        XaiAgent::with_deps(
+            NoOpNotifier,
+            "grok-4",
+            "dummy-key",
+            SlowCancelHttpClient {
+                ready: Arc::clone(&ready),
+            },
+        )
+        .with_session_store(Arc::new(store)),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let session_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let agent_prompt = Arc::clone(&agent);
+            let sid_for_prompt = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid_for_prompt,
+                        vec![ContentBlock::from("partial call")],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // `chat_stream` was called → Usage event already in the stream buffer,
+            // cancel channel is registered. Sending cancel now will interrupt after
+            // the Usage event has been processed.
+            ready.notified().await;
+            agent
+                .cancel(CancelNotification::new(session_id.clone()))
+                .await
+                .unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist after cancel with billed tokens");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 20,
+                "cancel path must persist input tokens to KV; got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 8,
+                "cancel path must persist output tokens to KV; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_read_tokens"], 15,
+                "cancel path must persist cache_read tokens to KV; got: {v}"
             );
         })
         .await;

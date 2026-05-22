@@ -33,7 +33,8 @@ use futures_util::stream::{self, LocalBoxStream};
 use trogon_nats::mocks::MockNatsClient;
 use trogon_openrouter_runner::{
     AgentConfig, AgentLoading, AssembledToolCall, FinishReason, Message as OaMessage,
-    OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier, SkillLoading, ToolDef,
+    OpenRouterAgent, OpenRouterEvent, OpenRouterHttpClient, SessionNotifier, SessionStoring,
+    SkillLoading, ToolDef,
 };
 
 // ── Inline HTTP client stub ───────────────────────────────────────────────────
@@ -150,6 +151,46 @@ impl TestNotifier {
 impl SessionNotifier for TestNotifier {
     async fn notify(&self, notification: SessionNotification) {
         self.notifications.lock().unwrap().push(notification);
+    }
+}
+
+// ── Inline session store: records full snapshots for cancel+KV tests ──────────
+
+struct RecordingStore {
+    saves: Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>,
+}
+
+impl RecordingStore {
+    fn new() -> (Self, Arc<Mutex<Vec<trogon_openrouter_runner::session_store::SessionSnapshot>>>) {
+        let saves = Arc::new(Mutex::new(Vec::new()));
+        (Self { saves: Arc::clone(&saves) }, saves)
+    }
+}
+
+impl SessionStoring for RecordingStore {
+    fn save<'a>(
+        &'a self,
+        snapshot: &'a trogon_openrouter_runner::session_store::SessionSnapshot,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        let snap = snapshot.clone();
+        let saves = Arc::clone(&self.saves);
+        Box::pin(async move { saves.lock().unwrap().push(snap); })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {})
+    }
+
+    fn load<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _session_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<trogon_openrouter_runner::session_store::SessionSnapshot>> + Send + 'a>> {
+        Box::pin(async move { None })
     }
 }
 
@@ -425,7 +466,7 @@ async fn prompt_via_nats_sends_usage_notification() {
 
             h.http.push(vec![
                 OpenRouterEvent::TextDelta { text: "answer".to_string() },
-                OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+                OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
             ]);
             let prompt_subj = format!("acp.session.{sid}.agent.prompt");
             h.session_req(
@@ -895,10 +936,9 @@ async fn cancel_via_nats_interrupts_prompt() {
                 "r.prompt",
             );
 
-            // Yield to let the prompt task start and enter the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for the TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");
             h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
@@ -1411,10 +1451,9 @@ async fn close_session_during_active_prompt_cancels_and_removes_session() {
                 "r.prompt",
             );
 
-            // Yield so the prompt task starts and enters the streaming loop.
-            for _ in 0..5 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for the TextDelta notification — guarantees cancel_senders is registered
+            // and the slow stream is still pending.
+            h.expect_n_notifications(1).await;
 
             // Close the session while the prompt is still running.
             let close_subj = format!("acp.session.{sid}.agent.close");
@@ -4376,7 +4415,7 @@ async fn usage_update_notification_fires_after_tool_round_via_nats() {
             }]);
             // Call 2: final answer with usage event
             h.http.push(vec![
-                OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 10 },
+                OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
                 OpenRouterEvent::TextDelta { text: "done".to_string() },
             ]);
 
@@ -4623,10 +4662,10 @@ async fn cancel_during_second_http_call_of_tool_round_via_nats() {
                 "r.cancel2",
             );
 
-            // Yield until the agent has entered the second HTTP call's inner loop.
-            for _ in 0..20 {
-                tokio::task::yield_now().await;
-            }
+            // Wait for: ToolCall InProgress + ToolCallUpdate Completed + AgentMessageChunk
+            // from the second HTTP call. That guarantees we're inside the second streaming
+            // loop while the slow stream is still pending.
+            h.expect_n_notifications(3).await;
 
             let cancel_subj = format!("acp.session.{sid}.agent.cancel");
             h.session_notify(&cancel_subj, CancelNotification::new(sid.clone()));
@@ -4881,6 +4920,481 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
                 completed.tool_call_id.0.as_ref(),
                 "call_verify_id",
                 "ToolCallUpdate notification tool_call_id must match dispatched call id"
+            );
+        })
+        .await;
+}
+
+// ── cancel via NATS saves token totals to KV when usage received before cancel ──
+
+/// A prompt cancelled via NATS must persist accumulated token totals to the
+/// session store — verifies the full NATS dispatch stack for the cancel path.
+#[tokio::test]
+async fn cancel_saves_token_totals_to_kv() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let nats = MockNatsClient::new();
+            let http = TestHttpClient::new();
+            let notifier = TestNotifier::new();
+            let global_tx = nats.inject_messages();
+            let session_tx = nats.inject_messages();
+
+            let (store, saves) = RecordingStore::new();
+
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let agent =
+                OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
+                    .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let (_, io_task) =
+                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+            tokio::task::spawn_local(async move { let _ = io_task.await; });
+
+            // Create a session via NATS.
+            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 1 { break; }
+                assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
+                tokio::task::yield_now().await;
+            }
+            let sid: String = serde_json::from_slice::<serde_json::Value>(
+                &nats.published_payloads()[0],
+            )
+            .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // First call: Usage + ToolCallsReady → triggers tool dispatch + second call.
+            http.push(vec![
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 9,
+                    completion_tokens: 4,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+                OpenRouterEvent::ToolCallsReady {
+                    calls: vec![AssembledToolCall {
+                        id: "call_kv".to_string(),
+                        name: "list_directory".to_string(),
+                        arguments: r#"{"path":"."}"#.to_string(),
+                    }],
+                },
+            ]);
+            // Second call: slow — hangs until cancel fires.
+            http.push_slow(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            inject_req(
+                &session_tx,
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")]),
+                "r.prompt",
+            );
+
+            // Wait for the UsageUpdate notification (usage from call 1 was processed)
+            // and at least one AgentMessageChunk (call 2 is streaming = cancel_senders populated).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let notes = notifier.notifications.lock().unwrap();
+                let has_usage = notes.iter().any(|n| matches!(&n.update, SessionUpdate::UsageUpdate(_)));
+                let has_chunk = notes.iter().any(|n| matches!(&n.update, SessionUpdate::AgentMessageChunk(_)));
+                if has_usage && has_chunk { break; }
+                drop(notes);
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for UsageUpdate + AgentMessageChunk"
+                );
+                tokio::task::yield_now().await;
+            }
+
+            // Send cancel via NATS (notification — no reply).
+            let cancel_subj = format!("acp.session.{sid}.agent.cancel");
+            let msg = async_nats::Message {
+                subject: cancel_subj.into(),
+                reply: None,
+                payload: serde_json::to_vec(&CancelNotification::new(sid.clone()))
+                    .unwrap()
+                    .into(),
+                headers: None,
+                length: 0,
+                status: None,
+                description: None,
+            };
+            session_tx.unbounded_send(msg).unwrap();
+
+            // Wait for the prompt response (publish 2 = new_session + prompt).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 2 { break; }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for cancel prompt response"
+                );
+                tokio::task::yield_now().await;
+            }
+            let payloads = nats.published_payloads();
+            let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
+                "must return Cancelled: {:?}",
+                resp.stop_reason
+            );
+
+            // The store must have a snapshot with non-zero token totals.
+            // (1 save from new_session + 1 save from post-loop path = at least 2)
+            let stored = saves.lock().unwrap();
+            assert!(
+                stored.len() >= 2,
+                "store must be saved on new_session and after cancel; got {} saves",
+                stored.len()
+            );
+            let last = stored.last().unwrap();
+            assert_eq!(
+                last.total_input_tokens, 9,
+                "cancel path must persist accumulated input tokens to KV"
+            );
+            assert_eq!(
+                last.total_output_tokens, 4,
+                "cancel path must persist accumulated output tokens to KV"
+            );
+        })
+        .await;
+}
+
+// ── completion path persists token totals to KV ───────────────────────────────
+
+/// A normally-completed prompt must persist token totals to the session store —
+/// verifies the success code path writes through the full NATS dispatch stack.
+#[tokio::test]
+async fn completion_saves_token_totals_to_kv() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let nats = MockNatsClient::new();
+            let http = TestHttpClient::new();
+            let notifier = TestNotifier::new();
+            let global_tx = nats.inject_messages();
+            let session_tx = nats.inject_messages();
+
+            let (store, saves) = RecordingStore::new();
+
+            let prefix = AcpPrefix::new("acp").unwrap();
+            let agent =
+                OpenRouterAgent::with_deps(notifier.clone(), "test-model", "test-key", http.clone())
+                    .with_session_store(Arc::new(store) as Arc<dyn SessionStoring>);
+            let (_, io_task) =
+                AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
+                    tokio::task::spawn_local(fut);
+                });
+            tokio::task::spawn_local(async move { let _ = io_task.await; });
+
+            // Create a session via NATS.
+            inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 1 { break; }
+                assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
+                tokio::task::yield_now().await;
+            }
+            let sid: String = serde_json::from_slice::<serde_json::Value>(
+                &nats.published_payloads()[0],
+            )
+            .unwrap()["sessionId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+
+            // Normal completion: TextDelta + Usage (openrouter ends turn on Usage event).
+            http.push(vec![
+                OpenRouterEvent::TextDelta { text: "done".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 12,
+                    completion_tokens: 6,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+            ]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            inject_req(
+                &session_tx,
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+
+            // Wait for prompt response (publish 2 = session.new + prompt).
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if nats.published_payloads().len() >= 2 { break; }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timeout waiting for prompt response; got {} publishes",
+                    nats.published_payloads().len()
+                );
+                tokio::task::yield_now().await;
+            }
+
+            let stored = saves.lock().unwrap();
+            assert!(
+                stored.len() >= 2,
+                "store must be saved on new_session and on completion; got {} saves",
+                stored.len()
+            );
+            let last = stored.last().unwrap();
+            assert_eq!(
+                last.total_input_tokens, 12,
+                "completion path must persist input tokens to KV"
+            );
+            assert_eq!(
+                last.total_output_tokens, 6,
+                "completion path must persist output tokens to KV"
+            );
+        })
+        .await;
+}
+
+// ── list_sessions exposes token totals in _meta via NATS ─────────────────────
+
+/// After a prompt completes, `list_sessions` via NATS must return the session
+/// with `totalInputTokens` and `totalOutputTokens` in `_meta`.
+#[tokio::test]
+async fn list_sessions_exposes_token_totals_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                OpenRouterEvent::TextDelta { text: "ok".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 15,
+                    completion_tokens: 7,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("count")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await;
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            let info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == sid)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after a prompt with usage");
+            assert_eq!(
+                meta.get("totalInputTokens"),
+                Some(&serde_json::json!(15)),
+                "list_sessions must expose totalInputTokens in _meta: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalOutputTokens"),
+                Some(&serde_json::json!(7)),
+                "list_sessions must expose totalOutputTokens in _meta: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── list_sessions exposes cache token totals in _meta ────────────────────────
+
+/// When OpenRouter reports cache tokens in the usage event, they are accumulated
+/// and exposed as `totalCacheReadTokens` / `totalCacheCreationTokens` in `_meta`.
+#[tokio::test]
+async fn list_sessions_exposes_cache_tokens_in_meta() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![
+                OpenRouterEvent::TextDelta { text: "cached".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 12,
+                    completion_tokens: 6,
+                    cache_read_tokens: 30,
+                    cache_creation_tokens: 15,
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("use cache")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(3).await;
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[2]).unwrap();
+            let info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == sid)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after a prompt with cache tokens");
+            assert_eq!(
+                meta.get("totalCacheReadTokens"),
+                Some(&serde_json::json!(30)),
+                "list_sessions must expose totalCacheReadTokens in _meta: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalCacheCreationTokens"),
+                Some(&serde_json::json!(15)),
+                "list_sessions must expose totalCacheCreationTokens in _meta: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token totals accumulate across multiple prompts via NATS ─────────────────
+
+/// Two consecutive prompts to the same session must accumulate token totals —
+/// `list_sessions` after both must return the sum of both turns.
+#[tokio::test]
+async fn multi_turn_tokens_accumulate_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Turn 1: 10 input + 5 output.
+            h.http.push(vec![
+                OpenRouterEvent::TextDelta { text: "first".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 1")]),
+                "r.p1",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Turn 2: 6 input + 3 output.
+            h.http.push(vec![
+                OpenRouterEvent::TextDelta { text: "second".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 6,
+                    completion_tokens: 3,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+            ]);
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("turn 2")]),
+                "r.p2",
+            );
+            h.expect_n_publishes(3).await;
+
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(4).await;
+
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[3]).unwrap();
+            let info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == sid)
+                .expect("session must appear in list_sessions");
+            let meta = info.meta.as_ref().expect("session must have _meta");
+            assert_eq!(
+                meta.get("totalInputTokens"),
+                Some(&serde_json::json!(16)),
+                "input tokens must sum across both turns (10+6=16): {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalOutputTokens"),
+                Some(&serde_json::json!(8)),
+                "output tokens must sum across both turns (5+3=8): {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── fork_session resets token totals to zero via NATS ────────────────────────
+
+/// After forking a session that has accumulated token totals, the forked
+/// session must appear in `list_sessions` with zero token totals.
+#[tokio::test]
+async fn fork_session_resets_token_totals_via_nats() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            // Prompt source session so it has non-zero token totals.
+            h.http.push(vec![
+                OpenRouterEvent::TextDelta { text: "src".to_string() },
+                OpenRouterEvent::Usage {
+                    prompt_tokens: 11,
+                    completion_tokens: 6,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                },
+            ]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")]),
+                "r.prompt",
+            );
+            h.expect_n_publishes(2).await;
+
+            // Fork the session.
+            let fork_subj = format!("acp.session.{sid}.agent.fork");
+            h.session_req(
+                &fork_subj,
+                ForkSessionRequest::new(sid.clone(), "/fork"),
+                "r.fork",
+            );
+            let payloads = h.expect_n_publishes(3).await;
+            let fork_val: serde_json::Value = serde_json::from_slice(&payloads[2]).unwrap();
+            let fork_id = fork_val["sessionId"].as_str().unwrap().to_string();
+
+            // list_sessions must show the forked session with zero token totals.
+            h.global("acp.agent.session.list", ListSessionsRequest::new(), "r.list");
+            let payloads = h.expect_n_publishes(4).await;
+            let resp: ListSessionsResponse = serde_json::from_slice(&payloads[3]).unwrap();
+
+            let fork_info = resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == fork_id)
+                .expect("forked session must appear in list_sessions");
+            let has_input_tokens = fork_info
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("totalInputTokens"))
+                .is_some();
+            assert!(
+                !has_input_tokens,
+                "forked session must have zero token totals (no totalInputTokens in _meta): {:?}",
+                fork_info.meta
             );
         })
         .await;

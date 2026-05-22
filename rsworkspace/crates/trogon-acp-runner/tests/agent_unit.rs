@@ -929,6 +929,46 @@ async fn fork_session_branch_at_index_wrong_type_falls_back_to_full_copy() {
         .await;
 }
 
+#[tokio::test]
+async fn fork_session_resets_token_totals_to_zero() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let new_resp = agent
+                .new_session(NewSessionRequest::new("/src"))
+                .await
+                .unwrap();
+            let source_id = new_resp.session_id.to_string();
+
+            // Inject token totals into the parent session.
+            let mut state = store.load(&source_id).await.unwrap();
+            state.total_input_tokens = 1000;
+            state.total_output_tokens = 400;
+            state.total_cache_creation_tokens = 80;
+            state.total_cache_read_tokens = 20;
+            store.save(&source_id, &state).await.unwrap();
+
+            let fork_resp = agent
+                .fork_session(ForkSessionRequest::new(source_id.clone(), "/fork"))
+                .await
+                .unwrap();
+            let fork_id = fork_resp.session_id.to_string();
+
+            let fork_state = store.load(&fork_id).await.unwrap();
+            assert_eq!(fork_state.total_input_tokens, 0, "fork must start with zero input tokens");
+            assert_eq!(fork_state.total_output_tokens, 0, "fork must start with zero output tokens");
+            assert_eq!(fork_state.total_cache_creation_tokens, 0, "fork must start with zero cache-creation tokens");
+            assert_eq!(fork_state.total_cache_read_tokens, 0, "fork must start with zero cache-read tokens");
+
+            // Parent totals must be unchanged.
+            let parent_state = store.load(&source_id).await.unwrap();
+            assert_eq!(parent_state.total_input_tokens, 1000);
+        })
+        .await;
+}
+
 // ── ext_method: session/list_children edge cases ──────────────────────────────
 
 #[tokio::test]
@@ -1086,6 +1126,82 @@ async fn list_sessions_preserves_parent_session_id_after_parent_deleted() {
                 Some(parent_id.as_str()),
                 "parentSessionId must survive even after the parent is deleted"
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn list_sessions_includes_token_totals_in_meta() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/work"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            // Inject token totals directly into the store.
+            let mut state = store.load(&session_id).await.unwrap();
+            state.total_input_tokens = 500;
+            state.total_output_tokens = 200;
+            state.total_cache_creation_tokens = 50;
+            state.total_cache_read_tokens = 10;
+            store.save(&session_id, &state).await.unwrap();
+
+            let list_resp = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+
+            let m = info.meta.as_ref().expect("session with tokens must have _meta");
+            assert_eq!(m.get("totalInputTokens").and_then(|v| v.as_u64()), Some(500));
+            assert_eq!(m.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(200));
+            assert_eq!(m.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(50));
+            assert_eq!(m.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(10));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn list_sessions_omits_token_meta_when_zero() {
+    let (_, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/work"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            let list_resp = agent
+                .list_sessions(ListSessionsRequest::new())
+                .await
+                .unwrap();
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+
+            // No tokens accumulated → no _meta (or _meta without token keys).
+            if let Some(m) = &info.meta {
+                assert!(
+                    m.get("totalInputTokens").is_none(),
+                    "zero-token session must not expose totalInputTokens in _meta"
+                );
+            }
         })
         .await;
 }
