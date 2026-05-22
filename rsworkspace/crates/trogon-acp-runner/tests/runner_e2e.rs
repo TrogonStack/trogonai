@@ -35,7 +35,7 @@ mod client_subjects {
     }
 }
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
+use agent_client_protocol::{ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, ListSessionsRequest, ListSessionsResponse, PromptRequest, SetSessionConfigOptionRequest, SessionConfigOptionValue, SetSessionConfigOptionResponse, TextContent, TerminalId};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
 use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
@@ -383,6 +383,42 @@ fn sse_event(event_type: &str, data: serde_json::Value) -> String {
     )
 }
 
+fn sse_end_turn_stream_with_tokens(
+    text: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens
+            }}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": output_tokens}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
 fn sse_end_turn_stream(text: &str) -> String {
     [
         sse_event("message_start", serde_json::json!({
@@ -436,23 +472,6 @@ fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value)
         sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
     ]
     .join("")
-}
-
-fn tool_use_body() -> String {
-    serde_json::json!({
-        "stop_reason": "tool_use",
-        "content": [{"type": "tool_use", "id": "tu_001", "name": "unknown_tool", "input": {}}]
-    })
-    .to_string()
-}
-
-fn max_tokens_body() -> String {
-    serde_json::json!({
-        "stop_reason": "max_tokens",
-        "content": [{"type": "text", "text": "partial"}],
-        "usage": {"input_tokens": 10, "output_tokens": 4096}
-    })
-    .to_string()
 }
 
 fn end_turn_body(text: &str) -> String {
@@ -3816,6 +3835,529 @@ async fn runner_fork_session_inherits_todos_and_permission_rules() {
                 forked.permission_rules_text.as_deref(),
                 Some(rules_text),
                 "forked session must inherit permission_rules_text from source"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — completion persists totals to NATS KV ───────────────────
+
+/// After a successful turn the agent must persist the token totals to the
+/// NATS KV store so they survive across restarts and appear in subsequent
+/// `list_sessions` responses.
+#[tokio::test]
+async fn runner_completion_persists_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done"));
+    });
+
+    let prefix = "test-tok-persist";
+    let session_id = "sess-tok-p-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "count tokens").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "completion must persist input token total to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "completion must persist output token total to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes token totals via NATS ─────────────
+
+/// After a completed prompt, `list_sessions` via NATS must return the session
+/// with `totalInputTokens` and `totalOutputTokens` in its `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_token_totals_via_nats() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("reply"));
+    });
+
+    let prefix = "test-tok-list";
+    let session_id = "sess-tok-l-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with usage");
+            assert_eq!(
+                meta.get("totalInputTokens"),
+                Some(&serde_json::json!(10)),
+                "list_sessions must expose totalInputTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalOutputTokens"),
+                Some(&serde_json::json!(8)),
+                "list_sessions must expose totalOutputTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes cache token totals ────────────────
+
+/// After a prompt that includes cache tokens, `list_sessions` must expose
+/// `totalCacheCreationTokens` and `totalCacheReadTokens` alongside the main
+/// token counts in the session's `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_cache_tokens_in_meta() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached reply", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-list-cache";
+    let session_id = "sess-tok-lc-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "cache query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with cache tokens");
+            assert_eq!(
+                meta.get("totalCacheCreationTokens"),
+                Some(&serde_json::json!(200)),
+                "list_sessions must expose totalCacheCreationTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalCacheReadTokens"),
+                Some(&serde_json::json!(50)),
+                "list_sessions must expose totalCacheReadTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — fork_session resets token totals to zero ────────────────
+
+/// After forking a session that has accumulated token totals, the new session
+/// must start with zero token totals — tokens belong to the branch, not
+/// inherited from the parent.
+#[tokio::test]
+async fn runner_fork_session_resets_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("src reply"));
+    });
+
+    let prefix = "test-tok-fork";
+    let source_id = "sess-tok-f-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Prompt the source session so it accumulates token totals.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, source_id, "accumulate").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let src_state = store.load(source_id).await.unwrap();
+            assert!(
+                src_state.total_input_tokens > 0,
+                "source must have accumulated tokens before fork"
+            );
+
+            // Fork the session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let resp_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&ForkSessionRequest::new(source_id, "/fork")).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&resp_msg.payload)
+                    .expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+
+            // The forked session must have zero token totals.
+            let fork_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                fork_state.total_input_tokens, 0,
+                "forked session must start with zero input tokens"
+            );
+            assert_eq!(
+                fork_state.total_output_tokens, 0,
+                "forked session must start with zero output tokens"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cancel does not corrupt previously saved token totals ────
+
+/// After a first prompt completes and saves token totals to KV, a subsequent
+/// prompt that is cancelled must NOT zero-out or overwrite those saved totals.
+/// The KV entry from the completed turn must survive the cancellation.
+#[tokio::test]
+async fn runner_cancel_preserves_prior_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second prompt → slow (2 s), giving the cancel time to arrive.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("turn 2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .delay(Duration::from_secs(2))
+            .body(sse_end_turn_stream("never reached"));
+    });
+    // First prompt → completes immediately with tokens.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 10, 8, 0, 0));
+    });
+
+    let prefix = "test-tok-cancel2";
+    let session_id = "sess-tok-c2-1";
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // First prompt: completes normally, tokens saved to KV.
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "turn 1").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must complete with end_turn; got: {resp1}"
+            );
+
+            // Second prompt: slow — cancel fires during the HTTP call.
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "turn 2").await;
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("cancelled"),
+                "second prompt must be cancelled; got: {resp2}"
+            );
+
+            // Token totals from the completed first prompt must still be in KV.
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "cancel must not erase token totals saved by the prior end_turn; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "cancel must not erase output tokens saved by the prior end_turn; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — max_tokens error path persists tokens ───────────────────
+
+/// When the model returns `max_tokens`, the agent must persist accumulated token
+/// totals to KV before returning — not silently discard them.
+#[tokio::test]
+async fn runner_max_tokens_persists_token_totals_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(max_tokens_body());
+    });
+
+    let prefix = "test-tok-maxtok";
+    let session_id = "sess-tok-mt-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "fill the context").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("max_tokens"),
+                "expected stop_reason=max_tokens; got: {resp}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            // max_tokens_body() sends input=10, output=4096
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "max_tokens path must persist input tokens to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 4096,
+                "max_tokens path must persist output tokens to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — multi-turn accumulation + load-from-KV via NATS ─────────
+
+/// Two consecutive prompts must accumulate token totals in KV. This also
+/// verifies load-from-KV: the second prompt loads the state saved after the
+/// first and adds to it, so the final total equals the sum of both turns.
+#[tokio::test]
+async fn runner_multi_turn_tokens_accumulate() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 15, 6, 0, 0));
+    });
+
+    let prefix = "test-tok-multi";
+    let session_id = "sess-tok-m-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Turn 1.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "turn 1").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // Turn 2 — agent must load KV state from turn 1 and accumulate.
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "turn 2").await;
+            collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 30,
+                "input tokens must accumulate across two turns (15+15=30); got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 12,
+                "output tokens must accumulate across two turns (6+6=12); got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cache tokens persisted to KV ────────────────────────────
+
+/// The Anthropic SSE can include cache_creation_input_tokens and
+/// cache_read_input_tokens. These must be accumulated and persisted to KV
+/// so that the full billing picture is available in session state.
+#[tokio::test]
+async fn runner_cache_tokens_persisted_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-cache";
+    let session_id = "sess-tok-ch-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "cache test").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_cache_creation_tokens, 200,
+                "cache_creation tokens must be persisted to KV; got {}",
+                state.total_cache_creation_tokens
+            );
+            assert_eq!(
+                state.total_cache_read_tokens, 50,
+                "cache_read tokens must be persisted to KV; got {}",
+                state.total_cache_read_tokens
             );
         })
         .await;

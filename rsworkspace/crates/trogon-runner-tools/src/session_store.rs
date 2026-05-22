@@ -905,6 +905,60 @@ mod tests {
         assert_eq!(back.token_budget, 100_000);
     }
 
+    // ── Token tracking serialization ──────────────────────────────────────────
+
+    #[test]
+    fn session_state_zero_tokens_omitted_from_json() {
+        let state = SessionState::default();
+        let v: serde_json::Value = serde_json::to_value(&state).unwrap();
+        assert!(
+            v.get("total_input_tokens").is_none(),
+            "zero total_input_tokens must be omitted from JSON"
+        );
+        assert!(
+            v.get("total_output_tokens").is_none(),
+            "zero total_output_tokens must be omitted from JSON"
+        );
+        assert!(
+            v.get("total_cache_creation_tokens").is_none(),
+            "zero total_cache_creation_tokens must be omitted from JSON"
+        );
+        assert!(
+            v.get("total_cache_read_tokens").is_none(),
+            "zero total_cache_read_tokens must be omitted from JSON"
+        );
+    }
+
+    #[test]
+    fn session_state_nonzero_tokens_round_trip() {
+        let state = SessionState {
+            total_input_tokens: 1000,
+            total_output_tokens: 500,
+            total_cache_creation_tokens: 200,
+            total_cache_read_tokens: 75,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: SessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.total_input_tokens, 1000);
+        assert_eq!(back.total_output_tokens, 500);
+        assert_eq!(back.total_cache_creation_tokens, 200);
+        assert_eq!(back.total_cache_read_tokens, 75);
+    }
+
+    #[test]
+    fn session_state_partial_nonzero_tokens_only_nonzero_fields_appear() {
+        let state = SessionState {
+            total_input_tokens: 42,
+            ..Default::default()
+        };
+        let v: serde_json::Value = serde_json::to_value(&state).unwrap();
+        assert_eq!(v["total_input_tokens"], 42);
+        assert!(v.get("total_output_tokens").is_none());
+        assert!(v.get("total_cache_creation_tokens").is_none());
+        assert!(v.get("total_cache_read_tokens").is_none());
+    }
+
     // ── MemorySessionStore::list_children ─────────────────────────────────────
 
     #[cfg(feature = "test-helpers")]

@@ -532,3 +532,134 @@ async fn list_sessions_returns_all_agent_written_sessions() {
 
     assert_eq!(sessions.as_array().unwrap().len(), 2);
 }
+
+/// When messages have no per-message `usage`, the console falls back to the
+/// top-level `input_tokens` / `output_tokens` fields (written by some runners).
+#[tokio::test]
+async fn session_top_level_token_fallback_used_when_no_per_message_usage() {
+    let env = start().await;
+
+    write_raw_session(
+        &env.js,
+        "tenant_fb",
+        serde_json::json!({
+            "id": "sess_fallback",
+            "tenant_id": "tenant_fb",
+            "name": "Fallback session",
+            "messages": [
+                { "role": "user",      "content": [] },
+                { "role": "assistant", "content": [] }
+            ],
+            "input_tokens": 80,
+            "output_tokens": 30,
+            "created_at": "1", "updated_at": "2"
+        }),
+    )
+    .await;
+
+    let s: Value = env
+        .client
+        .get(format!("{}/sessions/tenant_fb/sess_fallback", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(s["input_tokens"], 80, "fallback must read top-level input_tokens");
+    assert_eq!(s["output_tokens"], 30, "fallback must read top-level output_tokens");
+}
+
+/// When messages have no per-message `usage`, the console falls back to
+/// `total_input_tokens` / `total_output_tokens` (written by xai-runner and openrouter-runner).
+#[tokio::test]
+async fn session_xai_runner_total_token_fields_used_as_fallback() {
+    let env = start().await;
+
+    write_raw_session(
+        &env.js,
+        "tenant_xai",
+        serde_json::json!({
+            "id": "sess_xai",
+            "tenant_id": "tenant_xai",
+            "name": "xai-runner session",
+            "messages": [
+                { "role": "user",      "content": [] },
+                { "role": "assistant", "content": [] }
+            ],
+            "total_input_tokens": 120,
+            "total_output_tokens": 45,
+            "created_at": "1", "updated_at": "2"
+        }),
+    )
+    .await;
+
+    let s: Value = env
+        .client
+        .get(format!("{}/sessions/tenant_xai/sess_xai", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        s["input_tokens"], 120,
+        "console must fall back to total_input_tokens written by xai-runner"
+    );
+    assert_eq!(
+        s["output_tokens"], 45,
+        "console must fall back to total_output_tokens written by xai-runner"
+    );
+}
+
+/// xai-runner writes per-message `usage` on assistant messages with the same
+/// field names as trogon-acp-runner. The console must sum them correctly.
+#[tokio::test]
+async fn session_xai_runner_per_message_usage_is_summed_by_console() {
+    let env = start().await;
+
+    write_raw_session(
+        &env.js,
+        "tenant_xai2",
+        serde_json::json!({
+            "id": "sess_xai2",
+            "tenant_id": "tenant_xai2",
+            "name": "xai per-msg",
+            "messages": [
+                { "role": "user", "content": [] },
+                {
+                    "role": "assistant",
+                    "content": [],
+                    "usage": { "input_tokens": 30, "output_tokens": 12 }
+                },
+                { "role": "user", "content": [] },
+                {
+                    "role": "assistant",
+                    "content": [],
+                    "usage": { "input_tokens": 25, "output_tokens": 8 }
+                }
+            ],
+            "total_input_tokens": 55,
+            "total_output_tokens": 20,
+            "created_at": "1", "updated_at": "2"
+        }),
+    )
+    .await;
+
+    let s: Value = env
+        .client
+        .get(format!("{}/sessions/tenant_xai2/sess_xai2", env.base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Per-message usage takes precedence over top-level totals.
+    assert_eq!(s["input_tokens"], 55, "30 + 25 from per-message usage");
+    assert_eq!(s["output_tokens"], 20, "12 + 8 from per-message usage");
+}

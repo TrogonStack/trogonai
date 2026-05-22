@@ -679,6 +679,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxIterationsReached)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                                        if let Err(e) = self.store.save(&session_id, &state).await {
+                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_iterations");
+                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -696,6 +703,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 }
                                 Ok(Err(trogon_agent_core::agent_loop::AgentError::MaxTokens)) => {
                                     if last_input_tokens > 0 || last_output_tokens > 0 {
+                                        state.total_input_tokens = state.total_input_tokens.saturating_add(last_input_tokens as u64);
+                                        state.total_output_tokens = state.total_output_tokens.saturating_add(last_output_tokens as u64);
+                                        state.total_cache_creation_tokens = state.total_cache_creation_tokens.saturating_add(last_cache_creation_tokens as u64);
+                                        state.total_cache_read_tokens = state.total_cache_read_tokens.saturating_add(last_cache_read_tokens as u64);
+                                        if let Err(e) = self.store.save(&session_id, &state).await {
+                                            warn!(session_id, error = %e, "agent: failed to save token usage on max_tokens");
+                                        }
                                         publish_via_converter(
                                             prompt_client,
                                             &mut converter,
@@ -1976,5 +1990,266 @@ mod tests {
         assert_eq!(saved.total_input_tokens, 200, "tokens from completed turns must be persisted on cancel");
         assert_eq!(saved.total_output_tokens, 80);
         assert_eq!(saved.total_cache_read_tokens, 20);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        use agent_client_protocol::{Agent as _, ListSessionsRequest, PromptRequest};
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 80,
+                output_tokens: 30,
+                cache_creation_tokens: 5,
+                cache_read_tokens: 10,
+            }]);
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let req = PromptRequest::new("s1", vec![]);
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent.run_prompt(&req, &client, None, None).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
+                .expect("session must appear in list");
+            let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+            assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(80));
+            assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(30));
+            assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(5));
+            assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(10));
+        }).await;
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        use agent_client_protocol::{Agent as _, ListSessionsRequest};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState {
+            total_input_tokens: 120,
+            total_output_tokens: 45,
+            total_cache_creation_tokens: 7,
+            total_cache_read_tokens: 18,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "s1")
+            .expect("session must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be present for pre-saved tokens");
+        assert_eq!(meta.get("totalInputTokens").and_then(|v| v.as_u64()), Some(120));
+        assert_eq!(meta.get("totalOutputTokens").and_then(|v| v.as_u64()), Some(45));
+        assert_eq!(meta.get("totalCacheCreationTokens").and_then(|v| v.as_u64()), Some(7));
+        assert_eq!(meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()), Some(18));
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        use agent_client_protocol::{Agent as _, ForkSessionRequest};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("src", &SessionState {
+            total_input_tokens: 150,
+            total_output_tokens: 60,
+            total_cache_creation_tokens: 8,
+            total_cache_read_tokens: 12,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let fork_resp = agent.fork_session(ForkSessionRequest::new("src", "/tmp")).await.unwrap();
+        let new_id = fork_resp.session_id.to_string();
+
+        let forked = store_clone.load(&new_id).await.unwrap();
+        assert_eq!(forked.total_input_tokens, 0);
+        assert_eq!(forked.total_output_tokens, 0);
+        assert_eq!(forked.total_cache_creation_tokens, 0);
+        assert_eq!(forked.total_cache_read_tokens, 0);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn token_totals_accumulate_across_multiple_prompts() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 100, output_tokens: 50,
+                cache_creation_tokens: 0, cache_read_tokens: 0,
+            }]);
+        let agent1 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store.clone(),
+            runner1,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 80, output_tokens: 40,
+                cache_creation_tokens: 0, cache_read_tokens: 0,
+            }]);
+        let agent2 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner2,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local2 = tokio::task::LocalSet::new();
+        local2.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 180);
+        assert_eq!(saved.total_output_tokens, 90);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn cache_tokens_accumulate_across_multiple_prompts() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_agent_core::agent_loop::AgentEvent;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState::default()).await.unwrap();
+
+        let runner1 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 10, output_tokens: 5,
+                cache_creation_tokens: 6, cache_read_tokens: 15,
+            }]);
+        let agent1 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store.clone(),
+            runner1,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent1.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let runner2 = crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022")
+            .with_events(vec![AgentEvent::UsageSummary {
+                input_tokens: 10, output_tokens: 5,
+                cache_creation_tokens: 9, cache_read_tokens: 20,
+            }]);
+        let agent2 = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner2,
+            "test-prefix", "claude-3-5-sonnet-20241022", None, None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+        let local2 = tokio::task::LocalSet::new();
+        local2.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent2.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_cache_creation_tokens, 15);
+        assert_eq!(saved.total_cache_read_tokens, 35);
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn prompt_without_usage_summary_preserves_existing_token_totals() {
+        use agent_client_protocol::PromptRequest;
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("s1", &SessionState {
+            total_input_tokens: 100,
+            total_output_tokens: 40,
+            ..Default::default()
+        }).await.unwrap();
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            let client = crate::session_notifier::mock::NullPromptEventClient;
+            agent.run_prompt(&PromptRequest::new("s1", vec![]), &client, None, None).await.unwrap();
+        }).await;
+
+        let saved = store_clone.load("s1").await.unwrap();
+        assert_eq!(saved.total_input_tokens, 100, "tokens must not decrease when prompt has no usage event");
+        assert_eq!(saved.total_output_tokens, 40);
     }
 }
