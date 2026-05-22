@@ -7,15 +7,43 @@ pub enum OutputFormat {
     Json,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct PrintOptions {
+    pub print_tools: bool,
+}
+
+/// Exit code for `--print` mode (mirrors shell conventions in the plan).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintExitCode {
+    Success = 0,
+    Error = 1,
+    MaxTurns = 2,
+}
+
+impl PrintExitCode {
+    pub fn from_stop_reason(reason: &str) -> Self {
+        match reason {
+            "maxTurnRequests" => Self::MaxTurns,
+            "error" | "cancelled" => Self::Error,
+            _ => Self::Success,
+        }
+    }
+}
+
 /// Non-interactive mode: send one prompt, stream output to stdout, exit.
-///
-/// `Text` mode streams `Text` events as plain text, flushing per chunk.
-/// `Json` mode accumulates all text then emits a single JSON line:
-///   `{"text":"...","stop_reason":"end_turn"}`
-///
-/// Returns `Err` if the prompt cannot be sent or the runner signals stop reason `"error"`.
-pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> anyhow::Result<()> {
-    let mut rx = session.prompt(prompt).await?;
+pub async fn run<S: Session>(
+    session: S,
+    prompt: &str,
+    format: OutputFormat,
+    options: PrintOptions,
+) -> PrintExitCode {
+    let mut rx = match session.prompt(prompt).await {
+        Ok(rx) => rx,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return PrintExitCode::Error;
+        }
+    };
     let mut stdout = std::io::stdout();
 
     if format == OutputFormat::Json {
@@ -25,63 +53,74 @@ pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat) -> 
         while let Some(event) = rx.recv().await {
             match event {
                 StreamEvent::Text(t) => text.push_str(&t),
+                StreamEvent::ToolFinished { name, output, exit_code, .. } if options.print_tools => {
+                    let line = serde_json::json!({
+                        "type": "tool",
+                        "name": name,
+                        "output": output,
+                        "exit_code": exit_code,
+                    });
+                    let _ = writeln!(stdout, "{line}");
+                }
                 StreamEvent::Done(reason) => {
-                    if reason == "error" {
-                        session.close().await;
-                        return Err(anyhow::anyhow!("agent stopped with error"));
-                    }
                     stop_reason = reason;
                     break;
                 }
                 StreamEvent::Error(msg) => {
                     session.close().await;
-                    return Err(anyhow::anyhow!("{msg}"));
+                    eprintln!("error: {msg}");
+                    return PrintExitCode::Error;
                 }
-                StreamEvent::Thinking
-                | StreamEvent::ToolCall(_)
-                | StreamEvent::Diff(_)
-                | StreamEvent::ToolFinished { .. }
-                | StreamEvent::Usage { .. } => {}
+                _ => {}
             }
         }
 
         let out = serde_json::json!({"text": text, "stop_reason": stop_reason});
-        writeln!(stdout, "{out}")?;
-    } else {
-        let mut text = String::new();
-
-        while let Some(event) = rx.recv().await {
-            match event {
-                StreamEvent::Text(t) => text.push_str(&t),
-                StreamEvent::Done(reason) => {
-                    if reason == "error" {
-                        session.close().await;
-                        return Err(anyhow::anyhow!("agent stopped with error"));
-                    }
-                    break;
-                }
-                StreamEvent::Error(msg) => {
-                    session.close().await;
-                    return Err(anyhow::anyhow!("{msg}"));
-                }
-                StreamEvent::Thinking
-                | StreamEvent::ToolCall(_)
-                | StreamEvent::Diff(_)
-                | StreamEvent::ToolFinished { .. }
-                | StreamEvent::Usage { .. } => {}
-            }
-        }
-
-        let rendered = crate::markdown::render(&text);
-        print!("{rendered}");
-        if !rendered.ends_with('\n') {
-            println!();
-        }
-        let _ = stdout.flush();
+        let _ = writeln!(stdout, "{out}");
+        session.close().await;
+        return PrintExitCode::from_stop_reason(&stop_reason);
     }
 
+    let mut text = String::new();
+    let mut stop_reason = String::from("end_turn");
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            StreamEvent::Text(t) => text.push_str(&t),
+            StreamEvent::ToolFinished { name, output, exit_code, .. } if options.print_tools => {
+                let line = serde_json::json!({
+                    "type": "tool",
+                    "name": name,
+                    "output": output,
+                    "exit_code": exit_code,
+                });
+                let _ = writeln!(stdout, "{line}");
+            }
+            StreamEvent::Done(reason) => {
+                stop_reason = reason;
+                break;
+            }
+            StreamEvent::Error(msg) => {
+                session.close().await;
+                eprintln!("error: {msg}");
+                return PrintExitCode::Error;
+            }
+            StreamEvent::Thinking
+            | StreamEvent::ToolCall(_)
+            | StreamEvent::Diff(_)
+            | StreamEvent::ToolFinished { .. }
+            | StreamEvent::Usage { .. } => {}
+        }
+    }
+
+    let rendered = crate::markdown::render(&text);
+    print!("{rendered}");
+    if !rendered.ends_with('\n') {
+        println!();
+    }
+    let _ = stdout.flush();
     session.close().await;
-    Ok(())
+    PrintExitCode::from_stop_reason(&stop_reason)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -92,44 +131,60 @@ mod tests {
     use crate::session::mock::MockSession;
 
     #[tokio::test]
-    async fn text_mode_returns_ok_on_end_turn() {
+    async fn text_mode_returns_success_on_end_turn() {
         let session = MockSession::new("s");
         session.queue_turn(vec![
             StreamEvent::Text("hello\n".into()),
             StreamEvent::Done("end_turn".into()),
         ]);
-        let result = run(session, "test", OutputFormat::Text).await;
-        assert!(result.is_ok());
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, PrintOptions::default()).await,
+            PrintExitCode::Success
+        );
     }
 
     #[tokio::test]
-    async fn text_mode_returns_err_on_error_stop_reason() {
+    async fn text_mode_returns_error_on_error_stop_reason() {
         let session = MockSession::new("s");
         session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        let result = run(session, "test", OutputFormat::Text).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("error"));
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, PrintOptions::default()).await,
+            PrintExitCode::Error
+        );
     }
 
     #[tokio::test]
-    async fn json_mode_returns_ok_and_accumulates_text() {
+    async fn max_turn_requests_yields_exit_code_2() {
+        let session = MockSession::new("s");
+        session.queue_turn(vec![StreamEvent::Done("maxTurnRequests".into())]);
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, PrintOptions::default()).await,
+            PrintExitCode::MaxTurns
+        );
+    }
+
+    #[tokio::test]
+    async fn json_mode_returns_success_and_accumulates_text() {
         let session = MockSession::new("s");
         session.queue_turn(vec![
             StreamEvent::Text("foo".into()),
             StreamEvent::Text("bar".into()),
             StreamEvent::Done("end_turn".into()),
         ]);
-        // We can't easily capture stdout in tests, but we verify it doesn't error.
-        let result = run(session, "test", OutputFormat::Json).await;
-        assert!(result.is_ok());
+        assert_eq!(
+            run(session, "test", OutputFormat::Json, PrintOptions::default()).await,
+            PrintExitCode::Success
+        );
     }
 
     #[tokio::test]
-    async fn json_mode_returns_err_on_error_stop_reason() {
+    async fn json_mode_returns_error_on_error_stop_reason() {
         let session = MockSession::new("s");
         session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        let result = run(session, "test", OutputFormat::Json).await;
-        assert!(result.is_err());
+        assert_eq!(
+            run(session, "test", OutputFormat::Json, PrintOptions::default()).await,
+            PrintExitCode::Error
+        );
     }
 
     #[tokio::test]
@@ -143,8 +198,10 @@ mod tests {
                 StreamEvent::Usage { used_tokens: 100, context_size: 1000 },
                 StreamEvent::Done("end_turn".into()),
             ]);
-            let result = run(session, "test", format).await;
-            assert!(result.is_ok(), "format={format:?}: {result:?}", format = format as u8);
+            assert_eq!(
+                run(session, "test", format, PrintOptions::default()).await,
+                PrintExitCode::Success
+            );
         }
     }
 
@@ -152,8 +209,10 @@ mod tests {
     async fn empty_event_stream_completes_without_panic() {
         let session = MockSession::new("s");
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
-        let result = run(session, "test", OutputFormat::Text).await;
-        assert!(result.is_ok());
+        assert_eq!(
+            run(session, "test", OutputFormat::Text, PrintOptions::default()).await,
+            PrintExitCode::Success
+        );
     }
 
     #[tokio::test]
@@ -161,8 +220,8 @@ mod tests {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
-        run(Arc::clone(&session), "test", OutputFormat::Text).await.unwrap();
-        assert_eq!(session.close_count(), 1, "close() must be called exactly once");
+        run(Arc::clone(&session), "test", OutputFormat::Text, PrintOptions::default()).await;
+        assert_eq!(session.close_count(), 1);
     }
 
     #[tokio::test]
@@ -170,8 +229,8 @@ mod tests {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        let _ = run(Arc::clone(&session), "test", OutputFormat::Text).await;
-        assert_eq!(session.close_count(), 1, "close() must be called even on error stop reason");
+        run(Arc::clone(&session), "test", OutputFormat::Text, PrintOptions::default()).await;
+        assert_eq!(session.close_count(), 1);
     }
 
     #[tokio::test]
@@ -179,7 +238,7 @@ mod tests {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Text("hi".into()), StreamEvent::Done("end_turn".into())]);
-        run(Arc::clone(&session), "test", OutputFormat::Json).await.unwrap();
-        assert_eq!(session.close_count(), 1, "close() must be called exactly once");
+        run(Arc::clone(&session), "test", OutputFormat::Json, PrintOptions::default()).await;
+        assert_eq!(session.close_count(), 1);
     }
 }
