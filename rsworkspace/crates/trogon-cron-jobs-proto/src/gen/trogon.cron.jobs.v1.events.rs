@@ -26,6 +26,12 @@ impl ::buffa::DefaultInstance for JobEvent {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobEvent {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobEvent";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobEvent";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobEvent";
+}
 impl ::buffa::Message for JobEvent {
     /// Returns the total encoded size in bytes.
     ///

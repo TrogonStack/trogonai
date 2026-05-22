@@ -281,6 +281,60 @@ impl<'a> ::buffa::ViewEncode<'a> for JobDetailsView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobDetailsView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            struct _W(super::super::JobStatus);
+            impl ::serde::Serialize for _W {
+                fn serialize<__S: ::serde::Serializer>(
+                    &self,
+                    __s: __S,
+                ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                    ::buffa::json_helpers::closed_enum::serialize(&self.0, __s)
+                }
+            }
+            __map.serialize_entry("status", &_W(self.status))?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.schedule.as_option() {
+                __map.serialize_entry("schedule", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.delivery.as_option() {
+                __map.serialize_entry("delivery", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.message.as_option() {
+                __map.serialize_entry("message", __v)?;
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobDetailsView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobDetails";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobDetails";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobDetails";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobDetailsView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where

@@ -26,6 +26,12 @@ impl ::buffa::DefaultInstance for JobSchedule {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobSchedule {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobSchedule";
+}
 impl ::buffa::Message for JobSchedule {
     /// Returns the total encoded size in bytes.
     ///
@@ -369,6 +375,12 @@ impl ::buffa::DefaultInstance for AtSchedule {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for AtSchedule {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "AtSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.AtSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.AtSchedule";
+}
 impl ::buffa::Message for AtSchedule {
     /// Returns the total encoded size in bytes.
     ///
@@ -474,6 +486,12 @@ impl ::buffa::DefaultInstance for EverySchedule {
         static VALUE: ::buffa::__private::OnceBox<EverySchedule> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for EverySchedule {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "EverySchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.EverySchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.EverySchedule";
 }
 impl ::buffa::Message for EverySchedule {
     /// Returns the total encoded size in bytes.
@@ -582,6 +600,12 @@ impl ::buffa::DefaultInstance for CronSchedule {
         static VALUE: ::buffa::__private::OnceBox<CronSchedule> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for CronSchedule {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "CronSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.CronSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.CronSchedule";
 }
 impl ::buffa::Message for CronSchedule {
     /// Returns the total encoded size in bytes.

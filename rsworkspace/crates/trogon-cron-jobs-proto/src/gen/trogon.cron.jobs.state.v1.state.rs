@@ -178,11 +178,29 @@ impl State {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.state.v1.State";
 }
+impl State {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::state`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_state(
+        mut self,
+        value: impl Into<::buffa::EnumValue<StateValue>>,
+    ) -> Self {
+        self.state = Some(value.into());
+        self
+    }
+}
 impl ::buffa::DefaultInstance for State {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<State> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for State {
+    const PACKAGE: &'static str = "trogon.cron.jobs.state.v1";
+    const NAME: &'static str = "State";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.state.v1.State";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.state.v1.State";
 }
 impl ::buffa::Message for State {
     /// Returns the total encoded size in bytes.

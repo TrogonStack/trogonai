@@ -37,6 +37,12 @@ impl ::buffa::DefaultInstance for JobMessage {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobMessage {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobMessage";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobMessage";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobMessage";
+}
 impl ::buffa::Message for JobMessage {
     /// Returns the total encoded size in bytes.
     ///
@@ -174,6 +180,12 @@ impl ::buffa::DefaultInstance for Header {
         static VALUE: ::buffa::__private::OnceBox<Header> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for Header {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "Header";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.Header";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.Header";
 }
 impl ::buffa::Message for Header {
     /// Returns the total encoded size in bytes.

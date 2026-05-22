@@ -26,6 +26,12 @@ impl ::buffa::DefaultInstance for JobDelivery {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobDelivery {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobDelivery";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobDelivery";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobDelivery";
+}
 impl ::buffa::Message for JobDelivery {
     /// Returns the total encoded size in bytes.
     ///
@@ -243,11 +249,26 @@ impl NatsEventDelivery {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.NatsEventDelivery";
 }
+impl NatsEventDelivery {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::ttl_sec`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_ttl_sec(mut self, value: u64) -> Self {
+        self.ttl_sec = Some(value);
+        self
+    }
+}
 impl ::buffa::DefaultInstance for NatsEventDelivery {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<NatsEventDelivery> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for NatsEventDelivery {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "NatsEventDelivery";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.NatsEventDelivery";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.NatsEventDelivery";
 }
 impl ::buffa::Message for NatsEventDelivery {
     /// Returns the total encoded size in bytes.
@@ -402,6 +423,12 @@ impl ::buffa::DefaultInstance for JobSamplingSource {
         static VALUE: ::buffa::__private::OnceBox<JobSamplingSource> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for JobSamplingSource {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobSamplingSource";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobSamplingSource";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobSamplingSource";
 }
 impl ::buffa::Message for JobSamplingSource {
     /// Returns the total encoded size in bytes.
@@ -611,6 +638,12 @@ impl ::buffa::DefaultInstance for LatestFromSubjectSampling {
         static VALUE: ::buffa::__private::OnceBox<LatestFromSubjectSampling> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
+}
+impl ::buffa::MessageName for LatestFromSubjectSampling {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "LatestFromSubjectSampling";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.LatestFromSubjectSampling";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.LatestFromSubjectSampling";
 }
 impl ::buffa::Message for LatestFromSubjectSampling {
     /// Returns the total encoded size in bytes.

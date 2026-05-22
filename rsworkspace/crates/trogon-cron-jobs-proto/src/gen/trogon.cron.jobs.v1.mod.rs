@@ -39,13 +39,7 @@ pub mod __buffa {
             #[allow(unused_imports)]
             use super::*;
             include!("trogon.cron.jobs.v1.delivery.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.message.__view_oneof.rs");
             include!("trogon.cron.jobs.v1.schedule.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.job_details.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.job_added.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.job_paused.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.job_removed.__view_oneof.rs");
-            include!("trogon.cron.jobs.v1.job_resumed.__view_oneof.rs");
             include!("trogon.cron.jobs.v1.events.__view_oneof.rs");
         }
     }
@@ -53,27 +47,8 @@ pub mod __buffa {
         #[allow(unused_imports)]
         use super::*;
         include!("trogon.cron.jobs.v1.delivery.__oneof.rs");
-        include!("trogon.cron.jobs.v1.message.__oneof.rs");
         include!("trogon.cron.jobs.v1.schedule.__oneof.rs");
-        include!("trogon.cron.jobs.v1.job_details.__oneof.rs");
-        include!("trogon.cron.jobs.v1.job_added.__oneof.rs");
-        include!("trogon.cron.jobs.v1.job_paused.__oneof.rs");
-        include!("trogon.cron.jobs.v1.job_removed.__oneof.rs");
-        include!("trogon.cron.jobs.v1.job_resumed.__oneof.rs");
         include!("trogon.cron.jobs.v1.events.__oneof.rs");
-    }
-    pub mod ext {
-        #[allow(unused_imports)]
-        use super::*;
-        include!("trogon.cron.jobs.v1.delivery.__ext.rs");
-        include!("trogon.cron.jobs.v1.message.__ext.rs");
-        include!("trogon.cron.jobs.v1.schedule.__ext.rs");
-        include!("trogon.cron.jobs.v1.job_details.__ext.rs");
-        include!("trogon.cron.jobs.v1.job_added.__ext.rs");
-        include!("trogon.cron.jobs.v1.job_paused.__ext.rs");
-        include!("trogon.cron.jobs.v1.job_removed.__ext.rs");
-        include!("trogon.cron.jobs.v1.job_resumed.__ext.rs");
-        include!("trogon.cron.jobs.v1.events.__ext.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {

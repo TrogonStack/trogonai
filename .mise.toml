@@ -1,7 +1,7 @@
 [tools]
 buf = "1.69.0"
-"cargo:protoc-gen-buffa" = "0.5.2"
-"cargo:protoc-gen-buffa-packaging" = "0.5.2"
+"cargo:protoc-gen-buffa" = "0.6.0"
+"cargo:protoc-gen-buffa-packaging" = "0.6.0"
 rust = { version = "1.93.0", profile = "default" }
 
 [tasks.dev]

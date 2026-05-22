@@ -96,6 +96,33 @@ impl<'a> ::buffa::ViewEncode<'a> for JobRemovedView<'a> {
         use ::buffa::Enumeration as _;
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobRemovedView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobRemovedView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobRemoved";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobRemoved";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobRemoved";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobRemovedView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where

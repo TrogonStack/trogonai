@@ -278,6 +278,46 @@ impl<'a> ::buffa::ViewEncode<'a> for JobScheduleView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobScheduleView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        if let ::core::option::Option::Some(ref __ov) = self.kind {
+            match __ov {
+                super::super::__buffa::view::oneof::job_schedule::Kind::At(v) => {
+                    __map.serialize_entry("at", v)?;
+                }
+                super::super::__buffa::view::oneof::job_schedule::Kind::Every(v) => {
+                    __map.serialize_entry("every", v)?;
+                }
+                super::super::__buffa::view::oneof::job_schedule::Kind::Cron(v) => {
+                    __map.serialize_entry("cron", v)?;
+                }
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobScheduleView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobSchedule";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobScheduleView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
@@ -408,6 +448,36 @@ impl<'a> ::buffa::ViewEncode<'a> for AtScheduleView<'a> {
         ::buffa::types::encode_string(&self.at, buf);
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for AtScheduleView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("at", self.at)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for AtScheduleView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "AtSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.AtSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.AtSchedule";
+}
 impl<'v> ::buffa::DefaultViewInstance for AtScheduleView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
@@ -537,6 +607,45 @@ impl<'a> ::buffa::ViewEncode<'a> for EveryScheduleView<'a> {
             .encode(buf);
         ::buffa::types::encode_uint64(self.every_sec, buf);
     }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for EveryScheduleView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            struct _W(u64);
+            impl ::serde::Serialize for _W {
+                fn serialize<__S: ::serde::Serializer>(
+                    &self,
+                    __s: __S,
+                ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                    ::buffa::json_helpers::uint64::serialize(&self.0, __s)
+                }
+            }
+            __map.serialize_entry("everySec", &_W(self.every_sec))?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for EveryScheduleView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "EverySchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.EverySchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.EverySchedule";
 }
 impl<'v> ::buffa::DefaultViewInstance for EveryScheduleView<'v> {
     fn default_view_instance<'a>() -> &'a Self
@@ -682,6 +791,39 @@ impl<'a> ::buffa::ViewEncode<'a> for CronScheduleView<'a> {
             .encode(buf);
         ::buffa::types::encode_string(&self.timezone, buf);
     }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for CronScheduleView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("expr", self.expr)?;
+        }
+        {
+            __map.serialize_entry("timezone", self.timezone)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for CronScheduleView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "CronSchedule";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.CronSchedule";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.CronSchedule";
 }
 impl<'v> ::buffa::DefaultViewInstance for CronScheduleView<'v> {
     fn default_view_instance<'a>() -> &'a Self

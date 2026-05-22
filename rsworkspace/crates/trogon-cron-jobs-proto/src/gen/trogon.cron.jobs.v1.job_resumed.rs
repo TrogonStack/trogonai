@@ -23,6 +23,12 @@ impl ::buffa::DefaultInstance for JobResumed {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobResumed {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobResumed";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobResumed";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobResumed";
+}
 impl ::buffa::Message for JobResumed {
     /// Returns the total encoded size in bytes.
     ///

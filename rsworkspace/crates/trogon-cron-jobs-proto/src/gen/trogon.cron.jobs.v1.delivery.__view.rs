@@ -168,6 +168,40 @@ impl<'a> ::buffa::ViewEncode<'a> for JobDeliveryView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobDeliveryView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        if let ::core::option::Option::Some(ref __ov) = self.kind {
+            match __ov {
+                super::super::__buffa::view::oneof::job_delivery::Kind::NatsEvent(v) => {
+                    __map.serialize_entry("natsEvent", v)?;
+                }
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobDeliveryView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobDelivery";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobDelivery";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobDelivery";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobDeliveryView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
@@ -370,6 +404,53 @@ impl<'a> ::buffa::ViewEncode<'a> for NatsEventDeliveryView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for NatsEventDeliveryView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("route", self.route)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.ttl_sec {
+            struct _W(u64);
+            impl ::serde::Serialize for _W {
+                fn serialize<__S: ::serde::Serializer>(
+                    &self,
+                    __s: __S,
+                ) -> ::core::result::Result<__S::Ok, __S::Error> {
+                    ::buffa::json_helpers::uint64::serialize(&self.0, __s)
+                }
+            }
+            __map.serialize_entry("ttlSec", &_W(__v))?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.source.as_option() {
+                __map.serialize_entry("source", __v)?;
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for NatsEventDeliveryView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "NatsEventDelivery";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.NatsEventDelivery";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.NatsEventDelivery";
+}
 impl<'v> ::buffa::DefaultViewInstance for NatsEventDeliveryView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
@@ -559,6 +640,42 @@ impl<'a> ::buffa::ViewEncode<'a> for JobSamplingSourceView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobSamplingSourceView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        if let ::core::option::Option::Some(ref __ov) = self.kind {
+            match __ov {
+                super::super::__buffa::view::oneof::job_sampling_source::Kind::LatestFromSubject(
+                    v,
+                ) => {
+                    __map.serialize_entry("latestFromSubject", v)?;
+                }
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobSamplingSourceView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobSamplingSource";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobSamplingSource";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobSamplingSource";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobSamplingSourceView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
@@ -686,6 +803,36 @@ impl<'a> ::buffa::ViewEncode<'a> for LatestFromSubjectSamplingView<'a> {
             .encode(buf);
         ::buffa::types::encode_string(&self.subject, buf);
     }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for LatestFromSubjectSamplingView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("subject", self.subject)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for LatestFromSubjectSamplingView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "LatestFromSubjectSampling";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.LatestFromSubjectSampling";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.LatestFromSubjectSampling";
 }
 impl<'v> ::buffa::DefaultViewInstance for LatestFromSubjectSamplingView<'v> {
     fn default_view_instance<'a>() -> &'a Self

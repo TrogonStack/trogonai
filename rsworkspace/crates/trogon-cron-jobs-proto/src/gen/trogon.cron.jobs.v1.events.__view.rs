@@ -340,6 +340,49 @@ impl<'a> ::buffa::ViewEncode<'a> for JobEventView<'a> {
         }
     }
 }
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for JobEventView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        if let ::core::option::Option::Some(ref __ov) = self.event {
+            match __ov {
+                super::super::__buffa::view::oneof::job_event::Event::JobAdded(v) => {
+                    __map.serialize_entry("jobAdded", v)?;
+                }
+                super::super::__buffa::view::oneof::job_event::Event::JobPaused(v) => {
+                    __map.serialize_entry("jobPaused", v)?;
+                }
+                super::super::__buffa::view::oneof::job_event::Event::JobResumed(v) => {
+                    __map.serialize_entry("jobResumed", v)?;
+                }
+                super::super::__buffa::view::oneof::job_event::Event::JobRemoved(v) => {
+                    __map.serialize_entry("jobRemoved", v)?;
+                }
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for JobEventView<'a> {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobEvent";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobEvent";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobEvent";
+}
 impl<'v> ::buffa::DefaultViewInstance for JobEventView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where

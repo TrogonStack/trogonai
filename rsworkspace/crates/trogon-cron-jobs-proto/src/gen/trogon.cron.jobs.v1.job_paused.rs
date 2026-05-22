@@ -23,6 +23,12 @@ impl ::buffa::DefaultInstance for JobPaused {
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
+impl ::buffa::MessageName for JobPaused {
+    const PACKAGE: &'static str = "trogon.cron.jobs.v1";
+    const NAME: &'static str = "JobPaused";
+    const FULL_NAME: &'static str = "trogon.cron.jobs.v1.JobPaused";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogon.cron.jobs.v1.JobPaused";
+}
 impl ::buffa::Message for JobPaused {
     /// Returns the total encoded size in bytes.
     ///
