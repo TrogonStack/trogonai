@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use trogon_cli::{
     connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, NatsSessionFactory,
-    OutputFormat, RealFs,
+    OutputFormat, RealFs, SessionEntry, SessionIndex,
 };
 
 #[derive(Subcommand)]
@@ -47,6 +47,14 @@ struct Args {
     /// Stream assistant text live instead of buffering until a tool boundary
     #[arg(long)]
     stream: bool,
+
+    /// Resume the last session for this project (from ~/.local/share/trogon/sessions.json)
+    #[arg(long, conflicts_with = "session_id")]
+    continue_session: bool,
+
+    /// Attach to a specific session id (uses --prefix runner)
+    #[arg(long, conflicts_with = "continue_session")]
+    session_id: Option<String>,
 }
 
 fn trogon_dev_script() -> anyhow::Result<PathBuf> {
@@ -119,6 +127,26 @@ async fn main() -> anyhow::Result<()> {
         let registry = trogon_registry::Registry::new(reg_store);
         let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
         let factory = NatsSessionFactory::new(nats.clone());
+
+        let resume = if args.continue_session {
+            let index = SessionIndex::load(&RealFs);
+            let canon = cwd.canonicalize().unwrap_or(cwd.clone());
+            index.get_last(&canon).cloned()
+        } else if let Some(id) = &args.session_id {
+            Some(SessionEntry {
+                prefix: args.prefix.clone(),
+                session_id: id.clone(),
+                model: String::new(),
+                updated_at: String::new(),
+            })
+        } else {
+            None
+        };
+
+        if args.continue_session && resume.is_none() {
+            eprintln!("warning: no saved session for this project — starting fresh");
+        }
+
         trogon_cli::runtime::run_interactive(
             factory,
             &args.prefix,
@@ -129,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
             acp_config,
             args.nats_url,
             args.stream,
+            resume,
         )
         .await?;
     }

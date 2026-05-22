@@ -7,6 +7,7 @@ pub mod print;
 pub mod repl;
 pub mod runtime;
 pub mod session;
+pub mod session_store;
 pub mod stdio_mcp_bridge;
 pub mod tool_update;
 pub mod tui_client;
@@ -14,7 +15,8 @@ pub mod tui_client;
 pub use fs::{Fs, RealFs};
 pub use nats::NatsClient;
 pub use print::OutputFormat;
-pub use session::{NatsSessionFactory, Session, SessionFactory};
+pub use session::{NatsSessionFactory, Session, SessionFactory, SessionSummary};
+pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;
