@@ -2607,3 +2607,131 @@ async fn run_chat_real_todo_write_then_read_roundtrip() {
 
     assert_eq!(text, "roundtrip complete");
 }
+
+// ── Token tracking ─────────────────────────────────────────────────────────────
+
+fn sse_end_turn_with_tokens(
+    text: &str,
+    input_tokens: u32,
+    output_tokens: u32,
+    cache_creation: u32,
+    cache_read: u32,
+) -> String {
+    [
+        sse_event("message_start", serde_json::json!({
+            "type": "message_start",
+            "message": {"usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": cache_creation,
+                "cache_read_input_tokens": cache_read
+            }}
+        })),
+        sse_event("content_block_start", serde_json::json!({
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })),
+        sse_event("content_block_delta", serde_json::json!({
+            "type": "content_block_delta", "index": 0,
+            "delta": {"type": "text_delta", "text": text}
+        })),
+        sse_event("content_block_stop", serde_json::json!({"type": "content_block_stop", "index": 0})),
+        sse_event("message_delta", serde_json::json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": output_tokens}
+        })),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+/// `UsageSummary` contains the exact token values from the SSE stream, including
+/// cache_creation and cache_read tokens from `message_start`.
+#[tokio::test]
+async fn run_chat_streaming_usage_summary_token_values_match_sse() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_with_tokens("reply", 42, 17, 100, 25));
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    agent
+        .run_chat_streaming(vec![Message::user_text("hi")], &[], None, tx, None)
+        .await
+        .unwrap();
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let (inp, out, cc, cr) = events
+        .iter()
+        .find_map(|e| {
+            if let AgentEvent::UsageSummary {
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            } = e
+            {
+                Some((*input_tokens, *output_tokens, *cache_creation_tokens, *cache_read_tokens))
+            } else {
+                None
+            }
+        })
+        .expect("expected a UsageSummary event");
+
+    assert_eq!(inp, 42, "input_tokens must match SSE message_start value");
+    assert_eq!(out, 17, "output_tokens must match SSE message_delta value");
+    assert_eq!(cc, 100, "cache_creation_tokens must match SSE cache_creation_input_tokens");
+    assert_eq!(cr, 25, "cache_read_tokens must match SSE cache_read_input_tokens");
+}
+
+/// A `tool_use` round does NOT emit `UsageSummary`. Only the final `end_turn`
+/// emits one, with cumulative totals from all turns in the call.
+#[tokio::test]
+async fn run_chat_streaming_tool_use_does_not_emit_usage_summary_until_end_turn() {
+    let server = MockServer::start();
+    // Second call (after tool_result) → end_turn: input=10, output=5
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_with_tokens("done", 10, 5, 0, 0));
+    });
+    // First call → tool_use (unknown_tool): input=10, output=10
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use());
+    });
+
+    let agent = make_agent(&server.base_url());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    agent
+        .run_chat_streaming(vec![Message::user_text("use the tool")], &[], None, tx, None)
+        .await
+        .unwrap();
+
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let summaries: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::UsageSummary { .. }))
+        .collect();
+
+    assert_eq!(
+        summaries.len(),
+        1,
+        "exactly one UsageSummary must be emitted (at end_turn, not at tool_use); got {}",
+        summaries.len()
+    );
+
+    // Cumulative: tool_use round (input=10, output=10) + end_turn round (input=10, output=5)
+    if let AgentEvent::UsageSummary { input_tokens, output_tokens, .. } = summaries[0] {
+        assert_eq!(*input_tokens, 20, "cumulative input must be 20 (10 + 10)");
+        assert_eq!(*output_tokens, 15, "cumulative output must be 15 (10 + 5)");
+    }
+}

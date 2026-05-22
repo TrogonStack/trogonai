@@ -42,12 +42,18 @@ pub(crate) struct RawSession {
     pub duration_ms: u64,
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// Top-level token counts written by xai-runner (cumulative across all turns).
+    /// Top-level token counts written by trogon-acp-runner style (field name: `input_tokens`).
     /// Used as fallback when messages do not carry per-message usage fields.
     #[serde(default)]
     pub input_tokens: u64,
     #[serde(default)]
     pub output_tokens: u64,
+    /// Top-level cumulative totals written by xai-runner / openrouter-runner style
+    /// (field names: `total_input_tokens`, `total_output_tokens`). Also used as fallback.
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    #[serde(default)]
+    pub total_output_tokens: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,16 +103,17 @@ impl From<RawSession> for ConsoleSession {
             .sum();
 
         // Prefer per-message usage (trogon-acp-runner style). Fall back to the
-        // top-level cumulative counts written by trogon-xai-runner.
+        // top-level cumulative counts written by trogon-xai-runner (`total_input_tokens`)
+        // or any runner that writes the shorter `input_tokens` field.
         let input_tokens = if per_msg_input > 0 {
             per_msg_input
         } else {
-            r.input_tokens.min(u32::MAX as u64) as u32
+            r.input_tokens.max(r.total_input_tokens).min(u32::MAX as u64) as u32
         };
         let output_tokens = if per_msg_output > 0 {
             per_msg_output
         } else {
-            r.output_tokens.min(u32::MAX as u64) as u32
+            r.output_tokens.max(r.total_output_tokens).min(u32::MAX as u64) as u32
         };
 
         // A session is "running" if the last message is from the user

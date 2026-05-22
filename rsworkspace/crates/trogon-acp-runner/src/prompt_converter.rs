@@ -755,4 +755,80 @@ mod tests {
             "must end with closing fence, got: {fenced:?}"
         );
     }
+
+    // ── PromptEventConverter::convert — UsageUpdate ───────────────────────────
+
+    fn make_converter() -> PromptEventConverter {
+        PromptEventConverter::new("sess-test")
+    }
+
+    fn extract_usage(notifs: Vec<SessionNotification>) -> UsageUpdate {
+        for n in notifs {
+            if let SessionUpdate::UsageUpdate(u) = n.update {
+                return u;
+            }
+        }
+        panic!("no UsageUpdate notification found");
+    }
+
+    /// `used` is the sum of all four token types.
+    #[test]
+    fn usage_update_calculates_used_as_sum_of_all_token_types() {
+        let mut c = make_converter();
+        let (notifs, outcome) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 20,
+            cache_read_tokens: 10,
+            context_window: Some(200_000),
+        });
+        assert!(outcome.is_none());
+        let u = extract_usage(notifs);
+        assert_eq!(u.used, 180, "used must equal 100 + 50 + 20 + 10");
+    }
+
+    /// When `context_window` is `None`, the DEFAULT_CONTEXT_WINDOW is used.
+    #[test]
+    fn usage_update_uses_default_context_window_when_none() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: None,
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(u.size, DEFAULT_CONTEXT_WINDOW, "size must equal DEFAULT_CONTEXT_WINDOW");
+    }
+
+    /// When `context_window` is `Some(n)`, that value is used as the window size.
+    #[test]
+    fn usage_update_uses_provided_context_window() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: Some(100_000),
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(u.size, 100_000, "size must equal the provided context_window value");
+    }
+
+    /// A `UsageUpdate` event produces exactly one notification and no outcome.
+    #[test]
+    fn usage_update_produces_one_notification_and_no_outcome() {
+        let mut c = make_converter();
+        let (notifs, outcome) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 5,
+            output_tokens: 3,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: Some(200_000),
+        });
+        assert_eq!(notifs.len(), 1, "must produce exactly one notification");
+        assert!(outcome.is_none(), "UsageUpdate must not produce a final outcome");
+    }
 }
