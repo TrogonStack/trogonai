@@ -10,6 +10,8 @@
 pub mod a2a_prefix;
 pub mod agent;
 pub mod agent_id;
+pub mod audit;
+pub mod catalog;
 pub mod client;
 pub mod config;
 pub mod constants;
@@ -18,6 +20,7 @@ pub mod error;
 pub mod jetstream;
 pub mod jsonrpc;
 pub mod nats;
+pub mod push;
 pub mod req_id;
 pub mod task_id;
 
