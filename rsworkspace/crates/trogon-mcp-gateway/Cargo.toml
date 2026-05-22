@@ -9,11 +9,16 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true }
 async-trait = { workspace = true }
+base64 = "=0.22.1"
 bytes = { workspace = true }
 cel-interpreter = "=0.10.0"
 clap = { workspace = true }
 futures = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 mcp-nats = { workspace = true }
+pem = "=3.0.6"
+reqwest = { version = "=0.12.22", default-features = false, features = ["json", "rustls-tls"] }
+rsa = "=0.9.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 spicedb-rs-client = "=1.49.2"
