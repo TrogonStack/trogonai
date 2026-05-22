@@ -139,8 +139,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let local = tokio::task::LocalSet::new();
+    let (perm_tx, mut perm_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(32);
+    let perm_store = trogon_runner_tools::AllowedToolsSessionStore::new();
+    agent = agent.with_permission_gate(perm_tx, perm_store.clone());
+    let nats_for_perm = nats.clone();
+    let prefix_for_perm = acp_prefix.clone();
+
     let result = local
         .run_until(async {
+            tokio::task::spawn_local(async move {
+                while let Some(req) = perm_rx.recv().await {
+                    trogon_runner_tools::handle_permission_request_nats(
+                        req,
+                        nats_for_perm.clone(),
+                        prefix_for_perm.clone(),
+                        &perm_store,
+                    )
+                    .await;
+                }
+            });
+
             let (_conn, io_task) =
                 AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
                     tokio::task::spawn_local(fut);

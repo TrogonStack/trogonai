@@ -5392,6 +5392,7 @@ dependencies = [
  "agent-client-protocol",
  "anyhow",
  "async-nats",
+ "async-trait",
  "axum 0.8.9",
  "bytes",
  "clap",
@@ -5827,10 +5828,12 @@ dependencies = [
 name = "trogon-runner-tools"
 version = "0.1.0"
 dependencies = [
+ "acp-nats",
  "agent-client-protocol",
  "anyhow",
  "async-nats",
  "async-trait",
+ "bytes",
  "futures-util",
  "globset",
  "reqwest",
@@ -5840,6 +5843,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-mcp",
+ "trogon-nats",
  "trogon-tools",
 ]
 

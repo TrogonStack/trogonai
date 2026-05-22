@@ -31,7 +31,11 @@ use crate::http_client::OpenRouterHttpClient;
 use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
-use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::check_tool_permission;
+use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::{
+    AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
+};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -46,6 +50,22 @@ fn not_found(msg: impl Into<String>) -> Error {
 }
 
 const MAX_SESSIONS: usize = 100;
+
+const VALID_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+];
+
+fn default_session_mode() -> String {
+    "default".to_string()
+}
+
+fn is_valid_mode(mode: &str) -> bool {
+    VALID_MODES.contains(&mode)
+}
 
 /// Returns the context-window size (in tokens) for known models routed through OpenRouter.
 /// OpenRouter model IDs are typically `provider/model-name`; matching is done on the full
@@ -120,6 +140,8 @@ struct OpenRouterSession {
     created_at_iso: String,
     parent_session_id: Option<String>,
     branched_at_index: Option<usize>,
+    #[serde(default = "default_session_mode")]
+    mode: String,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -145,6 +167,8 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     execution_nats: Option<async_nats::Client>,
     tool_http_client: reqwest::Client,
+    permission_tx: Option<PermissionTx>,
+    permission_store: AllowedToolsSessionStore,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -261,6 +285,8 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             registry: None,
             execution_nats: None,
             tool_http_client: reqwest::Client::new(),
+            permission_tx: None,
+            permission_store: AllowedToolsSessionStore::new(),
         }
     }
 }
@@ -291,7 +317,19 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             registry: self.registry,
             execution_nats: self.execution_nats,
             tool_http_client: self.tool_http_client,
+            permission_tx: self.permission_tx,
+            permission_store: self.permission_store,
         }
+    }
+
+    pub fn with_permission_gate(
+        mut self,
+        perm_tx: PermissionTx,
+        store: AllowedToolsSessionStore,
+    ) -> Self {
+        self.permission_tx = Some(perm_tx);
+        self.permission_store = store;
+        self
     }
 
     pub fn with_loaders(
@@ -416,10 +454,16 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         }
     }
 
-    fn session_mode_state(&self) -> SessionModeState {
+    fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
         SessionModeState::new(
-            "default".to_string(),
-            vec![SessionMode::new("default", "Default")],
+            current_mode.to_string(),
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("plan", "Plan"),
+                SessionMode::new("dontAsk", "Don't Ask"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
+            ],
         )
     }
 
@@ -601,6 +645,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
 
@@ -615,7 +660,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         info!(session_id, agent_id = ?self.agent_id, "openrouter: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None))
             .config_options(Self::all_tool_config_options(&enabled_tools)))
     }
@@ -631,7 +676,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             let sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get(&session_id) {
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
-                    .modes(self.session_mode_state())
+                    .modes(self.session_mode_state(&s.mode))
                     .models(self.session_model_state(s.model.as_deref()))
                     .config_options(Self::all_tool_config_options(&s.enabled_tools)));
             }
@@ -679,11 +724,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
+                        mode: default_session_mode(),
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
-                    .modes(self.session_mode_state())
+                    .modes(self.session_mode_state(
+                        sessions
+                            .get(&session_id)
+                            .map(|s| s.mode.as_str())
+                            .unwrap_or("default"),
+                    ))
                     .models(self.session_model_state(
                         sessions.get(&session_id).and_then(|s| s.model.as_deref()),
                     ))
@@ -714,7 +765,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_system_prompt, inherited_tools) = {
+        let (inherited_model, inherited_key, mut history, inherited_system_prompt, inherited_tools, inherited_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -725,6 +776,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.history.clone(),
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
+                s.mode.clone(),
             )
         };
 
@@ -754,6 +806,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
+                mode: inherited_mode.clone(),
             },
         );
 
@@ -764,7 +817,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         drop(sessions);
 
         Ok(ForkSessionResponse::new(new_session_id)
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref()))
             .config_options(Self::all_tool_config_options(&inherited_tools)))
     }
@@ -823,13 +876,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let mode_id = req.mode_id.to_string();
         let session_id = req.session_id.to_string();
-        if mode_id != "default" {
+        if !is_valid_mode(&mode_id) {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
-        if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(not_found(format!("session {session_id} not found")));
+        let mut sessions = self.sessions.lock().await;
+        match sessions.get_mut(&session_id) {
+            Some(s) => {
+                s.mode = mode_id;
+                info!(session_id, mode = %s.mode, "openrouter: set_session_mode");
+                Ok(SetSessionModeResponse::new())
+            }
+            None => Err(not_found(format!("session {session_id} not found"))),
         }
-        Ok(SetSessionModeResponse::new())
     }
 
     async fn set_session_model(
@@ -1162,7 +1220,47 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     ),
                 )).await;
 
-                let result = if call.name == "bash" {
+                let tool_input = if call.name == "bash" {
+                    serde_json::from_str(&call.arguments).unwrap_or_else(|_| {
+                        serde_json::json!({"command": call.arguments})
+                    })
+                } else {
+                    serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .unwrap_or(serde_json::Value::Null)
+                };
+
+                let session_mode = {
+                    let sessions = self.sessions.lock().await;
+                    sessions
+                        .get(&session_id)
+                        .map(|s| s.mode.clone())
+                        .unwrap_or_else(default_session_mode)
+                };
+
+                let allowed = {
+                    let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
+                        PermissionRules::parse(&tmd)
+                    } else {
+                        PermissionRules::default()
+                    };
+                    let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                    check_tool_permission(
+                        &session_mode,
+                        &session_id,
+                        self.permission_tx.as_ref(),
+                        &allowed_tools,
+                        rules,
+                        &[],
+                        &call.id,
+                        &call.name,
+                        &tool_input,
+                    )
+                    .await
+                };
+
+                let result = if !allowed {
+                    format!("Permission denied: user refused to run tool `{}`", call.name)
+                } else if call.name == "bash" {
                     if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
                         execute_bash_via_nats(nats, wasm, &session_id, &call.arguments).await
@@ -1170,18 +1268,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         "bash not available: no execution backend configured".to_string()
                     }
                 } else if call.name == "fetch_url" {
-                    let input = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                        .unwrap_or(serde_json::Value::Null);
-                    let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = tool_input.get("url").and_then(|v| v.as_str()).unwrap_or("");
                     if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                         format!("fetch_url: URL blocked by egress policy: {url}")
                     } else {
-                        trogon_tools::dispatch_tool(&ctx, &call.name, &input).await
+                        trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
                     }
                 } else {
-                    let input = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                        .unwrap_or(serde_json::Value::Null);
-                    trogon_tools::dispatch_tool(&ctx, &call.name, &input).await
+                    trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
                 };
 
                 notifier.notify(agent_client_protocol::SessionNotification::new(
@@ -1398,6 +1492,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mode: default_session_mode(),
         });
     }
 
@@ -1602,18 +1697,18 @@ mod tests {
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mode: default_session_mode(),
         }
     }
 
     // ── session_mode_state / session_model_state ──────────────────────────────
 
     #[test]
-    fn session_mode_state_has_single_default_mode() {
+    fn session_mode_state_exposes_all_modes() {
         let agent = make_agent();
-        let state = agent.session_mode_state();
+        let state = agent.session_mode_state("default");
         assert_eq!(state.current_mode_id.0.as_ref(), "default");
-        assert_eq!(state.available_modes.len(), 1);
-        assert_eq!(state.available_modes[0].id.0.as_ref(), "default");
+        assert_eq!(state.available_modes.len(), 5);
     }
 
     #[test]

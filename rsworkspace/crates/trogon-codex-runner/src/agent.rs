@@ -49,6 +49,22 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+const VALID_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+];
+
+fn default_session_mode() -> String {
+    "default".to_string()
+}
+
+fn is_valid_mode(mode: &str) -> bool {
+    VALID_MODES.contains(&mode)
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -62,6 +78,8 @@ struct CodexSession {
     history: Vec<trogon_runner_tools::portable_session::PortableMessage>,
     pending_history: Option<Vec<trogon_runner_tools::portable_session::PortableMessage>>,
     first_turn: bool,
+    #[serde(default = "default_session_mode")]
+    mode: String,
 }
 
 // ── NatsNotifierFactory ───────────────────────────────────────────────────────
@@ -231,11 +249,16 @@ where
         self.notifier_factory.make_notifier(session_id)
     }
 
-    fn session_mode_state(&self) -> SessionModeState {
-        // Codex does not have named permission modes — expose a single "default".
+    fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
         SessionModeState::new(
-            "default".to_string(),
-            vec![SessionMode::new("default", "Default")],
+            current_mode.to_string(),
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("plan", "Plan"),
+                SessionMode::new("dontAsk", "Don't Ask"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
+            ],
         )
     }
 
@@ -333,12 +356,13 @@ where
                 history: Vec::new(),
                 pending_history: None,
                 first_turn: true,
+                mode: default_session_mode(),
             },
         );
 
         info!(session_id, "codex: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None)))
     }
 
@@ -352,7 +376,7 @@ where
         if let Some(session) = sessions.get(&session_id) {
             let model = session.model.as_deref();
             return Ok(LoadSessionResponse::new()
-                .modes(self.session_mode_state())
+                .modes(self.session_mode_state(&session.mode))
                 .models(self.session_model_state(model)));
         }
 
@@ -390,12 +414,12 @@ where
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (source_thread_id, inherited_model) = {
+        let (source_thread_id, inherited_model, inherited_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
                 .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
-            (s.thread_id.clone(), s.model.clone())
+            (s.thread_id.clone(), s.model.clone(), s.mode.clone())
         };
 
         let proc = self.process().await?;
@@ -416,11 +440,12 @@ where
                 history: Vec::new(),
                 pending_history: None,
                 first_turn: true,
+                mode: inherited_mode.clone(),
             },
         );
 
         Ok(ForkSessionResponse::new(new_session_id)
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref())))
     }
 
@@ -459,10 +484,22 @@ where
 
     async fn set_session_mode(
         &self,
-        _req: SetSessionModeRequest,
+        req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
-        // Codex does not have ACP permission modes — silently accept.
-        Ok(SetSessionModeResponse::new())
+        let mode_id = req.mode_id.to_string();
+        let session_id = req.session_id.to_string();
+        if !is_valid_mode(&mode_id) {
+            return Err(internal_error(format!("unknown mode: {mode_id}")));
+        }
+        let mut sessions = self.sessions.lock().await;
+        match sessions.get_mut(&session_id) {
+            Some(s) => {
+                s.mode = mode_id;
+                info!(session_id, mode = %s.mode, "codex: set_session_mode");
+                Ok(SetSessionModeResponse::new())
+            }
+            None => Err(internal_error(format!("session {session_id} not found"))),
+        }
     }
 
     async fn set_session_model(
@@ -750,6 +787,7 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
                 history: Vec::new(),
                 pending_history: None,
                 first_turn: true,
+                mode: default_session_mode(),
             },
         );
     }

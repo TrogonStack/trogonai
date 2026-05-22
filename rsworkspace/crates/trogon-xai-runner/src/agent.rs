@@ -31,6 +31,9 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::check_tool_permission;
+use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -56,6 +59,18 @@ const AVAILABLE_TOOLS: &[(&str, &str)] = &[("web_search", "Web Search"), ("x_sea
 /// `created_at`) is evicted with a warning. This prevents unbounded growth in
 /// long-running deployments where clients never call `close_session`.
 const MAX_SESSIONS: usize = 100;
+
+const VALID_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+];
+
+fn is_valid_mode(mode: &str) -> bool {
+    VALID_MODES.contains(&mode)
+}
 
 /// Returns the context-window size (in tokens) for a known xAI model.
 /// More-specific prefixes are checked before broader ones.
@@ -111,6 +126,13 @@ struct XaiSession {
     parent_session_id: Option<String>,
     /// Message index at which the branch was made. None for full forks.
     branched_at_index: Option<usize>,
+    /// Permission mode for tool approval gates.
+    #[serde(default = "default_session_mode")]
+    mode: String,
+}
+
+fn default_session_mode() -> String {
+    "default".to_string()
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -176,6 +198,10 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     execution_nats: Option<async_nats::Client>,
     /// HTTP client used by trogon-tools (fetch_url and similar web tools).
     tool_http_client: reqwest::Client,
+    /// Permission gate channel — forwards requests to the ACP client via NATS.
+    permission_tx: Option<PermissionTx>,
+    /// In-memory store for `allow_always` tool persistence.
+    permission_store: AllowedToolsSessionStore,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -302,6 +328,8 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             registry: None,
             execution_nats: None,
             tool_http_client: reqwest::Client::new(),
+            permission_tx: None,
+            permission_store: AllowedToolsSessionStore::new(),
         }
     }
 
@@ -342,7 +370,20 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             registry: self.registry,
             execution_nats: self.execution_nats,
             tool_http_client: self.tool_http_client,
+            permission_tx: self.permission_tx,
+            permission_store: self.permission_store,
         }
+    }
+
+    /// Wire the permission gate channel (call from `main.rs` inside a `LocalSet`).
+    pub fn with_permission_gate(
+        mut self,
+        perm_tx: PermissionTx,
+        store: AllowedToolsSessionStore,
+    ) -> Self {
+        self.permission_tx = Some(perm_tx);
+        self.permission_store = store;
+        self
     }
 
     /// Attach console skill loaders. Call this after `new()` / `with_deps()` when
@@ -443,10 +484,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         }
     }
 
-    fn session_mode_state(&self) -> SessionModeState {
+    fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
         SessionModeState::new(
-            "default".to_string(),
-            vec![SessionMode::new("default", "Default")],
+            current_mode.to_string(),
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("plan", "Plan"),
+                SessionMode::new("dontAsk", "Don't Ask"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
+            ],
         )
     }
 
@@ -653,6 +700,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
 
@@ -667,7 +715,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         info!(session_id, agent_id = ?self.agent_id, "xai: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None))
             .config_options(Self::all_tool_config_options(&[])))
     }
@@ -683,7 +731,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get(&session_id) {
                 return Ok(LoadSessionResponse::new()
-                    .modes(self.session_mode_state())
+                    .modes(self.session_mode_state(&s.mode))
                     .models(self.session_model_state(s.model.as_deref()))
                     .config_options(Self::all_tool_config_options(&s.enabled_tools)));
             }
@@ -737,11 +785,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
+                        mode: default_session_mode(),
                     },
                 );
                 info!(session_id, "xai: load_session restored from KV snapshot");
                 return Ok(LoadSessionResponse::new()
-                    .modes(self.session_mode_state())
+                    .modes(self.session_mode_state(
+                        &sessions
+                            .get(&session_id)
+                            .map(|s| s.mode.as_str())
+                            .unwrap_or("default"),
+                    ))
                     .models(self.session_model_state(
                         sessions.get(&session_id).and_then(|s| s.model.as_deref()),
                     ))
@@ -770,7 +824,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt) = {
+        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -781,6 +835,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.history.clone(),
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
+                s.mode.clone(),
             )
         };
 
@@ -813,6 +868,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
+                mode: inherited_mode.clone(),
             },
         );
 
@@ -823,7 +879,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         drop(sessions);
 
         Ok(ForkSessionResponse::new(new_session_id)
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref()))
             .config_options(Self::all_tool_config_options(&inherited_tools)))
     }
@@ -883,14 +939,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let mode_id = req.mode_id.to_string();
         let session_id = req.session_id.to_string();
-        if mode_id != "default" {
+        if !is_valid_mode(&mode_id) {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
-        if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(not_found(format!("session {session_id} not found")));
+        let mut sessions = self.sessions.lock().await;
+        match sessions.get_mut(&session_id) {
+            Some(s) => {
+                s.mode = mode_id;
+                info!(session_id, mode = %s.mode, "xai: set_session_mode");
+                Ok(SetSessionModeResponse::new())
+            }
+            None => Err(not_found(format!("session {session_id} not found"))),
         }
-        // xAI has no ACP permission modes — silently accept "default".
-        Ok(SetSessionModeResponse::new())
     }
 
     async fn set_session_model(
@@ -1423,7 +1483,48 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         ),
                     )).await;
 
-                    let result = match name.as_str() {
+                    let tool_input = if name == "bash" {
+                        serde_json::from_str(&arguments).unwrap_or_else(|_| {
+                            serde_json::json!({"command": arguments})
+                        })
+                    } else {
+                        serde_json::from_str::<serde_json::Value>(&arguments)
+                            .unwrap_or(serde_json::Value::Null)
+                    };
+
+                    let session_mode = {
+                        let sessions = self.sessions.lock().await;
+                        sessions
+                            .get(&session_id)
+                            .map(|s| s.mode.clone())
+                            .unwrap_or_else(default_session_mode)
+                    };
+
+                    let allowed = {
+                        let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
+                            PermissionRules::parse(&tmd)
+                        } else {
+                            PermissionRules::default()
+                        };
+                        let allowed_tools = self.permission_store.allowed_tools(&session_id);
+                        check_tool_permission(
+                            &session_mode,
+                            &session_id,
+                            self.permission_tx.as_ref(),
+                            &allowed_tools,
+                            rules,
+                            &[],
+                            &call_id,
+                            &name,
+                            &tool_input,
+                        )
+                        .await
+                    };
+
+                    let result = if !allowed {
+                        format!("Permission denied: user refused to run tool `{name}`")
+                    } else {
+                    match name.as_str() {
                         "bash" => {
                             if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
@@ -1433,10 +1534,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             }
                         }
                         _ => {
-                            let input = serde_json::from_str::<serde_json::Value>(&arguments)
-                                .unwrap_or(serde_json::Value::Null);
                             if name == "fetch_url" {
-                                let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                                let url = tool_input.get("url").and_then(|v| v.as_str()).unwrap_or("");
                                 if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                                     format!("fetch_url: URL blocked by egress policy: {url}")
                                 } else {
@@ -1445,7 +1544,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                         cwd: cwd.clone(),
                                         http_client: self.tool_http_client.clone(),
                                     };
-                                    trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                                    trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
                                 }
                             } else {
                                 let ctx = trogon_tools::ToolContext {
@@ -1453,9 +1552,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                     cwd: cwd.clone(),
                                     http_client: self.tool_http_client.clone(),
                                 };
-                                trogon_tools::dispatch_tool(&ctx, &name, &input).await
+                                trogon_tools::dispatch_tool(&ctx, &name, &tool_input).await
                             }
                         }
+                    }
                     };
 
                     info!(session_id, call_id = %call_id, tool = %name, "xai: tool executed");
@@ -1794,6 +1894,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
     }
@@ -1813,6 +1914,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
     }
@@ -1877,6 +1979,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
     }
@@ -1896,6 +1999,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
     }
@@ -1915,6 +2019,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                mode: default_session_mode(),
             },
         );
     }
@@ -2996,7 +3101,7 @@ mod tests {
     #[tokio::test]
     async fn session_mode_state_current_is_default() {
         let agent = make_agent();
-        let state = agent.session_mode_state();
+        let state = agent.session_mode_state("default");
         assert_eq!(state.current_mode_id.to_string(), "default");
     }
 

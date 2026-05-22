@@ -19,6 +19,15 @@ LOG_DIR="${TROGON_LOG_DIR:-/tmp}"
 if ! nc -z localhost 4222 2>/dev/null; then
   echo "Starting nats-server -js"
   nats-server -p 4222 -js > "$LOG_DIR/trogon-nats.log" 2>&1 &
+  # Wait until NATS accepts TCP connections (max 10s)
+  for i in $(seq 1 20); do
+    nc -z localhost 4222 2>/dev/null && break
+    sleep 0.5
+    if [ "$i" -eq 20 ]; then
+      echo "ERROR: nats-server did not start within 10s — check $LOG_DIR/trogon-nats.log"
+      exit 1
+    fi
+  done
 fi
 
 # 2. Execution backend — REQUIRED for bash
