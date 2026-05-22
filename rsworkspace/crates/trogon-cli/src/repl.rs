@@ -246,9 +246,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             eprintln!("usage: /resume <session-id>");
                         } else {
                             let target = arg.trim();
+                            let old_session_id = session.session_id().to_string();
+                            // Shut down old MCP bridges before spawning new ones so that
+                            // MCP servers that only allow one instance (e.g. port-binding
+                            // servers) do not fail to start for the resumed session.
+                            mcp_manager.shutdown_session(&old_session_id).await;
                             match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd).await {
                                 Ok(s) => {
-                                    mcp_manager.shutdown_session(session.session_id()).await;
                                     session.close().await;
                                     session = s;
                                     session_used_tokens = 0;

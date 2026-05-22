@@ -1199,15 +1199,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = openrouter_history_to_wire(&messages);
-            match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
-                Ok(Some(compacted)) => {
-                    messages = openrouter_history_from_wire(compacted);
-                    let mut sessions = self.sessions.lock().await;
-                    if let Some(s) = sessions.get_mut(&session_id) {
-                        s.history = messages.clone();
-                    }
-                }
-                Ok(None) | Err(_) => {}
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+                messages = openrouter_history_from_wire(compacted);
+                // Intentionally not writing back to s.history here: the post-turn path
+                // assigns the full messages (including new response) to s.history and
+                // then calls compact_or_trim.  Writing here would cause double compaction
+                // on the same turn and race with concurrent prompts.
             }
         }
 
