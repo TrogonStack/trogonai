@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::{Event, EventData, EventDecode, StreamPosition};
+use crate::{Event, EventData, EventDecode, EventDecodeOutcome, StreamPosition};
 
 /// Event envelope returned from a concrete stream.
 ///
@@ -24,8 +24,11 @@ impl StreamEvent {
         &self.stream_id
     }
 
-    /// Decodes the enclosed event payload as a domain event.
-    pub fn decode<E>(&self) -> Result<E, E::Error>
+    /// Decodes the enclosed event payload against a domain event set.
+    ///
+    /// A skipped outcome means the stored envelope remains part of stream
+    /// history, but the selected decoder does not own its event type.
+    pub fn decode<E>(&self) -> Result<EventDecodeOutcome<E>, E::Error>
     where
         E: EventDecode,
     {
