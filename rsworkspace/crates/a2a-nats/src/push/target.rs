@@ -1,46 +1,41 @@
 use std::fmt;
 
-use url::Url;
+#[derive(Debug, Clone)]
+pub struct WebhookUrl(String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebhookUrl(Url);
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum WebhookUrlError {
-    /// Couldn't parse the input as a URL at all.
-    #[error("webhook URL is not a valid URL ({reason}): {raw}")]
-    Parse { raw: String, reason: String },
-    /// Parsed cleanly but the scheme isn't `http`/`https`.
-    #[error("webhook URL must use http:// or https://, got {scheme}://: {raw}")]
-    UnsupportedScheme { raw: String, scheme: String },
+#[derive(Debug)]
+pub struct WebhookUrlError {
+    raw: String,
 }
 
 impl WebhookUrl {
     pub fn new(raw: impl Into<String>) -> Result<Self, WebhookUrlError> {
         let raw = raw.into();
-        let parsed = Url::parse(&raw).map_err(|e| WebhookUrlError::Parse {
-            raw: raw.clone(),
-            reason: e.to_string(),
-        })?;
-        match parsed.scheme() {
-            "http" | "https" => Ok(Self(parsed)),
-            other => Err(WebhookUrlError::UnsupportedScheme {
-                raw,
-                scheme: other.to_owned(),
-            }),
+        if raw.starts_with("https://") || raw.starts_with("http://") {
+            Ok(Self(raw))
+        } else {
+            Err(WebhookUrlError { raw })
         }
     }
 
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
     }
 }
 
 impl fmt::Display for WebhookUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0.as_str())
+        f.write_str(&self.0)
     }
 }
+
+impl fmt::Display for WebhookUrlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "webhook URL must start with https:// or http://: {}", self.raw)
+    }
+}
+
+impl std::error::Error for WebhookUrlError {}
 
 #[cfg(test)]
 mod tests {
@@ -57,21 +52,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_http_schemes() {
-        let err = WebhookUrl::new("ftp://example.com/hook").unwrap_err();
-        assert!(matches!(err, WebhookUrlError::UnsupportedScheme { .. }));
-        let err = WebhookUrl::new("nats://example.com").unwrap_err();
-        assert!(matches!(err, WebhookUrlError::UnsupportedScheme { .. }));
-    }
-
-    #[test]
-    fn rejects_unparseable_strings() {
-        let err = WebhookUrl::new("").unwrap_err();
-        assert!(matches!(err, WebhookUrlError::Parse { .. }));
-        let err = WebhookUrl::new("not a url").unwrap_err();
-        assert!(matches!(err, WebhookUrlError::Parse { .. }));
-        let err = WebhookUrl::new("http://").unwrap_err();
-        assert!(matches!(err, WebhookUrlError::Parse { .. }));
+    fn rejects_other_schemes() {
+        assert!(WebhookUrl::new("ftp://example.com/hook").is_err());
+        assert!(WebhookUrl::new("nats://example.com").is_err());
+        assert!(WebhookUrl::new("").is_err());
     }
 
     #[test]
@@ -81,18 +65,8 @@ mod tests {
     }
 
     #[test]
-    fn error_display_covers_every_variant() {
-        let parse_err = WebhookUrl::new("not a url").unwrap_err();
-        assert!(parse_err.to_string().contains("not a valid URL"));
-
-        let scheme_err = WebhookUrl::new("ftp://bad").unwrap_err();
-        assert!(scheme_err.to_string().contains("ftp://"));
-        assert!(scheme_err.to_string().contains("must use http"));
-    }
-
-    #[test]
-    fn as_str_returns_inner_value() {
-        let url = WebhookUrl::new("https://example.com/hook").unwrap();
-        assert_eq!(url.as_str(), "https://example.com/hook");
+    fn error_display_includes_raw_value() {
+        let err = WebhookUrl::new("ftp://bad").unwrap_err();
+        assert!(err.to_string().contains("ftp://bad"));
     }
 }
