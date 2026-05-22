@@ -43,6 +43,10 @@ struct Args {
     /// Run health checks on NATS, registry, runners, and compactor
     #[arg(long)]
     doctor: bool,
+
+    /// Stream assistant text live instead of buffering until a tool boundary
+    #[arg(long)]
+    stream: bool,
 }
 
 fn trogon_dev_script() -> anyhow::Result<PathBuf> {
@@ -124,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
             nats,
             acp_config,
             args.nats_url,
+            args.stream,
         )
         .await?;
     }

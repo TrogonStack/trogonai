@@ -1,16 +1,115 @@
 use crate::nats::NatsClient;
 use crate::tool_update::map_tool_call_update;
 use agent_client_protocol::{
-    ContentBlock, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate,
-    TextContent, ToolCallStatus,
+    ContentBlock, ExtRequest, ExtResponse, NewSessionRequest, PromptRequest, SessionNotification,
+    SessionUpdate, TextContent, ToolCallStatus,
 };
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const SESSION_NEW_TIMEOUT: Duration = Duration::from_secs(15);
+const EXT_METHOD_TIMEOUT: Duration = Duration::from_secs(30);
+const COMPACT_TIMEOUT: Duration = Duration::from_secs(120);
+const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
+
+/// Result of a manual `/compact` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactResult {
+    pub compacted: bool,
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PortableMessage {
+    role: String,
+    text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CompactorMessage {
+    role: String,
+    content: Vec<Value>,
+}
+
+#[derive(Deserialize)]
+struct CompactResponse {
+    messages: Vec<CompactorMessage>,
+    #[serde(default)]
+    compacted: bool,
+    #[serde(default)]
+    tokens_before: usize,
+    #[serde(default)]
+    tokens_after: usize,
+}
+
+#[derive(Deserialize)]
+struct CompactErrorResponse {
+    error: String,
+}
+
+fn portable_to_compactor(messages: &[PortableMessage]) -> Vec<CompactorMessage> {
+    messages
+        .iter()
+        .map(|m| CompactorMessage {
+            role: m.role.clone(),
+            content: vec![json!({ "type": "text", "text": m.text })],
+        })
+        .collect()
+}
+
+fn compactor_content_to_text(content: &[Value]) -> String {
+    content
+        .iter()
+        .filter_map(|block| {
+            (block.get("type")?.as_str() == Some("text"))
+                .then(|| block.get("text")?.as_str())
+                .flatten()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn compactor_to_portable(messages: &[CompactorMessage]) -> Vec<PortableMessage> {
+    messages
+        .iter()
+        .map(|m| PortableMessage {
+            role: m.role.clone(),
+            text: compactor_content_to_text(&m.content),
+        })
+        .collect()
+}
+
+async fn ext_method<N: NatsClient>(
+    nats: &N,
+    prefix: &str,
+    method: &str,
+    params: Value,
+) -> anyhow::Result<Value> {
+    let params_raw = serde_json::value::RawValue::from_string(params.to_string())
+        .map_err(|e| anyhow::anyhow!("invalid ext params: {e}"))?;
+    let req = ExtRequest::new(method, params_raw.into());
+    let subject = format!("{prefix}.agent.ext.{method}");
+    let payload = serde_json::to_vec(&req)?;
+
+    let bytes = tokio::time::timeout(
+        EXT_METHOD_TIMEOUT,
+        nats.request_bytes(subject, payload.into()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out waiting for ext method `{method}`"))?
+    .map_err(|e| anyhow::anyhow!("NATS error on ext method `{method}`: {e}"))?;
+
+    if let Ok(resp) = serde_json::from_slice::<ExtResponse>(&bytes) {
+        return serde_json::from_str(resp.0.get())
+            .map_err(|e| anyhow::anyhow!("invalid ext response body: {e}"));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| anyhow::anyhow!("invalid ext response: {e}"))
+}
 
 // ── Session trait ─────────────────────────────────────────────────────────────
 
@@ -30,7 +129,7 @@ pub trait Session: Send + Sync + 'static {
         model_id: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
-    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_;
 
     fn set_mode(
         &self,
@@ -343,15 +442,63 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         }
     }
 
-    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
-        let subject = format!("{}.compactor.compact", self.prefix);
+    fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
+        let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
         let nats = &self.nats;
         async move {
-            let payload = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id }))?;
-            nats.publish_bytes(subject, payload.into())
-                .await
-                .map_err(|e| anyhow::anyhow!("NATS error triggering compaction: {e}"))
+            let export_params = json!({ "sessionId": session_id });
+            let export_val =
+                ext_method(nats, &prefix, "session/export", export_params).await?;
+            let portable: Vec<PortableMessage> = serde_json::from_value(export_val).map_err(|e| {
+                anyhow::anyhow!("session/export returned invalid messages: {e}")
+            })?;
+
+            if portable.is_empty() {
+                return Ok(CompactResult {
+                    compacted: false,
+                    tokens_before: 0,
+                    tokens_after: 0,
+                });
+            }
+
+            let compact_payload =
+                serde_json::to_vec(&json!({ "messages": portable_to_compactor(&portable) }))?;
+            let bytes = tokio::time::timeout(
+                COMPACT_TIMEOUT,
+                nats.request_bytes(COMPACT_SUBJECT.to_string(), compact_payload.into()),
+            )
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "timed out waiting for compactor ({}s)",
+                    COMPACT_TIMEOUT.as_secs()
+                )
+            })?
+            .map_err(|e| anyhow::anyhow!("NATS error calling compactor: {e}"))?;
+
+            if let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes) {
+                return Err(anyhow::anyhow!("compactor error: {}", err.error));
+            }
+
+            let resp: CompactResponse = serde_json::from_slice(&bytes)
+                .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
+
+            let result = CompactResult {
+                compacted: resp.compacted,
+                tokens_before: resp.tokens_before,
+                tokens_after: resp.tokens_after,
+            };
+
+            if resp.compacted {
+                let import_params = json!({
+                    "sessionId": session_id,
+                    "messages": compactor_to_portable(&resp.messages),
+                });
+                ext_method(nats, &prefix, "session/import", import_params).await?;
+            }
+
+            Ok(result)
         }
     }
 
@@ -597,13 +744,17 @@ pub mod mock {
             }
         }
 
-        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
             async move {
                 if let Some(err) = self.compact_error.lock().unwrap().clone() {
                     return Err(anyhow::anyhow!("{err}"));
                 }
                 *self.compacted.lock().unwrap() += 1;
-                Ok(())
+                Ok(CompactResult {
+                    compacted: true,
+                    tokens_before: 100,
+                    tokens_after: 50,
+                })
             }
         }
 
@@ -647,7 +798,7 @@ pub mod mock {
             (**self).set_model(model_id)
         }
 
-        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
             (**self).compact()
         }
 
@@ -1038,19 +1189,64 @@ mod tests {
 
     // ── TrogonSession::compact via MockNatsClient ─────────────────────────────
 
+    fn ext_response(body: &str) -> Bytes {
+        let resp = ExtResponse::new(
+            serde_json::value::RawValue::from_string(body.to_string())
+                .unwrap()
+                .into(),
+        );
+        Bytes::from(serde_json::to_vec(&resp).unwrap())
+    }
+
     #[tokio::test]
-    async fn compact_publishes_to_compactor_subject() {
+    async fn compact_export_compactor_import_round_trip() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
 
-        let result = session.compact().await;
-        assert!(result.is_ok(), "expected Ok, got: {result:?}");
-        let published = nats.published();
-        assert!(
-            published.iter().any(|(subj, _)| subj.contains("compactor.compact")),
-            "compact subject not published; got: {published:?}"
+        nats.queue_request_ok(ext_response(
+            r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"world"}]"#,
+        ));
+        nats.queue_request_ok(Bytes::from(
+            serde_json::to_vec(&json!({
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "summary"}]}],
+                "compacted": true,
+                "tokens_before": 1000,
+                "tokens_after": 200,
+            }))
+            .unwrap(),
+        ));
+        nats.queue_request_ok(ext_response("{}"));
+
+        let result = session.compact().await.unwrap();
+        assert_eq!(
+            result,
+            CompactResult {
+                compacted: true,
+                tokens_before: 1000,
+                tokens_after: 200,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_returns_noop_when_export_empty() {
+        let nats = MockNatsClient::new();
+        queue_new_session_setup(&nats, "s1").await;
+        let session =
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+
+        nats.queue_request_ok(ext_response("[]"));
+
+        let result = session.compact().await.unwrap();
+        assert_eq!(
+            result,
+            CompactResult {
+                compacted: false,
+                tokens_before: 0,
+                tokens_after: 0,
+            }
         );
     }
 

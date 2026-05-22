@@ -26,6 +26,7 @@ pub async fn run_interactive<SF, F, SW>(
     nats: async_nats::Client,
     _config: Config,
     nats_url: String,
+    stream: bool,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -35,7 +36,7 @@ where
     let local = tokio::task::LocalSet::new();
     local
         .run_until(run_interactive_inner(
-            factory, prefix, cwd, fs, switcher, nats, nats_url,
+            factory, prefix, cwd, fs, switcher, nats, nats_url, stream,
         ))
         .await
 }
@@ -48,6 +49,7 @@ async fn run_interactive_inner<SF, F, SW>(
     switcher: SW,
     nats: async_nats::Client,
     nats_url: String,
+    stream: bool,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -79,5 +81,5 @@ where
         prefix,
     )?);
 
-    repl::run(factory, prefix, cwd, fs, switcher, Some(supervisor)).await
+    repl::run(factory, prefix, cwd, fs, switcher, Some(supervisor), stream).await
 }

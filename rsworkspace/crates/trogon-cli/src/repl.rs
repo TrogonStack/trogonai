@@ -1,5 +1,5 @@
 use crate::fs::Fs;
-use crate::session::{Session, SessionFactory, StreamEvent};
+use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
 use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -143,6 +143,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     fs: F,
     mut switcher: SW,
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
+    stream: bool,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
@@ -261,17 +262,21 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         }
                     } else if cmd == "/compact" {
                         match session.compact().await {
-                            Ok(()) => {
-                                if session_context_size > 0 {
-                                    let pct = session_used_tokens * 100 / session_context_size;
+                            Ok(CompactResult { compacted: true, tokens_before, tokens_after }) => {
+                                println!(
+                                    "compacted: {} → {} tokens",
+                                    fmt_tokens(tokens_before as u64),
+                                    fmt_tokens(tokens_after as u64),
+                                );
+                            }
+                            Ok(CompactResult { compacted: false, tokens_before, .. }) => {
+                                if tokens_before > 0 {
                                     println!(
-                                        "compaction triggered — context: {}/{} tokens ({}%)",
-                                        fmt_tokens(session_used_tokens),
-                                        fmt_tokens(session_context_size),
-                                        pct,
+                                        "no compaction needed ({} tokens)",
+                                        fmt_tokens(tokens_before as u64),
                                     );
                                 } else {
-                                    println!("compaction triggered");
+                                    println!("no messages to compact");
                                 }
                             }
                             Err(e) => eprintln!("error triggering compaction: {e}"),
@@ -391,11 +396,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                                 let _ = std::io::stderr().flush();
                                                 tool_line_active = false;
                                             }
-                                            response_buf.push_str(&text);
+                                            if stream {
+                                                print!("{text}");
+                                                let _ = stdout.flush();
+                                            } else {
+                                                response_buf.push_str(&text);
+                                            }
                                         }
                                         Some(StreamEvent::Thinking) => {}
                                         Some(StreamEvent::ToolCall(name)) => {
-                                            if !response_buf.is_empty() {
+                                            if !stream && !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
                                                 let _ = stdout.flush();
                                                 response_buf.clear();
@@ -441,7 +451,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                         }
                                         Some(StreamEvent::Error(msg)) => {
                                             if tool_line_active { eprint!("\r\x1b[2K"); let _ = std::io::stderr().flush(); }
-                                            if !response_buf.is_empty() {
+                                            if !stream && !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
                                                 response_buf.clear();
                                             }
@@ -451,7 +461,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                         }
                                         Some(StreamEvent::Done(reason)) => {
                                             if tool_line_active { eprint!("\r\x1b[2K"); let _ = std::io::stderr().flush(); }
-                                            if !response_buf.is_empty() {
+                                            if !stream && !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
                                                 response_buf.clear();
                                             }
