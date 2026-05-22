@@ -14,6 +14,7 @@ use trogon_nats::inject_trace_context;
 use crate::audit::{self, AuditEnvelope};
 use crate::authz::{AuthzContext, PermissionChecker};
 use crate::policy::SpicedbGatePolicy;
+use crate::rpc_codes;
 use crate::subject::gateway_to_server_subject;
 use crate::trace::{DecisionTrace, TraceStore};
 
@@ -128,38 +129,69 @@ async fn handle_ingress(
     } else {
         None
     };
-    let tool_name = tool_call.as_deref();
+
+    let resource_read = if jsonrpc_method == "resources/read" {
+        resources_read_uri(&msg.payload)
+    } else {
+        None
+    };
 
     let server_id = parse_server_id(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
 
     let mut spicedb_allowed: Option<bool> = None;
     if requires_spicedb {
-        let allowed = checker
-            .check_tool_call(AuthzContext {
+        match checker
+            .authorize_mcp_request(AuthzContext {
                 tenant: tenant.as_deref(),
                 server_id,
                 jsonrpc_method: &jsonrpc_method,
-                tool_name,
+                tool_name: tool_call.as_deref(),
+                resource_uri: resource_read.as_deref(),
             })
             .await
-            .map_err(|e| GatewayError(e.0))?;
-        spicedb_allowed = Some(allowed);
-        if !allowed {
-            finish_denied(FinishDeniedParams {
-                client,
-                jetstream,
-                mcp,
-                msg: &msg,
-                backend_subject: &backend_subject,
-                jsonrpc_method: &jsonrpc_method,
-                tenant: tenant.clone(),
-                request_id: request_id.clone(),
-                requires_spicedb,
-                spicedb_allowed,
-                traces,
-            })
-            .await;
-            return Ok(());
+        {
+            Ok(true) => spicedb_allowed = Some(true),
+            Ok(false) => {
+                spicedb_allowed = Some(false);
+                finish_ingress_blocked(FinishIngressBlockedParams {
+                    client,
+                    jetstream,
+                    mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    tenant: tenant.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed,
+                    audit_outcome: "deny",
+                    jsonrpc_code: rpc_codes::POLICY_DENY,
+                    jsonrpc_message: "policy_deny".to_string(),
+                    traces,
+                })
+                .await;
+                return Ok(());
+            }
+            Err(authz_err) => {
+                finish_ingress_blocked(FinishIngressBlockedParams {
+                    client,
+                    jetstream,
+                    mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    tenant: tenant.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed: None,
+                    audit_outcome: "error",
+                    jsonrpc_code: rpc_codes::AUTHZ_UNREACHABLE,
+                    jsonrpc_message: authz_err.0,
+                    traces,
+                })
+                .await;
+                return Ok(());
+            }
         }
     }
 
@@ -248,7 +280,13 @@ async fn handle_ingress(
             dispatch_backend_response(client, &msg, response.payload).await?;
         }
         Ok(Err(e)) => {
-            respond_with_jsonrpc_error(client, &msg, request_id, -32001, format!("upstream request failed: {e}"))
+            respond_with_jsonrpc_error(
+                client,
+                &msg,
+                request_id,
+                rpc_codes::BACKEND_UNREACHABLE,
+                format!("upstream request failed: {e}"),
+            )
                 .await?;
         }
         Err(_) => {
@@ -256,7 +294,7 @@ async fn handle_ingress(
                 client,
                 &msg,
                 request_id,
-                -32002,
+                rpc_codes::BACKEND_TIMEOUT,
                 "upstream request timed out".to_string(),
             )
             .await?;
@@ -266,7 +304,7 @@ async fn handle_ingress(
     Ok(())
 }
 
-struct FinishDeniedParams<'a> {
+struct FinishIngressBlockedParams<'a> {
     client: &'a async_nats::Client,
     jetstream: &'a jetstream::Context,
     mcp: &'a Config,
@@ -278,31 +316,34 @@ struct FinishDeniedParams<'a> {
     requires_spicedb: bool,
     spicedb_allowed: Option<bool>,
     traces: &'a TraceStore,
+    audit_outcome: &'static str,
+    jsonrpc_code: i32,
+    jsonrpc_message: String,
 }
 
-async fn finish_denied(params: FinishDeniedParams<'_>) {
+async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
     let prefix = params.mcp.prefix_str();
     if params.msg.reply.is_some() {
         reply_with_jsonrpc_error(
             params.client,
             params.msg,
             params.request_id.clone(),
-            -32003,
-            "forbidden".to_string(),
+            params.jsonrpc_code,
+            params.jsonrpc_message.clone(),
         )
         .await;
     }
     let envelope = AuditEnvelope {
         subject_in: params.msg.subject.to_string(),
         subject_out: params.backend_subject.to_string(),
-        outcome: "deny",
+        outcome: params.audit_outcome,
         direction: "request",
         jsonrpc_method: params.jsonrpc_method.to_string(),
         tenant: params.tenant,
         request_id: params.request_id.clone(),
     };
     let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
-    let subject = audit::audit_publish_subject(prefix, "deny", "request", &method_root);
+    let subject = audit::audit_publish_subject(prefix, params.audit_outcome, "request", &method_root);
     audit::publish_audit(
         params.jetstream,
         subject,
@@ -340,6 +381,15 @@ fn tools_call_name(payload: &[u8]) -> Option<String> {
     value
         .get("params")?
         .get("name")?
+        .as_str()
+        .map(std::string::ToString::to_string)
+}
+
+fn resources_read_uri(payload: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    value
+        .get("params")?
+        .get("uri")?
         .as_str()
         .map(std::string::ToString::to_string)
 }
@@ -422,6 +472,20 @@ fn jsonrpc_error_bytes(id: Option<serde_json::Value>, code: i32, message: String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resources_read_uri_parses_params() {
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "resources/read",
+            "params": {"uri": "file:///tmp/x"}
+        })
+        .to_string();
+        assert_eq!(
+            resources_read_uri(payload.as_bytes()).as_deref(),
+            Some("file:///tmp/x")
+        );
+    }
 
     #[test]
     fn parse_server_id_ok() {

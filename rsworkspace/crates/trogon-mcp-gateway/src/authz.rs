@@ -1,4 +1,4 @@
-//! Phase-1 authorization: async callback for Zanzibar checks (SpiceDB later).
+//! Authorization: SpiceDB-backed checks for gated MCP methods (`spicedb-rs-client`) or allow-all.
 
 use std::fmt;
 
@@ -10,6 +10,7 @@ pub struct AuthzContext<'a> {
     pub server_id: &'a str,
     pub jsonrpc_method: &'a str,
     pub tool_name: Option<&'a str>,
+    pub resource_uri: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -25,7 +26,7 @@ impl std::error::Error for AuthzError {}
 
 #[async_trait]
 pub trait PermissionChecker: Send + Sync {
-    async fn check_tool_call(&self, ctx: AuthzContext<'_>) -> Result<bool, AuthzError>;
+    async fn authorize_mcp_request(&self, ctx: AuthzContext<'_>) -> Result<bool, AuthzError>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -33,7 +34,7 @@ pub struct AllowAllPermissionChecker;
 
 #[async_trait]
 impl PermissionChecker for AllowAllPermissionChecker {
-    async fn check_tool_call(&self, _ctx: AuthzContext<'_>) -> Result<bool, AuthzError> {
+    async fn authorize_mcp_request(&self, _ctx: AuthzContext<'_>) -> Result<bool, AuthzError> {
         Ok(true)
     }
 }
