@@ -1,0 +1,23 @@
+[package]
+name = "trogon-mcp-gateway"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+cel-interpreter = "=0.10.0"
+clap = { workspace = true }
+futures = { workspace = true }
+mcp-nats = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
+trogon-telemetry = { workspace = true }
