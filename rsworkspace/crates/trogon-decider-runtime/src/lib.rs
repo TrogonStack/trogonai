@@ -62,7 +62,9 @@ pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
-pub use event::{Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventType, StreamEvent};
+pub use event::{
+    Event, EventData, EventDecode, EventEncode, EventId, EventIdentity, EventPayloadError, EventType, StreamEvent,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{

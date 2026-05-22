@@ -41,5 +41,7 @@ pub use read_model::{
 pub use schedule::ResolvedJob;
 pub use store::{Store, connect_store, open_command_snapshot_bucket};
 pub use traits::{LeaderLock, SchedulePublisher};
-pub use trogon_cron_jobs_proto::{JobEventCase, JobEventPayloadError, state_v1, v1};
 pub use trogon_decider_runtime::{CommandError, CommandResult, ExecutionResult, StreamWritePrecondition};
+pub use trogon_proto::cron::jobs::{
+    JobDeliveryKind, JobEventCase, JobEventPayloadError, JobSamplingSourceKind, JobScheduleKind, state_v1, v1,
+};

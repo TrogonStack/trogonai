@@ -12,7 +12,7 @@ mod stream_event;
 
 use crate::headers::Headers;
 
-pub use codec::{EventData, EventDecode, EventEncode};
+pub use codec::{EventData, EventDecode, EventEncode, EventPayloadError};
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
 pub use event_type::EventType;

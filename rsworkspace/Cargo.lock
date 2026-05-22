@@ -3174,25 +3174,14 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "trogon-cron-jobs-proto",
  "trogon-decider",
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-proto",
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
-]
-
-[[package]]
-name = "trogon-cron-jobs-proto"
-version = "0.1.0"
-dependencies = [
- "buffa",
- "chrono",
- "serde",
- "serde_json",
- "trogon-decider-runtime",
 ]
 
 [[package]]
@@ -3288,6 +3277,15 @@ dependencies = [
  "tracing-subscriber",
  "trogon-std",
  "uuid",
+]
+
+[[package]]
+name = "trogon-proto"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "serde",
+ "trogon-decider-runtime",
 ]
 
 [[package]]

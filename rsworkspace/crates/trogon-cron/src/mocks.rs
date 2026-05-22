@@ -21,7 +21,7 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    GetJobCommand, JobEventCase, ListJobsCommand, ResolvedJob,
+    GetJobCommand, JobDeliveryKind, JobEventCase, JobSamplingSourceKind, JobScheduleKind, ListJobsCommand, ResolvedJob,
     config::{JobWriteCondition, JobWriteState},
     error::CronError,
     projections::{CronJobWatchStream, LoadAndWatchCronJobsResult},
@@ -347,11 +347,11 @@ fn cron_job_from_proto(stream_id: &str, details: &v1::JobDetails) -> CronJob {
 
 fn schedule_from_proto(schedule: &v1::JobSchedule) -> JobEventSchedule {
     match schedule.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => JobEventSchedule::At { at: inner.at.clone() },
-        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => JobEventSchedule::Every {
+        Some(JobScheduleKind::At(inner)) => JobEventSchedule::At { at: inner.at.clone() },
+        Some(JobScheduleKind::Every(inner)) => JobEventSchedule::Every {
             every_sec: inner.every_sec,
         },
-        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => JobEventSchedule::Cron {
+        Some(JobScheduleKind::Cron(inner)) => JobEventSchedule::Cron {
             expr: inner.expr.clone(),
             timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
         },
@@ -361,7 +361,7 @@ fn schedule_from_proto(schedule: &v1::JobSchedule) -> JobEventSchedule {
 
 fn delivery_from_proto(delivery: &v1::JobDelivery) -> JobEventDelivery {
     match delivery.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => JobEventDelivery::NatsEvent {
+        Some(JobDeliveryKind::NatsEvent(inner)) => JobEventDelivery::NatsEvent {
             route: inner.route.clone(),
             ttl_sec: inner.ttl_sec,
             source: inner.source.as_option().map(sampling_source_from_proto),
@@ -376,11 +376,9 @@ fn delivery_from_proto(delivery: &v1::JobDelivery) -> JobEventDelivery {
 
 fn sampling_source_from_proto(source: &v1::JobSamplingSource) -> JobEventSamplingSource {
     match source.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => {
-            JobEventSamplingSource::LatestFromSubject {
-                subject: inner.subject.clone(),
-            }
-        }
+        Some(JobSamplingSourceKind::LatestFromSubject(inner)) => JobEventSamplingSource::LatestFromSubject {
+            subject: inner.subject.clone(),
+        },
         None => JobEventSamplingSource::LatestFromSubject { subject: String::new() },
     }
 }

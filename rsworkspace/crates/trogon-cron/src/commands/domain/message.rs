@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-use trogon_cron_jobs_proto::v1;
+use trogon_proto::cron::jobs::v1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageHeadersError {

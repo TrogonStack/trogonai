@@ -1,5 +1,5 @@
 use buffa::MessageField;
-use trogon_cron_jobs_proto::v1;
+use trogon_proto::cron::jobs::v1;
 
 use super::JobEventSamplingSource;
 

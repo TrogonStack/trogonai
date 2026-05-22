@@ -14,7 +14,7 @@ use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
 use crate::{
-    JobEventCase,
+    JobDeliveryKind, JobEventCase, JobSamplingSourceKind, JobScheduleKind,
     error::CronError,
     kv::{CRON_JOBS_CHECKPOINT_KEY, EVENTS_SUBJECT_PREFIX},
     read_model::{
@@ -159,11 +159,11 @@ fn project_status(status: v1::JobStatus) -> JobEventStatus {
 
 fn project_schedule(schedule: &v1::JobSchedule) -> Result<JobEventSchedule, JobTransitionError> {
     match schedule.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => Ok(JobEventSchedule::At { at: inner.at.clone() }),
-        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => Ok(JobEventSchedule::Every {
+        Some(JobScheduleKind::At(inner)) => Ok(JobEventSchedule::At { at: inner.at.clone() }),
+        Some(JobScheduleKind::Every(inner)) => Ok(JobEventSchedule::Every {
             every_sec: inner.every_sec,
         }),
-        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => Ok(JobEventSchedule::Cron {
+        Some(JobScheduleKind::Cron(inner)) => Ok(JobEventSchedule::Cron {
             expr: inner.expr.clone(),
             timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
         }),
@@ -175,7 +175,7 @@ fn project_schedule(schedule: &v1::JobSchedule) -> Result<JobEventSchedule, JobT
 
 fn project_delivery(delivery: &v1::JobDelivery) -> Result<JobEventDelivery, JobTransitionError> {
     match delivery.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => Ok(JobEventDelivery::NatsEvent {
+        Some(JobDeliveryKind::NatsEvent(inner)) => Ok(JobEventDelivery::NatsEvent {
             route: inner.route.clone(),
             ttl_sec: inner.ttl_sec,
             source: inner.source.as_option().map(project_sampling_source).transpose()?,
@@ -188,11 +188,9 @@ fn project_delivery(delivery: &v1::JobDelivery) -> Result<JobEventDelivery, JobT
 
 fn project_sampling_source(source: &v1::JobSamplingSource) -> Result<JobEventSamplingSource, JobTransitionError> {
     match source.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => {
-            Ok(JobEventSamplingSource::LatestFromSubject {
-                subject: inner.subject.clone(),
-            })
-        }
+        Some(JobSamplingSourceKind::LatestFromSubject(inner)) => Ok(JobEventSamplingSource::LatestFromSubject {
+            subject: inner.subject.clone(),
+        }),
         None => Err(JobTransitionError::MalformedEvent {
             context: "job sampling source has no supported case",
         }),

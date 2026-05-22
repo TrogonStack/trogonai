@@ -1,5 +1,5 @@
 [package]
-name = "trogon-cron-jobs-proto"
+name = "trogon-proto"
 version = "0.1.0"
 edition = "2024"
 
@@ -14,7 +14,3 @@ all = "deny"
 buffa = { workspace = true }
 serde = { workspace = true }
 trogon-decider-runtime = { workspace = true }
-
-[dev-dependencies]
-chrono = { version = "0.4", features = ["serde"] }
-serde_json = { workspace = true }

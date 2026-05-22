@@ -1,5 +1,5 @@
-use trogon_cron_jobs_proto::{state_v1, v1};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogon_proto::cron::jobs::{state_v1, v1};
 
 use super::domain::JobId;
 

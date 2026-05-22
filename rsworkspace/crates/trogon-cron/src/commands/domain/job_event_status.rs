@@ -1,4 +1,4 @@
-use trogon_cron_jobs_proto::v1;
+use trogon_proto::cron::jobs::v1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JobEventStatus {

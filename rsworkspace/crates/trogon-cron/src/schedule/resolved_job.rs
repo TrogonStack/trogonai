@@ -5,6 +5,7 @@ use bytes::Bytes;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
+    JobDeliveryKind, JobSamplingSourceKind, JobScheduleKind,
     error::{CronError, JobSpecError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
     v1,
@@ -190,15 +191,15 @@ fn parse_job_id(id: &str) -> Result<NatsToken, CronError> {
 
 fn schedule_parts(schedule: &v1::JobSchedule) -> Result<(String, Option<String>), CronError> {
     match schedule.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_schedule::Kind::At(inner)) => Ok((format!("@at {}", inner.at), None)),
-        Some(v1::__buffa::oneof::job_schedule::Kind::Every(inner)) => {
+        Some(JobScheduleKind::At(inner)) => Ok((format!("@at {}", inner.at), None)),
+        Some(JobScheduleKind::Every(inner)) => {
             let every_sec = inner.every_sec;
             if every_sec == 0 {
                 return Err(CronError::invalid_job_spec(JobSpecError::EverySecondsMustBePositive));
             }
             Ok((format!("@every {every_sec}s"), None))
         }
-        Some(v1::__buffa::oneof::job_schedule::Kind::Cron(inner)) => {
+        Some(JobScheduleKind::Cron(inner)) => {
             let expr = inner.expr.clone();
             cron::Schedule::from_str(&expr).map_err(|source| {
                 CronError::invalid_job_spec(JobSpecError::InvalidCronExpression {
@@ -218,7 +219,7 @@ fn schedule_parts(schedule: &v1::JobSchedule) -> Result<(String, Option<String>)
 
 fn delivery_parts(delivery: &v1::JobDelivery) -> Result<(DottedNatsToken, Option<u64>, Option<String>), CronError> {
     match delivery.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_delivery::Kind::NatsEvent(inner)) => {
+        Some(JobDeliveryKind::NatsEvent(inner)) => {
             let route = inner.route.clone();
             Ok((
                 DottedNatsToken::new(&route).map_err(|source| {
@@ -240,7 +241,7 @@ fn delivery_parts(delivery: &v1::JobDelivery) -> Result<(DottedNatsToken, Option
 
 fn source_subject(source: &v1::JobSamplingSource) -> Result<String, CronError> {
     match source.kind.as_ref() {
-        Some(v1::__buffa::oneof::job_sampling_source::Kind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
+        Some(JobSamplingSourceKind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
         None => Err(CronError::event_source(
             "scheduler received job details without a sampling source kind",
             std::io::Error::other("missing sampling source kind"),

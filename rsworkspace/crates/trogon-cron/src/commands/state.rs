@@ -1,5 +1,5 @@
 use buffa::EnumValue;
-use trogon_cron_jobs_proto::{JobEventCase, state_v1, v1};
+use trogon_proto::cron::jobs::{JobEventCase, state_v1, v1};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvolveError {
