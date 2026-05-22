@@ -10,7 +10,25 @@ Operators run this service so MCP JSON-RPC crosses a single NATS chokepoint (`ga
 
 Clients that already targeted `{prefix}.server.{id}.{method}` must instead publish (or NATS-request) onto `{prefix}.gateway.request.{id}.{method}` — the gateway rewrites to the server lane and preserves inbox reply semantics when a reply inbox is attached.
 
-Optional header **`trogon-mcp-tenant`** seeds JetStream audit JSON and doubles as the SpiceDB subject `object_id` when `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (principal type defaults to `trogon/principal`). Align tuples in SpiceDB with the gateway resource naming documented below.
+Optional header **`trogon-mcp-tenant`** seeds JetStream audit JSON when no verified JWT carries a tenant claim, and still acts as the SpiceDB subject `object_id` for legacy callers when **`MCP_GATEWAY_JWT_MODE=off`** (or absent). When JWT ingress is **validate** or **require**, forgeable **`trogon-mcp-tenant`** is stripped before messages reach **`server.*`**, SpiceDB principals prefer the JWT **`sub`** (caller id), and audit/traces carry **`caller_sub`** / **`identity_source`**.
+
+See **Verified JWT** below and align tuples in SpiceDB with gateway resource naming documented here.
+
+## Verified JWT (`MCP_GATEWAY_JWT_*`)
+
+| Variable | Meaning |
+|---------|---------|
+| `MCP_GATEWAY_JWT_MODE` | **`off`** (default), **`validate`**, or **`require`**. **`require`** enforces Bearer JWT on SpiceDB-gated methods (`tools/call`, `resources/read`). |
+| `MCP_GATEWAY_JWT_ISSUERS` | Comma-separated `iss` allow-list (required when mode ≠ off). |
+| `MCP_GATEWAY_JWT_AUDIENCE` | Expected `aud` (default `trogon-mcp-gateway`). |
+| `MCP_GATEWAY_JWT_JWKS_URI` | HTTPS JWKS URL for RSA keys (cached ~5 minutes). |
+| `MCP_GATEWAY_JWT_RSA_PUBLIC_KEY_PEM` | PEM for a single static RSA key (alternative to JWKS). |
+| `MCP_GATEWAY_JWT_HS256_SECRET` | Raw secret bytes for **`HS256`** (dev/smoke paths). Configure **one or more** of JWKS / RSA PEM / HS256 when mode ≠ off. |
+| `MCP_GATEWAY_JWT_LEEWAY_SECS` | Clock skew (default `60`). |
+| `MCP_GATEWAY_JWT_TENANT_CLAIM` | JSON claim key for tenancy; **`tenant`** or default namespaced **`https://trogon.ai/tenant`** (falls back to plain **`tenant`**). |
+| `MCP_GATEWAY_JWT_BEARER_HEADER` | Header name carrying `Bearer …` (default **`authorization`**). Matching is ASCII case-insensitive. |
+
+`jsonwebtoken` is built with the **`rust_crypto`** backend (`Cargo.toml`).
 
 ## Tune
 
@@ -19,6 +37,8 @@ Optional header **`trogon-mcp-tenant`** seeds JetStream audit JSON and doubles a
 | `MCP_GATEWAY_QUEUE_GROUP` | Queue group for HA workers (default `mcp-gateway`) |
 | `MCP_GATEWAY_AUDIT_STREAM` | JetStream stream name (default `MCP_AUDIT`) |
 | `MCP_GATEWAY_SKIP_AUDIT_STREAM_INIT` | Truthy ⇒ skip bootstrap `get_or_create_stream` |
+
+Audit payloads include **`identity_source`** (**`jwt`**, **`legacy_header`**, **`anonymous`**) plus optional **`caller_sub`** and **`jwt_issuer`** when present.
 
 ## SpiceDB (gated `tools/call` and `resources/read`)
 
@@ -42,11 +62,11 @@ When `MCP_GATEWAY_SPICEDB_ENDPOINT` is set (host:port without scheme, or full `h
 | Resource id | Normalized full `params.uri` string |
 | Permission | `read` |
 
-Both methods use the same **subject**: type `trogon/principal` (configurable), id from **`trogon-mcp-tenant`** or anonymous.
+Both methods use the same **subject**: type `trogon/principal` (configurable), id from JWT **`sub`** when present (normalized); otherwise **`trogon-mcp-tenant`** header when legacy path is allowed; otherwise anonymous.
 
 ### JSON-RPC codes (gateway)
 
-Client-visible errors partially align with `MCP_GATEWAY_PLAN.md` Trogon allocation (`rpc_codes`): `-32100` policy deny after SpiceDB refusal, `-32102` upstream timeout, `-32103` upstream request failure, `-32107` SpiceDB unreachable / PDP error.
+Client-visible errors partially align with `MCP_GATEWAY_PLAN.md` Trogon allocation (`rpc_codes`): `-32100` policy deny after SpiceDB refusal, `-32102` upstream timeout, `-32103` upstream request failure, `-32106` expired JWT bearer, `-32107` SpiceDB unreachable / PDP error, `-32109` auth required when **`require`** and gate applies, `-32110` malformed or invalid Bearer token under **`require`**.
 
 | Variable | Meaning |
 |---------|---------|

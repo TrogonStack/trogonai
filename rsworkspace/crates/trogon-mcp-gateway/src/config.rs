@@ -25,6 +25,7 @@ pub const DEFAULT_SPICEDB_SUBJECT_TYPE: &str = "trogon/principal";
 pub const DEFAULT_SPICEDB_TOOL_PERMISSION: &str = "call";
 pub const DEFAULT_SPICEDB_READ_PERMISSION: &str = "read";
 pub const DEFAULT_SPICEDB_ANONYMOUS_SUBJECT_ID: &str = "anonymous";
+
 pub struct SpicedbConnectConfig {
     pub endpoint: String,
     pub token: Option<String>,
