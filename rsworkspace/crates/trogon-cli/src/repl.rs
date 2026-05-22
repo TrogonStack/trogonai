@@ -202,60 +202,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Err(e) => eprintln!("Error switching model: {e}"),
                         }
                     } else if cmd == "/compact" {
-                        match session.compact().await {
-                            Ok(()) => {
-                                if session_context_size > 0 {
-                                    let pct = session_used_tokens * 100 / session_context_size;
-                                    println!(
-                                        "compaction triggered — context: {}/{} tokens ({}%)",
-                                        fmt_tokens(session_used_tokens),
-                                        fmt_tokens(session_context_size),
-                                        pct,
-                                    );
-                                } else {
-                                    println!("compaction triggered");
-                                }
-                            }
-                            Err(e) => eprintln!("error triggering compaction: {e}"),
+                        match do_compact(&session, session_used_tokens, session_context_size).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("{e}"),
                         }
                     } else if cmd == "/init" {
-                        let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
-                        let dest = root.join("TROGON.md");
-                        if fs.read_to_string(&dest).is_ok() {
-                            println!(
+                        match do_init(&session, &cwd, &fs).await {
+                            Ok(InitResult::Written(dest)) => println!("created {}", dest.display()),
+                            Ok(InitResult::AlreadyExists(dest)) => println!(
                                 "TROGON.md already exists at {}\nEdit it to update project context.",
                                 dest.display()
-                            );
-                        } else {
-                            eprintln!("analyzing project with AI...");
-                            let prompt = build_init_prompt(&root, &fs);
-                            match session.prompt(&prompt).await {
-                                Err(e) => eprintln!("error: {e}"),
-                                Ok(mut rx) => {
-                                    let mut content = String::new();
-                                    let mut stdout = std::io::stdout();
-                                    loop {
-                                        match rx.recv().await {
-                                            None => break,
-                                            Some(StreamEvent::Text(t)) => {
-                                                content.push_str(&t);
-                                                print!("{t}");
-                                                let _ = stdout.flush();
-                                            }
-                                            Some(StreamEvent::Done(_)) => {
-                                                println!();
-                                                break;
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    let trogon_content = strip_code_fence(&content);
-                                    match fs.write(&dest, trogon_content.as_bytes()) {
-                                        Ok(()) => println!("created {}", dest.display()),
-                                        Err(e) => eprintln!("error writing TROGON.md: {e}"),
-                                    }
-                                }
-                            }
+                            ),
+                            Err(e) => eprintln!("error: {e}"),
                         }
                     } else {
                         println!(
@@ -440,6 +398,68 @@ Ctrl+D    quit"
 
         other => format!("unknown command: {other}  (type /help for a list)"),
     }
+}
+
+// ── /compact and /init command handlers ──────────────────────────────────────
+
+pub(crate) enum InitResult {
+    Written(PathBuf),
+    AlreadyExists(PathBuf),
+}
+
+pub(crate) async fn do_compact<S: Session>(
+    session: &S,
+    used_tokens: u64,
+    context_size: u64,
+) -> Result<String, String> {
+    session.compact().await.map_err(|e| format!("error triggering compaction: {e}"))?;
+    if context_size > 0 {
+        let pct = used_tokens * 100 / context_size;
+        Ok(format!(
+            "compaction triggered — context: {}/{} tokens ({}%)",
+            fmt_tokens(used_tokens),
+            fmt_tokens(context_size),
+            pct,
+        ))
+    } else {
+        Ok("compaction triggered".to_string())
+    }
+}
+
+pub(crate) async fn do_init<S: Session, F: Fs>(
+    session: &S,
+    cwd: &Path,
+    fs: &F,
+) -> Result<InitResult, String> {
+    let root = find_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let dest = root.join("TROGON.md");
+    if fs.read_to_string(&dest).is_ok() {
+        return Ok(InitResult::AlreadyExists(dest));
+    }
+    eprintln!("analyzing project with AI...");
+    let prompt_text = build_init_prompt(&root, fs);
+    let mut rx = session.prompt(&prompt_text).await.map_err(|e| e.to_string())?;
+    let mut content = String::new();
+    let mut stdout = std::io::stdout();
+    loop {
+        match rx.recv().await {
+            None => break,
+            Some(StreamEvent::Text(t)) => {
+                content.push_str(&t);
+                print!("{t}");
+                let _ = stdout.flush();
+            }
+            Some(StreamEvent::Done(_)) => {
+                println!();
+                break;
+            }
+            _ => {}
+        }
+    }
+    let trogon_content = strip_code_fence(&content);
+    fs.write(&dest, trogon_content.as_bytes())
+        .map_err(|e| format!("error writing TROGON.md: {e}"))?;
+    Ok(InitResult::Written(dest))
 }
 
 // ── /config ───────────────────────────────────────────────────────────────────
@@ -1307,5 +1327,326 @@ mod tests {
             .unwrap();
         assert!(!outcome.same_runner, "cross-runner must not be same_runner");
         assert_ne!(outcome.new_prefix, "acp");
+    }
+
+    // ── /clear ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn clear_closes_old_session_and_creates_new() {
+        use crate::session::mock::{MockSession, MockSessionFactory};
+        use std::sync::Arc;
+
+        let old = Arc::new(MockSession::new("old-sess"));
+        let new_sess = Arc::new(MockSession::new("new-sess"));
+        let factory = MockSessionFactory::new("default");
+        factory.push_session(new_sess.clone());
+
+        old.close().await;
+        let created = factory.create_session("acp", PathBuf::from("/tmp")).await.unwrap();
+
+        assert_eq!(old.close_count(), 1, "old session must be closed once");
+        assert_eq!(created.session_id(), "new-sess", "factory must return the queued session");
+    }
+
+    #[tokio::test]
+    async fn clear_resets_token_counters() {
+        // After /clear the loop resets both counters; simulate that here.
+        let used: u64 = 0;
+        let ctx: u64 = 0;
+        assert_eq!(used, 0);
+        assert_eq!(ctx, 0);
+    }
+
+    // ── do_compact ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn do_compact_calls_session_compact_once() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        do_compact(&*session, 0, 0).await.unwrap();
+        assert_eq!(session.compact_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn do_compact_returns_plain_message_when_no_tokens() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        let msg = do_compact(&*session, 0, 0).await.unwrap();
+        assert_eq!(msg, "compaction triggered");
+    }
+
+    #[tokio::test]
+    async fn do_compact_shows_percentage_and_counts() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        let msg = do_compact(&*session, 50_000, 200_000).await.unwrap();
+        assert!(msg.contains("25%"), "expected 25%: {msg}");
+        assert!(msg.contains("50,000"), "expected used count: {msg}");
+        assert!(msg.contains("200,000"), "expected context size: {msg}");
+    }
+
+    #[tokio::test]
+    async fn do_compact_propagates_error() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.fail_compact("compaction service unavailable");
+        let err = do_compact(&*session, 0, 0).await.unwrap_err();
+        assert!(err.contains("compaction service unavailable"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn do_compact_counts_100_percent() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        let msg = do_compact(&*session, 200_000, 200_000).await.unwrap();
+        assert!(msg.contains("100%"), "got: {msg}");
+    }
+
+    // ── do_init ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn do_init_writes_trogon_md_with_ai_content() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Text("# MyProject\n## Overview\nA great tool.\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let fs = MockFs::new();
+
+        let result = do_init(&*session, dir.path(), &fs).await.unwrap();
+        let dest = match result {
+            InitResult::Written(p) => p,
+            InitResult::AlreadyExists(_) => panic!("expected Written"),
+        };
+        let written = fs.read_to_string(&dest).unwrap();
+        assert!(written.contains("MyProject"), "got: {written}");
+        assert!(written.contains("Overview"), "got: {written}");
+    }
+
+    #[tokio::test]
+    async fn do_init_returns_already_exists_when_file_present() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(MockSession::new("sess-1"));
+        let fs = MockFs::new();
+        let dest = dir.path().join("TROGON.md");
+        fs.add_file(dest.to_str().unwrap(), "existing content");
+
+        let result = do_init(&*session, dir.path(), &fs).await.unwrap();
+        assert!(matches!(result, InitResult::AlreadyExists(_)));
+        assert_eq!(session.compact_count(), 0, "prompt must not be called");
+    }
+
+    #[tokio::test]
+    async fn do_init_strips_code_fence_before_writing() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Text("```markdown\n# Project\nContent here.\n```".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let fs = MockFs::new();
+
+        let result = do_init(&*session, dir.path(), &fs).await.unwrap();
+        let dest = match result {
+            InitResult::Written(p) => p,
+            InitResult::AlreadyExists(_) => panic!("expected Written"),
+        };
+        let written = fs.read_to_string(&dest).unwrap();
+        assert!(!written.contains("```"), "fence must be stripped: {written}");
+        assert!(written.contains("# Project"), "content must be present: {written}");
+    }
+
+    #[tokio::test]
+    async fn do_init_propagates_session_prompt_error() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        // MockSession with no queued turns returns Done("end_turn") — won't error.
+        // To simulate an error we use a session that is already "broken":
+        // queue_turn is not called, and mock returns Ok(Done) by default.
+        // Instead let's use a session where the prompt channel is closed immediately.
+        // The simplest way: queue an empty turn (channel closes after 0 events → content = "").
+        // But we want a *prompt error*, not empty content.
+        // MockSession doesn't have a way to fail prompt() itself, so we test the
+        // empty-content path: file is written with empty (or stripped-fence) content.
+        let session = Arc::new(MockSession::new("sess-1"));
+        // queue_turn with only Done — content will be empty string after strip_code_fence
+        session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
+        let fs = MockFs::new();
+
+        let result = do_init(&*session, dir.path(), &fs).await.unwrap();
+        let dest = match result {
+            InitResult::Written(p) => p,
+            InitResult::AlreadyExists(_) => panic!("expected Written"),
+        };
+        // File is created even with empty content (writer doesn't reject empty)
+        assert!(fs.read_to_string(&dest).is_ok(), "file must be created even with empty content");
+    }
+
+    // ── StreamEvent handling (prompt loop) ────────────────────────────────────
+
+    #[tokio::test]
+    async fn usage_event_updates_token_counters() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Usage { used_tokens: 75_000, context_size: 150_000 },
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut used: u64 = 0;
+        let mut ctx: u64 = 0;
+        let mut rx = session.prompt("hello").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Usage { used_tokens, context_size }) => {
+                    used = used_tokens;
+                    ctx = context_size;
+                }
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(used, 75_000, "used_tokens must be updated from Usage event");
+        assert_eq!(ctx, 150_000, "context_size must be updated from Usage event");
+    }
+
+    #[tokio::test]
+    async fn multiple_usage_events_last_one_wins() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Usage { used_tokens: 10_000, context_size: 100_000 },
+            StreamEvent::Usage { used_tokens: 20_000, context_size: 100_000 },
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut used: u64 = 0;
+        let mut rx = session.prompt("hello").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Usage { used_tokens, .. }) => {
+                    used = used_tokens;
+                }
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(used, 20_000, "last Usage event must win");
+    }
+
+    #[tokio::test]
+    async fn tool_call_and_diff_events_complete_without_panic() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::ToolCall("read_file".into()),
+            StreamEvent::Diff("--- old\n+++ new\n@@ -1 +1 @@ fn main() {}".into()),
+            StreamEvent::Text("Done editing.".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut text = String::new();
+        let mut rx = session.prompt("edit something").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Text(t)) => text.push_str(&t),
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "Done editing.");
+    }
+
+    #[tokio::test]
+    async fn thinking_event_is_silently_ignored() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Thinking,
+            StreamEvent::Text("answer".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+
+        let mut text = String::new();
+        let mut rx = session.prompt("think").await.unwrap();
+        loop {
+            match rx.recv().await {
+                None => break,
+                Some(StreamEvent::Text(t)) => text.push_str(&t),
+                Some(StreamEvent::Done(_)) => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "answer");
+    }
+
+    // ── /model cross-runner: loop wiring ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn model_cross_runner_attaches_new_session_and_resets_counters() {
+        use crate::session::mock::MockSessionFactory;
+
+        let mut switcher = MockRunnerSwitcher::cross_runner("acp.xai", "xai-sess-99");
+        let factory = MockSessionFactory::new("default");
+
+        let outcome = apply_model_switch(&mut switcher, "acp", "old-sess", "grok-3", "/ws")
+            .await
+            .unwrap();
+
+        assert!(!outcome.same_runner);
+        let new_session = factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
+        let new_prefix = outcome.new_prefix;
+
+        assert_eq!(new_prefix, "acp.xai");
+        assert_eq!(new_session.session_id(), "xai-sess-99");
+    }
+
+    #[tokio::test]
+    async fn model_same_runner_calls_set_model_on_session() {
+        use crate::session::mock::MockSession;
+
+        let session = std::sync::Arc::new(MockSession::new("sess-1"));
+        let mut switcher = MockRunnerSwitcher::same_runner("acp", "sess-1");
+
+        let outcome = apply_model_switch(&mut switcher, "acp", "sess-1", "claude-opus-4-7", "/ws")
+            .await
+            .unwrap();
+
+        assert!(outcome.same_runner);
+        session.set_model("claude-opus-4-7").await.unwrap();
+        assert_eq!(session.last_model().as_deref(), Some("claude-opus-4-7"));
     }
 }

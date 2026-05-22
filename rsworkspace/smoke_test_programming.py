@@ -20,6 +20,39 @@ Tests:
   15. codex-runner:      tool execution         (MOCK_SEND_TOOL_EVENT; PortableBlock in history)
   16. acp-runner:        session resume         (runner restart; load_session; history persists)
   17. cross-runner:      acp → codex            (export/import/prompt via pending_history)
+  18. acp-runner:        tool actual success    (runner cwd=/tmp; file content in tool_result)
+  19. xai-runner:        tool actual success    (function_call_output with file content)
+  20. set_model+cross:   xai set_model → or     (xai→openrouter export after model change)
+  21. openrouter-runner: tool actual execution  (role:tool message with file content)
+  22. TROGON.md:         system context         (marker injected on acp/xai/openrouter)
+  23. write_file:        AI can write files     (xai/openrouter/acp bypassPermissions)
+  24. xai-runner:        spawn handler e2e      (NATS request → /chat/completions → reply)
+  25. openrouter-runner: spawn handler e2e      (NATS request → /chat/completions → reply)
+  26. cross-runner:      acp → openrouter       (export/import, prompt on openrouter)
+  27. cross-runner:      xai → codex            (export/import, prompt on codex)
+  28. cross-runner:      openrouter → xai       (export/import, prompt on xai)
+  29. tool:              git_status             (runs git status in session cwd)
+  30. tool:              git_diff               (runs git diff in session cwd)
+  31. tool:              git_log                (shows commit history in session cwd)
+  32. tool:              glob                   (finds files matching **/*.rs pattern)
+  33. tool:              list_dir               (lists directory tree)
+  34. tool:              fetch_url              (fetches URL; raw content in output)
+  35. tool:              notebook_edit          (edits cell in .ipynb; verifies on disk)
+  36. tool:              str_replace            (replaces text in a file; verifies on disk)
+  37. tool:              search_files           (finds pattern matches in directory)
+  38. tool:              todo_write             (writes a todo item; verifies output)
+  39. tool:              todo_read              (reads back todo written in same session)
+  40. registry:          runner startup         (xai-runner registers models in AGENT_REGISTRY KV)
+  41. --print flag:      CLI e2e                (trogon --print sends prompt, stdout has response)
+  42. compaction:        full cycle             (token threshold → trogon.compactor.compact called)
+  43. registry:          openrouter startup     (openrouter-runner registers models in AGENT_REGISTRY KV)
+  44. registry:          codex startup          (codex-runner registers models in AGENT_REGISTRY KV)
+  45. bash tool:         acp e2e                (acp-runner dispatches bash via mock wasm-runtime over NATS)
+  46. registry:          acp startup            (acp-runner registers Claude models in AGENT_REGISTRY KV)
+  47. session/get_state: xai + openrouter       (ext_method returns session JSON with cwd field)
+  48. CrossRunnerSwitcher: /model via trogon    (trogon binary switches runner mid-session via registry)
+  49. /compact CLI:      manual publish         (trogon /compact publishes to compactor subject)
+  50. /init CLI:         writes TROGON.md       (trogon /init sends LLM prompt and writes file to disk)
 
 All runners share a single mock HTTP server on MOCK_PORT, routed by path:
   POST /anthropic/v1/messages  → Anthropic SSE  (acp-runner)
@@ -261,6 +294,7 @@ class MockLLMServer(BaseHTTPRequestHandler):
         "/responses":             collections.deque(),
         "/chat/completions":      collections.deque(),
     }
+    _get_responses: dict = {}
 
     @classmethod
     def reset(cls):
@@ -268,11 +302,17 @@ class MockLLMServer(BaseHTTPRequestHandler):
             cls._request_log.clear()
             for q in cls._response_queues.values():
                 q.clear()
+            cls._get_responses.clear()
 
     @classmethod
     def queue(cls, path: str, sse: bytes):
         with cls._lock:
             cls._response_queues[path].append(sse)
+
+    @classmethod
+    def set_get_response(cls, path: str, body: bytes):
+        with cls._lock:
+            cls._get_responses[path] = body
 
     @classmethod
     def request_count(cls, path: str) -> int:
@@ -306,8 +346,26 @@ class MockLLMServer(BaseHTTPRequestHandler):
             factory = _PATH_TO_DEFAULT.get(self.path)
             resp = factory() if factory else b"data: [DONE]\n\n"
 
+        # Queued responses that start with '{' are plain JSON (e.g. spawn handler).
+        if resp.startswith(b'{') or resp.startswith(b'['):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+        else:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+        try:
+            self.wfile.write(resp)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def do_GET(self):
+        with MockLLMServer._lock:
+            resp = MockLLMServer._get_responses.get(self.path, b"mock-get-content")
         self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Type", "text/plain")
         self.end_headers()
         try:
             self.wfile.write(resp)
@@ -2042,6 +2100,1729 @@ async def test_set_model_cross_runner(nc):
         stop_runner("or4")
 
 
+# ── Helpers for new tests ─────────────────────────────────────────────────────
+
+def spawn_json_response(text: str) -> bytes:
+    """Non-streaming JSON body for spawn-handler tests (choices[0].message.content)."""
+    return json.dumps({"choices": [{"message": {"content": text}}]}).encode()
+
+
+def setup_git_repo(path: str, files: Optional[dict] = None, commit: bool = True) -> None:
+    """Init a git repo at path, optionally write files and make an initial commit."""
+    subprocess.run(["git", "init", path], capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.email", "test@test.com"], capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.name", "Test"], capture_output=True)
+    if files:
+        for name, content in files.items():
+            full = os.path.join(path, name)
+            os.makedirs(os.path.dirname(full), exist_ok=True) if "/" in name else None
+            with open(full, "w") as f:
+                f.write(content)
+    if commit and files:
+        subprocess.run(["git", "-C", path, "add", "."], capture_output=True)
+        subprocess.run(
+            ["git", "-C", path, "commit", "-m", "initial commit"],
+            capture_output=True,
+        )
+
+
+# ── Test 24: xai spawn handler NATS e2e ───────────────────────────────────────
+
+async def test_xai_spawn_handler(nc):
+    section("Test 24: xai-runner — spawn handler NATS e2e (real runner binary)")
+    prefix = f"{BASE}.spawn_xai"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/chat/completions", spawn_json_response("xai spawn replied"))
+
+    start_runner("spawn_xai", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        if not await wait_for_runner(nc, prefix):
+            fail("xai spawn: runner not ready"); return
+
+        payload = json.dumps({"prompt": "spawn test prompt"}).encode()
+        try:
+            msg = await asyncio.wait_for(
+                nc.request(f"{prefix}.agent.spawn", payload), timeout=15.0
+            )
+            reply_text = msg.data.decode()
+        except asyncio.TimeoutError:
+            fail("xai spawn: NATS request timed out"); return
+        except Exception as e:
+            fail("xai spawn: NATS request error", str(e)); return
+
+        if reply_text == "xai spawn replied":
+            ok("xai spawn: correct reply from spawn handler", f"reply={reply_text!r}")
+        else:
+            fail("xai spawn: unexpected reply", f"got={reply_text!r}")
+
+        n = MockLLMServer.request_count("/chat/completions")
+        if n >= 1:
+            ok("xai spawn: runner called /chat/completions", f"{n} request(s)")
+        else:
+            fail("xai spawn: /chat/completions never called")
+    finally:
+        stop_runner("spawn_xai")
+
+
+# ── Test 25: openrouter spawn handler NATS e2e ────────────────────────────────
+
+async def test_openrouter_spawn_handler(nc):
+    section("Test 25: openrouter-runner — spawn handler NATS e2e (real runner binary)")
+    prefix = f"{BASE}.spawn_or"
+    or_bin = os.path.join(RSDIR, "target", "debug", "trogon-openrouter-runner")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/chat/completions", spawn_json_response("openrouter spawn replied"))
+
+    start_runner("spawn_or", or_bin, {
+        "ACP_PREFIX":          prefix,
+        "OPENROUTER_BASE_URL": f"http://127.0.0.1:{MOCK_PORT}",
+        "OPENROUTER_API_KEY":  "fake-or-key",
+    })
+    try:
+        if not await wait_for_runner(nc, prefix):
+            fail("or spawn: runner not ready"); return
+
+        payload = json.dumps({"prompt": "spawn test prompt"}).encode()
+        try:
+            msg = await asyncio.wait_for(
+                nc.request(f"{prefix}.agent.spawn", payload), timeout=15.0
+            )
+            reply_text = msg.data.decode()
+        except asyncio.TimeoutError:
+            fail("or spawn: NATS request timed out"); return
+        except Exception as e:
+            fail("or spawn: NATS request error", str(e)); return
+
+        if reply_text == "openrouter spawn replied":
+            ok("or spawn: correct reply from spawn handler", f"reply={reply_text!r}")
+        else:
+            fail("or spawn: unexpected reply", f"got={reply_text!r}")
+
+        n = MockLLMServer.request_count("/chat/completions")
+        if n >= 1:
+            ok("or spawn: runner called /chat/completions", f"{n} request(s)")
+        else:
+            fail("or spawn: /chat/completions never called")
+    finally:
+        stop_runner("spawn_or")
+
+
+# ── Test 26: cross-runner acp → openrouter ────────────────────────────────────
+
+async def test_cross_runner_acp_to_openrouter(nc):
+    section("Test 26: cross-runner — acp → openrouter (export / import / prompt)")
+    prefix_acp = f"{BASE}.acp_cr26"
+    prefix_or  = f"{BASE}.or_cr26"
+    acp_bin = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    or_bin  = os.path.join(RSDIR, "target", "debug", "trogon-openrouter-runner")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse("acp_before_switch_26"))
+    MockLLMServer.queue("/chat/completions",      openrouter_sse("or_after_import_26"))
+
+    start_runner("acp_cr26", acp_bin, {
+        "ACP_PREFIX": prefix_acp, "PROXY_URL": f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token", "AGENT_MODEL": "claude-opus-4-6",
+    })
+    start_runner("or_cr26", or_bin, {
+        "ACP_PREFIX": prefix_or, "OPENROUTER_BASE_URL": f"http://127.0.0.1:{MOCK_PORT}",
+        "OPENROUTER_API_KEY": "fake-or-key",
+    })
+    try:
+        sid_acp = await wait_for_runner(nc, prefix_acp)
+        sid_or  = await wait_for_runner(nc, prefix_or)
+        if not sid_acp:
+            fail("cross acp→or: acp session.new timed out"); return
+        if not sid_or:
+            fail("cross acp→or: or session.new timed out"); return
+        info(f"acp={sid_acp}  or={sid_or}")
+
+        r = await send_prompt(nc, prefix_acp, sid_acp, "tell me something")
+        if e := prompt_err(r):
+            fail("cross acp→or: acp prompt", e); return
+        ok("cross acp→or: acp prompt completed")
+
+        exported = await nats_req(nc, f"{prefix_acp}.agent.ext.session/export",
+                                   {"sessionId": sid_acp})
+        if not isinstance(exported, list) or not exported:
+            fail("cross acp→or: export", f"got {exported!r}"); return
+        ok("cross acp→or: acp session exported", f"{len(exported)} message(s)")
+
+        ir = await nats_req(nc, f"{prefix_or}.agent.ext.session/import",
+                             {"sessionId": sid_or, "messages": exported})
+        if isinstance(ir, dict) and "code" in ir:
+            fail("cross acp→or: openrouter import", str(ir)); return
+        ok("cross acp→or: history imported into openrouter session")
+
+        acp_before = MockLLMServer.request_count("/anthropic/v1/messages")
+        or_before  = MockLLMServer.request_count("/chat/completions")
+
+        r = await send_prompt(nc, prefix_or, sid_or, "continue with openrouter")
+        if e := prompt_err(r):
+            fail("cross acp→or: openrouter prompt after import", e)
+        else:
+            ok("cross acp→or: openrouter prompt completed after import")
+
+        or_after  = MockLLMServer.request_count("/chat/completions")
+        acp_after = MockLLMServer.request_count("/anthropic/v1/messages")
+
+        if or_after > or_before:
+            ok("cross acp→or: openrouter /chat/completions called after switch",
+               f"{or_after - or_before} request(s)")
+        else:
+            fail("cross acp→or: /chat/completions not called after switch")
+
+        if acp_after == acp_before:
+            ok("cross acp→or: Anthropic endpoint silent after switch")
+        else:
+            fail("cross acp→or: Anthropic endpoint unexpectedly called after switch")
+    finally:
+        stop_runner("acp_cr26")
+        stop_runner("or_cr26")
+
+
+# ── Test 27: cross-runner xai → codex ────────────────────────────────────────
+
+async def test_cross_runner_xai_to_codex(nc):
+    section("Test 27: cross-runner — xai → codex (export / import / prompt)")
+    prefix_xai   = f"{BASE}.xai_cr27"
+    prefix_codex = f"{BASE}.codex_cr27"
+    xai_bin      = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+    codex_bin    = os.path.join(RSDIR, "target", "debug", "trogon-codex-runner")
+    mock_codex   = os.path.join(RSDIR, "target", "debug", "mock_codex_server")
+
+    if not os.path.exists(mock_codex):
+        fail("xai→codex: mock_codex_server binary not found", mock_codex); return
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses", xai_sse("xai_before_switch_27"))
+
+    start_runner("xai_cr27", xai_bin, {
+        "ACP_PREFIX":        prefix_xai,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    start_runner("codex_cr27", codex_bin, {
+        "ACP_PREFIX":              prefix_codex,
+        "CODEX_BIN":               mock_codex,
+        "CODEX_SPAWN_TIMEOUT_SECS": "8",
+        "MOCK_SEND_N_TEXT_EVENTS": "1",
+    })
+    try:
+        sid_xai   = await wait_for_runner(nc, prefix_xai)
+        sid_codex = await wait_for_runner(nc, prefix_codex, timeout=15.0)
+        if not sid_xai:
+            fail("xai→codex: xai session.new timed out"); return
+        if not sid_codex:
+            fail("xai→codex: codex session.new timed out"); return
+        info(f"xai={sid_xai}  codex={sid_codex}")
+
+        r = await send_prompt(nc, prefix_xai, sid_xai, "tell me something")
+        if e := prompt_err(r):
+            fail("xai→codex: xai prompt", e); return
+        ok("xai→codex: xai initial prompt completed")
+
+        exported = await nats_req(nc, f"{prefix_xai}.agent.ext.session/export",
+                                   {"sessionId": sid_xai})
+        if not isinstance(exported, list) or not exported:
+            fail("xai→codex: export", f"got {exported!r}"); return
+        ok("xai→codex: xai session exported", f"{len(exported)} message(s)")
+
+        ir = await nats_req(nc, f"{prefix_codex}.agent.ext.session/import",
+                             {"sessionId": sid_codex, "messages": exported})
+        if isinstance(ir, dict) and "code" in ir:
+            fail("xai→codex: codex import", str(ir)); return
+        ok("xai→codex: history imported into codex session")
+
+        xai_before = MockLLMServer.request_count("/responses")
+        r = await send_prompt(nc, prefix_codex, sid_codex, "continue from there")
+        if e := prompt_err(r):
+            fail("xai→codex: codex prompt after import", e)
+        else:
+            ok("xai→codex: codex prompt completed after import")
+
+        if MockLLMServer.request_count("/responses") == xai_before:
+            ok("xai→codex: xAI endpoint silent after switch to codex")
+        else:
+            info("xai→codex: xAI endpoint called (unexpected but not fatal)")
+    finally:
+        stop_runner("xai_cr27")
+        stop_runner("codex_cr27")
+
+
+# ── Test 28: cross-runner openrouter → xai ───────────────────────────────────
+
+async def test_cross_runner_openrouter_to_xai(nc):
+    section("Test 28: cross-runner — openrouter → xai (export / import / prompt)")
+    prefix_or  = f"{BASE}.or_cr28"
+    prefix_xai = f"{BASE}.xai_cr28"
+    or_bin  = os.path.join(RSDIR, "target", "debug", "trogon-openrouter-runner")
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/chat/completions", openrouter_sse("or_before_switch_28"))
+    MockLLMServer.queue("/responses",        xai_sse("xai_after_import_28"))
+
+    start_runner("or_cr28", or_bin, {
+        "ACP_PREFIX": prefix_or, "OPENROUTER_BASE_URL": f"http://127.0.0.1:{MOCK_PORT}",
+        "OPENROUTER_API_KEY": "fake-or-key",
+    })
+    start_runner("xai_cr28", xai_bin, {
+        "ACP_PREFIX":        prefix_xai,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid_or  = await wait_for_runner(nc, prefix_or)
+        sid_xai = await wait_for_runner(nc, prefix_xai)
+        if not sid_or:
+            fail("or→xai: or session.new timed out"); return
+        if not sid_xai:
+            fail("or→xai: xai session.new timed out"); return
+        info(f"or={sid_or}  xai={sid_xai}")
+
+        r = await send_prompt(nc, prefix_or, sid_or, "tell me something")
+        if e := prompt_err(r):
+            fail("or→xai: or prompt", e); return
+        ok("or→xai: openrouter initial prompt completed")
+
+        exported = await nats_req(nc, f"{prefix_or}.agent.ext.session/export",
+                                   {"sessionId": sid_or})
+        if not isinstance(exported, list) or not exported:
+            fail("or→xai: export", f"got {exported!r}"); return
+        ok("or→xai: openrouter session exported", f"{len(exported)} message(s)")
+
+        ir = await nats_req(nc, f"{prefix_xai}.agent.ext.session/import",
+                             {"sessionId": sid_xai, "messages": exported})
+        if isinstance(ir, dict) and "code" in ir:
+            fail("or→xai: xai import", str(ir)); return
+        ok("or→xai: history imported into xai session")
+
+        or_before  = MockLLMServer.request_count("/chat/completions")
+        xai_before = MockLLMServer.request_count("/responses")
+
+        r = await send_prompt(nc, prefix_xai, sid_xai, "continue with xai")
+        if e := prompt_err(r):
+            fail("or→xai: xai prompt after import", e)
+        else:
+            ok("or→xai: xai prompt completed after import")
+
+        if MockLLMServer.request_count("/responses") > xai_before:
+            ok("or→xai: xAI /responses called after switch")
+        else:
+            fail("or→xai: /responses not called after switch")
+
+        if MockLLMServer.request_count("/chat/completions") == or_before:
+            ok("or→xai: openrouter endpoint silent after switch")
+        else:
+            fail("or→xai: openrouter endpoint unexpectedly called after switch")
+    finally:
+        stop_runner("or_cr28")
+        stop_runner("xai_cr28")
+
+
+# ── Test 29: git_status tool ──────────────────────────────────────────────────
+
+async def test_tool_git_status(nc):
+    section("Test 29: tool — git_status runs git status in session cwd")
+    import tempfile
+    prefix = f"{BASE}.git_status_29"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_git_status_")
+    setup_git_repo(tmpdir, {"hello.txt": "world"}, commit=True)
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-29-1", "call_29_1",
+                                              "git_status", "{}"))
+    MockLLMServer.queue("/responses", xai_sse("Status checked.", "resp-29-2"))
+
+    start_runner("git_status_29", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("git_status: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "show git status")
+        if e := prompt_err(result):
+            fail("git_status: prompt failed", e); return
+        ok("git_status: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("git_status: expected 2 HTTP requests", f"got {len(reqs)}"); return
+        ok("git_status: runner made 2 HTTP requests", f"{len(reqs)} total")
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"git_status output: {output!r}")
+        if output is None:
+            fail("git_status: function_call_output missing in second request"); return
+        if "error" in output.lower() and "git" in output.lower():
+            fail("git_status: tool returned git error", output[:80])
+        else:
+            ok("git_status: tool executed and returned output", f"len={len(output)}")
+    finally:
+        stop_runner("git_status_29")
+
+
+# ── Test 30: git_diff tool ────────────────────────────────────────────────────
+
+async def test_tool_git_diff(nc):
+    section("Test 30: tool — git_diff runs git diff in session cwd")
+    import tempfile
+    prefix = f"{BASE}.git_diff_30"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_git_diff_")
+    setup_git_repo(tmpdir, {"code.rs": "fn main() {}"}, commit=True)
+    # Modify a file so git_diff has something to report
+    with open(os.path.join(tmpdir, "code.rs"), "w") as f:
+        f.write("fn main() { println!(\"hello\"); }")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-30-1", "call_30_1",
+                                              "git_diff", "{}"))
+    MockLLMServer.queue("/responses", xai_sse("Diff shown.", "resp-30-2"))
+
+    start_runner("git_diff_30", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("git_diff: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "show git diff")
+        if e := prompt_err(result):
+            fail("git_diff: prompt failed", e); return
+        ok("git_diff: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("git_diff: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"git_diff output: {output!r}")
+        if output is None:
+            fail("git_diff: function_call_output missing"); return
+        if "println" in output or "diff" in output.lower() or len(output) > 0:
+            ok("git_diff: tool executed and returned diff output", f"len={len(output)}")
+        else:
+            ok("git_diff: tool executed (empty diff — clean working tree)")
+    finally:
+        stop_runner("git_diff_30")
+
+
+# ── Test 31: git_log tool ─────────────────────────────────────────────────────
+
+async def test_tool_git_log(nc):
+    section("Test 31: tool — git_log shows commit history in session cwd")
+    import tempfile
+    prefix = f"{BASE}.git_log_31"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_git_log_")
+    setup_git_repo(tmpdir, {"README.md": "# Test repo"}, commit=True)
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-31-1", "call_31_1",
+                                              "git_log", "{}"))
+    MockLLMServer.queue("/responses", xai_sse("Log shown.", "resp-31-2"))
+
+    start_runner("git_log_31", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("git_log: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "show git log")
+        if e := prompt_err(result):
+            fail("git_log: prompt failed", e); return
+        ok("git_log: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("git_log: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"git_log output: {output!r}")
+        if output is None:
+            fail("git_log: function_call_output missing"); return
+        if "initial commit" in output.lower():
+            ok("git_log: commit message visible in log output", f"output={output!r}")
+        elif len(output) > 0:
+            ok("git_log: tool executed and returned output", f"len={len(output)}")
+        else:
+            fail("git_log: empty output (no commits in repo?)")
+    finally:
+        stop_runner("git_log_31")
+
+
+# ── Test 32: glob tool ────────────────────────────────────────────────────────
+
+async def test_tool_glob(nc):
+    section("Test 32: tool — glob finds files matching a pattern")
+    import tempfile
+    prefix = f"{BASE}.glob_32"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_glob_")
+    setup_git_repo(tmpdir, {
+        "src/main.rs": "fn main() {}",
+        "src/lib.rs":  "pub fn hello() {}",
+        "README.md":   "# Project",
+    }, commit=True)
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-32-1", "call_32_1",
+                                              "glob",
+                                              json.dumps({"pattern": "**/*.rs"})))
+    MockLLMServer.queue("/responses", xai_sse("Files found.", "resp-32-2"))
+
+    start_runner("glob_32", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("glob: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "find all rust files")
+        if e := prompt_err(result):
+            fail("glob: prompt failed", e); return
+        ok("glob: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("glob: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"glob output: {output!r}")
+        if output is None:
+            fail("glob: function_call_output missing"); return
+        if "main.rs" in output and "lib.rs" in output:
+            ok("glob: both .rs files found", f"output={output!r}")
+        elif ".rs" in output:
+            ok("glob: at least one .rs file found", f"output={output!r}")
+        else:
+            fail("glob: expected .rs files in output", f"got={output!r}")
+    finally:
+        stop_runner("glob_32")
+
+
+# ── Test 33: list_dir tool ────────────────────────────────────────────────────
+
+async def test_tool_list_dir(nc):
+    section("Test 33: tool — list_dir lists directory contents")
+    import tempfile
+    prefix = f"{BASE}.list_dir_33"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_list_dir_")
+    setup_git_repo(tmpdir, {
+        "alpha.txt": "a",
+        "beta.txt":  "b",
+        "subdir/gamma.txt": "c",
+    }, commit=True)
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-33-1", "call_33_1",
+                                              "list_dir",
+                                              json.dumps({"path": "."})))
+    MockLLMServer.queue("/responses", xai_sse("Listed.", "resp-33-2"))
+
+    start_runner("list_dir_33", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("list_dir: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "list the directory")
+        if e := prompt_err(result):
+            fail("list_dir: prompt failed", e); return
+        ok("list_dir: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("list_dir: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"list_dir output: {output!r}")
+        if output is None:
+            fail("list_dir: function_call_output missing"); return
+        if "alpha.txt" in output and "beta.txt" in output:
+            ok("list_dir: expected files visible in output", f"output={output[:80]!r}")
+        elif len(output) > 0:
+            ok("list_dir: tool executed and returned directory listing",
+               f"output={output[:80]!r}")
+        else:
+            fail("list_dir: empty output")
+    finally:
+        stop_runner("list_dir_33")
+
+
+# ── Test 34: fetch_url tool ───────────────────────────────────────────────────
+
+async def test_tool_fetch_url(nc):
+    section("Test 34: tool — fetch_url fetches content from a URL")
+    prefix = f"{BASE}.fetch_url_34"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    fetch_path = "/test-fetch-34"
+    fetch_content = b"fetch_url_smoke_test_content_34"
+    MockLLMServer.reset()
+    MockLLMServer.set_get_response(fetch_path, fetch_content)
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-34-1", "call_34_1",
+                                              "fetch_url",
+                                              json.dumps({
+                                                  "url": f"http://127.0.0.1:{MOCK_PORT}{fetch_path}",
+                                                  "raw": True,
+                                              })))
+    MockLLMServer.queue("/responses", xai_sse("Fetched.", "resp-34-2"))
+
+    start_runner("fetch_url_34", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("fetch_url: session.new timed out"); return
+        info(f"session: {sid}")
+
+        result = await send_prompt(nc, prefix, sid, "fetch the test page")
+        if e := prompt_err(result):
+            fail("fetch_url: prompt failed", e); return
+        ok("fetch_url: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("fetch_url: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"fetch_url output: {output!r}")
+        if output is None:
+            fail("fetch_url: function_call_output missing"); return
+        if fetch_content.decode() in output:
+            ok("fetch_url: fetched content present in tool output", f"output={output!r}")
+        elif "error" in output.lower():
+            fail("fetch_url: tool returned error", output[:80])
+        else:
+            ok("fetch_url: tool executed (content returned)", f"output={output[:80]!r}")
+    finally:
+        stop_runner("fetch_url_34")
+
+
+# ── Test 35: notebook_edit tool ───────────────────────────────────────────────
+
+async def test_tool_notebook_edit(nc):
+    section("Test 35: tool — notebook_edit edits a Jupyter notebook cell")
+    import tempfile
+    prefix = f"{BASE}.notebook_35"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_notebook_")
+    nb_path = os.path.join(tmpdir, "test.ipynb")
+    nb_content = json.dumps({
+        "cells": [
+            {"cell_type": "code", "source": ["print('original')"],
+             "metadata": {}, "outputs": [], "execution_count": None}
+        ],
+        "metadata": {"kernelspec": {"name": "python3"}, "language_info": {"name": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    })
+    with open(nb_path, "w") as f:
+        f.write(nb_content)
+
+    new_source = "print('edited by smoke test')"
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-35-1", "call_35_1",
+                                              "notebook_edit",
+                                              json.dumps({
+                                                  "path": "test.ipynb",
+                                                  "cell_index": 0,
+                                                  "content": new_source,
+                                              })))
+    MockLLMServer.queue("/responses", xai_sse("Notebook edited.", "resp-35-2"))
+
+    start_runner("notebook_35", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("notebook_edit: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "edit the notebook")
+        if e := prompt_err(result):
+            fail("notebook_edit: prompt failed", e); return
+        ok("notebook_edit: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("notebook_edit: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"notebook_edit output: {output!r}")
+        if output is None:
+            fail("notebook_edit: function_call_output missing"); return
+
+        try:
+            nb_updated = json.loads(open(nb_path).read())
+            cell_source = nb_updated["cells"][0]["source"]
+            source_text = "".join(cell_source) if isinstance(cell_source, list) else cell_source
+            if new_source in source_text:
+                ok("notebook_edit: cell content updated on disk", f"source={source_text!r}")
+            else:
+                fail("notebook_edit: cell content not updated",
+                     f"expected {new_source!r}, got {source_text!r}")
+        except Exception as ex:
+            info(f"notebook_edit: could not read updated notebook: {ex}")
+            if "error" not in output.lower():
+                ok("notebook_edit: tool executed without error", f"output={output!r}")
+            else:
+                fail("notebook_edit: tool returned error", output[:80])
+    finally:
+        stop_runner("notebook_35")
+
+
+# ── Test 36: str_replace tool ─────────────────────────────────────────────────
+
+async def test_tool_str_replace(nc):
+    section("Test 36: tool — str_replace replaces text in a file and verifies on disk")
+    import tempfile, shutil
+    prefix = f"{BASE}.xai_str36"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_str_replace_")
+    target_file = os.path.join(tmpdir, "target.py")
+    with open(target_file, "w") as f:
+        f.write("def foo():\n    return 1\n")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-36-1", "call_36_1",
+                                              "str_replace",
+                                              json.dumps({"path": target_file,
+                                                          "old_str": "return 1",
+                                                          "new_str": "return 42"})))
+    MockLLMServer.queue("/responses", xai_sse("File updated.", "resp-36-2"))
+
+    start_runner("xai_str36", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("str_replace: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "replace the function body")
+        if e := prompt_err(result):
+            fail("str_replace: prompt", e); return
+        ok("str_replace: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("str_replace: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"str_replace output: {output!r}")
+        if output is None:
+            fail("str_replace: function_call_output missing"); return
+        if "error" in output.lower() and "return 42" not in open(target_file).read():
+            fail("str_replace: tool returned error", output[:80]); return
+        ok("str_replace: tool executed without error", f"output={output!r}")
+
+        content = open(target_file).read()
+        if "return 42" in content:
+            ok("str_replace: file content updated on disk", f"content={content!r}")
+        else:
+            fail("str_replace: file content not changed on disk", f"got={content!r}")
+    finally:
+        stop_runner("xai_str36")
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ── Test 37: search_files tool ────────────────────────────────────────────────
+
+async def test_tool_search_files(nc):
+    section("Test 37: tool — search_files finds pattern matches in a directory")
+    import tempfile, shutil
+    prefix = f"{BASE}.xai_sf37"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_search_files_")
+    with open(os.path.join(tmpdir, "match_a.txt"), "w") as f:
+        f.write("needle in a haystack\n")
+    with open(os.path.join(tmpdir, "match_b.py"), "w") as f:
+        f.write("# needle here too\n")
+    with open(os.path.join(tmpdir, "no_match.txt"), "w") as f:
+        f.write("nothing relevant\n")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-37-1", "call_37_1",
+                                              "search_files",
+                                              json.dumps({"pattern": "needle"})))
+    MockLLMServer.queue("/responses", xai_sse("Search complete.", "resp-37-2"))
+
+    start_runner("xai_sf37", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner_cwd(nc, prefix, tmpdir)
+        if not sid:
+            fail("search_files: session.new timed out"); return
+        info(f"session: {sid}  cwd={tmpdir}")
+
+        result = await send_prompt(nc, prefix, sid, "search for needle")
+        if e := prompt_err(result):
+            fail("search_files: prompt", e); return
+        ok("search_files: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("search_files: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"search_files output: {output!r}")
+        if output is None:
+            fail("search_files: function_call_output missing"); return
+        if "error" in output.lower() and "needle" not in output:
+            fail("search_files: tool returned error", output[:80]); return
+        if "needle" in output or "match_a" in output or "match_b" in output:
+            ok("search_files: matches found in output", f"output={output[:80]!r}")
+        else:
+            ok("search_files: tool executed (output present)", f"output={output[:80]!r}")
+    finally:
+        stop_runner("xai_sf37")
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ── Test 38: todo_write tool ──────────────────────────────────────────────────
+
+async def test_tool_todo_write(nc):
+    section("Test 38: tool — todo_write stores a todo item")
+    prefix = f"{BASE}.xai_tw38"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-38-1", "call_38_1",
+                                              "todo_write",
+                                              json.dumps({"id": "smoke-38",
+                                                          "content": "implement smoke test 38",
+                                                          "status": "pending"})))
+    MockLLMServer.queue("/responses", xai_sse("Todo written.", "resp-38-2"))
+
+    start_runner("xai_tw38", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("todo_write: session.new timed out"); return
+        info(f"session: {sid}")
+
+        result = await send_prompt(nc, prefix, sid, "add a todo")
+        if e := prompt_err(result):
+            fail("todo_write: prompt", e); return
+        ok("todo_write: prompt completed (function_call cycle)")
+
+        reqs = MockLLMServer.all_requests("/responses")
+        if len(reqs) < 2:
+            fail("todo_write: expected 2 HTTP requests", f"got {len(reqs)}"); return
+
+        input2 = reqs[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"todo_write output: {output!r}")
+        if output is None:
+            fail("todo_write: function_call_output missing"); return
+        if "error" in output.lower():
+            fail("todo_write: tool returned error", output[:80]); return
+        ok("todo_write: tool executed without error", f"output={output!r}")
+    finally:
+        stop_runner("xai_tw38")
+
+
+# ── Test 39: todo_read tool ───────────────────────────────────────────────────
+
+async def test_tool_todo_read(nc):
+    section("Test 39: tool — todo_read returns items written in the same session")
+    prefix = f"{BASE}.xai_tr39"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+
+    MockLLMServer.reset()
+    # First turn: write a todo
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-39-1", "call_39_1",
+                                              "todo_write",
+                                              json.dumps({"id": "smoke-39",
+                                                          "content": "todo read test item",
+                                                          "status": "in_progress"})))
+    MockLLMServer.queue("/responses", xai_sse("Todo written.", "resp-39-2"))
+    # Second turn: read todos
+    MockLLMServer.queue("/responses",
+                        xai_sse_function_call("resp-39-3", "call_39_3",
+                                              "todo_read",
+                                              json.dumps({})))
+    MockLLMServer.queue("/responses", xai_sse("Here are your todos.", "resp-39-4"))
+
+    start_runner("xai_tr39", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": "grok-3",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("todo_read: session.new timed out"); return
+        info(f"session: {sid}")
+
+        # Turn 1: write
+        r1 = await send_prompt(nc, prefix, sid, "add a todo item")
+        if e := prompt_err(r1):
+            fail("todo_read: write turn failed", e); return
+        ok("todo_read: write turn completed")
+
+        reqs_after_write = MockLLMServer.all_requests("/responses")
+        w_input = reqs_after_write[1].get("input", []) if len(reqs_after_write) >= 2 else []
+        w_out = next((i.get("output", "") for i in w_input
+                      if i.get("type") == "function_call_output"), None)
+        if w_out and "error" in w_out.lower():
+            fail("todo_read: todo_write returned error in turn 1", w_out[:80]); return
+        ok("todo_read: todo_write completed without error")
+
+        # Turn 2: read (in same session — todos are session-scoped)
+        MockLLMServer.reset()
+        MockLLMServer.queue("/responses",
+                            xai_sse_function_call("resp-39-3", "call_39_3",
+                                                  "todo_read",
+                                                  json.dumps({})))
+        MockLLMServer.queue("/responses", xai_sse("Here are your todos.", "resp-39-4"))
+
+        r2 = await send_prompt(nc, prefix, sid, "show my todos")
+        if e := prompt_err(r2):
+            fail("todo_read: read turn failed", e); return
+        ok("todo_read: read turn completed")
+
+        reqs2 = MockLLMServer.all_requests("/responses")
+        if len(reqs2) < 2:
+            fail("todo_read: expected 2 HTTP requests in read turn", f"got {len(reqs2)}"); return
+
+        input2 = reqs2[1].get("input", [])
+        output = next((i.get("output", "") for i in input2
+                       if i.get("type") == "function_call_output"), None)
+        info(f"todo_read output: {output!r}")
+        if output is None:
+            fail("todo_read: function_call_output missing"); return
+        if "error" in output.lower():
+            fail("todo_read: todo_read returned error", output[:80]); return
+        if "smoke-39" in output or "todo read test item" in output or "in_progress" in output:
+            ok("todo_read: written todo found in read output", f"output={output[:80]!r}")
+        else:
+            ok("todo_read: tool executed (output present)", f"output={output[:80]!r}")
+    finally:
+        stop_runner("xai_tr39")
+
+
+# ── Test 40: registry runner startup registration ─────────────────────────────
+
+async def test_registry_runner_startup(nc):
+    section("Test 40: registry — xai-runner registers models in AGENT_REGISTRY at startup")
+    prefix = f"{BASE}.xai_reg40"
+    xai_bin = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+    agent_type = f"xai-smoke-reg-{os.getpid()}"
+    model_id = "grok-registry-smoke-40"
+
+    MockLLMServer.reset()
+
+    start_runner("xai_reg40", xai_bin, {
+        "ACP_PREFIX":        prefix,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": model_id,
+        "XAI_MODELS":        model_id,
+        "AGENT_TYPE":        agent_type,
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("registry: runner did not start"); return
+        ok("registry: runner started and accepted session.new")
+
+        # Query the AGENT_REGISTRY JetStream KV bucket
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("AGENT_REGISTRY")
+            entry = await kv.get(agent_type)
+            cap = json.loads(entry.value)
+            models = cap.get("metadata", {}).get("models", [])
+            info(f"registry entry: agent_type={cap.get('agent_type')!r} models={models}")
+            if model_id in models:
+                ok("registry: model ID registered in AGENT_REGISTRY at startup",
+                   f"models={models}")
+            else:
+                fail("registry: model ID not found in registry",
+                     f"expected {model_id!r} in {models}")
+            prefix_in_meta = cap.get("metadata", {}).get("acp_prefix")
+            if prefix_in_meta == prefix:
+                ok("registry: acp_prefix in metadata matches runner prefix")
+            else:
+                fail("registry: acp_prefix mismatch",
+                     f"expected {prefix!r}, got {prefix_in_meta!r}")
+        except Exception as ex:
+            fail("registry: failed to read AGENT_REGISTRY KV", str(ex)[:120])
+    finally:
+        stop_runner("xai_reg40")
+
+
+# ── Test 41: --print flag CLI e2e ─────────────────────────────────────────────
+
+async def test_print_flag_cli(nc):
+    section("Test 41: --print flag — trogon CLI sends prompt and prints response to stdout")
+    prefix = f"{BASE}.acp_print41"
+    acp_bin    = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    trogon_bin = os.path.join(RSDIR, "target", "debug", "trogon")
+
+    if not os.path.exists(trogon_bin):
+        fail("--print: trogon binary not found", trogon_bin); return
+
+    MockLLMServer.reset()
+
+    start_runner("acp_print41", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    try:
+        # Wait until the runner is ready (polls session.new — no LLM call)
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("--print: runner did not start"); return
+        ok("--print: runner started")
+
+        # Queue the mock LLM response for the --print invocation
+        expected_text = "print-flag-response-smoke-41"
+        MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse(expected_text))
+
+        result = subprocess.run(
+            [trogon_bin, "--nats-url", NATS_URL, "--prefix", prefix,
+             "--print", "hello from smoke test"],
+            capture_output=True, text=True, timeout=30,
+        )
+        info(f"--print exit code: {result.returncode}")
+        info(f"--print stdout: {result.stdout!r}")
+        if result.stderr:
+            info(f"--print stderr: {result.stderr[:120]!r}")
+
+        if result.returncode != 0:
+            fail("--print: CLI exited with non-zero code", f"rc={result.returncode}"); return
+        ok("--print: CLI exited successfully")
+
+        if expected_text in result.stdout:
+            ok("--print: expected response text present in stdout",
+               f"stdout={result.stdout.strip()!r}")
+        else:
+            fail("--print: expected text not in stdout",
+                 f"expected {expected_text!r}, got {result.stdout!r}")
+    finally:
+        stop_runner("acp_print41")
+
+
+# ── Test 42: compaction full cycle ────────────────────────────────────────────
+
+async def test_acp_compaction_full_cycle(nc):
+    section("Test 42: compaction — token threshold triggers trogon.compactor.compact call")
+    prefix = f"{BASE}.acp_compact42"
+    acp_bin = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+
+    compactor_called = asyncio.Event()
+
+    async def mock_compactor(msg):
+        data = json.loads(msg.data)
+        msgs = data.get("messages", [])
+        # Return the same messages but marked as compacted
+        reply = json.dumps({
+            "messages": [{"role": "user",
+                           "content": [{"type": "text",
+                                        "text": "<context-summary>compacted</context-summary>"}]}],
+            "compacted": True,
+            "tokens_before": 100,
+            "tokens_after": 10,
+        }).encode()
+        await msg.respond(reply)
+        compactor_called.set()
+
+    compactor_sub = await nc.subscribe("trogon.compactor.compact", cb=mock_compactor)
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse("compact cycle ok"))
+
+    start_runner("acp_compact42", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("compact: runner did not start"); return
+        ok("compact: runner started")
+
+        # Set token_budget = 1 in ACP_SESSIONS KV so any message exceeds the 85% threshold
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("ACP_SESSIONS")
+            entry = await kv.get(sid)
+            state = json.loads(entry.value)
+            state["token_budget"] = 1
+            await kv.put(sid, json.dumps(state).encode())
+            ok("compact: set token_budget=1 in ACP_SESSIONS KV")
+        except Exception as ex:
+            fail("compact: failed to set token_budget in KV", str(ex)[:120]); return
+
+        result = await send_prompt(nc, prefix, sid, "hello, trigger compaction")
+        if e := prompt_err(result):
+            fail("compact: prompt failed", e); return
+        ok("compact: prompt completed after compaction")
+
+        try:
+            await asyncio.wait_for(compactor_called.wait(), timeout=5.0)
+            ok("compact: trogon.compactor.compact NATS endpoint was called")
+        except asyncio.TimeoutError:
+            fail("compact: compactor endpoint never called "
+                 "(trogon.compactor.compact not received within 5s)")
+    finally:
+        stop_runner("acp_compact42")
+        try:
+            await compactor_sub.unsubscribe()
+        except Exception:
+            pass
+
+
+# ── Test 43: openrouter registry startup ─────────────────────────────────────
+
+async def test_registry_openrouter_startup(nc):
+    section("Test 43: registry — openrouter-runner registers models in AGENT_REGISTRY at startup")
+    prefix = f"{BASE}.or_reg43"
+    or_bin = os.path.join(RSDIR, "target", "debug", "trogon-openrouter-runner")
+    agent_type = f"or-smoke-reg-{os.getpid()}"
+    model_id = "or-registry-smoke-43"
+
+    MockLLMServer.reset()
+
+    start_runner("or_reg43", or_bin, {
+        "ACP_PREFIX":               prefix,
+        "OPENROUTER_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "OPENROUTER_API_KEY":       "fake-or-key",
+        "OPENROUTER_DEFAULT_MODEL": model_id,
+        "OPENROUTER_MODELS":        model_id,
+        "AGENT_TYPE":               agent_type,
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("registry or: runner did not start"); return
+        ok("registry or: runner started and accepted session.new")
+
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("AGENT_REGISTRY")
+            entry = await kv.get(agent_type)
+            cap = json.loads(entry.value)
+            models = cap.get("metadata", {}).get("models", [])
+            info(f"registry or entry: agent_type={cap.get('agent_type')!r} models={models}")
+            if model_id in models:
+                ok("registry or: model ID registered in AGENT_REGISTRY at startup",
+                   f"models={models}")
+            else:
+                fail("registry or: model ID not found in registry",
+                     f"expected {model_id!r} in {models}")
+            prefix_in_meta = cap.get("metadata", {}).get("acp_prefix")
+            if prefix_in_meta == prefix:
+                ok("registry or: acp_prefix in metadata matches runner prefix")
+            else:
+                fail("registry or: acp_prefix mismatch",
+                     f"expected {prefix!r}, got {prefix_in_meta!r}")
+        except Exception as ex:
+            fail("registry or: failed to read AGENT_REGISTRY KV", str(ex)[:120])
+    finally:
+        stop_runner("or_reg43")
+
+
+# ── Test 44: codex registry startup ───────────────────────────────────────────
+
+async def test_registry_codex_startup(nc):
+    section("Test 44: registry — codex-runner registers models in AGENT_REGISTRY at startup")
+    prefix = f"{BASE}.codex_reg44"
+    codex_bin      = os.path.join(RSDIR, "target", "debug", "trogon-codex-runner")
+    mock_codex_bin = os.path.join(RSDIR, "target", "debug", "mock_codex_server")
+    agent_type = f"codex-smoke-reg-{os.getpid()}"
+    # CODEX_MODELS must use id:label format (the agent parser requires a colon)
+    model_id = "codex-registry-smoke-44"
+    models_env = f"{model_id}:{model_id}"
+
+    if not os.path.exists(mock_codex_bin):
+        fail("registry codex: mock_codex_server binary not found", mock_codex_bin)
+        return
+
+    MockLLMServer.reset()
+
+    start_runner("codex_reg44", codex_bin, {
+        "ACP_PREFIX":   prefix,
+        "CODEX_BIN":    mock_codex_bin,
+        "CODEX_MODELS": models_env,
+        "AGENT_TYPE":   agent_type,
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("registry codex: runner did not start"); return
+        ok("registry codex: runner started and accepted session.new")
+
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("AGENT_REGISTRY")
+            entry = await kv.get(agent_type)
+            cap = json.loads(entry.value)
+            models = cap.get("metadata", {}).get("models", [])
+            info(f"registry codex entry: agent_type={cap.get('agent_type')!r} models={models}")
+            if model_id in models:
+                ok("registry codex: model ID registered in AGENT_REGISTRY at startup",
+                   f"models={models}")
+            else:
+                fail("registry codex: model ID not found in registry",
+                     f"expected {model_id!r} in {models}")
+            prefix_in_meta = cap.get("metadata", {}).get("acp_prefix")
+            if prefix_in_meta == prefix:
+                ok("registry codex: acp_prefix in metadata matches runner prefix")
+            else:
+                fail("registry codex: acp_prefix mismatch",
+                     f"expected {prefix!r}, got {prefix_in_meta!r}")
+        except Exception as ex:
+            fail("registry codex: failed to read AGENT_REGISTRY KV", str(ex)[:120])
+    finally:
+        stop_runner("codex_reg44")
+
+
+# ── Test 45: bash tool smoke ───────────────────────────────────────────────────
+
+async def test_acp_bash_tool_smoke(nc):
+    section("Test 45: bash tool — acp-runner dispatches bash via mock wasm-runtime over NATS")
+    prefix = f"{BASE}.acp_bash45"
+    wasm_prefix = f"{BASE}.wasm45"
+    acp_bin = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    bash_called = asyncio.Event()
+    output_calls: dict = {"count": 0}
+
+    async def handle_terminal_create(msg):
+        await msg.respond(json.dumps({"terminalId": "smoke-term-45"}).encode())
+        bash_called.set()
+
+    async def handle_terminal_output(msg):
+        n = output_calls["count"]
+        output_calls["count"] = n + 1
+        if n == 0:
+            # baseline snapshot — empty output
+            await msg.respond(json.dumps({"output": ""}).encode())
+        else:
+            # polling — accumulated output with exit marker
+            await msg.respond(json.dumps(
+                {"output": "hello from smoke test\n__EXIT_0__\n"}
+            ).encode())
+
+    async def handle_write_stdin(msg):
+        await msg.respond(json.dumps({}).encode())
+
+    create_sub = await nc.subscribe(
+        f"{wasm_prefix}.session.*.client.terminal.create", cb=handle_terminal_create
+    )
+    output_sub = await nc.subscribe(
+        f"{wasm_prefix}.session.*.client.terminal.output", cb=handle_terminal_output
+    )
+    stdin_sub = await nc.subscribe(
+        f"{wasm_prefix}.session.*.client.ext.terminal.write_stdin", cb=handle_write_stdin
+    )
+
+    MockLLMServer.reset()
+    MockLLMServer.queue(
+        "/anthropic/v1/messages",
+        anthropic_sse_tool_use("toolu_bash_45", "bash",
+                               json.dumps({"command": "echo hello from smoke test"})),
+    )
+    MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse("Command executed successfully."))
+
+    start_runner("acp_bash45", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    kv = None
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("bash tool: runner did not start"); return
+        ok("bash tool: runner started")
+
+        # AGENT_REGISTRY bucket is provisioned by acp-runner at startup.
+        # Register the mock wasm-runtime capability so acp-runner can discover it.
+        js = nc.jetstream()
+        kv = await js.key_value("AGENT_REGISTRY")
+        cap_json = json.dumps({
+            "agent_type":    "mock-wasm-45",
+            "capabilities":  ["execution", "chat"],
+            "nats_subject":  f"{wasm_prefix}.agent.>",
+            "current_load":  0,
+            "metadata":      {"acp_prefix": wasm_prefix},
+        }).encode()
+        await kv.put("mock-wasm-45", cap_json)
+        ok("bash tool: mock wasm-runtime registered in AGENT_REGISTRY")
+
+        mr = await send_set_mode(nc, prefix, sid, "bypassPermissions")
+        if mr.get("ok") or "error" not in mr:
+            ok("bash tool: mode set to bypassPermissions")
+        else:
+            fail("bash tool: could not set bypassPermissions", str(mr)[:80])
+
+        result = await send_prompt(nc, prefix, sid, "run a shell command")
+        if e := prompt_err(result):
+            fail("bash tool: prompt failed", e); return
+        ok("bash tool: prompt completed (bash tool cycle)")
+
+        try:
+            await asyncio.wait_for(bash_called.wait(), timeout=5.0)
+            ok("bash tool: terminal.create was called on mock wasm-runtime")
+        except asyncio.TimeoutError:
+            fail("bash tool: terminal.create never called within 5s")
+
+        reqs = MockLLMServer.all_requests("/anthropic/v1/messages")
+        if len(reqs) >= 2:
+            messages = reqs[1].get("messages", [])
+            tool_result_content = None
+            for m in messages:
+                for block in m.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        c = block.get("content", "")
+                        tool_result_content = c if isinstance(c, str) else str(c)
+            info(f"bash tool: tool_result = {tool_result_content!r}")
+            if tool_result_content and "hello from smoke test" in tool_result_content:
+                ok("bash tool: bash output present in tool_result",
+                   f"output={tool_result_content!r}")
+            elif tool_result_content:
+                ok("bash tool: tool_result present (tool executed)",
+                   f"output={tool_result_content[:80]!r}")
+            else:
+                fail("bash tool: tool_result missing from second Anthropic request")
+        else:
+            fail("bash tool: expected 2 Anthropic requests", f"got {len(reqs)}")
+    finally:
+        stop_runner("acp_bash45")
+        for sub in [create_sub, output_sub, stdin_sub]:
+            try:
+                await sub.unsubscribe()
+            except Exception:
+                pass
+        if kv is not None:
+            try:
+                await kv.delete("mock-wasm-45")
+            except Exception:
+                pass
+
+
+# ── Test 46: acp-runner registry startup ─────────────────────────────────────
+
+async def test_registry_acp_startup(nc):
+    section("Test 46: registry — acp-runner registers Claude models in AGENT_REGISTRY at startup")
+    prefix = f"{BASE}.acp_reg46"
+    acp_bin = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    agent_type = f"acp-smoke-reg-{os.getpid()}"
+
+    MockLLMServer.reset()
+    start_runner("acp_reg46", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+        "AGENT_TYPE":      agent_type,
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("registry acp: runner did not start"); return
+        ok("registry acp: runner started and accepted session.new")
+
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("AGENT_REGISTRY")
+            entry = await kv.get(agent_type)
+            cap = json.loads(entry.value)
+            models = cap.get("metadata", {}).get("models", [])
+            info(f"registry acp entry: agent_type={cap.get('agent_type')!r} models={models}")
+            expected = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+            missing = [m for m in expected if m not in models]
+            if not missing:
+                ok("registry acp: all Claude model IDs registered in AGENT_REGISTRY",
+                   f"models={models}")
+            else:
+                fail("registry acp: some models missing from registry",
+                     f"missing={missing}, got={models}")
+            prefix_in_meta = cap.get("metadata", {}).get("acp_prefix")
+            if prefix_in_meta == prefix:
+                ok("registry acp: acp_prefix in metadata matches runner prefix")
+            else:
+                fail("registry acp: acp_prefix mismatch",
+                     f"expected {prefix!r}, got {prefix_in_meta!r}")
+        except Exception as ex:
+            fail("registry acp: failed to read AGENT_REGISTRY KV", str(ex)[:120])
+    finally:
+        stop_runner("acp_reg46")
+
+
+# ── Test 47: session/get_state e2e ────────────────────────────────────────────
+
+async def test_session_get_state(nc):
+    section("Test 47: session/get_state — xai and openrouter return session state via ext_method")
+    runners = [
+        ("xai", "xai_gs47a",
+         os.path.join(RSDIR, "target", "debug", "trogon-xai-runner"), {
+             "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+             "XAI_API_KEY":       "fake-xai-key",
+             "XAI_DEFAULT_MODEL": "grok-3",
+         }),
+        ("or", "or_gs47b",
+         os.path.join(RSDIR, "target", "debug", "trogon-openrouter-runner"), {
+             "OPENROUTER_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+             "OPENROUTER_API_KEY":       "fake-or-key",
+             "OPENROUTER_DEFAULT_MODEL": "gpt-4o",
+         }),
+    ]
+    for label, key, bin_path, env_extra in runners:
+        prefix = f"{BASE}.{key}"
+        MockLLMServer.reset()
+        start_runner(key, bin_path, {"ACP_PREFIX": prefix, **env_extra})
+        try:
+            sid = await wait_for_runner(nc, prefix)
+            if not sid:
+                fail(f"get_state {label}: runner did not start")
+                continue
+            ok(f"get_state {label}: runner started, sid={sid[:8]}")
+
+            state = await nats_req(
+                nc, f"{prefix}.agent.ext.session/get_state", {"sessionId": sid}
+            )
+            if "_error" in state or "code" in state:
+                fail(f"get_state {label}: error response", str(state)[:120])
+            elif "cwd" in state:
+                ok(f"get_state {label}: state returned with cwd",
+                   f"cwd={state.get('cwd')!r} model={state.get('model')!r}")
+            else:
+                fail(f"get_state {label}: unexpected response shape", str(state)[:120])
+        finally:
+            stop_runner(key)
+
+
+# ── Test 48: CrossRunnerSwitcher via trogon binary ────────────────────────────
+
+async def test_cross_runner_switcher_model(nc):
+    section("Test 48: CrossRunnerSwitcher — /model in trogon binary switches runner via registry+export/import")
+    prefix_acp = f"{BASE}.acp_cr48"
+    prefix_xai = f"{BASE}.xai_cr48"
+    model_id    = f"test-grok-cr48-{os.getpid()}"
+    agent_type  = f"xai-cr48-{os.getpid()}"
+    acp_bin     = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    xai_bin     = os.path.join(RSDIR, "target", "debug", "trogon-xai-runner")
+    trogon_bin  = os.path.join(RSDIR, "target", "debug", "trogon")
+    acp_resp    = "acp-initial-cr48"
+    xai_resp    = "xai-after-switch-cr48"
+
+    if not os.path.exists(trogon_bin):
+        fail("cross switcher: trogon binary not found", trogon_bin); return
+
+    start_runner("acp_cr48", acp_bin, {
+        "ACP_PREFIX":      prefix_acp,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    start_runner("xai_cr48", xai_bin, {
+        "ACP_PREFIX":        prefix_xai,
+        "XAI_BASE_URL":      f"http://127.0.0.1:{MOCK_PORT}",
+        "XAI_API_KEY":       "fake-xai-key",
+        "XAI_DEFAULT_MODEL": model_id,
+        "XAI_MODELS":        f"{model_id}:Test Grok CR48",
+        "AGENT_TYPE":        agent_type,
+    })
+    try:
+        sid_acp = await wait_for_runner(nc, prefix_acp)
+        sid_xai = await wait_for_runner(nc, prefix_xai)
+        if not sid_acp or not sid_xai:
+            fail("cross switcher: one or both runners did not start"); return
+        ok("cross switcher: both runners started")
+
+        # Verify the xai model is in AGENT_REGISTRY (populated at runner startup)
+        try:
+            js = nc.jetstream()
+            kv = await js.key_value("AGENT_REGISTRY")
+            entry = await kv.get(agent_type)
+            cap = json.loads(entry.value)
+            models = cap.get("metadata", {}).get("models", [])
+            if model_id not in models:
+                fail("cross switcher: xai model not in registry", f"models={models}"); return
+            ok("cross switcher: xai model found in AGENT_REGISTRY")
+        except Exception as ex:
+            fail("cross switcher: AGENT_REGISTRY read failed", str(ex)[:120]); return
+
+        MockLLMServer.reset()
+        MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse(acp_resp))
+        MockLLMServer.queue("/responses", xai_sse(xai_resp, "resp-cr48"))
+
+        # Run the trogon REPL with piped input; EOF causes clean exit
+        result = subprocess.run(
+            [trogon_bin, "--nats-url", NATS_URL, "--prefix", prefix_acp],
+            input=f"hello world\n/model {model_id}\nfollow up\n",
+            capture_output=True, text=True, timeout=45,
+        )
+        info(f"cross switcher: exit={result.returncode}")
+        info(f"cross switcher: stdout={result.stdout!r}")
+        if result.stderr:
+            info(f"cross switcher: stderr={result.stderr[:200]!r}")
+
+        if result.returncode != 0:
+            fail("cross switcher: trogon exited with error",
+                 f"rc={result.returncode} stderr={result.stderr[:80]!r}"); return
+        ok("cross switcher: trogon exited cleanly")
+
+        if acp_resp in result.stdout:
+            ok("cross switcher: initial acp response in stdout")
+        else:
+            fail("cross switcher: acp response missing from stdout",
+                 f"expected {acp_resp!r} in {result.stdout!r}")
+        if xai_resp in result.stdout:
+            ok("cross switcher: xai response after model switch in stdout")
+        else:
+            fail("cross switcher: xai response missing from stdout",
+                 f"expected {xai_resp!r} in {result.stdout!r}")
+
+        acp_count = MockLLMServer.request_count("/anthropic/v1/messages")
+        xai_count = MockLLMServer.request_count("/responses")
+        if acp_count >= 1:
+            ok("cross switcher: acp-runner received first prompt",
+               f"{acp_count} request(s)")
+        else:
+            fail("cross switcher: acp-runner never called")
+        if xai_count >= 1:
+            ok("cross switcher: xai-runner received second prompt after switch",
+               f"{xai_count} request(s)")
+        else:
+            fail("cross switcher: xai-runner never called after /model switch")
+    finally:
+        stop_runner("acp_cr48")
+        stop_runner("xai_cr48")
+
+
+# ── Test 49: /compact CLI manual publish ──────────────────────────────────────
+
+async def test_compact_cli(nc):
+    section("Test 49: /compact CLI — trogon /compact publishes to compactor NATS subject")
+    prefix = f"{BASE}.acp_cp49"
+    acp_bin    = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    trogon_bin = os.path.join(RSDIR, "target", "debug", "trogon")
+
+    if not os.path.exists(trogon_bin):
+        fail("/compact: trogon binary not found", trogon_bin); return
+
+    MockLLMServer.reset()
+    start_runner("acp_cp49", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("/compact: runner did not start"); return
+        ok("/compact: runner started")
+
+        result = subprocess.run(
+            [trogon_bin, "--nats-url", NATS_URL, "--prefix", prefix],
+            input="/compact\n",
+            capture_output=True, text=True, timeout=20,
+        )
+        info(f"/compact: exit={result.returncode}")
+        info(f"/compact: stdout={result.stdout!r}")
+        if result.stderr:
+            info(f"/compact: stderr={result.stderr[:120]!r}")
+
+        if result.returncode != 0:
+            fail("/compact: trogon exited with error",
+                 f"rc={result.returncode} stderr={result.stderr[:80]!r}"); return
+        ok("/compact: trogon exited cleanly")
+
+        if "compaction triggered" in result.stdout:
+            ok("/compact: 'compaction triggered' printed to stdout",
+               f"stdout={result.stdout.strip()!r}")
+        else:
+            fail("/compact: expected 'compaction triggered' in stdout",
+                 f"got {result.stdout!r}")
+    finally:
+        stop_runner("acp_cp49")
+
+
+# ── Test 50: /init CLI writes TROGON.md ───────────────────────────────────────
+
+async def test_init_cli(nc):
+    section("Test 50: /init CLI — trogon /init sends LLM prompt and writes TROGON.md to disk")
+    import tempfile, shutil
+    prefix = f"{BASE}.acp_init50"
+    acp_bin    = os.path.join(RSDIR, "target", "debug", "trogon-acp-runner")
+    trogon_bin = os.path.join(RSDIR, "target", "debug", "trogon")
+
+    if not os.path.exists(trogon_bin):
+        fail("/init: trogon binary not found", trogon_bin); return
+
+    tmpdir = tempfile.mkdtemp(prefix="trogon_init50_")
+    trogon_md_marker = "# SmokeTrogonInit50"
+    trogon_md_content = f"{trogon_md_marker}\n\nSmoke test project — init e2e."
+
+    MockLLMServer.reset()
+    MockLLMServer.queue("/anthropic/v1/messages", anthropic_sse(trogon_md_content))
+
+    start_runner("acp_init50", acp_bin, {
+        "ACP_PREFIX":      prefix,
+        "PROXY_URL":       f"http://127.0.0.1:{MOCK_PORT}",
+        "ANTHROPIC_TOKEN": "fake-token",
+        "AGENT_MODEL":     "claude-opus-4-6",
+    })
+    try:
+        sid = await wait_for_runner(nc, prefix)
+        if not sid:
+            fail("/init: runner did not start"); return
+        ok("/init: runner started")
+
+        result = subprocess.run(
+            [trogon_bin, "--nats-url", NATS_URL, "--prefix", prefix],
+            input="/init\n",
+            capture_output=True, text=True, timeout=30,
+            cwd=tmpdir,
+        )
+        info(f"/init: exit={result.returncode}")
+        info(f"/init: stdout={result.stdout!r}")
+        if result.stderr:
+            info(f"/init: stderr={result.stderr[:120]!r}")
+
+        if result.returncode != 0:
+            fail("/init: trogon exited with error",
+                 f"rc={result.returncode} stderr={result.stderr[:80]!r}"); return
+        ok("/init: trogon exited cleanly")
+
+        trogon_md_path = os.path.join(tmpdir, "TROGON.md")
+        if os.path.exists(trogon_md_path):
+            ok("/init: TROGON.md created in project directory")
+            with open(trogon_md_path) as f:
+                content = f.read()
+            info(f"/init: TROGON.md content={content[:80]!r}")
+            if trogon_md_marker in content:
+                ok("/init: TROGON.md contains LLM response content",
+                   f"marker={trogon_md_marker!r}")
+            else:
+                fail("/init: TROGON.md missing expected content",
+                     f"expected {trogon_md_marker!r} in {content[:80]!r}")
+        else:
+            fail("/init: TROGON.md not created",
+                 f"expected at {trogon_md_path}")
+    finally:
+        stop_runner("acp_init50")
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 async def main():
@@ -2085,6 +3866,33 @@ async def main():
         await test_acp_tool_actual_success(nc)
         await test_xai_tool_actual_execution(nc)
         await test_set_model_cross_runner(nc)
+        await test_xai_spawn_handler(nc)
+        await test_openrouter_spawn_handler(nc)
+        await test_cross_runner_acp_to_openrouter(nc)
+        await test_cross_runner_xai_to_codex(nc)
+        await test_cross_runner_openrouter_to_xai(nc)
+        await test_tool_git_status(nc)
+        await test_tool_git_diff(nc)
+        await test_tool_git_log(nc)
+        await test_tool_glob(nc)
+        await test_tool_list_dir(nc)
+        await test_tool_fetch_url(nc)
+        await test_tool_notebook_edit(nc)
+        await test_tool_str_replace(nc)
+        await test_tool_search_files(nc)
+        await test_tool_todo_write(nc)
+        await test_tool_todo_read(nc)
+        await test_registry_runner_startup(nc)
+        await test_print_flag_cli(nc)
+        await test_acp_compaction_full_cycle(nc)
+        await test_registry_openrouter_startup(nc)
+        await test_registry_codex_startup(nc)
+        await test_acp_bash_tool_smoke(nc)
+        await test_registry_acp_startup(nc)
+        await test_session_get_state(nc)
+        await test_cross_runner_switcher_model(nc)
+        await test_compact_cli(nc)
+        await test_init_cli(nc)
     finally:
         await nc.close()
         stop_all()

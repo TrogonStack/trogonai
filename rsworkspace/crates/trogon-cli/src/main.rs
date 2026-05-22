@@ -1,6 +1,5 @@
 use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::Parser;
-use std::time::Duration;
 use trogon_cli::{
     connect_or_start_nats, session::TrogonSession, CrossRunnerSwitcher, NatsSessionFactory,
     OutputFormat, RealFs,
@@ -35,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let cwd = std::env::current_dir()?;
 
-    let (nats, _child) = connect_or_start_nats(&args.nats_url, Duration::from_secs(3)).await?;
+    let nats = connect_or_start_nats(&args.nats_url).await?;
 
     if let Some(prompt_arg) = &args.print {
         let prompt = if prompt_arg == "-" {
