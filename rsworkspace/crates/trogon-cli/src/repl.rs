@@ -1231,6 +1231,8 @@ mod tests {
         assert!(out.contains("/help"));
         assert!(out.contains("/cost"));
         assert!(out.contains("/clear"));
+        assert!(out.contains("/sessions"));
+        assert!(out.contains("/resume"));
         assert!(out.contains("/compact"));
         assert!(out.contains("/config"));
         assert!(out.contains("/model"));
