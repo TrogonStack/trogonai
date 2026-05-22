@@ -420,33 +420,79 @@ fn print_summary(checks: &[DoctorCheck]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use trogon_registry::{MockRegistryStore, Registry};
+
+    /// Token-related env vars read by [`collect_token_warnings`] / [`codex_enabled`].
+    const TOKEN_ENV_KEYS: &[&str] = &[
+        "ACP_PREFIX",
+        "ANTHROPIC_TOKEN",
+        "XAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "CODEX_ENABLED",
+    ];
+
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serializes env mutation across doctor unit tests and restores prior values on drop.
+    struct EnvGuard {
+        saved: Vec<(String, Option<String>)>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let lock = ENV_TEST_LOCK.lock().unwrap();
+            let saved = TOKEN_ENV_KEYS
+                .iter()
+                .map(|k| ((*k).to_string(), std::env::var(k).ok()))
+                .collect();
+            Self { saved, _lock: lock }
+        }
+
+        fn clear_token_env(&self) {
+            for key in TOKEN_ENV_KEYS {
+                unsafe { std::env::remove_var(key) };
+            }
+        }
+
+        fn set(&self, key: &str, value: &str) {
+            unsafe { std::env::set_var(key, value) };
+        }
+
+        fn remove(&self, key: &str) {
+            unsafe { std::env::remove_var(key) };
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(v) => unsafe { std::env::set_var(key, v) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
 
     #[test]
     fn collect_token_warnings_empty_when_keys_set() {
-        unsafe {
-            std::env::set_var("ACP_PREFIX", "acp.claude");
-            std::env::set_var("ANTHROPIC_TOKEN", "sk-test");
-            std::env::remove_var("OPENROUTER_API_KEY");
-            std::env::remove_var("XAI_API_KEY");
-            std::env::set_var("CODEX_ENABLED", "0");
-        }
+        let guard = EnvGuard::new();
+        guard.clear_token_env();
+        guard.set("ACP_PREFIX", "acp.claude");
+        guard.set("ANTHROPIC_TOKEN", "sk-test");
+        guard.set("CODEX_ENABLED", "0");
         let warnings = collect_token_warnings();
-        unsafe {
-            std::env::remove_var("ACP_PREFIX");
-            std::env::remove_var("ANTHROPIC_TOKEN");
-        }
         assert!(warnings.is_empty(), "expected no warnings, got: {warnings:?}");
     }
 
     #[test]
     fn collect_token_warnings_active_runner_empty_token() {
-        unsafe {
-            std::env::set_var("ACP_PREFIX", "acp.grok");
-            std::env::remove_var("XAI_API_KEY");
-        }
+        let guard = EnvGuard::new();
+        guard.clear_token_env();
+        guard.set("ACP_PREFIX", "acp.grok");
         let warnings = collect_token_warnings();
-        unsafe { std::env::remove_var("ACP_PREFIX") };
         assert!(
             warnings.iter().any(|w| w.contains("XAI_API_KEY")),
             "expected XAI warning, got: {warnings:?}"
@@ -455,9 +501,10 @@ mod tests {
 
     #[test]
     fn collect_token_warnings_set_but_empty() {
-        unsafe { std::env::set_var("OPENROUTER_API_KEY", "   ") };
+        let guard = EnvGuard::new();
+        guard.clear_token_env();
+        guard.set("OPENROUTER_API_KEY", "   ");
         let warnings = collect_token_warnings();
-        unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
         assert!(
             warnings.iter().any(|w| w.contains("OPENROUTER_API_KEY")),
             "expected empty-key warning, got: {warnings:?}"
@@ -497,11 +544,14 @@ mod tests {
 
     #[test]
     fn codex_enabled_reads_env() {
-        unsafe { std::env::set_var("CODEX_ENABLED", "1") };
+        let guard = EnvGuard::new();
+        guard.clear_token_env();
+        guard.set("CODEX_ENABLED", "1");
         assert!(codex_enabled());
-        unsafe { std::env::set_var("CODEX_ENABLED", "0") };
+        guard.set("CODEX_ENABLED", "0");
         assert!(!codex_enabled());
-        unsafe { std::env::remove_var("CODEX_ENABLED") };
+        guard.remove("CODEX_ENABLED");
+        assert!(!codex_enabled());
     }
 
     #[test]
