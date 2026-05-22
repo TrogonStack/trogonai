@@ -75,8 +75,17 @@ async fn main() -> Result<(), BoxError> {
         &SystemFs,
     );
 
+    let jwt_ingress = trogon_mcp_gateway::jwt::JwtIngressConfig::from_env(&SystemEnv).map_err(config_err_box)?;
+    let jwt = trogon_mcp_gateway::jwt::JwtValidator::try_new(jwt_ingress).map_err(config_err_box)?;
+    info!(
+        jwt_mode = ?jwt.mode(),
+        jwt_strip_legacy_tenant_header_to_backend = jwt.jwt_controls_transport(),
+        "MCP gateway verified identity"
+    );
+
     let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
         build_permission_checker(&SystemEnv).await?;
+
 
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
@@ -87,6 +96,7 @@ async fn main() -> Result<(), BoxError> {
         audit_stream_name,
         init_audit_stream,
         mcp,
+        jwt,
     };
 
     info!(

@@ -62,10 +62,11 @@ impl SpicedbPermissionChecker {
     }
 
     fn subject_ref(&self, ctx: &AuthzContext<'_>) -> SubjectReference {
-        let subject_object_id = normalize_spicedb_object_token(
-            ctx.tenant
-                .unwrap_or(self.inner.anonymous_subject_object_id.as_str()),
-        );
+        let raw_subject = ctx
+            .caller_sub
+            .or(ctx.tenant)
+            .unwrap_or(self.inner.anonymous_subject_object_id.as_str());
+        let subject_object_id = normalize_spicedb_object_token(raw_subject);
         SubjectReference {
             object: Some(ObjectReference {
                 object_type: self.inner.subject_object_type.clone(),

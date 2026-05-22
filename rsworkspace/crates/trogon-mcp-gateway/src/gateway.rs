@@ -12,13 +12,15 @@ use tracing::{info, warn};
 use trogon_nats::inject_trace_context;
 
 use crate::audit::{self, AuditEnvelope};
-use crate::authz::{AuthzContext, PermissionChecker};
+use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker};
+use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::rpc_codes;
 use crate::subject::gateway_to_server_subject;
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
+const AUTHZ_BEARER_PREFIX: &str = "bearer ";
 
 #[derive(Debug)]
 pub struct GatewayError(pub String);
@@ -37,6 +39,7 @@ pub struct GatewaySettings {
     pub queue_group: String,
     pub audit_stream_name: String,
     pub init_audit_stream: bool,
+    pub jwt: Arc<JwtValidator>,
 }
 
 pub async fn run<S>(
@@ -81,17 +84,7 @@ where
                 let Some(msg) = message else {
                     break;
                 };
-                if let Err(e) = handle_ingress(
-                    &client,
-                    &policy,
-                    &checker,
-                    &traces,
-                    &js,
-                    &settings.mcp,
-                    msg,
-                )
-                .await
-                {
+                if let Err(e) = handle_ingress(&client, &policy, &checker, &traces, &js, &settings, msg).await {
                     warn!(error = %e, "gateway message handling failed");
                 }
             }
@@ -106,11 +99,12 @@ async fn handle_ingress(
     checker: &Arc<dyn PermissionChecker>,
     traces: &TraceStore,
     jetstream: &jetstream::Context,
-    mcp: &Config,
+    settings: &GatewaySettings,
     msg: Message,
 ) -> Result<(), GatewayError> {
-    let prefix = mcp.prefix_str();
-    let backend_subject = gateway_to_server_subject(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
+    let prefix = settings.mcp.prefix_str();
+    let backend_subject =
+        gateway_to_server_subject(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
 
     let Some(jsonrpc_method) = jsonrpc_method(&msg.payload) else {
         warn!(subject = %msg.subject, "ingress message has no JSON-RPC method");
@@ -118,11 +112,42 @@ async fn handle_ingress(
     };
 
     let request_id = jsonrpc_request_id(&msg.payload);
-    let tenant = tenant_from_headers(msg.headers.as_ref());
+    let legacy_tenant_hdr = tenant_from_headers(msg.headers.as_ref());
 
     let requires_spicedb = policy
         .requires_spicedb_for_method(&jsonrpc_method)
         .map_err(|e| GatewayError(e.to_string()))?;
+
+    let bearer_h = settings.jwt.bearer_header_name_normalized();
+    let bearer = bearer_token_from_headers(msg.headers.as_ref(), bearer_h.as_str());
+    let jwt_strict = settings.jwt.jwt_required_for_gate(requires_spicedb);
+    let gateway_identity = match settings
+        .jwt
+        .resolve(bearer.as_deref(), legacy_tenant_hdr.as_deref(), jwt_strict)
+        .await
+    {
+        Ok(ident) => ident,
+        Err(deny) => {
+            finish_ingress_blocked(FinishIngressBlockedParams {
+                client,
+                jetstream,
+                mcp: &settings.mcp,
+                msg: &msg,
+                backend_subject: &backend_subject,
+                jsonrpc_method: &jsonrpc_method,
+                gateway_identity: anonymous_audit_identity(),
+                request_id: request_id.clone(),
+                requires_spicedb,
+                spicedb_allowed: None,
+                traces,
+                audit_outcome: "error",
+                jsonrpc_code: deny.code,
+                jsonrpc_message: deny.message,
+            })
+            .await;
+            return Ok(());
+        }
+    };
 
     let tool_call = if jsonrpc_method == "tools/call" {
         tools_call_name(&msg.payload)
@@ -142,7 +167,9 @@ async fn handle_ingress(
     if requires_spicedb {
         match checker
             .authorize_mcp_request(AuthzContext {
-                tenant: tenant.as_deref(),
+                tenant: gateway_identity.tenant.as_deref(),
+                caller_sub: gateway_identity.caller_sub.as_deref(),
+                identity_source: gateway_identity.source,
                 server_id,
                 jsonrpc_method: &jsonrpc_method,
                 tool_name: tool_call.as_deref(),
@@ -156,18 +183,18 @@ async fn handle_ingress(
                 finish_ingress_blocked(FinishIngressBlockedParams {
                     client,
                     jetstream,
-                    mcp,
+                    mcp: &settings.mcp,
                     msg: &msg,
                     backend_subject: &backend_subject,
                     jsonrpc_method: &jsonrpc_method,
-                    tenant: tenant.clone(),
+                    gateway_identity: gateway_identity.clone(),
                     request_id: request_id.clone(),
                     requires_spicedb,
                     spicedb_allowed,
+                    traces,
                     audit_outcome: "deny",
                     jsonrpc_code: rpc_codes::POLICY_DENY,
                     jsonrpc_message: "policy_deny".to_string(),
-                    traces,
                 })
                 .await;
                 return Ok(());
@@ -176,18 +203,18 @@ async fn handle_ingress(
                 finish_ingress_blocked(FinishIngressBlockedParams {
                     client,
                     jetstream,
-                    mcp,
+                    mcp: &settings.mcp,
                     msg: &msg,
                     backend_subject: &backend_subject,
                     jsonrpc_method: &jsonrpc_method,
-                    tenant: tenant.clone(),
+                    gateway_identity: gateway_identity.clone(),
                     request_id: request_id.clone(),
                     requires_spicedb,
                     spicedb_allowed: None,
+                    traces,
                     audit_outcome: "error",
                     jsonrpc_code: rpc_codes::AUTHZ_UNREACHABLE,
                     jsonrpc_message: authz_err.0,
-                    traces,
                 })
                 .await;
                 return Ok(());
@@ -195,7 +222,8 @@ async fn handle_ingress(
         }
     }
 
-    let mut outbound_headers = msg.headers.clone().unwrap_or_default();
+    let base_headers = msg.headers.clone().unwrap_or_default();
+    let mut outbound_headers = egress_header_map(base_headers, settings.jwt.jwt_controls_transport());
     inject_trace_context(&mut outbound_headers);
 
     if msg.reply.is_none() {
@@ -209,28 +237,20 @@ async fn handle_ingress(
             .map_err(|e| GatewayError(e.to_string()))?;
         client.flush().await.map_err(|e| GatewayError(e.to_string()))?;
 
-        let audit_envelope = AuditEnvelope {
-            subject_in: msg.subject.to_string(),
-            subject_out: backend_subject.clone(),
-            outcome: "allow",
-            direction: "request",
-            jsonrpc_method: jsonrpc_method.clone(),
-            tenant: tenant.clone(),
-            request_id: request_id.clone(),
-        };
-        let method_root = audit::jsonrpc_method_root(&jsonrpc_method);
-        let audit_subject = audit::audit_publish_subject(prefix, "allow", "request", &method_root);
-        audit::publish_audit(
+        publish_allow_audit_and_maybe_trace_no_reply(
             jetstream,
-            audit_subject,
-            &audit_envelope,
-            std::time::Duration::from_secs(5),
+            prefix,
+            &msg,
+            &backend_subject,
+            &jsonrpc_method,
+            &gateway_identity,
+            request_id.clone(),
         )
         .await;
         return Ok(());
     }
 
-    let timeout = mcp.operation_timeout();
+    let timeout = settings.mcp.operation_timeout();
     let backend_result = tokio::time::timeout(
         timeout,
         client.request_with_headers(backend_subject.clone(), outbound_headers, msg.payload.clone()),
@@ -243,22 +263,16 @@ async fn handle_ingress(
         Err(_) => "error",
     };
 
-    let audit_envelope = AuditEnvelope {
-        subject_in: msg.subject.to_string(),
-        subject_out: backend_subject.clone(),
-        outcome,
-        direction: "request",
-        jsonrpc_method: jsonrpc_method.clone(),
-        tenant: tenant.clone(),
-        request_id: request_id.clone(),
-    };
-    let method_root = audit::jsonrpc_method_root(&jsonrpc_method);
-    let audit_subject = audit::audit_publish_subject(prefix, outcome, "request", &method_root);
-    audit::publish_audit(
+    publish_audit_inner(
         jetstream,
-        audit_subject,
-        &audit_envelope,
-        std::time::Duration::from_secs(5),
+        prefix,
+        outcome,
+        "request",
+        &msg.subject,
+        &backend_subject,
+        &jsonrpc_method,
+        &gateway_identity,
+        request_id.clone(),
     )
     .await;
 
@@ -271,6 +285,9 @@ async fn handle_ingress(
                 jsonrpc_method: jsonrpc_method.clone(),
                 cel_requires_spicedb: requires_spicedb,
                 spicedb_allowed,
+                tenant: gateway_identity.tenant.clone(),
+                caller_sub: gateway_identity.caller_sub.clone(),
+                identity_source: gateway_identity.source,
             },
         );
     }
@@ -287,7 +304,7 @@ async fn handle_ingress(
                 rpc_codes::BACKEND_UNREACHABLE,
                 format!("upstream request failed: {e}"),
             )
-                .await?;
+            .await?;
         }
         Err(_) => {
             respond_with_jsonrpc_error(
@@ -304,6 +321,68 @@ async fn handle_ingress(
     Ok(())
 }
 
+fn anonymous_audit_identity() -> GatewayIdentity {
+    GatewayIdentity {
+        tenant: None,
+        caller_sub: None,
+        issuer: None,
+        jti: None,
+        source: IdentitySource::Anonymous,
+    }
+}
+
+async fn publish_allow_audit_and_maybe_trace_no_reply(
+    jetstream: &jetstream::Context,
+    prefix: &str,
+    msg: &Message,
+    backend_subject: &str,
+    jsonrpc_method: &str,
+    gateway_identity: &GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+) {
+    publish_audit_inner(
+        jetstream,
+        prefix,
+        "allow",
+        "request",
+        &msg.subject,
+        backend_subject,
+        jsonrpc_method,
+        gateway_identity,
+        request_id,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)] // Audit publish mirrors many gateway fields; struct would add noise here.
+async fn publish_audit_inner(
+    jetstream: &jetstream::Context,
+    prefix: &str,
+    outcome: &'static str,
+    direction: &'static str,
+    subject_in: &async_nats::Subject,
+    subject_out: &str,
+    jsonrpc_method: &str,
+    gateway_identity: &GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+) {
+    let audit_envelope = AuditEnvelope {
+        subject_in: subject_in.to_string(),
+        subject_out: subject_out.to_string(),
+        outcome,
+        direction,
+        jsonrpc_method: jsonrpc_method.to_string(),
+        tenant: gateway_identity.tenant.clone(),
+        caller_sub: gateway_identity.caller_sub.clone(),
+        jwt_issuer: gateway_identity.issuer.clone(),
+        identity_source: gateway_identity.source,
+        request_id,
+    };
+    let method_root = audit::jsonrpc_method_root(jsonrpc_method);
+    let audit_subject = audit::audit_publish_subject(prefix, outcome, direction, &method_root);
+    audit::publish_audit(jetstream, audit_subject, &audit_envelope, std::time::Duration::from_secs(5)).await;
+}
+
 struct FinishIngressBlockedParams<'a> {
     client: &'a async_nats::Client,
     jetstream: &'a jetstream::Context,
@@ -311,7 +390,7 @@ struct FinishIngressBlockedParams<'a> {
     msg: &'a Message,
     backend_subject: &'a str,
     jsonrpc_method: &'a str,
-    tenant: Option<String>,
+    gateway_identity: GatewayIdentity,
     request_id: Option<serde_json::Value>,
     requires_spicedb: bool,
     spicedb_allowed: Option<bool>,
@@ -339,7 +418,10 @@ async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
         outcome: params.audit_outcome,
         direction: "request",
         jsonrpc_method: params.jsonrpc_method.to_string(),
-        tenant: params.tenant,
+        tenant: params.gateway_identity.tenant.clone(),
+        caller_sub: params.gateway_identity.caller_sub.clone(),
+        jwt_issuer: params.gateway_identity.issuer.clone(),
+        identity_source: params.gateway_identity.source,
         request_id: params.request_id.clone(),
     };
     let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
@@ -361,6 +443,9 @@ async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
                 jsonrpc_method: params.jsonrpc_method.to_string(),
                 cel_requires_spicedb: params.requires_spicedb,
                 spicedb_allowed: params.spicedb_allowed,
+                tenant: params.gateway_identity.tenant,
+                caller_sub: params.gateway_identity.caller_sub,
+                identity_source: params.gateway_identity.source,
             },
         );
     }
@@ -395,7 +480,53 @@ fn resources_read_uri(payload: &[u8]) -> Option<String> {
 }
 
 fn tenant_from_headers(headers: Option<&async_nats::HeaderMap>) -> Option<String> {
-    Some(headers?.get(TENANT_HEADER)?.as_str().to_string())
+    let h = headers?;
+    Some(
+        h.get_last(TENANT_HEADER)
+            .or_else(|| h.get(TENANT_HEADER))?
+            .as_str()
+            .to_string(),
+    )
+}
+
+fn bearer_token_from_headers(headers: Option<&async_nats::HeaderMap>, header_name_normalized: &str) -> Option<String> {
+    let hm = headers?;
+    let hv = hm
+        .get_last(header_name_normalized)
+        .or_else(|| hm.get(header_name_normalized))?;
+    bearer_from_authorization_header_value(hv.as_str())
+}
+
+fn bearer_from_authorization_header_value(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    let plen = AUTHZ_BEARER_PREFIX.len();
+    if s.len() >= plen && s[..plen].eq_ignore_ascii_case(AUTHZ_BEARER_PREFIX) {
+        let tok = s[plen..].trim();
+        if tok.is_empty() {
+            None
+        } else {
+            Some(tok.to_string())
+        }
+    } else {
+        None
+    }
+}
+
+fn egress_header_map(src: async_nats::HeaderMap, strip_legacy_tenant: bool) -> async_nats::HeaderMap {
+    if !strip_legacy_tenant {
+        return src;
+    }
+    let mut out = async_nats::HeaderMap::new();
+    for (name, vals) in src.iter() {
+        let header_name_ref: &str = AsRef::<str>::as_ref(name);
+        if header_name_ref.eq_ignore_ascii_case(TENANT_HEADER) {
+            continue;
+        }
+        for v in vals {
+            out.append(name.clone(), v.clone());
+        }
+    }
+    out
 }
 
 fn parse_server_id<'a>(prefix: &str, subject: &'a str) -> Result<&'a str, &'static str> {
@@ -492,6 +623,26 @@ mod tests {
         assert_eq!(
             parse_server_id("mcp", "mcp.gateway.request.filesystem.tools.call").unwrap(),
             "filesystem"
+        );
+    }
+
+    #[test]
+    fn strips_tenant_header_when_configured() {
+        let mut h = async_nats::HeaderMap::new();
+        h.insert(TENANT_HEADER, "evil");
+        h.insert("X-Other", "v");
+        let preserved = egress_header_map(h.clone(), false);
+        assert!(preserved.get(TENANT_HEADER).is_some());
+        let stripped = egress_header_map(h, true);
+        assert!(stripped.get(TENANT_HEADER).is_none());
+        assert!(stripped.get("X-Other").is_some());
+    }
+
+    #[test]
+    fn bearer_parses_case_insensitive() {
+        assert_eq!(
+            bearer_from_authorization_header_value("Bearer abc.def").as_deref(),
+            Some("abc.def")
         );
     }
 }
