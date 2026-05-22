@@ -4,8 +4,10 @@ pub mod markdown;
 pub mod nats;
 pub mod print;
 pub mod repl;
+pub mod runtime;
 pub mod session;
 pub mod stdio_mcp_bridge;
+pub mod tui_client;
 
 pub use fs::{Fs, RealFs};
 pub use nats::NatsClient;

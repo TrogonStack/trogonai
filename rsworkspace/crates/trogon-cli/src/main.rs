@@ -113,9 +113,18 @@ async fn main() -> anyhow::Result<()> {
         let reg_store = trogon_registry::provision(&js).await
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
-        let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config, registry);
-        let factory = NatsSessionFactory::new(nats);
-        trogon_cli::repl::run(factory, &args.prefix, cwd, RealFs, switcher).await?;
+        let switcher = CrossRunnerSwitcher::new(nats.clone(), acp_config.clone(), registry);
+        let factory = NatsSessionFactory::new(nats.clone());
+        trogon_cli::runtime::run_interactive(
+            factory,
+            &args.prefix,
+            cwd,
+            RealFs,
+            switcher,
+            nats,
+            acp_config,
+        )
+        .await?;
     }
 
     Ok(())
