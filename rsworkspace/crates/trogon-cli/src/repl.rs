@@ -157,6 +157,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
 
     let mut session_used_tokens: u64 = 0;
     let mut session_context_size: u64 = 0;
+    let mut session_mode =
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "acceptEdits".into());
 
     loop {
         match rl.readline("> ") {
@@ -180,6 +182,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                 session = s;
                                 session_used_tokens = 0;
                                 session_context_size = 0;
+                                session_mode = std::env::var("TROGON_MODE")
+                                    .unwrap_or_else(|_| "acceptEdits".into());
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
                             Err(e) => eprintln!("error: {e}"),
@@ -204,6 +208,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                 }
                             }
                             Err(e) => eprintln!("Error switching model: {e}"),
+                        }
+                    } else if cmd == "/mode" {
+                        if arg.is_empty() {
+                            println!(
+                                "current mode: {session_mode}\nchange with: \x1b[35m/mode\x1b[0m \
+                                 <default|acceptEdits|plan|dontAsk|bypassPermissions>"
+                            );
+                        } else {
+                            let mode = arg.trim();
+                            match session.set_mode(mode).await {
+                                Ok(()) => {
+                                    session_mode = mode.to_string();
+                                    println!("mode set to {mode}");
+                                }
+                                Err(e) => eprintln!("error setting mode: {e}"),
+                            }
                         }
                     } else if cmd == "/compact" {
                         match session.compact().await {
@@ -486,6 +506,7 @@ Commands:
   {m}/compact{r}            force context compaction now
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
+  {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
 

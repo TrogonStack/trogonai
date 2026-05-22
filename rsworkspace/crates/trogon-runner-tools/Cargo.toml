@@ -30,15 +30,19 @@ serde_json  = "1.0"
 tokio       = { version = "1", features = ["full"] }
 tracing     = "0.1"
 
+acp-nats     = { workspace = true }
 trogon-mcp   = { path = "../trogon-mcp" }
+trogon-nats  = { workspace = true }
 trogon-tools = { path = "../trogon-tools" }
 
 [dev-dependencies]
 async-nats             = { workspace = true }
+bytes                  = { workspace = true }
 futures-util           = { version = "0.3", default-features = false, features = ["std"] }
 serde_json             = "1.0"
 testcontainers-modules = { workspace = true }
 tokio                  = { version = "1", features = ["full"] }
+trogon-nats            = { workspace = true, features = ["test-support"] }
 
 [features]
 test-helpers = []

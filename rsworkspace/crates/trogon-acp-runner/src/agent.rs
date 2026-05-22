@@ -31,7 +31,8 @@ use trogon_runner_tools::egress::EgressPolicy;
 use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
-use trogon_runner_tools::permission::{AuditBuf, ChannelPermissionChecker, PermissionTx, RulesPermissionChecker};
+use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
+use trogon_runner_tools::build_mode_permission_checker;
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
@@ -362,6 +363,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 SessionMode::new("acceptEdits", "Accept Edits"),
                 SessionMode::new("plan", "Plan"),
                 SessionMode::new("dontAsk", "Don't Ask"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
             ],
         )
     }
@@ -527,13 +529,6 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 if needs_perm
                     && let Some(ref perm_tx) = self.permission_tx
                 {
-                    let inner = ChannelPermissionChecker {
-                        session_id: session_id.clone(),
-                        tx: perm_tx.clone(),
-                        allowed_tools: state.allowed_tools.clone(),
-                        audit_buf: audit_buf.clone(),
-                    };
-                    // Build static rules: TROGON.md base + session override merged.
                     let mut rules = if let Some(trogon_md) =
                         self.md_loader.load(&state.cwd).await
                     {
@@ -544,11 +539,16 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     if let Some(ref extra) = state.permission_rules_text {
                         rules.merge(PermissionRules::parse(extra));
                     }
-                    a.set_permission_checker(Arc::new(RulesPermissionChecker {
-                        rules: Arc::new(rules),
-                        tool_policies: state.tool_policies.clone(),
-                        inner,
-                    }));
+                    if let Some(checker) = build_mode_permission_checker(
+                        &state.mode,
+                        &session_id,
+                        perm_tx,
+                        state.allowed_tools.clone(),
+                        Arc::new(rules),
+                        state.tool_policies.clone(),
+                    ) {
+                        a.set_permission_checker(checker);
+                    }
                 }
                 if let Some(ref elic_tx) = self.elicitation_tx {
                     a.set_elicitation_provider(Arc::new(ChannelElicitationProvider {

@@ -198,6 +198,140 @@ impl PermissionChecker for RulesPermissionChecker {
     }
 }
 
+/// Tools auto-allowed in `acceptEdits` mode without prompting.
+const ACCEPT_EDITS_TOOLS: &[&str] = &[
+    "write_file",
+    "str_replace",
+    "notebook_edit",
+    "Edit",
+    "Write",
+    "MultiEdit",
+];
+
+/// Tools denied in `plan` mode until the ExitPlanMode permission flow completes.
+const PLAN_DENIED_TOOLS: &[&str] = &[
+    "write_file",
+    "str_replace",
+    "notebook_edit",
+    "bash",
+    "Bash",
+    "Edit",
+    "Write",
+    "MultiEdit",
+];
+
+fn is_edit_tool(tool_name: &str) -> bool {
+    ACCEPT_EDITS_TOOLS.iter().any(|t| *t == tool_name)
+}
+
+fn is_plan_denied_tool(tool_name: &str) -> bool {
+    PLAN_DENIED_TOOLS.iter().any(|t| *t == tool_name)
+}
+
+/// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
+///
+/// | Mode | Behavior |
+/// |------|----------|
+/// | `default` | Delegate to rules + interactive channel |
+/// | `acceptEdits` | Auto-allow edit tools; prompt bash/MCP |
+/// | `dontAsk` | Auto-allow all (audit only) |
+/// | `plan` | Deny write/bash tools |
+/// | `bypassPermissions` | Not installed — caller skips checker entirely |
+pub struct ModePermissionChecker {
+    pub mode: String,
+    pub inner: RulesPermissionChecker,
+}
+
+impl PermissionChecker for ModePermissionChecker {
+    fn check<'a>(
+        &'a self,
+        tool_call_id: &'a str,
+        tool_name: &'a str,
+        tool_input: &'a Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
+        let audit_buf = self.inner.inner.audit_buf.clone();
+        match self.mode.as_str() {
+            "dontAsk" => {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                Box::pin(async move { true })
+            }
+            "acceptEdits" if is_edit_tool(tool_name) => {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                Box::pin(async move { true })
+            }
+            "plan" if is_plan_denied_tool(tool_name) => {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                Box::pin(async move { false })
+            }
+            _ => self.inner.check(tool_call_id, tool_name, tool_input),
+        }
+    }
+}
+
+/// Build a mode-aware permission checker, or `None` when mode is `bypassPermissions`.
+pub fn build_mode_permission_checker(
+    mode: &str,
+    session_id: &str,
+    perm_tx: &PermissionTx,
+    allowed_tools: Vec<String>,
+    rules: Arc<PermissionRules>,
+    tool_policies: Vec<ToolPolicy>,
+) -> Option<Arc<dyn PermissionChecker>> {
+    if mode == "bypassPermissions" {
+        return None;
+    }
+    let audit_buf: AuditBuf = Arc::new(Mutex::new(Vec::new()));
+    let inner = ChannelPermissionChecker {
+        session_id: session_id.to_string(),
+        tx: perm_tx.clone(),
+        allowed_tools,
+        audit_buf,
+    };
+    let rules_checker = RulesPermissionChecker {
+        rules,
+        tool_policies,
+        inner,
+    };
+    Some(Arc::new(ModePermissionChecker {
+        mode: mode.to_string(),
+        inner: rules_checker,
+    }))
+}
+
+/// Gate a single tool invocation using session mode, rules, and optional NATS permission channel.
+/// Returns `true` when the tool may run; `false` when denied.
+pub async fn check_tool_permission(
+    mode: &str,
+    session_id: &str,
+    perm_tx: Option<&PermissionTx>,
+    allowed_tools: &[String],
+    rules: PermissionRules,
+    tool_policies: &[ToolPolicy],
+    tool_call_id: &str,
+    tool_name: &str,
+    tool_input: &Value,
+) -> bool {
+    if mode == "bypassPermissions" {
+        return true;
+    }
+    let Some(tx) = perm_tx else {
+        return true;
+    };
+    let Some(checker) = build_mode_permission_checker(
+        mode,
+        session_id,
+        tx,
+        allowed_tools.to_vec(),
+        Arc::new(rules),
+        tool_policies.to_vec(),
+    ) else {
+        return true;
+    };
+    checker
+        .check(tool_call_id, tool_name, tool_input)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +466,85 @@ mod tests {
             .check("tc-x", "Read", &serde_json::Value::Null)
             .await;
         assert!(!result, "dropped response_tx should return false");
+    }
+
+    // ── ModePermissionChecker ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mode_checker_dont_ask_auto_allows_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-da", "bash", &serde_json::json!({"command": "rm -rf /"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_auto_allows_write_file() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-ae", "write_file", &serde_json::json!({"path": "/tmp/x"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_prompts_bash_via_channel() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(false);
+            }
+        });
+        assert!(
+            !checker
+                .check("tc-ab", "bash", &serde_json::json!({"command": "ls"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_denies_write_file() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-pl", "write_file", &serde_json::json!({"path": "/tmp/x"}))
+                .await
+        );
+    }
+
+    #[test]
+    fn build_mode_permission_checker_none_for_bypass() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = build_mode_permission_checker(
+            "bypassPermissions",
+            "sess-1",
+            &tx,
+            vec![],
+            Arc::new(PermissionRules::default()),
+            vec![],
+        );
+        assert!(checker.is_none());
     }
 
     // ── eval_tool_policies ────────────────────────────────────────────────────

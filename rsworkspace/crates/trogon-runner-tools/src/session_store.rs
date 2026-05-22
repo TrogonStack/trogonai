@@ -1,6 +1,8 @@
 use async_nats::jetstream;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use trogon_tools::Message;
 
 use crate::egress::EgressPolicy;
@@ -199,6 +201,60 @@ pub trait SessionStore: Clone + Send + Sync + 'static {
     async fn list_ids(&self) -> anyhow::Result<Vec<String>>;
     /// Return the IDs of all sessions whose `parent_session_id` matches `parent_id`.
     async fn list_children(&self, parent_id: &str) -> anyhow::Result<Vec<String>>;
+}
+
+// ── In-memory allowed-tools store (xai/openrouter permission bridge) ───────────
+
+/// Minimal session store used by non-ACP runners for `allow_always` persistence.
+#[derive(Clone, Default)]
+pub struct AllowedToolsSessionStore {
+    allowed: Arc<Mutex<HashMap<String, Vec<String>>>>,
+}
+
+impl AllowedToolsSessionStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn allowed_tools(&self, session_id: &str) -> Vec<String> {
+        self.allowed
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait]
+impl SessionStore for AllowedToolsSessionStore {
+    async fn load(&self, session_id: &str) -> anyhow::Result<SessionState> {
+        Ok(SessionState {
+            allowed_tools: self.allowed_tools(session_id),
+            ..SessionState::default()
+        })
+    }
+
+    async fn save(&self, session_id: &str, state: &SessionState) -> anyhow::Result<()> {
+        self.allowed
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), state.allowed_tools.clone());
+        Ok(())
+    }
+
+    async fn delete(&self, session_id: &str) -> anyhow::Result<()> {
+        self.allowed.lock().unwrap().remove(session_id);
+        Ok(())
+    }
+
+    async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.allowed.lock().unwrap().keys().cloned().collect())
+    }
+
+    async fn list_children(&self, _parent_id: &str) -> anyhow::Result<Vec<String>> {
+        Ok(vec![])
+    }
 }
 
 // ── NATS KV implementation ────────────────────────────────────────────────────
