@@ -1,4 +1,5 @@
 use crate::fs::Fs;
+use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
 use crate::session_store::{SessionIndex, new_session_entry};
 use crate::RunnerSwitcher;
@@ -151,10 +152,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     let init_prefix = prefix.clone(); // always use the startup runner for /init
     let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
 
+    let mut mcp_manager = McpManager::load(&fs);
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
-        match activate_session(&factory, &prefix, &entry.session_id, &cwd).await {
+        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd).await {
             Ok(s) => {
                 eprintln!(
                     "resumed session {} on {prefix}",
@@ -167,11 +169,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                     "warning: could not resume {}: {e} — starting fresh",
                     entry.session_id
                 );
-                factory.create_session(&prefix, cwd.clone()).await?
+                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
             }
         }
     } else {
-        factory.create_session(&prefix, cwd.clone()).await?
+        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
     };
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
@@ -214,8 +216,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("");
                     if cmd == "/clear" {
+                        mcp_manager.shutdown_session(session.session_id()).await;
                         session.close().await;
-                        match factory.create_session(&prefix, cwd.clone()).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
                             Ok(s) => {
                                 session = s;
                                 session_used_tokens = 0;
@@ -241,8 +244,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             eprintln!("usage: /resume <session-id>");
                         } else {
                             let target = arg.trim();
-                            match activate_session(&factory, &prefix, target, &cwd).await {
+                            match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd).await {
                                 Ok(s) => {
+                                    mcp_manager.shutdown_session(session.session_id()).await;
                                     session.close().await;
                                     session = s;
                                     session_used_tokens = 0;
@@ -393,6 +397,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             }
                             Err(e) => eprintln!("error triggering compaction: {e}"),
                         }
+                    } else if cmd == "/mcp" {
+                        handle_mcp_command(
+                            arg,
+                            &mut mcp_manager,
+                            &fs,
+                            &session,
+                            &cwd,
+                        )
+                        .await;
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -405,7 +418,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         } else {
                             eprintln!("analyzing project with AI...");
                             let prompt = build_init_prompt(&root, &fs);
-                            match factory.create_session(&init_prefix, cwd.clone()).await {
+                            match factory.create_session(&init_prefix, cwd.clone(), vec![]).await {
                                 Err(e) => eprintln!("error creating init session: {e}"),
                                 Ok(init_session) => {
                                     // Bypass approval gates so Claude can write TROGON.md without prompting.
@@ -616,7 +629,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                 eprintln!("(Ctrl+C)");
             }
             Err(ReadlineError::Eof) => {
+                mcp_manager.shutdown_session(session.session_id()).await;
                 session.close().await;
+                mcp_manager.shutdown_all().await;
                 eprintln!("bye");
                 break;
             }
@@ -631,15 +646,112 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     Ok(())
 }
 
+async fn start_session<SF: SessionFactory>(
+    factory: &SF,
+    mcp: &mut McpManager,
+    prefix: &str,
+    cwd: PathBuf,
+) -> anyhow::Result<SF::Sess> {
+    let mcp_servers = mcp.spawn_pending().await;
+    let session = factory.create_session(prefix, cwd, mcp_servers).await?;
+    mcp.commit_pending(session.session_id());
+    Ok(session)
+}
+
 async fn activate_session<SF: SessionFactory>(
     factory: &SF,
+    mcp: &mut McpManager,
     prefix: &str,
     session_id: &str,
     cwd: &Path,
 ) -> anyhow::Result<SF::Sess> {
+    let mcp_servers = mcp.spawn_pending().await;
     let session = factory.attach_session(prefix, session_id.to_string());
-    session.load_session(session_id, cwd).await?;
+    session.load_session(session_id, cwd, mcp_servers).await?;
+    mcp.commit_pending(session_id);
     Ok(session)
+}
+
+async fn handle_mcp_command<F: Fs, S: Session>(
+    arg: &str,
+    mcp: &mut McpManager,
+    fs: &F,
+    session: &S,
+    cwd: &Path,
+) {
+    let mut parts = arg.splitn(2, ' ');
+    let sub = parts.next().unwrap_or("list").trim();
+    let rest = parts.next().unwrap_or("").trim();
+
+    match sub {
+        "list" => {
+            println!("configured MCP servers (~/.config/trogon/mcp.json):");
+            if mcp.configured_servers().is_empty() {
+                println!("  (none)");
+            } else {
+                for s in mcp.configured_servers() {
+                    println!("  {} — {} {}", s.name, s.command, s.args.join(" "));
+                }
+            }
+            let active = mcp.active_for_session(session.session_id());
+            if active.is_empty() {
+                println!("active bridges: (none)");
+            } else {
+                println!("active bridges:");
+                for (name, url) in active {
+                    println!("  {name} → {url}");
+                }
+            }
+        }
+        "add" => {
+            let mut add_parts = rest.splitn(2, ' ');
+            let name = add_parts.next().unwrap_or("").trim();
+            let cmd_rest = add_parts.next().unwrap_or("").trim();
+            match McpManager::parse_add_args(name, cmd_rest) {
+                Err(e) => eprintln!("{e}"),
+                Ok(cfg) => {
+                    mcp.add_server(cfg);
+                    if let Err(e) = mcp.save(fs) {
+                        eprintln!("error saving MCP config: {e}");
+                    } else {
+                        println!("added MCP server `{name}`");
+                        if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
+                            eprintln!("warning: could not refresh session MCP: {e}");
+                        }
+                    }
+                }
+            }
+        }
+        "remove" => {
+            if rest.is_empty() {
+                eprintln!("usage: /mcp remove <name>");
+            } else if mcp.remove_server(rest) {
+                if let Err(e) = mcp.save(fs) {
+                    eprintln!("error saving MCP config: {e}");
+                } else {
+                    mcp.shutdown_session(session.session_id()).await;
+                    println!("removed MCP server `{rest}`");
+                    if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
+                        eprintln!("warning: could not refresh session MCP: {e}");
+                    }
+                }
+            } else {
+                eprintln!("no MCP server named `{rest}`");
+            }
+        }
+        other => eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove"),
+    }
+}
+
+async fn respawn_session_mcp<S: Session>(
+    session: &S,
+    mcp: &mut McpManager,
+    cwd: &Path,
+) -> anyhow::Result<()> {
+    mcp.shutdown_session(session.session_id()).await;
+    let servers = mcp.spawn_pending().await;
+    mcp.commit_pending(session.session_id());
+    session.load_session(session.session_id(), cwd, servers).await
 }
 
 fn current_model<F: Fs>(fs: &F) -> String {
@@ -724,6 +836,7 @@ Commands:
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
+  {m}/mcp{r} list|add|remove  manage MCP server bridges
   {m}/compact{r}            force context compaction now
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model

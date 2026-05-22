@@ -16,7 +16,7 @@ use agent_client_protocol::{
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
     SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse, StopReason,
+    SetSessionModelResponse, StopReason, McpServer,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -171,6 +171,33 @@ async fn build_session_mcp(
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
+}
+
+fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
+    servers
+        .iter()
+        .filter_map(|s| match s {
+            McpServer::Http(h) => Some(StoredMcpServer {
+                name: h.name.clone(),
+                url: h.url.clone(),
+                headers: h
+                    .headers
+                    .iter()
+                    .map(|hv| (hv.name.clone(), hv.value.clone()))
+                    .collect(),
+            }),
+            McpServer::Sse(s) => Some(StoredMcpServer {
+                name: s.name.clone(),
+                url: s.url.clone(),
+                headers: s
+                    .headers
+                    .iter()
+                    .map(|hv| (hv.name.clone(), hv.value.clone()))
+                    .collect(),
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Estimates the token count of a message list using the heuristic `bytes / 4`.
@@ -844,10 +871,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .to_string();
 
         let now = now_iso8601();
+        let mcp_servers = convert_mcp_servers(&req.mcp_servers);
         let state = trogon_runner_tools::session_store::SessionState {
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
             system_prompt,
+            mcp_servers,
             created_at: now.clone(),
             updated_at: now,
             ..Default::default()
@@ -871,7 +900,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
-        let state = self.store.load(&session_id).await.unwrap_or_default();
+        let mut state = self.store.load(&session_id).await.unwrap_or_default();
+        if !req.mcp_servers.is_empty() {
+            state.mcp_servers = convert_mcp_servers(&req.mcp_servers);
+            state.updated_at = now_iso8601();
+            if let Err(e) = self.store.save(&session_id, &state).await {
+                warn!(session_id, error = %e, "agent: failed to refresh MCP servers on load");
+            }
+        }
         let response = LoadSessionResponse::new()
             .modes(self.session_mode_state(&state.mode))
             .models(self.session_model_state(state.model.as_deref()));

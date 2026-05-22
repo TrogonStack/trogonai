@@ -110,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
         let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
-        let session = TrogonSession::new(nats, &args.prefix, cwd).await?;
+        let session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
         let result = trogon_cli::print::run(session, &prompt, format).await;
         if let Err(e) = result {
             eprintln!("error: {e}");

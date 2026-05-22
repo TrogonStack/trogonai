@@ -2,8 +2,8 @@ use crate::nats::NatsClient;
 use crate::tool_update::map_tool_call_update;
 use agent_client_protocol::{
     ContentBlock, ExtRequest, ExtResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate,
-    TextContent, ToolCallStatus,
+    LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest, SessionNotification,
+    SessionUpdate, TextContent, ToolCallStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -147,6 +147,7 @@ pub trait Session: Send + Sync + 'static {
         &self,
         session_id: &str,
         cwd: &Path,
+        mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
     fn list_sessions(
@@ -170,6 +171,7 @@ pub trait SessionFactory {
         &'a self,
         prefix: &'a str,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<Self::Sess>> + 'a;
 
     fn attach_session(&self, prefix: &str, session_id: String) -> Self::Sess;
@@ -194,10 +196,11 @@ impl<N: NatsClient + Clone> SessionFactory for NatsSessionFactory<N> {
         &'a self,
         prefix: &'a str,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<TrogonSession<N>>> + 'a {
         let nats = self.nats.clone();
         let prefix = prefix.to_string();
-        async move { TrogonSession::new(nats, &prefix, cwd).await }
+        async move { TrogonSession::new(nats, &prefix, cwd, mcp_servers).await }
     }
 
     fn attach_session(&self, prefix: &str, session_id: String) -> TrogonSession<N> {
@@ -227,9 +230,14 @@ impl<N: NatsClient> TrogonSession<N> {
         Self { nats, session_id, prefix: prefix.to_string() }
     }
 
-    pub async fn new(nats: N, prefix: &str, cwd: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(
+        nats: N,
+        prefix: &str,
+        cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
+    ) -> anyhow::Result<Self> {
         let subject = format!("{prefix}.agent.session.new");
-        let req = NewSessionRequest::new(cwd);
+        let req = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
         let payload = serde_json::to_vec(&req)?;
 
         let reply_bytes = tokio::time::timeout(
@@ -528,6 +536,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         &self,
         session_id: &str,
         cwd: &Path,
+        mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
         let session_id = session_id.to_string();
         let cwd = cwd.to_path_buf();
@@ -538,7 +547,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 return Err(anyhow::anyhow!("invalid session id: {session_id}"));
             }
             let subject = format!("{prefix}.session.{session_id}.agent.load");
-            let req = LoadSessionRequest::new(session_id, cwd);
+            let req = LoadSessionRequest::new(session_id, cwd).mcp_servers(mcp_servers);
             let payload = serde_json::to_vec(&req)?;
 
             let bytes = tokio::time::timeout(
@@ -856,6 +865,7 @@ pub mod mock {
             &self,
             _session_id: &str,
             _cwd: &Path,
+            _mcp_servers: Vec<McpServer>,
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             async move { Ok(()) }
         }
@@ -914,8 +924,9 @@ pub mod mock {
             &self,
             session_id: &str,
             cwd: &Path,
+            mcp_servers: Vec<McpServer>,
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
-            (**self).load_session(session_id, cwd)
+            (**self).load_session(session_id, cwd, mcp_servers)
         }
 
         fn list_sessions(
@@ -964,6 +975,7 @@ pub mod mock {
             &'a self,
             _prefix: &'a str,
             _cwd: PathBuf,
+            _mcp_servers: Vec<McpServer>,
         ) -> impl std::future::Future<Output = anyhow::Result<std::sync::Arc<MockSession>>> + 'a {
             async move {
                 let session = self.sessions.lock().unwrap().pop_front()
@@ -1137,7 +1149,7 @@ mod tests {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         nats.add_subscription(rx);
@@ -1151,7 +1163,7 @@ mod tests {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         // no subscription queued — subscribe_bytes will fail
         let err = session.set_model("claude-opus-4-7").await.unwrap_err();
@@ -1185,7 +1197,7 @@ mod tests {
         queue_new_session_setup(&nats, "test-session-42").await;
 
         let session =
-            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
         assert_eq!(session.session_id(), "test-session-42");
     }
 
@@ -1194,7 +1206,7 @@ mod tests {
         let nats = MockNatsClient::new();
         nats.queue_request_err("connection refused");
 
-        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"))
+        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("NATS error"), "got: {err}");
@@ -1206,7 +1218,7 @@ mod tests {
         let resp = json!({"other": "field"});
         nats.queue_request_ok(Bytes::from(serde_json::to_vec(&resp).unwrap()));
 
-        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"))
+        let err = TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("sessionId"), "got: {err}");
@@ -1226,7 +1238,7 @@ mod tests {
         nats.add_subscription(reply_rx);
 
         let session =
-            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats, "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         let mut events_rx = session.prompt("hello").await.unwrap();
 
@@ -1325,7 +1337,7 @@ mod tests {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         nats.queue_request_ok(ext_response(
             r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"world"}]"#,
@@ -1357,7 +1369,7 @@ mod tests {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
-            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+            TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
         nats.queue_request_ok(ext_response("[]"));
 
@@ -1381,7 +1393,7 @@ mod tests {
 
         let factory = NatsSessionFactory::new(nats);
         let session = factory
-            .create_session("acp", std::path::PathBuf::from("/tmp"))
+            .create_session("acp", std::path::PathBuf::from("/tmp"), vec![])
             .await
             .unwrap();
         assert_eq!(session.session_id(), "factory-created-session");
@@ -1402,7 +1414,7 @@ mod tests {
         use mock::MockSessionFactory;
         let factory = MockSessionFactory::new("default-sess");
         let session = factory
-            .create_session("acp", std::path::PathBuf::from("/tmp"))
+            .create_session("acp", std::path::PathBuf::from("/tmp"), vec![])
             .await
             .unwrap();
         assert_eq!(session.session_id(), "default-sess");
@@ -1416,9 +1428,9 @@ mod tests {
         factory.push_session(Arc::new(MockSession::new("first")));
         factory.push_session(Arc::new(MockSession::new("second")));
 
-        let s1 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
-        let s2 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
-        let s3 = factory.create_session("acp", std::path::PathBuf::from("/tmp")).await.unwrap();
+        let s1 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let s2 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
+        let s3 = factory.create_session("acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
         assert_eq!(s1.session_id(), "first");
         assert_eq!(s2.session_id(), "second");
         assert_eq!(s3.session_id(), "fallback");
