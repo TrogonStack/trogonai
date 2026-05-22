@@ -15,6 +15,112 @@ Provide a single chokepoint where every MCP tool call, resource read, prompt fet
 
 The gateway is generic at the transport level (NATS protocol + JSON-RPC) and MCP-aware via shippable policy bundles. The same engine should later cover ACP, A2A, or any JSON-RPC-over-NATS protocol.
 
+## The Take (Read This First)
+
+Everything below describes the *destination* — the full design space, including the platform-shaped ambition (generic policy engine, signed WASM bundles, multi-protocol reuse, KV-distributed control plane). It is **not the first thing to build.** The honest synthesis of all the design exploration in this document:
+
+1. **Do not build "Protect by itself."** A generic NATS-protocol policy proxy is months of platform work, competes directly with Synadia Protect (which already exists), and is the wrong wedge for TrogonStack. If a customer needs subject-level / connect-time policy on raw NATS, point them at Protect.
+2. **Do not build the full three-tier policy tower up front.** Declarative config → CEL DSL → NATS-callout plugins → WASM Component Model → signed bundles → KV-distributed control plane is the destination, not the first step. Building the engine before the product is the classic premature-abstraction trap, and most of the bundle / WIT / WASM-host-ABI machinery in this plan is platform thinking dressed as product thinking.
+3. **Do build an MCP-aware gateway as a NATS queue-group service.** Narrow, opinionated, MCP-specific. CEL with SpiceDB integration on `tools/call` and `resources/read`, schema-driven redaction (the actual differentiator vs agentgateway), automatic `tools/list` filtering via CEL re-evaluation (adopt directly from agentgateway), audit to JetStream. Treat it as a feature of TrogonStack's MCP story, not a standalone product. The vertical slice in **Phased Delivery → Phase 1** is the right starting shape.
+4. **Defer the generic-protocol play until a second protocol pulls on it.** When ACP, A2A, or decider commands need the same policy layer, the extraction will be obvious — and you'll know what is genuinely generic versus MCP-specific. Today there is one protocol asking for this; one protocol does not justify a platform.
+5. **WASM Component Model is the long-term wedge vs agentgateway, but Phase 3 — not Phase 1.** Build with CEL only first. Only add the WASM tier when tenants ask for it or when the schema-driven redaction story can't be expressed in CEL anymore.
+
+### The Strategic Question That Flips This
+
+The recommendation above assumes TrogonStack's pitch is **"an event-modeling / decider-driven agentic platform"** where MCP and ACP are surfaces, and the gateway is a feature of that platform. If the pitch is instead **"the security and governance layer for NATS-based agentic systems,"** the recommendation inverts: build the generic Protect-shaped product because *that is the company*. The technical design space is the same either way; the sequencing and scope are entirely different.
+
+This is a product-positioning decision, not a technical one. It belongs in the open questions until answered.
+
+### What "Next" Looks Like Concretely
+
+In order, before any code:
+
+1. Answer the product-positioning question above (feature vs. product).
+2. Pin the four irreversible technical decisions (host ABI, DSL, tenancy model, reply correlation) on paper — see **What's Missing** in the latter half of the plan.
+3. Decide on-bus vs. hybrid based on whether the gateway must front third-party MCP servers (GitHub, Notion, Linear, etc.) you do not control.
+
+Then, and only then, the **Phase 1 vertical slice**: `trogon-mcp-gateway` binary, queue-group on `mcp.gateway.request.>`, hardcoded CEL rule + one SpiceDB check on `tools/call`, audit to JetStream, end-to-end against an existing `mcp-nats` server. Approximately 2–4 weeks. Throwaway-safe — its purpose is to validate the substrate, not the policy model.
+
+## TODO
+
+Concrete work items derived from **The Take** and **What's Missing**. Ordered so earlier items unblock later ones. Checkboxes are intentional — this list should be edited in place as items land.
+
+### Block A — Strategic decisions (paper, no code)
+
+- [ ] Resolve product positioning: **feature inside TrogonStack** vs. **standalone security product**. Every other decision branches on this.
+- [ ] Resolve **on-bus vs. hybrid** deployment shape. Driven by: which MCP servers must this gateway front (TrogonStack-native only, or third-party ecosystem too).
+- [ ] Resolve tenancy boundary: **NATS account per tenant** vs. **tenant as JWT claim**. Affects KV namespaces, audit envelope shape, subject ACLs, JetStream stream layout — everything downstream. (Tenancy is **not** a subject segment — see **§ NATS Subject Topology → Tenancy**.)
+
+### Block B — Irreversible technical decisions (paper, before code)
+
+- [ ] **DSL choice.** CEL (recommended — agentgateway already validated it, ecosystem exists) vs. Expr (what Protect uses) vs. our own. Decide on the eval library too (`cel-rust` upstream or fork).
+- [ ] **Reply correlation mechanism.** Gateway terminates and holds the client inbox in memory vs. NATS subject-transform with inbox preservation. Different perf and complexity.
+- [ ] **Host ABI surface** — even if WASM is Phase 3, sketch the WIT interface now so CEL builtins are designed in a shape that survives the WASM port. `spicedb.check`, `cache.get/set`, `audit.emit`, `kv.fetch`, `nats.request`, `jsonpath.*`, `time.*`, `rate.acquire`.
+
+### Block C — Design specs to write (paper, before code)
+
+- [x] **Subject grammar** — full layout in **§ NATS Subject Topology** below: `mcp.gateway.request.>`, `mcp.gateway.callback.>`, `mcp.server.{server_id}.>`, `mcp.client.{client_id}.>`, `mcp.audit.>`, `mcp.control.>`, `mcp.plugin.{plugin_name}`. Includes reply-inbox conventions and how the gateway rewrites subjects.
+- [ ] **Session model** — where session state lives across queue-group members (JetStream KV vs. sticky routing vs. session-aware subject mapping). Required for `initialize` → operate → close to work under HA.
+- [ ] **Schema cache + invalidation** — keyed by `{server_id, schema_hash}`; invalidated by `notifications/tools/list_changed`, TTL fallback, version-bump on server reconnect.
+- [ ] **Failure-mode matrix** — stated default for: SpiceDB unreachable, WASM panic, bundle signature invalid on hot-swap, backend MCP server timeout, gateway saturation, NATS partition. Fail-closed vs. fail-open per decision class.
+- [ ] **Rate-limit state placement** — per-gateway-instance memory (fast, per-instance) vs. JetStream KV with atomic increment (cluster-wide, slower). Likely both, depending on rule scope.
+- [ ] **OAuth 2.0 MCP integration** — how the MCP OAuth flow composes with NATS auth callout. Probably callout calls the OAuth provider for token verification then issues a scoped NATS JWT.
+- [ ] **Bidirectional enforcement** — server→client traffic (`sampling/createMessage`, `elicitation/create`, `roots/list`) on `mcp.client.{client_id}.>`. Same policy engine, separate rule set, separate SpiceDB resource shape.
+- [ ] **Bootstrap / day-zero** behavior with empty bundle (default deny vs. fall-through with audit).
+- [ ] **Integration touch-points** — how the gateway emits to / consumes from `trogon-decider` (audit-as-events is the natural intersection), how it co-exists with `trogon-gateway` (Slack/etc.), whether the gateway itself is a decider.
+
+### Block D — Phase 1 vertical slice (2–4 weeks)
+
+Goal: prove the substrate, not the policy model. Throwaway-safe.
+
+- [ ] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
+- [ ] Queue-group consumer on `mcp.gateway.request.>`; tenant comes from JWT claim (or account scope) in the envelope, not the subject.
+- [ ] JSON-RPC parser; identity extraction from NATS message headers / inbound JWT.
+- [ ] CEL evaluator embedded; one hardcoded rule covering `tools/call`.
+- [ ] SpiceDB client + one `CheckPermission` call per `tools/call`.
+- [ ] Reply correlation: forward to `mcp.server.{id}.<method>`, await reply, return to original inbox.
+- [ ] Audit envelope publisher to JetStream stream `MCP_AUDIT`; subject `mcp.audit.{outcome}.{direction}.{method_root}` (tenant in envelope payload).
+- [ ] End-to-end test against an existing `mcp-nats` server (the test fixture in `mcp-nats/tests/transport.rs` is a good starting point).
+- [ ] Baseline latency measurement — P50, P99 added by the gateway vs. direct `mcp-nats` call. Establishes the budget for Phase 2+.
+- [ ] "Explain this decision" trace mode — given a request id, return the rules fired, the SpiceDB check result, the rewrites applied. Equivalent of `agctl trace`. Day-one, not later.
+
+### Block E — Phase 2 (CEL hardening + catalog shaping + redaction)
+
+- [ ] CEL builtins implemented per host-ABI sketch (`spicedb.check`, `cache.get/set`, `jsonpath.*`, `audit.emit`, `time.now`, `rate.acquire`).
+- [ ] `tools/list` filtering via CEL re-evaluation against each candidate item (adopt the agentgateway pattern directly).
+- [ ] `BulkCheckPermission` + ZedToken cache keyed to MCP session id.
+- [ ] Schema cache populated by sniffing `tools/list` replies; invalidation wired.
+- [ ] Schema-driven redaction — first pass as native code, not WASM, attached to schemas via JSONPath rules in YAML.
+- [ ] Hierarchical policy merge across subject-pattern specificity (org → tenant → server group → server → method).
+- [ ] Rate limiting wired with chosen state-placement decision.
+
+### Block F — Phase 3 (WASM components + bundles + multi-protocol)
+
+- [ ] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3.
+- [ ] Wasmtime integration with component pooling per bundle version.
+- [ ] Tracing across the WASM boundary; span context as part of `request-ctx`.
+- [ ] Bundle format (manifest + CEL + WASM components); NKey signature verification.
+- [ ] Bundle loader from NATS KV with hot-swap and rollback.
+- [ ] First-party `mcp-pack` bundle: resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope.
+- [ ] NATS-callout plugin tier (Tier 2.5 ext-proc-style) on `mcp.plugin.{plugin_name}`.
+- [ ] Engine extraction: `trogon-policy-core` + `trogon-policy-cel` as their own crates so ACP / A2A can reuse.
+
+### Block G — Operational tooling
+
+- [ ] CLI (`trogon-gateway-ctl` or similar): inspect config, trace requests, validate bundles offline, dry-run policy against fixture traffic.
+- [ ] Optional K8s controller projecting Gateway API CRDs into NATS KV (v2; only if positioning demands it).
+- [ ] xDS interop layer (v2+; only if positioning demands it).
+- [ ] Multi-region story: leaf-node deployment patterns, audit-stream replication, SpiceDB topology.
+- [ ] OpenTelemetry trace export from each phase + JetStream consumer for audit→SIEM.
+
+### Block H — Docs and process
+
+- [ ] One-page operator overview (Diátaxis-style explanation): on-bus vs. hybrid, deployment topology, what the MCP server does or doesn't change.
+- [ ] How-to: "put a third-party MCP server behind the gateway" (using `mcp-nats-stdio` as the server-side bridge).
+- [ ] How-to: "write a bundle pack" (once Phase 3 lands).
+- [ ] Reference: subject grammar, CEL variables, host ABI, audit envelope schema.
+- [ ] RFC per Block-A and Block-B decision, recorded under `.trogonai/decisions/` so the irreversible choices have a paper trail.
+
 ## Inspiration
 
 ### [Synadia Protect](https://www.synadia.com/protect)
@@ -55,7 +161,7 @@ agentgateway processes every request through four sequential phases with shallow
 
 | Phase | What it does in agentgateway | NATS-substrate equivalent |
 |---|---|---|
-| **Frontend** | TCP/TLS termination, access logging, tracing, gateway-level concerns | NATS **auth callout** at CONNECT — identity resolution (OIDC / mTLS / API key) → scoped user JWT with subject ACL `mcp.gateway.{tenant}.>`. TLS is the NATS server's responsibility. Tracing context bound to the connection. |
+| **Frontend** | TCP/TLS termination, access logging, tracing, gateway-level concerns | NATS **auth callout** at CONNECT — identity resolution (OIDC / mTLS / API key) → scoped user JWT with subject ACL `mcp.gateway.request.>` (and `mcp.gateway.callback.{my_client_id}.>` for the caller's own callbacks). TLS is the NATS server's responsibility. Tracing context bound to the connection. |
 | **PreRouting** | JWT / Basic / API-key auth, extAuth, extProc, transformations — runs *before* route selection | Gateway queue-group consumer receives the NATS message, decodes JSON-RPC, validates JWT claims, applies pre-routing transformations (e.g., header injection from claims). No subject mapping yet. |
 | **PostRouting** | The bulk — CORS, authentication, authorization, rate limit (local + global), extProc, transformations, header modifiers, CSRF, direct response. 14 filter types. | **The MCP policy engine runs here.** CEL evaluation, SpiceDB checks, schema-driven redaction, audit emission, rate limiting (JetStream-backed for distributed), `tools/list` shaping, request rewriting. |
 | **Backend** | TLS to upstream, backend auth, AI/MCP-specific policies, health checks | Publish to `mcp.server.{server_id}.<method>` via NATS request/reply. NATS account isolation replaces backend TLS. Health is NATS subscription liveness. |
@@ -68,10 +174,10 @@ agentgateway runs a control plane that ships config to data-plane proxies via **
 
 NATS equivalent — and arguably better operationally because NATS is already the bus:
 
-- **Config source of truth** → NATS KV bucket `gateway-config-{tenant}` with revisions. Each policy / backend / route is a KV entry keyed by name.
+- **Config source of truth** → NATS KV bucket `mcp-gateway-config` (one per account when tenancy = account; tenant-keyed entries when tenancy = JWT claim) with revisions. Each policy / backend / route is a KV entry keyed by name.
 - **Dynamic config push** → KV watchers. The gateway service subscribes; any KV update fires a hot reload. Revision number is the version pin.
 - **Bundles (Tier 1 + Tier 2 + Tier 3 + manifest)** → NATS **JetStream Object Store** for the binary WASM artifacts; NKey signature in the manifest; KV holds the active version pointer.
-- **Multi-source layering** → multiple KV buckets in priority order (org-base, tenant-override). The controller — if we even need one — is just a NATS service that watches some upstream (Git, OCI, K8s CRDs) and projects into KV.
+- **Multi-source layering** → multiple KV buckets in priority order (org-base, account-override). The controller — if we even need one — is just a NATS service that watches some upstream (Git, OCI, K8s CRDs) and projects into KV.
 
 This collapses agentgateway's three-tier "K8s CRD → controller → xDS → proxy" into "KV write → proxy watcher fires." No xDS protocol, no controller process required for the standalone case.
 
@@ -105,11 +211,11 @@ NATS equivalent uses subject-pattern specificity:
 
 | Scope | Subject pattern | Example |
 |---|---|---|
-| Org-wide | `mcp.gateway.>` | Audit envelope shape, base rate limit |
-| Tenant | `mcp.gateway.{tenant}.>` | Tenant-wide tool allowlist |
-| Server group | `mcp.gateway.{tenant}.server.{group}.>` | Per-group SpiceDB resource template |
-| Specific server | `mcp.gateway.{tenant}.server.{id}.>` | Override redaction for one server |
-| Method | `mcp.gateway.{tenant}.server.{id}.tools.call` | Per-method rules |
+| Org-wide | `mcp.gateway.request.>` | Audit envelope shape, base rate limit |
+| Server group | `mcp.gateway.request.{group}-*.>` (a CEL `match` predicate, since groups are not subject segments) | Per-group SpiceDB resource template |
+| Specific server | `mcp.gateway.request.{server_id}.>` | Override redaction for one server |
+| Method | `mcp.gateway.request.{server_id}.tools.call` | Per-method rules |
+| Tenant | *(not a subject — applied via JWT-claim predicate or NATS account scope)* | Tenant-wide tool allowlist |
 
 Merge is most-specific-wins per field. Same model, expressed in subject patterns rather than YAML target/backend hierarchy.
 
@@ -119,8 +225,8 @@ agentgateway's "Virtual MCP" combines N backend MCP servers into one logical ser
 
 NATS substrate: this is **trivial** because subjects already encode `mcp.server.{server_id}` — the prefix is the server id, no separate config needed.
 
-- Federated `tools/list` becomes a fan-out: gateway receives `mcp.gateway.{tenant}.tools.list` → fans out to `mcp.server.*.tools.list` for each registered server in the tenant's view → collects replies → prefixes each tool's `name` with `{server_id}_` → applies CEL filtering → returns one merged list.
-- `tools/call` reverses: gateway receives `mcp.gateway.{tenant}.tools.call` with `params.name = "github_create_issue"` → splits on first `_` → routes to `mcp.server.github.tools.call` with rewritten `params.name = "create_issue"`.
+- Federated `tools/list` becomes a fan-out: gateway receives `mcp.gateway.request.virtual-default.tools.list` → fans out to `mcp.server.*.tools.list` for each registered server in the federation member list → collects replies → prefixes each tool's `name` with `{server_id}_` → applies CEL filtering → returns one merged list.
+- `tools/call` reverses: gateway receives `mcp.gateway.request.virtual-default.tools.call` with `params.name = "github_create_issue"` → splits on first `_` → routes to `mcp.server.github.tools.call` with rewritten `params.name = "create_issue"`.
 
 Federation is a pure gateway-layer transform. The backend MCP servers don't know they've been multiplexed.
 
@@ -130,7 +236,7 @@ agentgateway's escape hatch is **ExtProc** — Envoy's external-processing proto
 
 We have a strictly better story available because we're on NATS:
 
-**Tier-2.5: NATS-callout plugins.** Instead of dialing out to a separate gRPC server, the gateway issues a NATS request on `mcp.policy.extproc.{plugin_name}` with the request envelope, and any subscriber (with the right entitlement) replies with the modification. Same out-of-process plugin model, same failClosed default, but:
+**Tier-2.5: NATS-callout plugins.** Instead of dialing out to a separate gRPC server, the gateway issues a NATS request on `mcp.plugin.{plugin_name}` with the request envelope, and any subscriber (with the right entitlement) replies with the modification. Same out-of-process plugin model, same failClosed default, but:
 
 - No second network transport — it's already on the bus.
 - Plugins scale horizontally via queue groups for free.
@@ -158,7 +264,7 @@ This is one of the cleanest places we can be strictly better than agentgateway: 
 
 agentgateway has access logging and OpenTelemetry-by-default. Audit is structured logging out the gateway.
 
-NATS equivalent is the natural one: audit envelope per decision → JetStream stream `MCP_AUDIT` with subject `mcp.audit.{tenant}.{outcome}.{method}`. Hash-chained envelopes (each envelope includes prior envelope's digest in the tenant's chain) for tamper-evidence. SIEM consumers subscribe via durable JetStream consumers. OpenTelemetry traces emit alongside but the audit stream is the legal record.
+NATS equivalent is the natural one: audit envelope per decision → JetStream stream `MCP_AUDIT` with subject `mcp.audit.{outcome}.{direction}.{method_root}` (tenant identity lives in the envelope payload). Hash-chained envelopes (each envelope includes prior envelope's digest) for tamper-evidence. SIEM consumers subscribe via durable JetStream consumers. OpenTelemetry traces emit alongside but the audit stream is the legal record.
 
 This is one place where NATS is *operationally simpler* than agentgateway — JetStream gives us durability, retention policy, replay, and SIEM connection out of the box.
 
@@ -218,26 +324,26 @@ The product wedge in one sentence: **agentgateway, but the control plane, data p
 
 ### Positioning on NATS
 
-Two namespaces, separated by NATS authorization (issued via auth callout):
+Two **zones**, separated by NATS authorization (subject ACL baked into JWT issued by the auth callout). Full subject grammar in **§ NATS Subject Topology** below; the short version:
 
-- `mcp.gateway.{tenant}.>` — only subject clients are permitted to publish to.
-- `mcp.server.{id}.>` — only the gateway service is permitted to publish to.
+- **Edge zone** — `mcp.gateway.request.>` (client → server) and `mcp.gateway.callback.>` (server → client) — client-facing. Clients (or edge bridges) publish on the request side; the gateway subscribes there. Gateway publishes on the callback side; the matching client subscribes there. Clients cannot publish anywhere else.
+- **Backend zone** — `mcp.server.{server_id}.>` and `mcp.client.{client_id}.>` — gateway-private. Uses the existing `mcp-nats` subject convention unchanged. Only the gateway holds publish permission on `mcp.server.*.>`; only the gateway holds subscribe permission on `mcp.client.*.>` (it receives server-initiated traffic and relays).
 
-Real MCP servers subscribe to `mcp.server.{id}.>` exactly as today (`rsworkspace/crates/mcp-nats`). Clients see only the gateway namespace. No code change to the existing transport.
+Existing `mcp-nats` MCP servers run **unchanged**. The gateway is purely additive — it introduces a new edge zone and translates between zones. Clients and servers are isolated from each other by NATS subject permissions, not by convention.
 
 ### Components
 
-1. **Auth callout service** — connect-time identity resolution. Maps external credentials (OIDC, mTLS, API key) to a scoped NATS user JWT with subject ACL covering `mcp.gateway.{tenant}.>`.
-2. **Gateway service** — queue-group subscriber on `mcp.gateway.>`. Stateless per-message; correlation state lives in-flight only.
+1. **Auth callout service** — connect-time identity resolution. Maps external credentials (OIDC, mTLS, API key) to a scoped NATS user JWT with subject ACL covering `mcp.gateway.request.>` (plus the caller's own `mcp.gateway.callback.{client_id}.>` subtree for server-initiated traffic). Tenant identity is asserted as a JWT claim, not a subject segment.
+2. **Gateway service** — queue-group subscriber on `mcp.gateway.request.>` and `mcp.client.>`. Stateless per-message; correlation state lives in-flight only.
 3. **Policy engine** — embedded in the gateway. Three-tier (see below). One execution model.
-4. **Audit emitter** — every decision → JetStream stream `mcp.audit.{tenant}.>` with JSON envelope.
+4. **Audit emitter** — every decision → JetStream stream `MCP_AUDIT` on subject root `mcp.audit.>` with JSON envelope.
 5. **Bundle loader** — fetches signed bundles from a configured source (NATS KV, OCI registry, HTTP), verifies NKey signature, hot-swaps in place.
 6. **Schema cache** — learns each backend server's tool / resource / prompt schemas by inspecting `tools/list` etc. replies; keyed by server id + version; used by redaction policies.
 
 ### Request flow
 
 ```
-client ──PUB──▶ mcp.gateway.{tenant}.tools.call
+client ──PUB──▶ mcp.gateway.request.{server_id}.tools.call
                         │
                         ▼
                 ┌──────────────────┐
@@ -246,19 +352,289 @@ client ──PUB──▶ mcp.gateway.{tenant}.tools.call
                 └──────────────────┘
                         │
         1. parse JSON-RPC (method, params, id)
-        2. resolve identity from JWT claims
+        2. resolve identity from JWT claims (sub, tenant, roles)
         3. derive resource tuple from method+params
-        4. policy.authorize(req)            ──▶ SpiceDB CheckPermission
-        5. policy.rewrite(req.params)       ──▶ input redaction
-        6. publish mcp.server.{id}.tools.call
+        4. policy.authorize(request)         ──▶ SpiceDB CheckPermission
+        5. policy.rewrite(request.params)    ──▶ input redaction
+        6. publish mcp.server.{server_id}.tools.call
         7. await reply on inbox
-        8. policy.shape(resp.result)        ──▶ catalog filter (if list)
-        9. policy.rewrite(resp.result)      ──▶ output redaction
-       10. publish audit envelope            ──▶ mcp.audit.{tenant}.*
+        8. policy.shape(response.result)     ──▶ catalog filter (if list)
+        9. policy.rewrite(response.result)   ──▶ output redaction
+       10. publish audit envelope            ──▶ mcp.audit.{outcome}.request.tools
        11. reply to client on original inbox
 ```
 
-Bidirectional traffic (server → client `sampling/createMessage`, `roots/list`, `elicitation/create`) is handled symmetrically on `mcp.client.{client_id}.>` — same policy engine, same decision verbs, separate rule set.
+Bidirectional traffic (server → client `sampling/createMessage`, `roots/list`, `elicitation/create`) is handled symmetrically: gateway subscribes on `mcp.client.{client_id}.>`, applies the callback-direction policy set, and re-publishes on `mcp.gateway.callback.{client_id}.{method}`. Subject mechanics in **§ NATS Subject Topology**.
+
+## NATS Subject Topology
+
+The full subject layout. This is the design's most foundational artifact — every other decision (subject ACLs, federation, audit filtering, multi-region routing, queue-group sharding) is downstream of it. Goals:
+
+1. **Subject permissions enforce isolation.** Clients literally cannot reach servers, and servers literally cannot reach clients, without the gateway in the middle. Enforced by NATS subject ACL, not convention.
+2. **Backwards-compatible with `mcp-nats`.** Backend zone reuses the existing transport's subjects verbatim — no breaking changes to the transport crate.
+3. **Direction, target, and method legible from the subject alone.** Routing, filtering, audit aggregation, and rate-limit keying never have to parse the payload.
+4. **Short enough for throughput.** NATS subject parsing is O(segments); 4–6 segments is the sweet spot.
+5. **Tenancy is not a subject segment.** Multi-tenancy is expressed via NATS accounts and/or per-deployment prefix overrides — not by adding a `{tenant}` token to every subject. See **§ Prefix convention** and **§ Tenancy** below.
+
+### Prefix convention (aligned with existing crates)
+
+`mcp-nats` and `acp-nats` both ship a configurable subject prefix today:
+
+- `mcp-nats` reads `MCP_PREFIX` env var, default `"mcp"`. Subjects branch as `{MCP_PREFIX}.server.{id}.{method}` and `{MCP_PREFIX}.client.{client_id}.{method}`.
+- `acp-nats` reads `ACP_PREFIX` env var, default `"acp"`. Subjects branch as `{ACP_PREFIX}.agent.ext.{method}` and `{ACP_PREFIX}.{session_id}.agent.*`.
+
+The gateway **reuses the same `MCP_PREFIX`** — it does not introduce a new env var. Every subject is spelled out — no short tokens — so an operator reading a subject in a log line can tell at a glance what it is. All gateway subjects are sibling subtrees under the one prefix:
+
+```
+{MCP_PREFIX}.gateway.request.{server_id}.{method}            # edge zone, client → server
+{MCP_PREFIX}.gateway.callback.{client_id}.{method}           # edge zone, server → client
+{MCP_PREFIX}.server.{server_id}.{method}                     # backend zone (existing mcp-nats)
+{MCP_PREFIX}.client.{client_id}.{method}                     # backend zone (existing mcp-nats)
+{MCP_PREFIX}.audit.{outcome}.{direction}.{method_root}       # outcome = allow|deny|rewrite|error
+{MCP_PREFIX}.control.<...>                                   # cache invalidation, discovery, heartbeats
+{MCP_PREFIX}.plugin.{plugin_name}                            # NATS-callout policy plugins
+```
+
+Default `MCP_PREFIX=mcp` yields `mcp.gateway.request.github.tools.call`, `mcp.audit.deny.request.tools`, etc. An operator who wants extra partitioning (multiple MCP installs on one cluster, environment-per-prefix, customer-per-prefix in a single-tenant-per-deploy model) sets `MCP_PREFIX=trogon.mcp` or `MCP_PREFIX=acme.mcp` and every subject shifts together.
+
+For the rest of this section, subjects are written with `mcp.` as the prefix for readability — understand it as `{MCP_PREFIX}.` throughout.
+
+### Two zones
+
+| Zone | Subject root | Who publishes | Who subscribes |
+|---|---|---|---|
+| **Edge** (gateway-facing) | `mcp.gateway.>` | clients, edge bridges, *and* gateway (for callbacks out) | gateway, and clients (for their own callback subjects) |
+| **Backend** (gateway-private, existing `mcp-nats`) | `mcp.server.{server_id}.>` / `mcp.client.{client_id}.>` | gateway (server-bound), backend servers (callbacks) | backend servers (own subject), gateway (all client-bound) |
+
+### Subject grammar
+
+#### Edge zone — client → server (`request` direction)
+
+```
+mcp.gateway.request.{server_id}.{method_path}
+```
+
+| Segment | Values | Notes |
+|---|---|---|
+| `request` | literal | Direction marker — message is client-initiated, flowing toward a server. |
+| `{server_id}` | `[a-z0-9-]+` or `virtual-{id}` | Logical server target. `virtual-*` indicates a federated/multiplexed target the gateway fans out. |
+| `{method_path}` | `tools.list` \| `tools.call` \| `resources.list` \| `resources.read` \| `resources.subscribe` \| `prompts.list` \| `prompts.get` \| `completion.complete` \| `initialize` \| `ping` \| `logging.setLevel` \| `notifications.initialized` \| `notifications.cancelled` \| `notifications.roots.list_changed` \| ... | MCP method with `/` → `.`. |
+
+Examples:
+
+```
+mcp.gateway.request.github.tools.call
+mcp.gateway.request.github.tools.list
+mcp.gateway.request.virtual-default.tools.list        # federated fan-out
+mcp.gateway.request.github.notifications.initialized
+```
+
+#### Edge zone — server → client (`callback` direction)
+
+```
+mcp.gateway.callback.{client_id}.{method_path}
+```
+
+| Segment | Values | Notes |
+|---|---|---|
+| `callback` | literal | Direction marker — message is server-initiated, flowing back to a client. |
+| `{client_id}` | `[a-z0-9-]+` | Logical client target. Gateway learns this from `initialize`. |
+| `{method_path}` | `sampling.createMessage` \| `elicitation.create` \| `roots.list` \| `notifications.tools.list_changed` \| `notifications.resources.list_changed` \| `notifications.resources.updated` \| `notifications.prompts.list_changed` \| `notifications.progress` \| `notifications.message` | Server → client MCP methods. |
+
+#### Backend zone — gateway → server (existing `mcp-nats`)
+
+```
+mcp.server.{server_id}.{method_path}
+```
+
+Verbatim from `rsworkspace/crates/mcp-nats`. The gateway is the only allowed publisher.
+
+#### Backend zone — server → gateway callbacks (existing `mcp-nats`)
+
+```
+mcp.client.{client_id}.{method_path}
+```
+
+Backend servers publish here when they need a client callback. The gateway is the only allowed subscriber.
+
+### Reply inboxes and correlation
+
+NATS request/reply uses an auto-generated `_INBOX.{nuid}` per request, set as the `reply-to` header. The gateway **terminates** correlation: it does not pass the client's inbox down to the backend; it creates its own.
+
+```
+1. client publishes mcp.gateway.request.github.tools.call
+                                       reply-to: _INBOX.client.{nuid_c}
+
+2. gateway receives, applies policy, then publishes
+   mcp.server.github.tools.call
+                    reply-to: _INBOX.gateway.{nuid_g}
+
+3. gateway holds map: nuid_g → { original_reply_to: _INBOX.client.{nuid_c},
+                                  request_ctx, span_ctx, deadline }
+
+4. backend server replies to _INBOX.gateway.{nuid_g}
+
+5. gateway receives reply, looks up nuid_g → context, applies response
+   policy (redaction, list filtering), then publishes to the original
+   _INBOX.client.{nuid_c}.
+```
+
+In-flight correlation state is **in-memory per gateway instance**. If a gateway instance dies mid-call, the request fails (client times out and retries; queue group routes the retry to a survivor). No JetStream KV for in-flight — that buys reliability we don't need at the cost of latency we can't afford.
+
+### Translation table
+
+Operations the gateway performs on each subject class:
+
+| Direction | Inbound subject (gateway subscribes) | Outbound subject (gateway publishes) | Operations |
+|---|---|---|---|
+| Client → Server, request | `mcp.gateway.request.{server_id}.{method}` | `mcp.server.{server_id}.{method}` | Authn, authz, input redact, audit, set own reply inbox |
+| Server → Gateway, response | `_INBOX.gateway.{nuid_g}` | original `_INBOX.client.{nuid_c}` | Output redact, `*/list` shape, audit |
+| Server → Client, callback | `mcp.client.{client_id}.{method}` | `mcp.gateway.callback.{client_id}.{method}` | Authz (callback direction), input redact, audit, set own reply inbox |
+| Client → Gateway, callback response | `_INBOX.gateway.{nuid_g2}` | original server-side `_INBOX.{nuid_s}` | Output redact, audit |
+| Notification, either direction | corresponding `request`/`callback` subject | corresponding backend subject | Authz, redact, audit; no reply path |
+
+### Virtual MCP (federation) in subjects
+
+Federated server id appears in subjects as `virtual-{id}`. The gateway expands the fan-out in its policy layer:
+
+```
+Client publishes:
+  mcp.gateway.request.virtual-default.tools.list
+                          │
+                          ▼ gateway fans out to all members of "default"
+  mcp.server.github.tools.list
+  mcp.server.linear.tools.list
+  mcp.server.notion.tools.list
+                          │
+                          ▼ gateway collects replies, prefixes tool names
+                             with target id, runs CEL filter per-item
+                             ("github_create_issue", "linear_create_issue", ...)
+                          ▼
+  one merged tools.list response back to the client
+```
+
+`tools/call` reverses the prefix: `params.name = "github_create_issue"` → split on first `_` → `mcp.server.github.tools.call` with `params.name = "create_issue"`.
+
+The fan-out membership list lives in the gateway's config (NATS KV); not encoded in the subject.
+
+### Subject ACL per principal
+
+Permissions baked into the JWT issued by the auth callout. Listed as `publish` / `subscribe` allow sets:
+
+| Principal | Publish | Subscribe |
+|---|---|---|
+| **Client / edge bridge** | `mcp.gateway.request.>` `_INBOX.client.>` | `mcp.gateway.callback.{my_client_id}.>` `_INBOX.client.>` |
+| **Backend MCP server** | `mcp.client.>` `_INBOX.>` (own replies) | `mcp.server.{my_server_id}.>` |
+| **Gateway service** | `mcp.server.>` `mcp.gateway.callback.>` `mcp.audit.>` `mcp.plugin.>` `mcp.control.>` `_INBOX.gateway.>` | `mcp.gateway.request.>` `mcp.client.>` `mcp.control.>` `_INBOX.gateway.>` |
+| **Audit consumer (SIEM)** | *(none)* | `mcp.audit.>` (durable JetStream consumer) |
+| **Policy plugin (ext-proc-style)** | `_INBOX.>` (replies) | `mcp.plugin.{my_plugin_name}.>` |
+
+The combination of (a) clients can only publish on `mcp.gateway.request.>` and (b) only the gateway can publish on `mcp.server.>` means **a malicious or buggy client cannot reach a backend MCP server even if it learns the server's id**. The gateway is not a recommended chokepoint — it's the only path the math allows.
+
+### Audit subjects
+
+```
+mcp.audit.{outcome}.{direction}.{method_root}
+```
+
+| Segment | Values |
+|---|---|
+| `{outcome}` | `allow` \| `deny` \| `rewrite` \| `error` |
+| `{direction}` | `request` \| `callback` |
+| `{method_root}` | `tools` \| `resources` \| `prompts` \| `sampling` \| `elicitation` \| `roots` \| `initialize` \| `notification` \| `other` |
+
+Full method, target id, caller, tenant claim, rules-fired, rewrites, SpiceDB decision, latency, span ctx live in the **envelope payload**, not the subject. Subject is for filtering.
+
+Examples:
+
+```
+mcp.audit.deny.request.tools           # SIEM subscriber for denials only
+mcp.audit.rewrite.callback.sampling    # redactions on server→client callbacks
+mcp.audit.allow.request.tools          # full allow trace (volume; sample at consumer)
+```
+
+JetStream stream name: `MCP_AUDIT` with subject filter `mcp.audit.>`. Retention quotas via stream limits. Hash-chained envelopes (each envelope carries prior digest) for tamper-evidence. When multiple deployments share a cluster, per-deployment `MCP_PREFIX` overrides naturally partition the audit stream.
+
+### Control plane subjects
+
+| Purpose | Subject |
+|---|---|
+| Schema-cache invalidation broadcast (when any gateway sees `notifications/tools/list_changed` from a server, all peers drop the cache for that server) | `mcp.control.cache.invalidate.{server_id}` |
+| Server registration / discovery (servers announce on startup) | `mcp.control.discovery.register.{server_id}` |
+| Server deregistration / shutdown | `mcp.control.discovery.deregister.{server_id}` |
+| Gateway instance heartbeat | `mcp.control.gateway.heartbeat.{instance_id}` |
+| Policy bundle reload signal (optional — KV watcher is primary path) | `mcp.control.bundle.reload` |
+
+Config bundles themselves live in **NATS KV** (bucket `mcp-gateway-config`) plus **JetStream Object Store** for binary WASM artifacts. KV watchers are the hot-reload mechanism; the `mcp.control.bundle.reload` subject is a belt-and-braces signal for non-watcher implementations. When tenancy = NATS account, each account naturally gets its own KV bucket; when tenancy = JWT claim, a single bucket holds entries keyed by tenant.
+
+### Plugin / ext-proc subjects
+
+NATS-callout policy plugins (Tier 2.5):
+
+```
+mcp.plugin.{plugin_name}
+```
+
+Gateway publishes a request envelope here with a reply inbox. Any subscriber on `mcp.plugin.{plugin_name}` in a queue group (named after the plugin) picks it up, processes, and replies. Multiple plugins are different `{plugin_name}` segments. failClosed by default — if no reply within the configured deadline, the gateway treats it as `deny`.
+
+### Notifications
+
+MCP notifications are one-way (no reply path). Use the same subject grammar as requests but publish without a reply inbox:
+
+```
+mcp.gateway.request.github.notifications.initialized              # client → server, fire-and-forget
+mcp.gateway.callback.client-1.notifications.tools.list_changed    # server → client, fire-and-forget
+```
+
+Gateway still applies policy and audits, but skips reply correlation.
+
+### Session correlation
+
+MCP `initialize` returns a session id used in subsequent requests via the `_meta` or `sessionId` header. Multi-instance gateway can't keep session state in memory per-instance, so:
+
+- **JetStream KV** bucket `mcp-sessions`, keyed by session id, TTL on idle. Stores: client_id, tenant claim (if soft tenancy), server_id binding(s), session-scoped ZedToken, schema versions in use, rate-limit budgets. Under hard tenancy the bucket is per-account; under soft tenancy a single bucket is namespaced by tenant claim in the key.
+- Any gateway instance handling a request looks up the session before policy eval.
+- For high-throughput / latency-sensitive deployments, **session-affinity via NATS subject mapping** is an alternative: include the session id in a subject token (e.g., `mcp.gateway.request.{server_id}.{method}.{session_id}` with consistent-hash routing), so the same gateway instance handles all requests for one session. Tradeoff: extra subject segment, harder to express subject ACL.
+
+The KV-based approach is the default; session-affinity is a Phase-3 perf optimization.
+
+### Tenancy
+
+Tenancy is not a subject segment. It is expressed by one (or a combination) of two mechanisms, both above the subject layer:
+
+1. **NATS account per tenant** (hard isolation, recommended default for multi-customer deployments). Subjects are identical across accounts — `mcp.gateway.request.github.tools.call` exists in every tenant's namespace — but accounts cannot reach each other's subjects without explicit imports/exports. The gateway runs once per account, or one gateway uses account imports to span tenants. KV buckets, JetStream streams, and audit retention all scope naturally to the account.
+2. **Per-deployment `MCP_PREFIX` override** (soft, simple partitioning). One operator wants `acme` and `globex` on the same NATS cluster without going through account configuration; set `MCP_PREFIX=acme.mcp` for one deployment and `MCP_PREFIX=globex.mcp` for the other. Subjects shift wholesale (`acme.mcp.gateway.request.github.tools.call`, `globex.mcp.gateway.request.github.tools.call`) and the gateway code is unaware. This matches the existing convention in `mcp-nats` and `acp-nats`.
+
+A tenant **claim** in the JWT remains useful even under hard tenancy — for the audit envelope payload, for SpiceDB principal naming, and for cross-account aggregation at the SIEM layer. But it does not appear in the subject. The subject answers "what message is this and where is it going"; the tenant answers "who is the message from", and that belongs in identity (JWT, account, headers), not topology.
+
+The default recommendation: **account-per-tenant in production, single account + tenant-claim-in-JWT for dev/single-customer deployments, and `MCP_PREFIX` override available as a partitioning escape hatch in either mode.**
+
+### Subject length / throughput note
+
+Typical edge-zone subject has ~5–7 segments. Example:
+
+```
+mcp.gateway.request.github.tools.call         # 6 segments, 37 chars
+mcp.audit.deny.request.tools                  # 5 segments, 28 chars
+mcp.control.cache.invalidate.github           # 5 segments, 35 chars
+```
+
+Well within NATS's comfortable range. Subject hashing and wildcard subscription are unaffected. For comparison, NATS itself uses subjects up to ~12 segments for internal `$SYS` traffic without issue.
+
+### Migration / compatibility with existing `mcp-nats`
+
+The existing transport in `rsworkspace/crates/mcp-nats` uses `MCP_PREFIX` (default `mcp`) and subjects `mcp.server.{server_id}.{method}` / `mcp.client.{client_id}.{method}`. The gateway design **does not require any change** to that crate — backend zone keeps those subjects verbatim. The gateway is purely additive at the subject level.
+
+The one new requirement on the transport: clients that want to talk to a gateway-fronted deployment use a new `mcp-gateway-client` adapter that targets the `mcp.gateway.request.>` edge zone instead of the backend `mcp.server.{server_id}.>` directly. For the bridge crates (`mcp-nats-stdio`, `mcp-nats-server`) the same applies — a configuration toggle picks edge zone vs backend zone. `MCP_PREFIX` is unchanged across the boundary.
+
+### Open decisions feeding back into the topology
+
+The subject design above leaves a few things deliberately under-specified because they depend on Block-A / Block-B decisions in **TODO**:
+
+- **Whether session id appears in the subject** for affinity routing. Current default: no, session in KV.
+- **Whether `request` and `callback` directions stay as separate segments** or could be unified into a single shape with role inferred from method. Current default: separate, because separate makes subject ACLs trivial.
+- **Whether `virtual-{id}` belongs in the subject** or whether federation is fully transparent (gateway looks up the real server id from a separate registry per call). Current default: subject-encoded, because it makes operator debugging easier.
+- **Whether the auth callout emits a tenant claim** under hard account tenancy. Current default: yes, for audit-envelope legibility and SpiceDB principal naming, even though the subject itself does not carry it.
 
 ## Policy Engine
 
@@ -272,7 +648,7 @@ YAML. Covers the boring 60%.
 rules:
   - name: deny-after-hours-writes
     when:
-      subject: "mcp.gateway.*.tools.call"
+      subject: "mcp.gateway.request.*.tools.call"
       jwt.role: "intern"
       time.hour_utc_in: [0, 6]
     decision: deny
@@ -321,7 +697,8 @@ package trogon:mcp-policy@0.1.0;
 
 interface policy {
   record request-ctx {
-    tenant: string,
+    tenant: string,                      // from JWT claim, not subject
+
     caller: identity,
     subject: string,
     method: string,
@@ -402,7 +779,7 @@ Schema-driven redaction is a WASM component (Tier 3) shipped in the MCP bundle p
 
 ## Audit
 
-Every decision emits one envelope to `mcp.audit.{tenant}.{outcome}.{method}`:
+Every decision emits one envelope to `mcp.audit.{outcome}.{direction}.{method_root}` (tenant identity lives in the envelope payload, not the subject):
 
 ```json
 {
@@ -411,7 +788,7 @@ Every decision emits one envelope to `mcp.audit.{tenant}.{outcome}.{method}`:
   "span_id": "...",
   "tenant": "acme",
   "caller": { "sub": "user:alice", "via": "oidc:google" },
-  "subject_in": "mcp.gateway.acme.tools.call",
+  "subject_in": "mcp.gateway.request.fs.tools.call",
   "subject_out": "mcp.server.fs.tools.call",
   "method": "tools/call",
   "tool": "db_query",
@@ -423,15 +800,164 @@ Every decision emits one envelope to `mcp.audit.{tenant}.{outcome}.{method}`:
 }
 ```
 
-Stream: `MCP_AUDIT` on JetStream, retention `limits` with per-tenant subject quota. SIEM connectors subscribe via durable consumers.
+Stream: `MCP_AUDIT` on JetStream, retention `limits`. Per-tenant quotas via per-account stream limits when tenancy = account, or by deploying separate `MCP_PREFIX` overrides per tenant. SIEM connectors subscribe via durable consumers filtered on `mcp.audit.>`.
 
 ## Bundles
 
 - **Format** — OCI artifact or tarball: `bundle.yaml` (Tier 1) + `*.cel` (Tier 2) + `*.wasm` components (Tier 3) + `manifest.json` (declared host capabilities, version, signer).
 - **Signing** — NKey signature over the manifest digest. Gateway verifies on load, rejects unsigned or unknown-signer bundles.
-- **Distribution** — bundle source is configurable: NATS KV bucket, OCI registry, or HTTP. Multiple sources can layer (org-wide base + tenant override).
+- **Distribution** — bundle source is configurable: NATS KV bucket, OCI registry, or HTTP. Multiple sources can layer (org-wide base + per-account override).
 - **Hot-swap** — atomic version pointer; in-flight messages finish on the old version, new ones start on the new. Rollback is a pointer flip.
 - **The "MCP pack"** — first-party bundle from us: resource-tuple derivation for every MCP method, catalog shaping rules, schema-learner WASM component, default audit envelope. Tenants extend/override.
+
+## Wire-Format Pins for Phase 1
+
+These are the on-the-wire contracts Phase 1 implements. Pinned now because each one bakes into headers, audit envelopes, JSON-RPC error responses, CEL rules, or the inbox subscription topology — changing any of them after consumers exist is a coordinated migration. Anything not listed here is allowed to change during Phase 1.
+
+### 1. NATS message headers
+
+Every gateway-handled message carries a fixed header set. Headers are authoritative for routing and policy; the JSON-RPC payload is for protocol semantics.
+
+| Header | Direction | Type | Source | Purpose |
+|---|---|---|---|---|
+| `traceparent` | both | W3C string | client (or gateway if absent) | Distributed-tracing parent span (W3C Trace Context). |
+| `tracestate` | both | W3C string | client / gateway | Vendor-specific trace state. |
+| `mcp-schema` | both | string, e.g. `trogon.mcp/v1` | gateway sets on egress | Wire-format version. Major bumps break consumers. |
+| `mcp-session-id` | both | opaque string | gateway issues at `initialize` | Stable across an MCP session. Routes to session KV. |
+| `mcp-caller-sub` | gateway → backend | string | gateway, from JWT `sub` | The authenticated principal. Backend may log/refuse. |
+| `mcp-tenant` | gateway → backend, audit | string | gateway, from JWT claim | Tenant identity mirror for log legibility — never trusted as authority. Stripped/overwritten on ingress; payload still carries it. |
+| `mcp-deadline-unix-ms` | client → gateway → backend | integer string | client (gateway clamps) | Absolute deadline, milliseconds since epoch. Gateway propagates after clamping to configured max. |
+| `mcp-correlation-id` | both | string | client (optional) | Opaque client correlator surfaced in audit envelope. |
+| `mcp-instance-id` | gateway → backend | string | gateway | Which gateway instance handled the request. Used for reply-inbox routing and audit. |
+
+**Ingress hardening rule.** On every message entering the gateway from the edge zone, the gateway **drops** any client-supplied value of `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, and `mcp-schema` and replaces them with values derived from the JWT and its own state. Clients cannot forge identity by header injection.
+
+### 2. Reply inbox naming
+
+```
+_INBOX.gateway.{instance_id}.{nuid}        # gateway → backend reply correlation
+_INBOX.client.{nuid}                       # client → gateway reply correlation (client-chosen)
+```
+
+- `{instance_id}` is a NUID generated at gateway-process boot and exposed on `mcp.control.gateway.heartbeat.{instance_id}`.
+- Each gateway instance subscribes **only** to `_INBOX.gateway.{my_instance_id}.>` — no cross-talk between instances.
+- Client inbox shape is the client's choice; the gateway never subscribes there. The original `reply-to` from the client is held in the in-memory correlation map keyed by `{nuid}` of the gateway-side inbox.
+- If `{instance_id}` collides on restart, the prior in-flight requests are already lost (process died); no recovery needed.
+
+### 3. Queue group strategy
+
+| Subscription | Queue group name | Reason |
+|---|---|---|
+| `mcp.gateway.request.>` | `mcp-gateway` | Single group; any healthy instance can serve any request. |
+| `mcp.client.>` | `mcp-gateway-callbacks` | Same instances, separate group so request and callback fairness are independent. |
+| `_INBOX.gateway.{my_instance_id}.>` | *(none — direct subscribe)* | Per-instance; queue-grouping would break correlation. |
+| `mcp.plugin.{plugin_name}` | `mcp-plugin-{plugin_name}` | Plugin authors get queue-group scale automatically. |
+
+**Backpressure.** Per-target inflight semaphore (default cap 256 per `server_id`) plus per-tenant inflight cap (default 4096). On saturation, gateway returns JSON-RPC error code `-32105` (see §6) with `data.retry_after_ms`. Caps are configurable per server in the bundle / KV config. This avoids per-method queue-group sprawl while bounding head-of-line blocking.
+
+### 4. Virtual-MCP name separator
+
+Federated tool names use `::` as the target-prefix separator:
+
+```
+github::create_issue
+linear::create_ticket
+notion::search_pages
+```
+
+Rationale: the MCP spec restricts tool names to a pattern that excludes `:`, so `::` cannot collide with any legal native tool name. Single `:` would be ambiguous with URI schemes in resource references. The separator is configurable per virtual server in the bundle (`separator: "::"` default) for operators who need to interop with prior conventions.
+
+**Splitting rule:** on `tools/call`, the gateway splits on the **first** `::` only; anything after the first separator is treated as the original tool name verbatim. This permits tools whose native name contains `::` (unusual but legal in some servers).
+
+### 5. `initialize` handshake handling
+
+**Gateway-terminated by default.** The gateway answers `initialize` itself; the client sees the gateway as the MCP server.
+
+- Gateway returns its own `serverInfo` (name `trogon-mcp-gateway`, version) and an aggregated `capabilities` object reflecting the union of features the federation supports — `tools`, `resources`, `prompts`, `logging`, `completions`, `sampling`, `elicitation`, etc.
+- Client's `clientInfo` and `protocolVersion` are recorded in the session KV under the issued `mcp-session-id`.
+- For **non-virtual** targets, the gateway lazily forwards an `initialize` to the chosen backend on first method call so the backend can do per-session setup. The backend response is recorded in the session KV; subsequent calls reuse it.
+- For **virtual** targets, the gateway lazily initializes each federation member on first call to that member. Members not yet initialized when `tools/list` runs are initialized in parallel before the merge.
+
+The lazy-forward keeps `initialize` cheap (no fan-out for clients that never call anything) while still giving backends a chance to do session setup before real work hits them.
+
+### 6. Gateway-emitted JSON-RPC error codes
+
+Trogon application errors occupy `-32100` to `-32199` (within the JSON-RPC application-error range, distinct from MCP's `-32002` and the protocol-reserved `-32700` … `-32600`).
+
+| Code | Symbol | Meaning | `data` shape |
+|---|---|---|---|
+| `-32100` | `policy_deny` | Authorization rule denied the request. | `{ trace_id, rule_fired, reason }` |
+| `-32101` | `policy_fault` | CEL evaluation error, WASM trap, bundle missing. failClosed result. | `{ trace_id, tier, error }` |
+| `-32102` | `backend_timeout` | Backend MCP server did not reply within the request deadline. | `{ trace_id, server_id, elapsed_ms }` |
+| `-32103` | `backend_unreachable` | No backend matched the target or queue-group has no consumers. | `{ trace_id, server_id }` |
+| `-32104` | `schema_unknown` | inputSchema not in cache and could not be fetched; redaction cannot validate. | `{ trace_id, server_id, tool }` |
+| `-32105` | `rate_limited` | Inflight cap or rate budget exceeded. | `{ trace_id, scope, retry_after_ms }` |
+| `-32106` | `auth_expired` | JWT expired mid-session, or session revoked. | `{ trace_id }` |
+| `-32107` | `authz_unreachable` | SpiceDB (or chosen PDP) did not respond. failClosed result. | `{ trace_id, elapsed_ms }` |
+| `-32108` | `no_policy` | Bundle not loaded, default-deny configured. | `{ trace_id }` |
+
+`trace_id` is always present and matches the `traceparent` header for cross-system correlation. Error message text is human-readable but **not** part of the contract — only the code and `data` shape are stable.
+
+### 7. Audit envelope schema
+
+Every audit envelope is JSON with a fixed top-level schema field. Forward-compat rule: consumers MUST tolerate unknown fields; consumers MAY refuse unknown major versions.
+
+```json
+{
+  "schema": "trogon.mcp.audit/v1",
+  "ts": "2026-05-22T10:00:00Z",
+  "trace_id": "0af7651916cd43dd8448eb211c80319c",
+  "span_id": "b7ad6b7169203331",
+  "instance_id": "NB7K…",
+  "tenant": "acme",
+  "session_id": "sess_…",
+  "caller": { "sub": "user:alice", "via": "oidc:google", "roles": ["engineer"] },
+  "subject_in": "mcp.gateway.request.github.tools.call",
+  "subject_out": "mcp.server.github.tools.call",
+  "direction": "request",
+  "method": "tools/call",
+  "method_root": "tools",
+  "tool": "create_issue",
+  "decision": "allow",
+  "rules_fired": ["tool-call-authz", "redact-github-pat"],
+  "rewrites": [{ "path": "$.params.token", "op": "hash" }],
+  "spicedb": { "zedtoken": "…", "checks": 1, "cache_hit": true },
+  "error": null,
+  "latency_us": 1820
+}
+```
+
+Stream-level metadata also tags `schema` so an offline reader can dispatch without unpacking a message. Bumps to `v2` are reserved for additive changes that consumers must opt into; renames or removals are `v2` and break old consumers.
+
+### 8. CEL variable namespace
+
+Roots are pinned; fields under a root may be added without a version bump, but never renamed or moved.
+
+| Root | Phase | Variables | Notes |
+|---|---|---|---|
+| `mcp.*` | both | `mcp.method` (string), `mcp.method_root` (string), `mcp.tool.name` (string), `mcp.tool.target` (string), `mcp.resource.uri` (string), `mcp.prompt.name` (string), `mcp.params` (JSON map), `mcp.result` (JSON map; response phase only) | Protocol surface. |
+| `jwt.*` | both | `jwt.sub` (string), `jwt.tenant` (string), `jwt.roles` (list<string>), `jwt.iss` (string), `jwt.aud` (string), `jwt.<custom>` | Claims from validated JWT. Custom claims are dynamic. |
+| `nats.*` | both | `nats.subject` (string), `nats.headers` (map<string,string>), `nats.account` (string) | Transport context. |
+| `request.*` | both | `request.id` (string), `request.deadline` (timestamp), `request.session_id` (string) | Request-level context. |
+| `response.*` | response only | `response.is_error` (bool), `response.list_filter_index` (int) | The list-filter index is set when re-evaluating the same rule per-item during `*/list` shaping. |
+| `time.*` | both | `time.now` (timestamp), `time.hour_utc` (int), `time.weekday` (int 0–6) | Host-evaluated. |
+| `spicedb.*` | both | *(functions, not variables)* — `spicedb.check(subject, perm, resource) -> bool`, `spicedb.bulk_check(subject, perm, [resources]) -> map<string,bool>` | Capability-gated host import. |
+| `cache.*` | both | *(functions)* — `cache.get(key) -> any`, `cache.set(key, value, ttl) -> bool` | ZedToken caching, schema caching. |
+| `audit.*` | both | *(functions)* — `audit.emit(extra_fields)` | Merged into the audit envelope's `extra` field. |
+| `rate.*` | both | *(functions)* — `rate.acquire(scope, key, budget, window) -> bool` | Returns false when rate-limited; rule typically denies on false. |
+
+The `mcp.params` and `mcp.result` JSON-map roots support indexing (`mcp.params.name`, `mcp.params["complex-key"]`) and traversal with the standard CEL operators. Deep traversal into untyped JSON uses the `jsonpath.*` host functions for ergonomic access.
+
+### 9. Per-target inflight cap and rate-limit defaults
+
+| Scope | Default cap | Configurable in | On exceed |
+|---|---|---|---|
+| Per `server_id` inflight | 256 | bundle / KV config | `-32105 rate_limited`, scope `server`, retry_after_ms set from oldest inflight age |
+| Per tenant inflight | 4096 | KV config | `-32105 rate_limited`, scope `tenant` |
+| Per caller `jwt.sub` rate | 100 req / 10s | bundle | `-32105 rate_limited`, scope `caller` |
+| Per `(jwt.sub, tool)` rate | (unset; opt-in via CEL `rate.acquire`) | bundle | per rule |
+
+Inflight caps are in-process semaphores per gateway instance (fast path, no NATS round-trip). Rate-limit budgets that need to be cluster-wide use `rate.acquire` against JetStream KV with atomic increment — slower but accurate across instances. Operators choose per-rule which one they need.
 
 ## Open Questions
 
