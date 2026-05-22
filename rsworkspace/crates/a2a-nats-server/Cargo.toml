@@ -1,0 +1,38 @@
+[package]
+name = "a2a-nats-server"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "a2a-nats-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-nats = { workspace = true }
+a2a-types = { workspace = true }
+async-compat = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "net"] }
+tower-http = { workspace = true, features = ["trace", "compression-full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["clap", "signal"] }
+
+[dev-dependencies]
+axum = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite = { workspace = true }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
