@@ -141,6 +141,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
     mut switcher: SW,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
+    let init_prefix = prefix.clone(); // always use the startup runner for /init
     let mut session = factory.create_session(&prefix, cwd.clone()).await?;
 
     let history_path = expand_tilde(HISTORY_PATH);
@@ -222,40 +223,68 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Err(e) => eprintln!("error triggering compaction: {e}"),
                         }
                     } else if cmd == "/init" {
+                        let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
                         let dest = root.join("TROGON.md");
-                        if fs.read_to_string(&dest).is_ok() {
+                        if fs.read_to_string(&dest).is_ok() && !force {
                             println!(
-                                "TROGON.md already exists at {}\nEdit it to update project context.",
+                                "TROGON.md already exists at {}\nRun /init --force to overwrite.",
                                 dest.display()
                             );
                         } else {
                             eprintln!("analyzing project with AI...");
                             let prompt = build_init_prompt(&root, &fs);
-                            match session.prompt(&prompt).await {
-                                Err(e) => eprintln!("error: {e}"),
-                                Ok(mut rx) => {
-                                    let mut content = String::new();
-                                    let mut stdout = std::io::stdout();
-                                    loop {
-                                        match rx.recv().await {
-                                            None => break,
-                                            Some(StreamEvent::Text(t)) => {
-                                                content.push_str(&t);
-                                                print!("{t}");
-                                                let _ = stdout.flush();
+                            match factory.create_session(&init_prefix, cwd.clone()).await {
+                                Err(e) => eprintln!("error creating init session: {e}"),
+                                Ok(init_session) => {
+                                    // Bypass approval gates so Claude can write TROGON.md without prompting.
+                                    let _ = init_session.set_mode("bypassPermissions").await;
+                                    match init_session.prompt(&prompt).await {
+                                        Err(e) => eprintln!("error: {e}"),
+                                        Ok(mut rx) => {
+                                            let mut content = String::new();
+                                            let mut stdout = std::io::stdout();
+                                            let mut runner_error: Option<String> = None;
+                                            loop {
+                                                match rx.recv().await {
+                                                    None => break,
+                                                    Some(StreamEvent::Text(t)) => {
+                                                        content.push_str(&t);
+                                                        print!("{t}");
+                                                        let _ = stdout.flush();
+                                                    }
+                                                    Some(StreamEvent::Error(msg)) => {
+                                                        runner_error = Some(msg);
+                                                        break;
+                                                    }
+                                                    Some(StreamEvent::Done(_)) => {
+                                                        println!();
+                                                        break;
+                                                    }
+                                                    _ => {}
+                                                }
                                             }
-                                            Some(StreamEvent::Done(_)) => {
-                                                println!();
-                                                break;
+                                            init_session.close().await;
+                                            if let Some(err) = runner_error {
+                                                eprintln!("error: {err}");
+                                            } else {
+                                            let trogon_content = strip_code_fence(&content);
+                                            if trogon_content.is_empty() {
+                                                // Model may have written the file directly via write_file tool.
+                                                // If it has content, keep it; otherwise report failure.
+                                                if fs.read_to_string(&dest).map(|s| !s.is_empty()).unwrap_or(false) {
+                                                    println!("created {}", dest.display());
+                                                } else {
+                                                    eprintln!("error: model produced no content — try again");
+                                                }
+                                            } else {
+                                                match fs.write(&dest, trogon_content.as_bytes()) {
+                                                    Ok(()) => println!("created {}", dest.display()),
+                                                    Err(e) => eprintln!("error writing TROGON.md: {e}"),
+                                                }
                                             }
-                                            _ => {}
+                                            } // close runner_error else
                                         }
-                                    }
-                                    let trogon_content = strip_code_fence(&content);
-                                    match fs.write(&dest, trogon_content.as_bytes()) {
-                                        Ok(()) => println!("created {}", dest.display()),
-                                        Err(e) => eprintln!("error writing TROGON.md: {e}"),
                                     }
                                 }
                             }
@@ -430,6 +459,7 @@ Commands:
   /config             show config  |  /config set <key> <value>
   /model              show current model  |  /model <id> change model
   /init               analyze project with AI and generate TROGON.md
+  /init --force       overwrite existing TROGON.md
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
@@ -571,8 +601,11 @@ fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
         .unwrap_or_default();
 
     format!(
-        "Analyze this software project and write a TROGON.md file.\n\
+        "Analyze this software project and generate the content of a TROGON.md file.\n\
          TROGON.md gives AI coding assistants context about the project.\n\
+         \n\
+         IMPORTANT: Do NOT call any tools (no read_file, no write_file, no list_dir, etc.).\n\
+         Output the TROGON.md content directly as plain text in your response — I will write it to disk.\n\
          \n\
          Project: {project_name}\n\
          {lang_line}\
@@ -586,7 +619,7 @@ fn build_init_prompt<F: Fs>(root: &Path, fs: &F) -> String {
          ## Development — build, test, and run commands\n\
          ## Notes — conventions and important context for an AI assistant\n\
          \n\
-         Output ONLY the TROGON.md content starting with the # heading. No preamble."
+         Output ONLY the TROGON.md content starting with the # heading. No preamble, no explanation."
     )
 }
 

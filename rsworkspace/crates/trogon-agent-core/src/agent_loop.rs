@@ -100,23 +100,47 @@ impl AnthropicHttpClient for reqwest::Client {
         extra_headers: &'a [(String, String)],
         body: &'a Value,
     ) -> Result<AnthropicResponse, AgentError> {
-        let mut req_builder = self
-            .post(url)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("anthropic-version", "2023-06-01");
-        for (k, v) in extra_headers {
-            req_builder = req_builder.header(k.as_str(), v.as_str());
+        const MAX_RETRIES: u32 = 4;
+        let mut attempt = 0u32;
+        loop {
+            let mut req_builder = self
+                .post(url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("anthropic-version", "2023-06-01");
+            for (k, v) in extra_headers {
+                req_builder = req_builder.header(k.as_str(), v.as_str());
+            }
+            let resp = match req_builder.json(body).send().await {
+                Err(e) if attempt < MAX_RETRIES => {
+                    warn!(attempt, error = %e, "Anthropic send error — retrying");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    attempt += 1;
+                    continue;
+                }
+                Err(e) => return Err(AgentError::Http(HttpError(e.to_string()))),
+                Ok(r) => r,
+            };
+
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(60);
+                warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
+                tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
+                attempt += 1;
+                continue;
+            }
+
+            return resp
+                .error_for_status()
+                .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
+                .json::<AnthropicResponse>()
+                .await
+                .map_err(|e| AgentError::Http(HttpError(e.to_string())));
         }
-        req_builder
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-            .error_for_status()
-            .map_err(|e| AgentError::Http(HttpError(e.to_string())))?
-            .json::<AnthropicResponse>()
-            .await
-            .map_err(|e| AgentError::Http(HttpError(e.to_string())))
     }
 }
 
@@ -247,14 +271,40 @@ impl AnthropicStreamingClient for ReqwestAnthropicStreamingClient {
 
         Box::pin(
             futures_util::stream::once(async move {
-                let mut req = http
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {token}"))
-                    .header("anthropic-version", "2023-06-01");
-                for (k, v) in &extra_headers {
-                    req = req.header(k.as_str(), v.as_str());
+                const MAX_RETRIES: u32 = 4;
+                let mut attempt = 0u32;
+                loop {
+                    let mut req = http
+                        .post(&url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .header("anthropic-version", "2023-06-01");
+                    for (k, v) in &extra_headers {
+                        req = req.header(k.as_str(), v.as_str());
+                    }
+                    let resp = match req.json(&body).send().await {
+                        Err(e) if attempt < MAX_RETRIES => {
+                            warn!(attempt, error = %e, "Anthropic send error — retrying");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            attempt += 1;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                        Ok(r) => r,
+                    };
+                    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(60);
+                        warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
+                        tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    return resp.error_for_status();
                 }
-                req.json(&body).send().await.and_then(|r| r.error_for_status())
             })
             .flat_map(
                 |result| -> Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>> {
