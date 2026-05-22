@@ -27,14 +27,23 @@ where
         publisher.clone(),
         |p, cfg| crate::source::github::router(p, cfg),
     );
-    app = mount_webhook_integrations(
-        app,
-        "slack",
-        "/sources/slack",
-        &config.slack,
-        publisher.clone(),
-        |p, cfg| crate::source::slack::router(p, cfg),
-    );
+    for integration in &config.slack {
+        if integration.config.webhook().is_none() {
+            continue;
+        }
+        let path = format!("/sources/slack/{}", integration.id);
+        app = app.nest(
+            &path,
+            crate::source::slack::router(publisher.clone(), &integration.config),
+        );
+        let integration_id = integration.id.as_str();
+        info!(
+            source = "slack",
+            integration = integration_id,
+            path,
+            "mounted source integration"
+        );
+    }
     app = mount_webhook_integrations(
         app,
         "telegram",
@@ -264,5 +273,29 @@ webhook_secret = "other-secret"
         let messages = publisher.published_messages();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].subject, "github-acme-main.push");
+    }
+
+    #[tokio::test]
+    async fn slack_socket_mode_integration_does_not_mount_webhook_route() {
+        let toml = r#"
+[sources.slack.integrations.primary.socket_mode]
+app_token = "xapp-test-token"
+"#;
+        let f = write_toml(toml);
+        let cfg = load(Some(f.path())).expect("load failed");
+        let app = mount_sources(cfg, wrap_publisher(MockJetStreamPublisher::new()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sources/slack/primary/webhook")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

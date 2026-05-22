@@ -84,6 +84,23 @@ bot_token = { env = "DISCORD_BOT_TOKEN" }
 Discord does not use the HTTP ingress or ngrok. It opens an outbound WebSocket
 connection to Discord and publishes every gateway event to NATS.
 
+## Slack Socket Mode
+
+Slack integrations can use either the existing HTTP webhook transport or Socket
+Mode. Configure exactly one transport per integration. Socket Mode does not use
+the HTTP ingress or ngrok; it opens an outbound WebSocket to Slack and publishes
+Events API payloads, interactive payloads, and slash commands to the same NATS
+subjects as the webhook transport.
+
+```toml
+[sources.slack.integrations.primary]
+subject_prefix = "slack-primary"
+stream_name = "SLACK_PRIMARY"
+
+[sources.slack.integrations.primary.socket_mode]
+app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }
+```
+
 ## Telegram webhooks
 
 Set `webhook_secret` under `[sources.telegram.integrations.<integration>.webhook]`. To let
