@@ -18,6 +18,40 @@ The result is opaque agent-to-agent collaboration with the same semantics as HTT
 
 The same gateway and policy engine described in `MCP_GATEWAY_PLAN.md` apply on top — A2A is the second tenant of that engine.
 
+## Implementation Status
+
+Snapshot of what is in-tree vs. what this plan still describes as future work.
+
+### Shipped crates
+
+- `rsworkspace/crates/a2a-nats` — protocol binding: subjects, JetStream stream/consumer/provision, JSON-RPC envelope, `Bridge` (agent runtime) and `Client`.
+- `rsworkspace/crates/a2a-nats-agent` — daemon shell that drives a user-supplied `A2aHandler` against the `Bridge`. Ships a `NoopHandler` and an `examples/echo.rs` reference handler.
+- `rsworkspace/crates/a2a-nats-server` — axum HTTP/SSE front-end that adapts JSON-RPC over HTTP to the NATS client. Not yet an A2A↔HTTPS interop bridge — it speaks to its own agent only.
+- `rsworkspace/crates/a2a-nats-stdio` — line-delimited JSON-RPC stdio bridge for tools that cannot embed NATS.
+
+### Working surface (Phase 2 partial)
+
+- Unary methods: `message/send`, `tasks/get`, `tasks/list`, `tasks/cancel`, `tasks/pushNotificationConfig/{set,get,list,delete}`, `agent/getAuthenticatedExtendedCard`. Each routes through `a2a.agent.{agent_id}.{method}` to an `A2aHandler` impl.
+- Streaming: `message/stream` (bootstrap reply + JetStream pump) and `tasks/resubscribe` (RPC for snapshot + JetStream consumer at `last_seq + 1`). Backed by a single `A2A_EVENTS` stream filtered to `a2a.task.*.events.*`.
+- Backpressure: `Config::max_concurrent_client_tasks` enforced via a Semaphore in the `Bridge` dispatch loop.
+- Consumer hygiene: ephemeral consumers carry `inactive_threshold = 5m` so client crashes don't leak server state.
+
+### Intentional simplifications vs. the design below
+
+- **No gateway / tenant axis yet.** Live subjects are `a2a.agent.{agent_id}.{method}` and `a2a.task.{task_id}.events.{req_id}` — the `a2a.gateway.{tenant}.>` namespace and the `{tenant}` segment on task subjects are not yet wired. Adding the tenant axis is a rename + an upstream gateway service; the handler trait is unaffected.
+- **Single stream `A2A_EVENTS`** instead of per-tenant `A2A_TASKS_{tenant}`.
+- **No auth callout, no policy engine, no SpiceDB authz, no audit emitter.** Anything that reaches the NATS subject is dispatched. Auth is delegated to the underlying NATS account / NKey.
+- **Push notification delivery is not implemented.** The `tasks/pushNotificationConfig/*` methods round-trip config through the handler, but no component reads that config and POSTs/publishes when an event fires.
+- **AgentCard generation is the handler's responsibility.** No KV catalog, no JSON-Schema validation, no `a2a.discover.{tenant}.>` service.
+- **No HTTPS↔NATS interop bridge** for foreign A2A clients.
+
+### Crates this plan still calls for
+
+- `a2a-gateway` — queue-group gateway sitting between clients and agents (auth, policy, audit, stream/consumer provisioning).
+- `a2a-bridge` — HTTPS↔NATS interop sidecar in both directions.
+- `a2a-pack` — first-party policy bundle (resource tuples, catalog shaping, redaction, audit envelope).
+- A discovery service that owns the `A2A_AGENTCARDS_{tenant}` KV bucket.
+
 ## Inspiration
 
 ### [Google A2A](https://a2aproject.github.io/A2A/)
@@ -316,11 +350,17 @@ Auth is re-minted at the bridge in both directions. AgentCards declare both tran
 
 Aligned with the MCP plan's phases so they share infrastructure.
 
-- **Phase 0** — auth callout + subject ACL + AgentCard KV bucket + unary `message/send` and `tasks/get` end-to-end. No streaming, no push, no policy. Prove the perimeter and the catalog.
-- **Phase 1** — Tier 1 policies, SpiceDB authz on `message/send` and `tasks/*`, audit to JetStream. Discovery shaping via `BulkCheckPermission`.
-- **Phase 2** — `message/stream` and `tasks/resubscribe` over JetStream consumers. Task-lifecycle audit. Tier 2 CEL.
-- **Phase 3** — `tasks/pushNotificationConfig/*` with NATS-subject and JetStream-stream targets; HTTPS webhook target as a special case. Tier 3 WASM redaction over `parts[*]`.
-- **Phase 4** — HTTPS↔NATS bridge, federated catalog, cross-binding agent collaboration.
+- **Phase 0** *(partial)* — auth callout + subject ACL + AgentCard KV bucket + unary `message/send` and `tasks/get` end-to-end. No streaming, no push, no policy. Prove the perimeter and the catalog.
+  - Done: unary `message/send`, `tasks/get`, and the rest of the unary surface.
+  - Pending: auth callout, subject ACL, AgentCard KV bucket / catalog service.
+- **Phase 1** *(not started)* — Tier 1 policies, SpiceDB authz on `message/send` and `tasks/*`, audit to JetStream. Discovery shaping via `BulkCheckPermission`.
+- **Phase 2** *(partial)* — `message/stream` and `tasks/resubscribe` over JetStream consumers. Task-lifecycle audit. Tier 2 CEL.
+  - Done: `message/stream` and `tasks/resubscribe` end-to-end, ephemeral pull consumers with `inactive_threshold`, resubscribe RPC + JetStream replay at `last_seq + 1`.
+  - Pending: task-lifecycle audit envelopes, Tier 2 CEL.
+- **Phase 3** *(not started)* — `tasks/pushNotificationConfig/*` with NATS-subject and JetStream-stream targets; HTTPS webhook target as a special case. Tier 3 WASM redaction over `parts[*]`.
+  - Done: `tasks/pushNotificationConfig/*` CRUD round-trips through the handler.
+  - Pending: delivery — nothing currently reads the config and dispatches notifications. Tier 3 WASM redaction.
+- **Phase 4** *(not started)* — HTTPS↔NATS bridge, federated catalog, cross-binding agent collaboration.
 
 ## Existing Code to Lean On
 
@@ -331,7 +371,10 @@ Aligned with the MCP plan's phases so they share infrastructure.
 
 New crates this plan adds:
 
-- `a2a-nats` — protocol binding (encoding, subject layout, task event helpers, AgentCard types). Peer of `mcp-nats`.
-- `a2a-gateway` — queue-group gateway service. Peer of `mcp-gateway`.
-- `a2a-bridge` — HTTPS↔NATS interop sidecar.
-- `a2a-pack` — first-party policy bundle (resource tuples, shaping, redaction, audit envelope).
+- `a2a-nats` *(shipped)* — protocol binding (encoding, subject layout, task event helpers, AgentCard types). Peer of `mcp-nats`.
+- `a2a-nats-agent` *(shipped, not originally in plan)* — daemon shell wrapping a user-supplied `A2aHandler`. Equivalent of an MCP "stdio server" entry point.
+- `a2a-nats-server` *(shipped, narrower than `a2a-bridge`)* — axum HTTP/SSE adapter for the local agent. A starting point for the planned interop bridge but does not yet bridge foreign A2A HTTPS clients.
+- `a2a-nats-stdio` *(shipped, not originally in plan)* — line-delimited JSON-RPC stdio adapter.
+- `a2a-gateway` *(not yet)* — queue-group gateway service. Peer of `mcp-gateway`.
+- `a2a-bridge` *(not yet)* — HTTPS↔NATS interop sidecar in both directions.
+- `a2a-pack` *(not yet)* — first-party policy bundle (resource tuples, shaping, redaction, audit envelope).
