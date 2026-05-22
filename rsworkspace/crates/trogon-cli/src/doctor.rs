@@ -421,6 +421,9 @@ mod tests {
         unsafe {
             std::env::set_var("ACP_PREFIX", "acp.claude");
             std::env::set_var("ANTHROPIC_TOKEN", "sk-test");
+            std::env::remove_var("OPENROUTER_API_KEY");
+            std::env::remove_var("XAI_API_KEY");
+            std::env::set_var("CODEX_ENABLED", "0");
         }
         let warnings = collect_token_warnings();
         unsafe {

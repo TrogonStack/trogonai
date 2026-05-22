@@ -1,6 +1,8 @@
 use crate::nats::NatsClient;
+use crate::tool_update::map_tool_call_update;
 use agent_client_protocol::{
-    ContentBlock, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, TextContent,
+    ContentBlock, NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate,
+    TextContent, ToolCallStatus,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -233,6 +235,18 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                                             let _ = tx.send(StreamEvent::ToolCall(tc.title)).await;
                                         }
                                     }
+                                    SessionUpdate::ToolCallUpdate(update) => {
+                                        if let Some(finished) = map_tool_call_update(&update) {
+                                            let _ = tx
+                                                .send(StreamEvent::ToolFinished {
+                                                    name: finished.name,
+                                                    output: finished.output,
+                                                    exit_code: finished.exit_code,
+                                                    status: finished.status,
+                                                })
+                                                .await;
+                                        }
+                                    }
                                     SessionUpdate::UsageUpdate(u) => {
                                         let _ = tx
                                             .send(StreamEvent::Usage {
@@ -366,6 +380,13 @@ pub enum StreamEvent {
     ToolCall(String),
     /// Pre-rendered colored diff for Edit/MultiEdit/Write tool calls.
     Diff(String),
+    /// Tool execution finished with output (from ToolCallUpdate).
+    ToolFinished {
+        name: String,
+        output: String,
+        exit_code: Option<i32>,
+        status: ToolCallStatus,
+    },
     /// Token usage update at the end of a turn.
     Usage { used_tokens: u64, context_size: u64 },
     /// Runner returned an error response (e.g. API failure).
@@ -407,6 +428,40 @@ fn render_diff(tool_name: &str, input: Option<&serde_json::Value>) -> Option<Str
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let lines = content.lines().count();
             Some(format!("{BOLD}[write: {path}]{RESET} {DIM}({lines} lines){RESET}"))
+        }
+        "str_replace" | "write_file" => {
+            let path = input
+                .get("path")
+                .or_else(|| input.get("file_path"))
+                .and_then(|v| v.as_str())?;
+            if tool_name == "write_file" {
+                let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let lines = content.lines().count();
+                Some(format!("{BOLD}[write: {path}]{RESET} {DIM}({lines} lines){RESET}"))
+            } else {
+                let old = input
+                    .get("old_str")
+                    .or_else(|| input.get("old_string"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let new = input
+                    .get("new_str")
+                    .or_else(|| input.get("new_string"))
+                    .and_then(|v| v.as_str())?;
+                Some(format_edit_diff(path, old, new))
+            }
+        }
+        "read_file" => {
+            let path = input.get("path").and_then(|v| v.as_str())?;
+            Some(format!("{DIM}[read: {path}]{RESET}"))
+        }
+        "bash" | "Bash" => {
+            let cmd = input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let preview: String = cmd.chars().take(80).collect();
+            Some(format!("{DIM}[bash: {preview}]{RESET}"))
         }
         _ => None,
     }
@@ -715,8 +770,34 @@ mod tests {
     #[test]
     fn render_diff_unknown_tool_returns_none() {
         let input = json!({"file_path": "x.rs"});
-        assert!(render_diff("Bash", Some(&input)).is_none());
-        assert!(render_diff("Read", Some(&input)).is_none());
+        assert!(render_diff("unknown_tool", Some(&input)).is_none());
+    }
+
+    #[test]
+    fn render_diff_str_replace_returns_colored_diff() {
+        let input = json!({
+            "path": "src/main.rs",
+            "old_str": "fn old()",
+            "new_str": "fn new()"
+        });
+        let diff = render_diff("str_replace", Some(&input)).unwrap();
+        assert!(diff.contains("src/main.rs"));
+        assert!(diff.contains("fn old()"));
+        assert!(diff.contains("fn new()"));
+    }
+
+    #[test]
+    fn render_diff_bash_shows_command_preview() {
+        let input = json!({"command": "cargo test -p trogon-cli"});
+        let diff = render_diff("bash", Some(&input)).unwrap();
+        assert!(diff.contains("cargo test"));
+    }
+
+    #[test]
+    fn render_diff_read_file_shows_path() {
+        let input = json!({"path": "Cargo.toml"});
+        let diff = render_diff("read_file", Some(&input)).unwrap();
+        assert!(diff.contains("Cargo.toml"));
     }
 
     #[test]

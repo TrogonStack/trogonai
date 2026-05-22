@@ -412,6 +412,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                         Some(StreamEvent::Diff(diff)) => {
                                             eprintln!("{diff}");
                                         }
+                                        Some(StreamEvent::ToolFinished {
+                                            name,
+                                            output,
+                                            exit_code,
+                                            status,
+                                        }) => {
+                                            if tool_line_active {
+                                                eprint!("\r\x1b[2K");
+                                                let _ = std::io::stderr().flush();
+                                                tool_line_active = false;
+                                            }
+                                            let failed = matches!(status, agent_client_protocol::ToolCallStatus::Failed);
+                                            let code_suffix = exit_code
+                                                .map(|c| format!(" (exit {c})"))
+                                                .unwrap_or_default();
+                                            let badge = if failed { " [failed]" } else { "" };
+                                            eprintln!(
+                                                "\x1b[2m┆ {name}{code_suffix}{badge}\x1b[0m"
+                                            );
+                                            if !output.is_empty() {
+                                                eprintln!("{output}");
+                                            }
+                                        }
                                         Some(StreamEvent::Usage { used_tokens, context_size }) => {
                                             session_used_tokens = used_tokens;
                                             session_context_size = context_size;
