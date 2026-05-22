@@ -315,12 +315,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                         let ctrl_c = tokio::signal::ctrl_c();
                         tokio::pin!(ctrl_c);
                         let mut response_buf = String::new();
+                        // true while a ┆ tool line is live on stderr (no trailing newline)
+                        let mut tool_line_active = false;
 
                         loop {
                             tokio::select! {
                                 biased;
                                 _ = &mut ctrl_c => {
                                     session.cancel().await;
+                                    if tool_line_active { eprint!("\r\x1b[2K"); let _ = std::io::stderr().flush(); }
                                     eprintln!("\n[cancelled]");
                                     break;
                                 }
@@ -328,15 +331,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                     match event {
                                         None => break,
                                         Some(StreamEvent::Text(text)) => {
+                                            if tool_line_active {
+                                                // clear tool line before text starts
+                                                eprint!("\r\x1b[2K");
+                                                let _ = std::io::stderr().flush();
+                                                tool_line_active = false;
+                                            }
                                             response_buf.push_str(&text);
                                         }
                                         Some(StreamEvent::Thinking) => {}
                                         Some(StreamEvent::ToolCall(name)) => {
                                             if !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
+                                                let _ = stdout.flush();
                                                 response_buf.clear();
                                             }
-                                            eprintln!("\n[tool: {name}]");
+                                            if tool_line_active {
+                                                // overwrite the previous tool line in place
+                                                eprint!("\r\x1b[2K\x1b[2m┆ {name}\x1b[0m");
+                                            } else {
+                                                eprint!("\n\x1b[2m┆ {name}\x1b[0m");
+                                                tool_line_active = true;
+                                            }
+                                            let _ = std::io::stderr().flush();
                                         }
                                         Some(StreamEvent::Diff(diff)) => {
                                             eprintln!("{diff}");
@@ -346,6 +363,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             session_context_size = context_size;
                                         }
                                         Some(StreamEvent::Error(msg)) => {
+                                            if tool_line_active { eprint!("\r\x1b[2K"); let _ = std::io::stderr().flush(); }
                                             if !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
                                                 response_buf.clear();
@@ -355,6 +373,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                                             break;
                                         }
                                         Some(StreamEvent::Done(reason)) => {
+                                            if tool_line_active { eprint!("\r\x1b[2K"); let _ = std::io::stderr().flush(); }
                                             if !response_buf.is_empty() {
                                                 print!("{}", crate::markdown::render(&response_buf));
                                                 response_buf.clear();
