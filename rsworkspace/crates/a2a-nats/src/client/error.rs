@@ -1,58 +1,27 @@
+use std::fmt;
+
 use crate::error::{
-    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, EXTENDED_AGENT_CARD_NOT_CONFIGURED, EXTENSION_SUPPORT_REQUIRED,
-    INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED, TASK_NOT_CANCELABLE, TASK_NOT_FOUND,
-    UNSUPPORTED_OPERATION, VERSION_NOT_SUPPORTED,
+    AGENT_UNAVAILABLE, CONTENT_TYPE_NOT_SUPPORTED, INVALID_AGENT_RESPONSE, PUSH_NOTIFICATION_NOT_SUPPORTED,
+    TASK_NOT_CANCELABLE, TASK_NOT_FOUND, UNSUPPORTED_OPERATION,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ClientError {
-    #[error("failed to serialize request: {0}")]
-    Serialize(#[source] serde_json::Error),
-    #[error("failed to deserialize response: {0}")]
-    Deserialize(#[source] serde_json::Error),
-    #[error("transport error: {0}")]
+    Serialize(serde_json::Error),
+    Deserialize(serde_json::Error),
     Transport(String),
-    #[error("request to '{subject}' timed out")]
     Timeout { subject: String },
-    #[error("JetStream error: {0}")]
     JetStream(String),
-    #[error("task not found")]
     TaskNotFound,
-    #[error("task is not cancelable")]
     TaskNotCancelable,
-    #[error("push notifications not supported")]
     PushNotificationNotSupported,
-    #[error("operation not supported")]
     UnsupportedOperation,
-    #[error("content type not supported")]
     ContentTypeNotSupported,
-    #[error("invalid agent response")]
     InvalidAgentResponse,
-    #[error("extended agent card not configured")]
-    ExtendedAgentCardNotConfigured,
-    #[error("extension support required: {0}")]
-    ExtensionSupportRequired(String),
-    #[error("A2A protocol version not supported: {0}")]
-    VersionNotSupported(String),
-    #[error("agent unavailable")]
     AgentUnavailable,
-    #[error("JSON-RPC error {code}: {message}")]
     JsonRpc { code: i32, message: String },
-    #[error("failed to set up event consumer: {0}")]
     ConsumerSetup(String),
-    #[error("event stream closed unexpectedly")]
     StreamClosed,
-    /// Returned when deriving a gateway ingress overlay from built-in agent subjects fails (internal invariant).
-    #[error("internal error deriving gateway ingress subject")]
-    InvalidRpcSubjectOverlay,
-    /// Gateway ingress publish attempted with an expired minted User JWT (refresh before retrying).
-    #[error("gateway caller JWT expired: {0}")]
-    GatewayCallerJwtExpired(String),
-    /// Minted User JWT failed freshness validation for a reason other than
-    /// expiry (missing `exp`, not-yet-valid `nbf`, decode failure, clock skew).
-    /// Callers should re-mint or investigate rather than treat as expired.
-    #[error("gateway caller JWT failed freshness check: {0}")]
-    GatewayCallerJwtInvalid(String),
 }
 
 impl ClientError {
@@ -64,11 +33,39 @@ impl ClientError {
             UNSUPPORTED_OPERATION => Self::UnsupportedOperation,
             CONTENT_TYPE_NOT_SUPPORTED => Self::ContentTypeNotSupported,
             INVALID_AGENT_RESPONSE => Self::InvalidAgentResponse,
-            EXTENDED_AGENT_CARD_NOT_CONFIGURED => Self::ExtendedAgentCardNotConfigured,
-            EXTENSION_SUPPORT_REQUIRED => Self::ExtensionSupportRequired(message),
-            VERSION_NOT_SUPPORTED => Self::VersionNotSupported(message),
             AGENT_UNAVAILABLE => Self::AgentUnavailable,
             _ => Self::JsonRpc { code, message },
+        }
+    }
+}
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Serialize(e) => write!(f, "failed to serialize request: {e}"),
+            Self::Deserialize(e) => write!(f, "failed to deserialize response: {e}"),
+            Self::Transport(msg) => write!(f, "transport error: {msg}"),
+            Self::Timeout { subject } => write!(f, "request to '{subject}' timed out"),
+            Self::JetStream(msg) => write!(f, "JetStream error: {msg}"),
+            Self::TaskNotFound => write!(f, "task not found"),
+            Self::TaskNotCancelable => write!(f, "task is not cancelable"),
+            Self::PushNotificationNotSupported => write!(f, "push notifications not supported"),
+            Self::UnsupportedOperation => write!(f, "operation not supported"),
+            Self::ContentTypeNotSupported => write!(f, "content type not supported"),
+            Self::InvalidAgentResponse => write!(f, "invalid agent response"),
+            Self::AgentUnavailable => write!(f, "agent unavailable"),
+            Self::JsonRpc { code, message } => write!(f, "JSON-RPC error {code}: {message}"),
+            Self::ConsumerSetup(msg) => write!(f, "failed to set up event consumer: {msg}"),
+            Self::StreamClosed => write!(f, "event stream closed unexpectedly"),
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Serialize(e) | Self::Deserialize(e) => Some(e),
+            _ => None,
         }
     }
 }
@@ -122,30 +119,6 @@ mod tests {
     }
 
     #[test]
-    fn extended_card_not_configured_code_maps_correctly() {
-        let err = ClientError::from_jsonrpc_code(EXTENDED_AGENT_CARD_NOT_CONFIGURED, "no ext card".into());
-        assert!(matches!(err, ClientError::ExtendedAgentCardNotConfigured));
-    }
-
-    #[test]
-    fn extension_support_required_code_carries_message() {
-        let err = ClientError::from_jsonrpc_code(EXTENSION_SUPPORT_REQUIRED, "need ext foo".into());
-        match err {
-            ClientError::ExtensionSupportRequired(msg) => assert_eq!(msg, "need ext foo"),
-            other => panic!("unexpected variant {other:?}"),
-        }
-    }
-
-    #[test]
-    fn version_not_supported_code_carries_message() {
-        let err = ClientError::from_jsonrpc_code(VERSION_NOT_SUPPORTED, "9.9.9".into());
-        match err {
-            ClientError::VersionNotSupported(msg) => assert_eq!(msg, "9.9.9"),
-            other => panic!("unexpected variant {other:?}"),
-        }
-    }
-
-    #[test]
     fn unknown_code_maps_to_generic_jsonrpc() {
         let err = ClientError::from_jsonrpc_code(-32099, "custom error".into());
         assert!(matches!(err, ClientError::JsonRpc { code: -32099, .. }));
@@ -171,9 +144,7 @@ mod tests {
 
     #[test]
     fn display_timeout() {
-        let err = ClientError::Timeout {
-            subject: "a.b.c".into(),
-        };
+        let err = ClientError::Timeout { subject: "a.b.c".into() };
         assert!(err.to_string().contains("'a.b.c' timed out"));
     }
 
@@ -205,11 +176,7 @@ mod tests {
 
     #[test]
     fn display_content_type() {
-        assert!(
-            ClientError::ContentTypeNotSupported
-                .to_string()
-                .contains("content type")
-        );
+        assert!(ClientError::ContentTypeNotSupported.to_string().contains("content type"));
     }
 
     #[test]
@@ -223,34 +190,8 @@ mod tests {
     }
 
     #[test]
-    fn display_extended_card_not_configured() {
-        assert!(
-            ClientError::ExtendedAgentCardNotConfigured
-                .to_string()
-                .contains("extended agent card")
-        );
-    }
-
-    #[test]
-    fn display_extension_support_required() {
-        let err = ClientError::ExtensionSupportRequired("foo".into());
-        assert!(err.to_string().contains("extension support required"));
-        assert!(err.to_string().contains("foo"));
-    }
-
-    #[test]
-    fn display_version_not_supported() {
-        let err = ClientError::VersionNotSupported("0.4".into());
-        assert!(err.to_string().contains("version not supported"));
-        assert!(err.to_string().contains("0.4"));
-    }
-
-    #[test]
     fn display_jsonrpc_generic() {
-        let err = ClientError::JsonRpc {
-            code: -32001,
-            message: "oops".into(),
-        };
+        let err = ClientError::JsonRpc { code: -32001, message: "oops".into() };
         assert!(err.to_string().contains("-32001"));
         assert!(err.to_string().contains("oops"));
     }
@@ -264,27 +205,6 @@ mod tests {
     #[test]
     fn display_stream_closed() {
         assert!(ClientError::StreamClosed.to_string().contains("closed"));
-    }
-
-    #[test]
-    fn display_invalid_rpc_subject_overlay() {
-        assert!(
-            ClientError::InvalidRpcSubjectOverlay
-                .to_string()
-                .contains("gateway ingress")
-        );
-    }
-
-    #[test]
-    fn display_gateway_caller_jwt_expired() {
-        let err = ClientError::GatewayCallerJwtExpired("user JWT expired".into());
-        assert!(err.to_string().contains("expired"));
-    }
-
-    #[test]
-    fn display_gateway_caller_jwt_invalid() {
-        let err = ClientError::GatewayCallerJwtInvalid("user JWT missing exp".into());
-        assert!(err.to_string().contains("failed freshness check"));
     }
 
     #[test]

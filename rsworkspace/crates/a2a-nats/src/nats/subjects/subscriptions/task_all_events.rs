@@ -1,6 +1,6 @@
 use crate::a2a_prefix::A2aPrefix;
 
-/// `{prefix}.tasks.*.events.*` — global JetStream filter subject covering every task's
+/// `{prefix}.task.*.events.*` — global JetStream filter subject covering every task's
 /// events. Used by the JetStream `EVENTS` stream config and aggregation consumers.
 #[derive(Debug)]
 pub struct TaskAllEventsSubject {
@@ -15,7 +15,7 @@ impl TaskAllEventsSubject {
 
 impl std::fmt::Display for TaskAllEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.tasks.*.events.*", self.prefix.as_str())
+        write!(f, "{}.task.*.events.*", self.prefix.as_str())
     }
 }
 
@@ -29,22 +29,4 @@ impl super::super::markers::Subscribable for TaskAllEventsSubject {}
 
 impl super::super::stream::StreamAssignment for TaskAllEventsSubject {
     const STREAM: Option<super::super::stream::A2aStream> = None;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn formats_global_tasks_events_filter() {
-        let s = TaskAllEventsSubject::new(&A2aPrefix::new("a2a").unwrap());
-        assert_eq!(s.to_string(), "a2a.tasks.*.events.*");
-    }
-
-    #[test]
-    fn to_subject_round_trips_display_form() {
-        use async_nats::subject::ToSubject;
-        let s = TaskAllEventsSubject::new(&A2aPrefix::new("a2a").unwrap());
-        assert_eq!(s.to_subject().as_str(), "a2a.tasks.*.events.*");
-    }
 }

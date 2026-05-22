@@ -26,11 +26,7 @@ pub struct OutboundResponse {
 
 impl OutboundResponse {
     pub fn new(id: RpcId, result: Value) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            result,
-        }
+        Self { jsonrpc: "2.0", id, result }
     }
 }
 
@@ -44,12 +40,7 @@ pub struct OutboundNotification {
 
 impl OutboundNotification {
     pub fn new(id: RpcId, method: &'static str, params: Value) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            method,
-            params,
-        }
+        Self { jsonrpc: "2.0", id, method, params }
     }
 }
 
@@ -68,11 +59,7 @@ pub struct OutboundError {
 
 impl OutboundError {
     pub fn new(id: RpcId, code: i32, message: String) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            error: RpcError { code, message },
-        }
+        Self { jsonrpc: "2.0", id, error: RpcError { code, message } }
     }
 }
 

@@ -1,23 +1,22 @@
 use std::sync::{Arc, Mutex};
 
-use a2a::types::SendMessageResponse;
+use a2a_types::SendMessageResponse;
 use bytes::Bytes;
 use serde::Serialize;
 use tokio::time::timeout;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
-use a2a_identity_types::MintedUserJwt;
-
 use crate::a2a_prefix::A2aPrefix;
+use crate::constants::REQ_ID_HEADER;
 use crate::jetstream::consumers::stream_events_consumer;
 use crate::jetstream::streams::events_stream_name;
 use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
+use crate::task_id::A2aTaskId;
 
 use super::error::ClientError;
 use super::event_stream::{TypedEventStream, build_event_stream};
-use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::wire::{JsonRpcRequest, JsonRpcResponse};
 
 pub struct StreamingRequest<'a, N, J> {
@@ -28,7 +27,6 @@ pub struct StreamingRequest<'a, N, J> {
     pub req_id: &'a ReqId,
     pub prefix: &'a A2aPrefix,
     pub op_timeout: std::time::Duration,
-    pub gateway_caller_jwt: Option<&'a MintedUserJwt>,
 }
 
 pub async fn send_streaming<N, J, Req>(
@@ -46,34 +44,36 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
     Req: Serialize,
 {
-    let StreamingRequest {
-        nats,
-        js,
-        subject,
-        method,
-        req_id,
-        prefix,
-        op_timeout,
-        gateway_caller_jwt,
-    } = ctx;
+    let StreamingRequest { nats, js, subject, method, req_id, prefix, op_timeout } = ctx;
     let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
     let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
 
-    let event_stream = open_task_stream(js, prefix, req_id).await?;
+    let stream_name = events_stream_name(prefix);
+    let stream = js
+        .get_stream(&stream_name)
+        .await
+        .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let headers = match gateway_caller_jwt {
-        Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
-        None => agent_rpc_headers(req_id),
-    };
+    let consumer_config = stream_events_consumer(prefix, &placeholder_task_id(), req_id);
+
+    let last_seq = Arc::new(Mutex::new(0u64));
+
+    let consumer = stream
+        .create_consumer(consumer_config)
+        .await
+        .map_err(|e| ClientError::ConsumerSetup(format!("create consumer: {e}")))?;
+
+    let event_stream = build_event_stream(consumer, last_seq);
+
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
 
     let msg = timeout(
         op_timeout,
         nats.request_with_headers(subject.to_string(), headers, Bytes::from(payload)),
     )
     .await
-    .map_err(|_| ClientError::Timeout {
-        subject: subject.to_string(),
-    })?
+    .map_err(|_| ClientError::Timeout { subject: subject.to_string() })?
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
     let response: JsonRpcResponse<SendMessageResponse> =
@@ -85,9 +85,14 @@ where
     }
 }
 
+fn placeholder_task_id() -> A2aTaskId {
+    A2aTaskId::new("_bootstrap").expect("static bootstrap id is valid")
+}
+
 pub async fn open_task_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
+    task_id: &A2aTaskId,
     req_id: &ReqId,
 ) -> Result<TypedEventStream, ClientError>
 where
@@ -105,7 +110,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = stream_events_consumer(prefix, req_id);
+    let consumer_config = stream_events_consumer(prefix, task_id, req_id);
 
     let last_seq = Arc::new(Mutex::new(0u64));
 
@@ -119,11 +124,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use a2a::types::{SendMessageResponse, Task, TaskState, TaskStatus};
+    use super::*;
+    use a2a_types::{SendMessageResponse, Task, TaskState, TaskStatus};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
-
-    use super::*;
 
     fn test_prefix() -> A2aPrefix {
         A2aPrefix::new("a2a".to_string()).unwrap()
@@ -133,20 +137,19 @@ mod tests {
         ReqId::from_test("req-stream-1")
     }
 
-    fn bootstrap_success(task_id: &str) -> Bytes {
+    fn bootstrap_success(task_id: &str) -> bytes::Bytes {
         let task = Task {
             id: task_id.to_string(),
-            context_id: String::new(),
-            status: TaskStatus {
-                state: TaskState::Working,
+            status: Some(TaskStatus {
+                state: TaskState::Working.into(),
                 message: None,
                 timestamp: None,
-            },
-            artifacts: None,
-            history: None,
-            metadata: None,
+            }),
+            ..Default::default()
         };
-        let response = SendMessageResponse::Task(task);
+        let response = SendMessageResponse {
+            payload: Some(a2a_types::send_message_response::Payload::Task(task)),
+        };
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "req-stream-1",
@@ -155,7 +158,7 @@ mod tests {
         serde_json::to_vec(&json).unwrap().into()
     }
 
-    fn bootstrap_error(code: i32, msg: &str) -> Bytes {
+    fn bootstrap_error(code: i32, msg: &str) -> bytes::Bytes {
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "req-stream-1",
@@ -179,19 +182,18 @@ mod tests {
         StreamingRequest {
             nats,
             js,
-            subject: "a2a.agents.bot.message.stream",
+            subject: "a2a.agent.bot.message.stream",
             method: "message/stream",
             req_id,
             prefix,
             op_timeout: timeout,
-            gateway_caller_jwt: None,
         }
     }
 
     #[tokio::test]
     async fn bootstrap_success_returns_task_and_stream() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agents.bot.message.stream", bootstrap_success("task-abc"));
+        nats.set_response("a2a.agent.bot.message.stream", bootstrap_success("task-abc"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -206,13 +208,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(matches!(envelope, SendMessageResponse::Task(_)));
+        assert!(envelope.payload.is_some());
     }
 
     #[tokio::test]
     async fn bootstrap_error_propagates_as_client_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agents.bot.message.stream", bootstrap_error(-32001, "not found"));
+        nats.set_response("a2a.agent.bot.message.stream", bootstrap_error(-32001, "not found"));
 
         let js = MockJetStreamConsumerFactory::new();
         let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -252,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn get_stream_failure_returns_consumer_setup_error() {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agents.bot.message.stream", bootstrap_success("t1"));
+        nats.set_response("a2a.agent.bot.message.stream", bootstrap_success("t1"));
 
         let js = MockJetStreamConsumerFactory::new();
         js.fail_get_stream_at(1);
@@ -274,9 +276,10 @@ mod tests {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
 
+        let task_id = A2aTaskId::new("task-1").unwrap();
         let req_id = test_req_id();
 
-        let stream = open_task_stream(&js, &test_prefix(), &req_id).await;
+        let stream = open_task_stream(&js, &test_prefix(), &task_id, &req_id).await;
         assert!(stream.is_ok());
     }
 
@@ -285,9 +288,10 @@ mod tests {
         let js = MockJetStreamConsumerFactory::new();
         js.fail_get_stream_at(1);
 
+        let task_id = A2aTaskId::new("task-1").unwrap();
         let req_id = test_req_id();
 
-        let result = open_task_stream(&js, &test_prefix(), &req_id).await;
+        let result = open_task_stream(&js, &test_prefix(), &task_id, &req_id).await;
         assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
     }
 
@@ -309,32 +313,5 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(ClientError::Timeout { .. })));
-    }
-
-    #[tokio::test]
-    async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
-        let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.gateway.bot.message.stream", bootstrap_success("task-gw"));
-
-        let js = MockJetStreamConsumerFactory::new();
-        let (consumer, _tx) = MockJetStreamConsumer::new();
-        js.add_consumer(consumer);
-
-        let jwt =
-            MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
-        let req_id = test_req_id();
-        let prefix = test_prefix();
-        let ctx = StreamingRequest {
-            nats: &nats,
-            js: &js,
-            subject: "a2a.gateway.bot.message.stream",
-            method: "message/stream",
-            req_id: &req_id,
-            prefix: &prefix,
-            op_timeout: std::time::Duration::from_secs(5),
-            gateway_caller_jwt: Some(&jwt),
-        };
-        let (envelope, _stream) = send_streaming(ctx, &TestParams { dummy: "hi".into() }).await.unwrap();
-        assert!(matches!(envelope, SendMessageResponse::Task(_)));
     }
 }

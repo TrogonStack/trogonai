@@ -44,9 +44,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
-
     use super::*;
+    use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
     fn test_prefix() -> A2aPrefix {
         A2aPrefix::new("a2a".to_string()).unwrap()
@@ -72,9 +71,7 @@ mod tests {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
 
-        let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 99)
-            .await
-            .unwrap();
+        let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 99).await.unwrap();
         assert_eq!(stream.last_seq(), 99);
     }
 

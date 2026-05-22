@@ -1,16 +1,14 @@
-use std::time::Duration;
-
+use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::{Serialize, de::DeserializeOwned};
+use std::time::Duration;
 use trogon_nats::RequestClient;
 
-use a2a_identity_types::MintedUserJwt;
-
+use crate::constants::REQ_ID_HEADER;
 use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
-use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::wire::{JsonRpcRequest, JsonRpcResponse};
 
 pub async fn send_unary<N, Req, Res>(
@@ -20,7 +18,6 @@ pub async fn send_unary<N, Req, Res>(
     params: &Req,
     req_id: &ReqId,
     timeout: Duration,
-    gateway_caller_jwt: Option<&MintedUserJwt>,
 ) -> Result<Res, ClientError>
 where
     N: RequestClient,
@@ -30,22 +27,19 @@ where
     let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
     let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
 
-    let headers = match gateway_caller_jwt {
-        Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
-        None => agent_rpc_headers(req_id),
-    };
+    let mut headers = HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
 
     let msg = tokio::time::timeout(
         timeout,
         nats.request_with_headers(subject.to_string(), headers, Bytes::from(payload)),
     )
     .await
-    .map_err(|_| ClientError::Timeout {
-        subject: subject.to_string(),
-    })?
+    .map_err(|_| ClientError::Timeout { subject: subject.to_string() })?
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
-    let response: JsonRpcResponse<Res> = serde_json::from_slice(&msg.payload).map_err(ClientError::Deserialize)?;
+    let response: JsonRpcResponse<Res> =
+        serde_json::from_slice(&msg.payload).map_err(ClientError::Deserialize)?;
 
     match response {
         JsonRpcResponse::Success(s) => Ok(s.result),
@@ -55,10 +49,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde::{Deserialize, Serialize};
     use trogon_nats::AdvancedMockNatsClient;
-
-    use super::*;
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Params {
@@ -74,7 +67,7 @@ mod tests {
         ReqId::from_test("test-req-1")
     }
 
-    fn success_response(y: &str) -> Bytes {
+    fn success_response(y: &str) -> bytes::Bytes {
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "test-req-1",
@@ -83,7 +76,7 @@ mod tests {
         serde_json::to_vec(&json).unwrap().into()
     }
 
-    fn error_response(code: i32, message: &str) -> Bytes {
+    fn error_response(code: i32, message: &str) -> bytes::Bytes {
         let json = serde_json::json!({
             "jsonrpc": "2.0",
             "id": "test-req-1",
@@ -95,35 +88,34 @@ mod tests {
     #[tokio::test]
     async fn success_response_deserializes_result() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agents.bot.tasks.get", success_response("hello"));
+        mock.set_response("a2a.agent.bot.tasks.get", success_response("hello"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
+        assert!(result.is_ok());
         assert_eq!(result.unwrap().y, "hello");
     }
 
     #[tokio::test]
     async fn task_not_found_error_code_maps_to_typed_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agents.bot.tasks.get", error_response(-32001, "Task not found"));
+        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32001, "Task not found"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
@@ -133,16 +125,15 @@ mod tests {
     #[tokio::test]
     async fn agent_unavailable_code_maps_to_typed_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agents.bot.tasks.get", error_response(-32050, "no responders"));
+        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32050, "no responders"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
@@ -156,12 +147,11 @@ mod tests {
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
@@ -175,12 +165,11 @@ mod tests {
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_millis(10),
-            None,
         )
         .await;
 
@@ -190,16 +179,15 @@ mod tests {
     #[tokio::test]
     async fn malformed_response_returns_deserialize_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agents.bot.tasks.get", Bytes::from_static(b"not json at all"));
+        mock.set_response("a2a.agent.bot.tasks.get", b"not json at all".as_ref().into());
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
@@ -209,58 +197,18 @@ mod tests {
     #[tokio::test]
     async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
         let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.agents.bot.tasks.get", error_response(-32099, "custom"));
+        mock.set_response("a2a.agent.bot.tasks.get", error_response(-32099, "custom"));
 
         let result: Result<Response, _> = send_unary(
             &mock,
-            "a2a.agents.bot.tasks.get",
+            "a2a.agent.bot.tasks.get",
             "tasks/get",
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
-            None,
         )
         .await;
 
         assert!(matches!(result, Err(ClientError::JsonRpc { code: -32099, .. })));
-    }
-
-    #[tokio::test]
-    async fn gateway_jwt_attaches_caller_jwt_header() {
-        let mock = AdvancedMockNatsClient::new();
-        mock.set_response("a2a.gateway.bot.tasks.get", success_response("ok"));
-
-        let jwt =
-            MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
-        let result: Result<Response, _> = send_unary(
-            &mock,
-            "a2a.gateway.bot.tasks.get",
-            "tasks/get",
-            &Params { x: 1 },
-            &req_id(),
-            Duration::from_secs(5),
-            Some(&jwt),
-        )
-        .await;
-
-        assert_eq!(result.unwrap().y, "ok");
-    }
-
-    #[tokio::test]
-    async fn gateway_expired_jwt_returns_expired_error() {
-        let mock = AdvancedMockNatsClient::new();
-        let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjF9.signature").unwrap();
-        let result: Result<Response, _> = send_unary(
-            &mock,
-            "a2a.gateway.bot.tasks.get",
-            "tasks/get",
-            &Params { x: 1 },
-            &req_id(),
-            Duration::from_secs(5),
-            Some(&jwt),
-        )
-        .await;
-
-        assert!(matches!(result, Err(ClientError::GatewayCallerJwtExpired(_))));
     }
 }

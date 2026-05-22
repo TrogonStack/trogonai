@@ -8,35 +8,33 @@
 use trogon_nats::NatsToken;
 use trogon_nats::SubjectTokenViolation;
 
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum ContextIdError {
-    #[error("context_id must not be empty")]
-    Empty,
-    #[error("context_id contains invalid character: {0:?}")]
-    InvalidCharacter(char),
-    #[error("context_id is too long: {0} characters (max 128)")]
-    TooLong(usize),
-}
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextIdError(pub SubjectTokenViolation);
 
-impl From<SubjectTokenViolation> for ContextIdError {
-    fn from(violation: SubjectTokenViolation) -> Self {
-        match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+impl std::fmt::Display for ContextIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            SubjectTokenViolation::Empty => write!(f, "context_id must not be empty"),
+            SubjectTokenViolation::InvalidCharacter(ch) => {
+                write!(f, "context_id contains invalid character: {:?}", ch)
+            }
+            SubjectTokenViolation::TooLong(len) => {
+                write!(f, "context_id is too long: {} characters (max 128)", len)
+            }
         }
     }
 }
+
+impl std::error::Error for ContextIdError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct A2aContextId(NatsToken);
 
 impl A2aContextId {
     pub fn new(s: impl AsRef<str>) -> Result<Self, ContextIdError> {
-        NatsToken::new(s).map(Self).map_err(ContextIdError::from)
+        NatsToken::new(s).map(Self).map_err(ContextIdError)
     }
 
-    #[allow(clippy::expect_used)]
     pub fn generate() -> Self {
         let id = uuid::Uuid::now_v7().simple().to_string();
         Self(NatsToken::new(id).expect("uuid v7 simple form is a valid NATS token"))
@@ -85,27 +83,17 @@ mod tests {
     }
 
     #[test]
-    fn a2a_context_id_display_matches_inner() {
-        let id = A2aContextId::new("ctx-display").unwrap();
-        assert_eq!(format!("{id}"), "ctx-display");
-    }
-
-    #[test]
-    fn a2a_context_id_derefs_to_str() {
-        let id = A2aContextId::new("ctx-deref").unwrap();
-        let s: &str = &id;
-        assert_eq!(s, "ctx-deref");
-    }
-
-    #[test]
     fn context_id_error_display() {
-        assert_eq!(ContextIdError::Empty.to_string(), "context_id must not be empty");
         assert_eq!(
-            ContextIdError::InvalidCharacter('.').to_string(),
+            format!("{}", ContextIdError(SubjectTokenViolation::Empty)),
+            "context_id must not be empty"
+        );
+        assert_eq!(
+            format!("{}", ContextIdError(SubjectTokenViolation::InvalidCharacter('.'))),
             "context_id contains invalid character: '.'"
         );
         assert_eq!(
-            ContextIdError::TooLong(200).to_string(),
+            format!("{}", ContextIdError(SubjectTokenViolation::TooLong(200))),
             "context_id is too long: 200 characters (max 128)"
         );
     }

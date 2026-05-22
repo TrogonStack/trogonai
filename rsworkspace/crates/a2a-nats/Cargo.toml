@@ -2,51 +2,30 @@
 name = "a2a-nats"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
-description = "A2A protocol bindings over NATS"
-publish = false
-
-[features]
-default = []
-# Opt in to the SpiceDB-backed import gate (federated-import authorisation
-# against an external SpiceDB Permissions API over gRPC). Off by default so
-# deployments without an external authoriser don't pay the authzed/tonic/moka
-# compile cost.
-spicedb = ["dep:authzed", "dep:moka", "dep:tonic"]
 
 [lints]
 workspace = true
 
 [dependencies]
-a2a = { workspace = true }
-a2a-identity-types = { workspace = true }
-a2a-pack = { workspace = true }
-async-nats = { workspace = true }
+a2a-types = { workspace = true }
+opentelemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
-authzed = { workspace = true, optional = true }
 bytes = { workspace = true }
 futures = { workspace = true }
-http = { workspace = true }
-moka = { workspace = true, optional = true }
-reqwest = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tokio-util = { workspace = true }
-tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
-trogon-nats = { workspace = true }
-trogon-std = { workspace = true }
-url = { workspace = true }
 uuid = { workspace = true }
 
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+
 [dev-dependencies]
-base64 = { workspace = true }
-time = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "metrics", "testing"] }
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
-tracing-subscriber = { workspace = true, features = ["fmt"] }
-wiremock = { workspace = true }

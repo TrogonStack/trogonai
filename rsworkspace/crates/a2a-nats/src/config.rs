@@ -7,12 +7,9 @@ use trogon_std::env::ReadEnv;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
-    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
-    DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE, DEFAULT_TASK_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_MAX_CONCURRENT_CLIENT_TASKS,
-    ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT, ENV_PUSH_DLQ_DEDUP_LRU_SIZE, ENV_TASK_TIMEOUT_SECS,
-    MIN_TIMEOUT_SECS,
+    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT, DEFAULT_TASK_TIMEOUT,
+    ENV_CONNECT_TIMEOUT_SECS, ENV_OPERATION_TIMEOUT_SECS, ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
 };
-use crate::push::caller_id::CallerId;
 
 pub use crate::constants::{DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 
@@ -23,8 +20,6 @@ pub struct Config {
     pub(crate) operation_timeout: Duration,
     pub(crate) task_timeout: Duration,
     pub(crate) max_concurrent_client_tasks: usize,
-    pub(crate) push_dlq_caller_segment: CallerId,
-    pub(crate) push_dlq_dedup_lru_size: usize,
 }
 
 impl Config {
@@ -35,33 +30,21 @@ impl Config {
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             task_timeout: DEFAULT_TASK_TIMEOUT,
             max_concurrent_client_tasks: DEFAULT_MAX_CONCURRENT_CLIENT_TASKS,
-            push_dlq_caller_segment: CallerId::default(),
-            push_dlq_dedup_lru_size: DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE,
         }
     }
 
     pub fn with_operation_timeout(mut self, timeout: Duration) -> Self {
-        self.operation_timeout = timeout.max(Duration::from_secs(MIN_TIMEOUT_SECS));
+        self.operation_timeout = timeout;
         self
     }
 
     pub fn with_task_timeout(mut self, timeout: Duration) -> Self {
-        self.task_timeout = timeout.max(Duration::from_secs(MIN_TIMEOUT_SECS));
+        self.task_timeout = timeout;
         self
     }
 
     pub fn with_max_concurrent_client_tasks(mut self, max: usize) -> Self {
         self.max_concurrent_client_tasks = max.max(1);
-        self
-    }
-
-    pub fn with_push_dlq_caller_segment(mut self, segment: impl Into<String>) -> Self {
-        let s = segment.into();
-        self.push_dlq_caller_segment = if s.trim().is_empty() {
-            CallerId::default()
-        } else {
-            CallerId::from(s.trim())
-        };
         self
     }
 
@@ -89,22 +72,13 @@ impl Config {
         self.max_concurrent_client_tasks
     }
 
-    pub fn push_dlq_caller_segment(&self) -> &CallerId {
-        &self.push_dlq_caller_segment
-    }
-
-    pub fn push_dlq_dedup_lru_size(&self) -> usize {
-        self.push_dlq_dedup_lru_size
-    }
-
     #[cfg(test)]
     pub(crate) fn for_test(a2a_prefix: &str) -> Self {
         let nats = NatsConfig {
             servers: vec!["localhost:4222".to_string()],
             auth: trogon_nats::NatsAuth::None,
         };
-        Self::new(A2aPrefix::new(a2a_prefix.to_string()).unwrap(), nats)
-            .with_task_timeout(crate::constants::TEST_TASK_TIMEOUT)
+        Self::new(A2aPrefix::new(a2a_prefix.to_string()).unwrap(), nats).with_task_timeout(crate::constants::TEST_TASK_TIMEOUT)
     }
 }
 
@@ -139,37 +113,6 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
         }
     }
 
-    if let Ok(raw) = env_provider.var(ENV_MAX_CONCURRENT_CLIENT_TASKS) {
-        match raw.parse::<usize>() {
-            Ok(max) => {
-                config = config.with_max_concurrent_client_tasks(max);
-            }
-            Err(_) => {
-                warn!(
-                    "{ENV_MAX_CONCURRENT_CLIENT_TASKS}={raw:?} is not a valid non-negative integer, using prior value"
-                );
-            }
-        }
-    }
-
-    if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_CALLER_SEGMENT) {
-        config = config.with_push_dlq_caller_segment(raw);
-    }
-
-    if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_DEDUP_LRU_SIZE) {
-        match raw.trim().parse::<usize>() {
-            Ok(size) if size > 0 => {
-                config.push_dlq_dedup_lru_size = size;
-            }
-            Ok(_) => {
-                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} must be positive, using prior value");
-            }
-            Err(_) => {
-                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} is not a valid integer, using prior value");
-            }
-        }
-    }
-
     config
 }
 
@@ -195,10 +138,6 @@ pub fn nats_connect_timeout<E: ReadEnv>(env_provider: &E) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{
-        DEFAULT_PUSH_DLQ_CALLER_SEGMENT as PLACEHOLDER_CALLER_SEGMENT, ENV_MAX_CONCURRENT_CLIENT_TASKS,
-        ENV_PUSH_DLQ_CALLER_SEGMENT,
-    };
 
     fn default_nats() -> NatsConfig {
         NatsConfig {
@@ -242,22 +181,7 @@ mod tests {
     #[test]
     fn config_default_max_concurrent_client_tasks() {
         let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats());
-        assert_eq!(
-            config.max_concurrent_client_tasks(),
-            DEFAULT_MAX_CONCURRENT_CLIENT_TASKS
-        );
-    }
-
-    #[test]
-    fn config_push_dlq_caller_segment_trim_empty_falls_back() {
-        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("");
-        assert_eq!(config.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
-    }
-
-    #[test]
-    fn config_push_dlq_caller_segment_preserves_explicit_value() {
-        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("alice");
-        assert_eq!(config.push_dlq_caller_segment().as_str(), "alice");
+        assert_eq!(config.max_concurrent_client_tasks(), DEFAULT_MAX_CONCURRENT_CLIENT_TASKS);
     }
 
     #[test]
@@ -371,104 +295,6 @@ mod tests {
             env.set(ENV_TASK_TIMEOUT_SECS, "120");
             let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
             assert_eq!(cfg.task_timeout(), Duration::from_secs(120));
-        });
-    }
-
-    #[test]
-    fn push_dlq_caller_segment_env_override() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "oidc-sub-7");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.push_dlq_caller_segment().as_str(), "oidc-sub-7");
-    }
-
-    #[test]
-    fn push_dlq_caller_segment_blank_env_falls_back_via_builder() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "   ");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
-    }
-
-    #[test]
-    fn max_concurrent_client_tasks_env_override() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_MAX_CONCURRENT_CLIENT_TASKS, "32");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.max_concurrent_client_tasks(), 32);
-    }
-
-    #[test]
-    fn max_concurrent_client_tasks_env_zero_normalized_to_one() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_MAX_CONCURRENT_CLIENT_TASKS, "0");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.max_concurrent_client_tasks(), 1);
-    }
-
-    #[test]
-    fn max_concurrent_client_tasks_invalid_env_is_ignored() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        let default_max = Config::for_test("a2a").max_concurrent_client_tasks();
-        env.set(ENV_MAX_CONCURRENT_CLIENT_TASKS, "bogus");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.max_concurrent_client_tasks(), default_max);
-    }
-
-    #[test]
-    fn a2a_prefix_ref_returns_prefix_value_object() {
-        let prefix = A2aPrefix::new("a2a-test").unwrap();
-        let config = Config::new(prefix.clone(), default_nats());
-        assert_eq!(config.a2a_prefix_ref().as_str(), prefix.as_str());
-    }
-
-    #[test]
-    fn push_dlq_dedup_lru_size_default() {
-        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats());
-        assert_eq!(config.push_dlq_dedup_lru_size(), DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE);
-    }
-
-    #[test]
-    fn with_operation_timeout_clamps_below_minimum_to_minimum() {
-        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_operation_timeout(Duration::ZERO);
-        assert_eq!(config.operation_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
-    }
-
-    #[test]
-    fn with_task_timeout_clamps_below_minimum_to_minimum() {
-        let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_task_timeout(Duration::ZERO);
-        assert_eq!(config.task_timeout(), Duration::from_secs(MIN_TIMEOUT_SECS));
-    }
-
-    #[test]
-    fn push_dlq_dedup_lru_size_env_override() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "4096");
-        let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.push_dlq_dedup_lru_size(), 4096);
-    }
-
-    #[test]
-    fn push_dlq_dedup_lru_size_zero_preserves_in_code_value() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "0");
-        with_subscriber(|| {
-            let mut base = Config::for_test("a2a");
-            base.push_dlq_dedup_lru_size = 9999;
-            let cfg = apply_timeout_overrides(base, &env);
-            assert_eq!(cfg.push_dlq_dedup_lru_size(), 9999);
-        });
-    }
-
-    #[test]
-    fn push_dlq_dedup_lru_size_invalid_preserves_in_code_value() {
-        let env = trogon_std::env::InMemoryEnv::new();
-        env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "not-a-number");
-        with_subscriber(|| {
-            let mut base = Config::for_test("a2a");
-            base.push_dlq_dedup_lru_size = 9999;
-            let cfg = apply_timeout_overrides(base, &env);
-            assert_eq!(cfg.push_dlq_dedup_lru_size(), 9999);
         });
     }
 }
