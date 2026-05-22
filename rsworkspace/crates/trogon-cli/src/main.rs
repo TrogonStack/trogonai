@@ -123,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
             switcher,
             nats,
             acp_config,
+            args.nats_url,
         )
         .await?;
     }
