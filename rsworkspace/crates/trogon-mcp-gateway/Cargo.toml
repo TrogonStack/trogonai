@@ -16,6 +16,7 @@ futures = { workspace = true }
 mcp-nats = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+spicedb-rs-client = "=1.49.2"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tracing = { workspace = true }
 trogon-nats = { workspace = true }

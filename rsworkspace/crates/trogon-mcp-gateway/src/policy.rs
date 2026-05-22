@@ -1,8 +1,8 @@
-//! Phase-1 CEL policy: selects when the SpiceDB-backed authorization hook runs.
+//! CEL policy: selects when the SpiceDB-backed authorization hook runs (`tools/call`, `resources/read`).
 
 use cel_interpreter::{Context, Program, Value};
 
-const SPICEDB_GATE_EXPR: &str = r#"mcp.method == "tools/call""#;
+const SPICEDB_GATE_EXPR: &str = r#"mcp.method == "tools/call" || mcp.method == "resources/read""#;
 
 #[derive(Debug)]
 pub struct PolicyError(pub String);
@@ -51,6 +51,12 @@ mod tests {
     fn gate_is_true_for_tools_call() {
         let p = SpicedbGatePolicy::phase1_hardcoded().unwrap();
         assert!(p.requires_spicedb_for_method("tools/call").unwrap());
+    }
+
+    #[test]
+    fn gate_is_true_for_resources_read() {
+        let p = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        assert!(p.requires_spicedb_for_method("resources/read").unwrap());
     }
 
     #[test]
