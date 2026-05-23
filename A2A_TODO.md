@@ -42,7 +42,7 @@ All architectural decisions are landed (see `A2A_PLAN.md` §Decisions). Items be
 
 ## Phase 4 — interop & federation
 
-- [ ] `a2a-bridge` crate (HTTPS↔NATS sidecar) — terminates HTTPS auth, calls auth-callout, obtains per-request User in caller's tenant Account; publishes on `a2a.gateway.{agent_id}.{method}`; maps SSE↔JetStream consumer on `a2a.task.{task_id}.events.>`. Symmetric inbound HTTPS-agent registration path.
+- [~] `a2a-bridge` crate (HTTPS↔NATS sidecar) — terminates HTTPS auth, calls auth-callout, obtains per-request User in caller's tenant Account; publishes on `a2a.gateway.{agent_id}.{method}`; maps SSE↔JetStream consumer on `a2a.task.{task_id}.events.>`. Symmetric inbound HTTPS-agent registration path. Scaffold landed in `rsworkspace/crates/a2a-bridge/`; auth-callout client wiring + real NATS publish/consume + SSE↔JetStream framing + outbound HTTPS path all stubbed.
 - [~] Federated discovery — operator-signed Account export contract for `a2a.discover.>`; SpiceDB gating at the import boundary. Sketch: [`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md). Import-gate trait + AllowAll default landed in `a2a-nats::catalog::import_gate`; SpiceDB impl stubbed pending Phase 1 SpiceDB integration.
 - [ ] Cross-binding collaboration tests (`a2a-bridge` prerequisite).
 

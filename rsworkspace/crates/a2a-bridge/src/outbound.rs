@@ -1,14 +1,13 @@
-use std::fmt;
-use std::sync::Arc;
+//! Symmetric egress: **`a2a.agent.{agent_id}.>` → HTTPS** for catalog-registered proxies.
 
-use a2a_nats::catalog::RegistrarSubject;
-use a2a_nats::{A2aAgentId, A2aPrefix};
+use std::fmt;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 
 use crate::error::BridgeError;
-use crate::identity::BridgeAgentId;
 
+/// HTTP upstream for an externally hosted A2A agent reached from the NATS-facing bridge.
 #[async_trait]
 pub trait OutboundHttpsAgentUpstream: Send + Sync {
     async fn proxy_jsonrpc_post(
@@ -19,7 +18,7 @@ pub trait OutboundHttpsAgentUpstream: Send + Sync {
     ) -> Result<Bytes, BridgeError>;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StubOutboundForwarder;
 
 #[async_trait]
@@ -28,15 +27,14 @@ impl OutboundHttpsAgentUpstream for StubOutboundForwarder {
         &self,
         agent_id: AgentRegistrationId,
         method: MethodSegment,
-        body: Bytes,
+        _body: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        let _: (_, _, _) = (agent_id, method, body.len());
-        Err(BridgeError::UpstreamHttps(
-            "HTTPS upstream forwarder not wired for this runtime".into(),
-        ))
+        let _: (AgentRegistrationId, MethodSegment) = (agent_id, method);
+        unimplemented!("wired when outbound HTTPS path is provisioned against catalog-registered proxies")
     }
 }
 
+/// Agent identifier as registered via the registrar (catalog key).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentRegistrationId(String);
 
@@ -56,6 +54,7 @@ impl fmt::Display for AgentRegistrationId {
     }
 }
 
+/// JSON-RPC method path segment with `/` as in A2A wire names (`message/send`, …).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MethodSegment(String);
 
@@ -75,140 +74,6 @@ impl fmt::Display for MethodSegment {
     }
 }
 
-#[async_trait]
-pub trait JsonHttpPost: Send + Sync {
-    async fn post_application_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, BridgeError>;
-}
-
-#[async_trait]
-pub trait OutboundUpstreamUrlResolve: Send + Sync {
-    async fn downstream_post_root(&self, agent_id: &AgentRegistrationId) -> Result<String, BridgeError>;
-}
-
-pub struct ReqwestJsonHttpPoster {
-    client: reqwest::Client,
-}
-
-impl ReqwestJsonHttpPoster {
-    #[must_use]
-    pub fn new(client: reqwest::Client) -> Self {
-        Self { client }
-    }
-
-    #[must_use = "poster must be wired into upstream before use"]
-    pub fn default_https_client() -> Result<Self, BridgeError> {
-        reqwest::Client::builder()
-            .build()
-            .map(Self::new)
-            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))
-    }
-}
-
-#[async_trait]
-impl JsonHttpPost for ReqwestJsonHttpPoster {
-    async fn post_application_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, BridgeError> {
-        let response = self
-            .client
-            .post(url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body.to_vec())
-            .send()
-            .await
-            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))?;
-        // A 4xx/5xx body is not a valid JSON-RPC reply — forwarding it
-        // would let callers misread an upstream failure as a successful
-        // agent response. Capture status before consuming the body so
-        // the error message is actionable.
-        let status = response.status();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))?;
-        if !status.is_success() {
-            return Err(BridgeError::UpstreamHttps(format!(
-                "upstream HTTPS returned {status}: {}",
-                String::from_utf8_lossy(&bytes)
-            )));
-        }
-        Ok(bytes.to_vec())
-    }
-}
-
-#[derive(Clone)]
-pub struct MappedHttpsUpstream<H, U> {
-    http: Arc<H>,
-    resolve: Arc<U>,
-}
-
-impl<H: JsonHttpPost, U: OutboundUpstreamUrlResolve> MappedHttpsUpstream<H, U> {
-    pub fn new(http: Arc<H>, resolve: Arc<U>) -> Self {
-        Self { http, resolve }
-    }
-}
-
-#[async_trait]
-impl<H: JsonHttpPost + Send + Sync, U: OutboundUpstreamUrlResolve> OutboundHttpsAgentUpstream
-    for MappedHttpsUpstream<H, U>
-{
-    async fn proxy_jsonrpc_post(
-        &self,
-        agent_id: AgentRegistrationId,
-        _method: MethodSegment,
-        body: Bytes,
-    ) -> Result<Bytes, BridgeError> {
-        let url = self.resolve.downstream_post_root(&agent_id).await?;
-        let bytes = self.http.post_application_json(&url, &body).await?;
-        Ok(Bytes::from(bytes))
-    }
-}
-
-#[async_trait]
-pub trait CatalogRegistrationPublish: Send + Sync {
-    async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError>;
-}
-
-pub async fn publish_https_agent_card_to_catalog<R: CatalogRegistrationPublish + ?Sized>(
-    registrar: &R,
-    prefix: &A2aPrefix,
-    agent_id: &A2aAgentId,
-    card_json: &[u8],
-) -> Result<(), BridgeError> {
-    let subject = RegistrarSubject::new(prefix).for_agent(agent_id);
-    registrar.publish_core(subject.as_str(), card_json).await?;
-
-    Ok(())
-}
-
-pub async fn publish_https_agent_card_registered<R: CatalogRegistrationPublish + ?Sized>(
-    registrar: &R,
-    prefix: &A2aPrefix,
-    agent_id: &BridgeAgentId,
-    card_json: &[u8],
-) -> Result<(), BridgeError> {
-    publish_https_agent_card_to_catalog(registrar, prefix, agent_id.as_agent_id(), card_json).await
-}
-
-pub struct NatsCoreCatalogRegistrar {
-    client: Arc<async_nats::Client>,
-}
-
-impl NatsCoreCatalogRegistrar {
-    #[must_use]
-    pub fn new(client: Arc<async_nats::Client>) -> Self {
-        Self { client }
-    }
-}
-
-#[async_trait]
-impl CatalogRegistrationPublish for NatsCoreCatalogRegistrar {
-    async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError> {
-        self.client
-            .publish(subject.as_ref().to_owned(), Bytes::copy_from_slice(payload))
-            .await
-            .map_err(|e| BridgeError::CatalogRegistration(e.to_string()))
-    }
-}
-
 pub async fn forward<U: OutboundHttpsAgentUpstream + ?Sized>(
     upstream: &U,
     agent_id: AgentRegistrationId,
@@ -219,4 +84,25 @@ pub async fn forward<U: OutboundHttpsAgentUpstream + ?Sized>(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
+
+    #[test]
+    fn identity_newtypes_roundtrip() {
+        let j = BridgeUserJwt::new("acct-user-jwt".to_owned());
+        assert_eq!(j.as_str(), "acct-user-jwt");
+        assert_eq!(j.into_inner(), "acct-user-jwt");
+
+        let c = CallerHttpsAuth::new("Bearer x".to_owned());
+        assert_eq!(c.into_inner(), "Bearer x");
+    }
+
+    #[test]
+    fn agent_and_method_segments_preserve_opaque_strings() {
+        let aid = AgentRegistrationId::new("ext-support".to_owned());
+        let om = MethodSegment::new("message/send".to_owned());
+        assert_eq!(aid.to_string(), "ext-support");
+        assert_eq!(om.to_string(), "message/send");
+    }
+}
