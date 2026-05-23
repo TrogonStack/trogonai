@@ -1,3 +1,10 @@
+//! JSON-RPC [`Client`] facade over [`RequestClient`](trogon_nats::RequestClient) + JetStream accessors.
+//!
+//! By default **`Client`** publishes to **`{prefix}.agent.{agent_id}.{method}`** subjects ([`Client::new`], [`Client::routing_to_agent`]).
+//! Use [`Client::routing_via_gateway_ingress`] to target **`{prefix}.gateway.{agent_id}.{method}`** subjects
+//! (forwarded transparently when **`a2a-gateway`** is running). Streamed **`{prefix}.task.…`** JetStream attaches are
+//! unchanged — only unary / bootstrap NATS **`request`** subjects are remapped.
+
 pub mod error;
 pub mod event_stream;
 pub mod handle;

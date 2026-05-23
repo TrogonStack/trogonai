@@ -80,7 +80,10 @@ where
         }
     });
 
-    TypedEventStream { receiver, last_seq: last_seq_cell }
+    TypedEventStream {
+        receiver,
+        last_seq: last_seq_cell,
+    }
 }
 
 fn extract_sequence(msg: &async_nats::Message) -> Option<u64> {
@@ -139,7 +142,8 @@ mod tests {
 
         let event = make_status_event("task-1");
         let payload = serde_json::to_vec(&event).unwrap();
-        tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_seq(payload, None)))).unwrap();
+        tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_seq(payload, None))))
+            .unwrap();
         drop(tx);
 
         let item = stream.next().await;
@@ -163,7 +167,8 @@ mod tests {
         let last_seq = Arc::new(Mutex::new(0u64));
         let mut stream = build_event_stream(consumer, last_seq);
 
-        tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_seq(b"not json".to_vec(), None)))).unwrap();
+        tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_seq(b"not json".to_vec(), None))))
+            .unwrap();
         drop(tx);
 
         let item = stream.next().await;
@@ -176,7 +181,8 @@ mod tests {
         let last_seq = Arc::new(Mutex::new(0u64));
         let mut stream = build_event_stream(consumer, last_seq);
 
-        tx.unbounded_send(Err(trogon_nats::mocks::MockError("boom".to_string()))).unwrap();
+        tx.unbounded_send(Err(trogon_nats::mocks::MockError("boom".to_string())))
+            .unwrap();
         drop(tx);
 
         let item = stream.next().await;

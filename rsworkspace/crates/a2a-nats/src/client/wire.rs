@@ -12,7 +12,12 @@ pub struct JsonRpcRequest<P> {
 
 impl<P> JsonRpcRequest<P> {
     pub fn new(id: JsonRpcId, method: &'static str, params: P) -> Self {
-        Self { jsonrpc: "2.0", id, method, params }
+        Self {
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+        }
     }
 }
 
@@ -86,7 +91,11 @@ mod tests {
 
     #[test]
     fn jsonrpc_request_string_id() {
-        let req = JsonRpcRequest::new(JsonRpcId::String("abc".into()), "message/send", DummyParams { value: "y".into() });
+        let req = JsonRpcRequest::new(
+            JsonRpcId::String("abc".into()),
+            "message/send",
+            DummyParams { value: "y".into() },
+        );
         let v = serde_json::to_value(&req).unwrap();
         assert_eq!(v["id"], "abc");
     }

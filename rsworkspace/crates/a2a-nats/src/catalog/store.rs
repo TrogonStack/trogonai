@@ -1,6 +1,7 @@
 use std::fmt;
 
 use bytes::Bytes;
+use serde_json::Value;
 use trogon_nats::jetstream::{JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet};
 
 use crate::agent_id::A2aAgentId;
@@ -9,6 +10,8 @@ use crate::agent_id::A2aAgentId;
 pub enum CatalogStoreError {
     Serialize(serde_json::Error),
     Deserialize(serde_json::Error),
+    /// AgentCard document failed bundled JSON-Schema validation ([`a2a_pack`]).
+    AgentCardSchema(a2a_pack::AgentCardValidateError),
     Kv(String),
 }
 
@@ -17,6 +20,7 @@ impl fmt::Display for CatalogStoreError {
         match self {
             Self::Serialize(e) => write!(f, "failed to serialize agent card: {e}"),
             Self::Deserialize(e) => write!(f, "failed to deserialize agent card: {e}"),
+            Self::AgentCardSchema(e) => write!(f, "AgentCard rejected by JSON Schema: {e}"),
             Self::Kv(msg) => write!(f, "KV store error: {msg}"),
         }
     }
@@ -26,6 +30,7 @@ impl std::error::Error for CatalogStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Serialize(e) | Self::Deserialize(e) => Some(e),
+            Self::AgentCardSchema(e) => Some(e),
             Self::Kv(_) => None,
         }
     }
@@ -60,7 +65,9 @@ where
     K: JetStreamKvGet + JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate + Send + Sync + Clone + 'static,
 {
     async fn put_card(&self, agent_id: &A2aAgentId, card: &a2a_types::AgentCard) -> Result<(), CatalogStoreError> {
-        let value: Bytes = serde_json::to_vec(card)
+        let value_json: Value = serde_json::to_value(card).map_err(CatalogStoreError::Serialize)?;
+        a2a_pack::validate_agent_card_value(&value_json).map_err(CatalogStoreError::AgentCardSchema)?;
+        let value: Bytes = serde_json::to_vec(&value_json)
             .map(Bytes::from)
             .map_err(CatalogStoreError::Serialize)?;
         let key = agent_id.as_str().to_owned();
@@ -99,8 +106,11 @@ where
         {
             None => Ok(None),
             Some(bytes) => {
-                let card = serde_json::from_slice::<a2a_types::AgentCard>(&bytes)
-                    .map_err(CatalogStoreError::Deserialize)?;
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&bytes).map_err(CatalogStoreError::Deserialize)?;
+                a2a_pack::validate_agent_card_value(&parsed).map_err(CatalogStoreError::AgentCardSchema)?;
+                let card =
+                    serde_json::from_value::<a2a_types::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)?;
                 Ok(Some(card))
             }
         }
@@ -119,6 +129,12 @@ mod tests {
     fn card(name: &str) -> a2a_types::AgentCard {
         a2a_types::AgentCard {
             name: name.to_string(),
+            supported_interfaces: vec![a2a_types::AgentInterface {
+                url: "https://example.com/a2a".to_string(),
+                protocol_binding: "JSONRPC".to_string(),
+                protocol_version: "0.2.0".to_string(),
+                tenant: String::new(),
+            }],
             ..Default::default()
         }
     }
@@ -172,6 +188,25 @@ mod tests {
         let store = KvCatalogStore::new(kv);
         let err = store.get_card(&agent_id("bot")).await.unwrap_err();
         assert!(matches!(err, CatalogStoreError::Deserialize(_)));
+    }
+
+    #[tokio::test]
+    async fn get_returns_schema_error_when_json_object_missing_agent_card_required_fields() {
+        let kv = MockJetStreamKvStore::new();
+        kv.enqueue_get_some(bytes::Bytes::from("{}".to_string()));
+        let store = KvCatalogStore::new(kv);
+        let err = store.get_card(&agent_id("bot")).await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::AgentCardSchema(_)));
+    }
+
+    #[tokio::test]
+    async fn put_returns_schema_error_when_card_missing_required_publishable_fields() {
+        let kv = MockJetStreamKvStore::new();
+        let store = KvCatalogStore::new(kv);
+        let mut c = card("semi");
+        c.supported_interfaces[0].url.clear();
+        let err = store.put_card(&agent_id("semi"), &c).await.unwrap_err();
+        assert!(matches!(err, CatalogStoreError::AgentCardSchema(_)));
     }
 
     #[test]

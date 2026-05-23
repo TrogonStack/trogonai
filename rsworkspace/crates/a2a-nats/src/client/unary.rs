@@ -35,11 +35,12 @@ where
         nats.request_with_headers(subject.to_string(), headers, Bytes::from(payload)),
     )
     .await
-    .map_err(|_| ClientError::Timeout { subject: subject.to_string() })?
+    .map_err(|_| ClientError::Timeout {
+        subject: subject.to_string(),
+    })?
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
-    let response: JsonRpcResponse<Res> =
-        serde_json::from_slice(&msg.payload).map_err(ClientError::Deserialize)?;
+    let response: JsonRpcResponse<Res> = serde_json::from_slice(&msg.payload).map_err(ClientError::Deserialize)?;
 
     match response {
         JsonRpcResponse::Success(s) => Ok(s.result),

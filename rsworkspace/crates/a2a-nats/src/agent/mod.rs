@@ -9,7 +9,7 @@ mod tasks_cancel;
 mod tasks_get;
 mod tasks_list;
 mod tasks_resubscribe;
-mod wire;
+pub(crate) mod wire;
 
 #[cfg(test)]
 pub(crate) mod test_support;

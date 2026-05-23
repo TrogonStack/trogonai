@@ -5,20 +5,23 @@ use crate::constants::DEFAULT_STREAM_MAX_AGE;
 
 /// The JetStream stream that captures a subject's messages.
 ///
-/// A2A only persists task event streams — request/reply over Core NATS doesn't need
-/// JetStream replay. The `Events` stream backs `message/stream` delivery and
-/// `tasks/resubscribe` reconnect-after-disconnect.
+/// A2A only persists task event streams and push DLQ envelopes — request/reply over
+/// Core NATS doesn't need JetStream replay. The `Events` stream backs `message/stream`
+/// delivery and `tasks/resubscribe` reconnect-after-disconnect. The `PushDlq` stream
+/// captures terminal push delivery failures for operator remediation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum A2aStream {
     Events,
+    PushDlq,
 }
 
 impl A2aStream {
-    pub const ALL: [A2aStream; 1] = [Self::Events];
+    pub const ALL: [A2aStream; 2] = [Self::Events, Self::PushDlq];
 
     pub fn suffix(&self) -> &'static str {
         match self {
             Self::Events => "EVENTS",
+            Self::PushDlq => "PUSH_DLQ",
         }
     }
 
@@ -30,6 +33,7 @@ impl A2aStream {
         let p = prefix.as_str();
         match self {
             Self::Events => vec![format!("{p}.task.*.events.*")],
+            Self::PushDlq => vec![format!("{p}.push.dlq.*.*")],
         }
     }
 
@@ -45,7 +49,7 @@ impl A2aStream {
         }
     }
 
-    pub fn all_configs(prefix: &A2aPrefix) -> [Config; 1] {
+    pub fn all_configs(prefix: &A2aPrefix) -> [Config; 2] {
         Self::ALL.map(|s| s.config(prefix))
     }
 }

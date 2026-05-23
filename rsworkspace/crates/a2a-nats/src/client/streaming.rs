@@ -43,7 +43,15 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
     Req: Serialize,
 {
-    let StreamingRequest { nats, js, subject, method, req_id, prefix, op_timeout } = ctx;
+    let StreamingRequest {
+        nats,
+        js,
+        subject,
+        method,
+        req_id,
+        prefix,
+        op_timeout,
+    } = ctx;
     let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
     let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
 
@@ -72,7 +80,9 @@ where
         nats.request_with_headers(subject.to_string(), headers, Bytes::from(payload)),
     )
     .await
-    .map_err(|_| ClientError::Timeout { subject: subject.to_string() })?
+    .map_err(|_| ClientError::Timeout {
+        subject: subject.to_string(),
+    })?
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
     let response: JsonRpcResponse<SendMessageResponse> =

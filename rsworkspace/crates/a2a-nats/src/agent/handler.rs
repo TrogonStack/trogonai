@@ -7,8 +7,7 @@ use crate::error::{
     TASK_NOT_CANCELABLE, TASK_NOT_FOUND, UNSUPPORTED_OPERATION,
 };
 
-pub type TaskEventStream =
-    Pin<Box<dyn Stream<Item = Result<a2a_types::StreamResponse, A2aError>> + Send + 'static>>;
+pub type TaskEventStream = Pin<Box<dyn Stream<Item = Result<a2a_types::StreamResponse, A2aError>> + Send + 'static>>;
 
 /// Error returned by an [`A2aHandler`] implementation and mapped to a JSON-RPC error response.
 #[derive(Debug)]
@@ -149,7 +148,10 @@ mod tests {
             PUSH_NOTIFICATION_NOT_SUPPORTED
         );
         assert_eq!(A2aError::unsupported_operation("x").code, UNSUPPORTED_OPERATION);
-        assert_eq!(A2aError::content_type_not_supported("x").code, CONTENT_TYPE_NOT_SUPPORTED);
+        assert_eq!(
+            A2aError::content_type_not_supported("x").code,
+            CONTENT_TYPE_NOT_SUPPORTED
+        );
         assert_eq!(A2aError::invalid_agent_response("x").code, INVALID_AGENT_RESPONSE);
         assert_eq!(A2aError::agent_unavailable("x").code, AGENT_UNAVAILABLE);
         assert_eq!(A2aError::internal("x").code, -32603);

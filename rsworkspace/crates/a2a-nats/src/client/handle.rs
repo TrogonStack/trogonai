@@ -7,14 +7,15 @@ use a2a_types::{
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
+use super::streaming::StreamingRequest;
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 use crate::config::Config;
+use crate::gateway_ingress::gateway_ingress_subject_from_agent_subject;
 use crate::nats::subjects::agent::{
     AgentCardSubject, MessageSendSubject, MessageStreamSubject, PushDeleteSubject, PushGetSubject, PushListSubject,
     PushSetSubject, TasksCancelSubject, TasksGetSubject, TasksListSubject, TasksResubscribeSubject,
 };
-use super::streaming::StreamingRequest;
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
@@ -24,16 +25,60 @@ use super::resubscribe::open_resubscribe_stream;
 use super::streaming::send_streaming;
 use super::unary::send_unary;
 
+/// Where [`Client`] sends JSON-RPC unary/stream bootstrap requests (`{prefix}.agent…` vs `{prefix}.gateway…`).
+#[derive(Clone, Debug)]
+enum ClientIngressTarget {
+    AgentSubjects,
+    GatewayIngress,
+}
+
 pub struct Client<N, J> {
     config: Config,
     agent_id: A2aAgentId,
     nats: N,
     js: J,
+    ingress: ClientIngressTarget,
 }
 
 impl<N, J> Client<N, J> {
     pub fn new(config: Config, agent_id: A2aAgentId, nats: N, js: J) -> Self {
-        Self { config, agent_id, nats, js }
+        Self {
+            config,
+            agent_id,
+            nats,
+            js,
+            ingress: ClientIngressTarget::AgentSubjects,
+        }
+    }
+
+    /// Routes requests through **`a2a-gateway`**: unary / bootstrap NATS **`request`** subjects become
+    /// **`{prefix}.gateway.{agent_id}.{method…}`** (`gateway_ingress_subject_from_agent_subject`), then the
+    /// gateway forwards to **`{prefix}.agent.{agent_id}.{method…}`**.
+    ///
+    /// Tenancy is the caller's **NATS Account** (see `A2A_PENDING_DECISION.md`), not an extra subject token.
+    ///
+    /// **`message/stream`** and **`tasks/resubscribe`** still attach to JetStream **`{prefix}.task.…`** event
+    /// subjects after their gateway-routed bootstrap/snapshot RPC; only the JSON-RPC ingress hop uses
+    /// `{prefix}.gateway.…`.
+    pub fn routing_via_gateway_ingress(mut self) -> Self {
+        self.ingress = ClientIngressTarget::GatewayIngress;
+        self
+    }
+
+    /// Default (direct) routing to `{prefix}.agent.{agent_id}.{{method}}` subjects.
+    pub fn routing_to_agent(mut self) -> Self {
+        self.ingress = ClientIngressTarget::AgentSubjects;
+        self
+    }
+
+    fn outbound_rpc_subject(&self, agent_subject: String) -> Result<String, ClientError> {
+        match &self.ingress {
+            ClientIngressTarget::AgentSubjects => Ok(agent_subject),
+            ClientIngressTarget::GatewayIngress => {
+                gateway_ingress_subject_from_agent_subject(&agent_subject, self.prefix())
+                    .ok_or(ClientError::InvalidRpcSubjectOverlay)
+            }
+        }
     }
 
     fn prefix(&self) -> &A2aPrefix {
@@ -53,7 +98,7 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
     pub async fn message_send(&self, req: &SendMessageRequest) -> Result<SendMessageResponse, ClientError> {
-        let subject = MessageSendSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(MessageSendSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(&self.nats, &subject, "message/send", req, &req_id, self.config.operation_timeout()).await
     }
@@ -62,12 +107,12 @@ where
         &self,
         req: &SendMessageRequest,
     ) -> Result<(SendMessageResponse, TypedEventStream), ClientError> {
-        let subject = MessageStreamSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(MessageStreamSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let ctx = StreamingRequest {
             nats: &self.nats,
             js: &self.js,
-            subject: &subject,
+            subject: subject.as_str(),
             method: "message/stream",
             req_id: &req_id,
             prefix: self.prefix(),
@@ -77,19 +122,19 @@ where
     }
 
     pub async fn tasks_get(&self, req: &GetTaskRequest) -> Result<Task, ClientError> {
-        let subject = TasksGetSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(TasksGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(&self.nats, &subject, "tasks/get", req, &req_id, self.config.operation_timeout()).await
     }
 
     pub async fn tasks_list(&self, req: &ListTasksRequest) -> Result<ListTasksResponse, ClientError> {
-        let subject = TasksListSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(TasksListSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(&self.nats, &subject, "tasks/list", req, &req_id, self.config.operation_timeout()).await
     }
 
     pub async fn tasks_cancel(&self, req: &CancelTaskRequest) -> Result<Task, ClientError> {
-        let subject = TasksCancelSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(TasksCancelSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(&self.nats, &subject, "tasks/cancel", req, &req_id, self.config.operation_timeout()).await
     }
@@ -99,7 +144,8 @@ where
         task_id: &A2aTaskId,
         last_seq: u64,
     ) -> Result<(Task, TypedEventStream), ClientError> {
-        let subject = TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject =
+            self.outbound_rpc_subject(TasksResubscribeSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let req = SubscribeToTaskRequest { id: task_id.as_str().to_owned(), tenant: String::new() };
         let snapshot: Task =
@@ -110,7 +156,7 @@ where
     }
 
     pub async fn push_set(&self, req: &TaskPushNotificationConfig) -> Result<TaskPushNotificationConfig, ClientError> {
-        let subject = PushSetSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(PushSetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(
             &self.nats,
@@ -127,7 +173,7 @@ where
         &self,
         req: &GetTaskPushNotificationConfigRequest,
     ) -> Result<TaskPushNotificationConfig, ClientError> {
-        let subject = PushGetSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(PushGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(
             &self.nats,
@@ -144,7 +190,7 @@ where
         &self,
         req: &ListTaskPushNotificationConfigsRequest,
     ) -> Result<ListTaskPushNotificationConfigsResponse, ClientError> {
-        let subject = PushListSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(PushListSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary(
             &self.nats,
@@ -158,7 +204,7 @@ where
     }
 
     pub async fn push_delete(&self, req: &DeleteTaskPushNotificationConfigRequest) -> Result<(), ClientError> {
-        let subject = PushDeleteSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(PushDeleteSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         send_unary::<N, _, ()>(
             &self.nats,
@@ -172,7 +218,7 @@ where
     }
 
     pub async fn agent_card(&self) -> Result<AgentCard, ClientError> {
-        let subject = AgentCardSubject::new(self.prefix(), &self.agent_id).to_string();
+        let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let req = GetExtendedAgentCardRequest { tenant: String::new() };
         send_unary(&self.nats, &subject, "agent/getAuthenticatedExtendedCard", &req, &req_id, self.config.operation_timeout())
@@ -256,7 +302,11 @@ mod tests {
         nats.set_response("a2a.agent.bot.tasks.get", task_response("task-1"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = GetTaskRequest { id: "task-1".into(), tenant: String::new(), history_length: None };
+        let req = GetTaskRequest {
+            id: "task-1".into(),
+            tenant: String::new(),
+            history_length: None,
+        };
 
         let result = client.tasks_get(&req).await;
         assert!(result.is_ok());
@@ -269,7 +319,11 @@ mod tests {
         nats.set_response("a2a.agent.bot.tasks.get", error_response(-32001, "not found"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = GetTaskRequest { id: "bad".into(), tenant: String::new(), history_length: None };
+        let req = GetTaskRequest {
+            id: "bad".into(),
+            tenant: String::new(),
+            history_length: None,
+        };
 
         assert!(matches!(client.tasks_get(&req).await, Err(ClientError::TaskNotFound)));
     }
@@ -280,7 +334,11 @@ mod tests {
         nats.set_response("a2a.agent.bot.tasks.cancel", task_response("task-c"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = CancelTaskRequest { id: "task-c".into(), tenant: String::new(), metadata: None };
+        let req = CancelTaskRequest {
+            id: "task-c".into(),
+            tenant: String::new(),
+            metadata: None,
+        };
 
         let result = client.tasks_cancel(&req).await;
         assert!(result.is_ok());
@@ -292,9 +350,16 @@ mod tests {
         nats.set_response("a2a.agent.bot.tasks.cancel", error_response(-32002, "not cancelable"));
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = CancelTaskRequest { id: "task-c".into(), tenant: String::new(), metadata: None };
+        let req = CancelTaskRequest {
+            id: "task-c".into(),
+            tenant: String::new(),
+            metadata: None,
+        };
 
-        assert!(matches!(client.tasks_cancel(&req).await, Err(ClientError::TaskNotCancelable)));
+        assert!(matches!(
+            client.tasks_cancel(&req).await,
+            Err(ClientError::TaskNotCancelable)
+        ));
     }
 
     #[tokio::test]
@@ -412,7 +477,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(client.push_set(&req).await, Err(ClientError::PushNotificationNotSupported)));
+        assert!(matches!(
+            client.push_set(&req).await,
+            Err(ClientError::PushNotificationNotSupported)
+        ));
     }
 
     #[tokio::test]
@@ -444,8 +512,30 @@ mod tests {
         nats.fail_next_request();
 
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let req = GetTaskRequest { id: "t".into(), tenant: String::new(), history_length: None };
+        let req = GetTaskRequest {
+            id: "t".into(),
+            tenant: String::new(),
+            history_length: None,
+        };
 
         assert!(matches!(client.tasks_get(&req).await, Err(ClientError::Transport(_))));
+    }
+
+    #[tokio::test]
+    async fn tasks_get_via_gateway_uses_account_scoped_gateway_subject_not_legacy_tenant_segment() {
+        let nats = AdvancedMockNatsClient::new();
+        // If the client mistakenly prefixed `acme.`, this mock would answer — it should remain idle.
+        nats.set_response("a2a.gateway.acme.bot.tasks.get", task_response("wrong-shape"));
+        nats.set_response("a2a.gateway.bot.tasks.get", task_response("task-gw"));
+
+        let client = make_client(nats, MockJetStreamConsumerFactory::new()).routing_via_gateway_ingress();
+        let req = GetTaskRequest {
+            id: "task-gw".into(),
+            tenant: String::new(),
+            history_length: None,
+        };
+
+        let result = client.tasks_get(&req).await.unwrap();
+        assert_eq!(result.id, "task-gw");
     }
 }
