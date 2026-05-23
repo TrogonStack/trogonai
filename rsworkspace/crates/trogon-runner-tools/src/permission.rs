@@ -34,11 +34,11 @@ fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
     if let Some(path) = tool_input.get("path").and_then(|v| v.as_str()) {
         return path.to_string();
     }
-    if tool_name == "bash" || tool_name == "Bash" {
-        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
-            let prefix: String = cmd.chars().take(60).collect();
-            return prefix;
-        }
+    if (tool_name == "bash" || tool_name == "Bash")
+        && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+    {
+        let prefix: String = cmd.chars().take(60).collect();
+        return prefix;
     }
     tool_name.to_string()
 }
@@ -221,11 +221,11 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
 ];
 
 fn is_edit_tool(tool_name: &str) -> bool {
-    ACCEPT_EDITS_TOOLS.iter().any(|t| *t == tool_name)
+    ACCEPT_EDITS_TOOLS.contains(&tool_name)
 }
 
 fn is_plan_denied_tool(tool_name: &str) -> bool {
-    PLAN_DENIED_TOOLS.iter().any(|t| *t == tool_name)
+    PLAN_DENIED_TOOLS.contains(&tool_name)
 }
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
@@ -300,6 +300,7 @@ pub fn build_mode_permission_checker(
 
 /// Gate a single tool invocation using session mode, rules, and optional NATS permission channel.
 /// Returns `true` when the tool may run; `false` when denied.
+#[allow(clippy::too_many_arguments)]
 pub async fn check_tool_permission(
     mode: &str,
     session_id: &str,

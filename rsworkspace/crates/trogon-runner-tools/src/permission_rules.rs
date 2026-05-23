@@ -102,16 +102,16 @@ impl PermissionRules {
 
     /// Evaluate rules for a single tool call.
     pub fn check(&self, tool_name: &str, tool_input: &Value) -> RuleDecision {
-        if FILE_TOOLS.contains(&tool_name) {
-            if let Some(path) = tool_input["path"].as_str() {
-                return self.check_path(path);
-            }
+        if FILE_TOOLS.contains(&tool_name)
+            && let Some(path) = tool_input["path"].as_str()
+        {
+            return self.check_path(path);
         }
 
-        if tool_name == "bash" {
-            if let Some(cmd) = tool_input["command"].as_str() {
-                return self.check_command(cmd);
-            }
+        if tool_name == "bash"
+            && let Some(cmd) = tool_input["command"].as_str()
+        {
+            return self.check_command(cmd);
         }
 
         RuleDecision::Ask

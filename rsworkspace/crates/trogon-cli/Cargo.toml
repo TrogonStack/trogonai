@@ -20,6 +20,7 @@ async-trait            = { workspace = true }
 bytes                  = { workspace = true }
 clap                   = { workspace = true, features = ["env"] }
 futures                = { workspace = true }
+libc                   = "0.2"
 opentelemetry          = { workspace = true }
 rustyline              = "14"
 serde                  = { workspace = true }

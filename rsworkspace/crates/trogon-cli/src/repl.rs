@@ -667,7 +667,6 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 mcp_manager.shutdown_session(session.session_id()).await;
                 session.close().await;
                 mcp_manager.shutdown_all().await;
-                eprintln!("bye");
                 break;
             }
             Err(e) => {

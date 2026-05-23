@@ -75,7 +75,7 @@ pub struct TrogonMdLayer {
 pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
     let mut layers = Vec::new();
 
-    if let Some(home) = std::env::var("HOME").ok() {
+    if let Ok(home) = std::env::var("HOME") {
         let path = PathBuf::from(home).join(".config/trogon/TROGON.md");
         layers.push(TrogonMdLayer {
             exists: tokio::fs::metadata(&path).await.is_ok(),
