@@ -16,7 +16,8 @@ BIN="$RSWORKSPACE/target/release"
 LOG_DIR="${TROGON_LOG_DIR:-/tmp}"
 
 # Returns 0 (true) if a process with the given binary name is already running.
-running() { pgrep -x "$1" > /dev/null 2>&1; }
+# pgrep -x truncates comm to 15 chars so it misses long names; match full path instead.
+running() { pgrep -f "release/$1" > /dev/null 2>&1; }
 
 # 1. NATS + JetStream (skip if port already open)
 if ! nc -z localhost 4222 2>/dev/null; then
