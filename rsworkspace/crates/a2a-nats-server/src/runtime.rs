@@ -13,6 +13,7 @@ use crate::router;
 const DEFAULT_BIND: &str = "0.0.0.0:8080";
 const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
 const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
+const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -50,6 +51,13 @@ impl std::error::Error for RuntimeError {
     }
 }
 
+fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
+    matches!(
+        trogon_std::env::ReadEnv::var(env, key).as_deref().map(str::trim),
+        Ok("1" | "true" | "TRUE" | "True" | "yes" | "YES" | "Yes" | "on" | "ON" | "On")
+    )
+}
+
 pub async fn run() -> Result<(), RuntimeError> {
     let env = SystemEnv;
 
@@ -57,8 +65,7 @@ pub async fn run() -> Result<(), RuntimeError> {
         .unwrap_or_else(|_| a2a_nats::DEFAULT_A2A_PREFIX.to_string());
     let prefix = A2aPrefix::new(raw_prefix).map_err(RuntimeError::InvalidPrefix)?;
 
-    let raw_agent_id = trogon_std::env::ReadEnv::var(&env, ENV_AGENT_ID)
-        .map_err(|_| RuntimeError::MissingAgentId)?;
+    let raw_agent_id = trogon_std::env::ReadEnv::var(&env, ENV_AGENT_ID).map_err(|_| RuntimeError::MissingAgentId)?;
     let agent_id = A2aAgentId::new(raw_agent_id).map_err(RuntimeError::InvalidAgentId)?;
 
     let bind_addr: SocketAddr = trogon_std::env::ReadEnv::var(&env, ENV_HTTP_BIND)
@@ -79,6 +86,12 @@ pub async fn run() -> Result<(), RuntimeError> {
     let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
 
     let client = Client::new(a2a_config, agent_id, nats_client, js_client);
+    let client = if env_flag(&env, ENV_USE_GATEWAY) {
+        info!("Routing HTTP requests through a2a-gateway ingress");
+        client.routing_via_gateway_ingress()
+    } else {
+        client
+    };
 
     let app = router::build(client);
 

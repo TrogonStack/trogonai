@@ -1,6 +1,9 @@
 use a2a_nats::agent::{A2aHandler, Bridge};
 use a2a_nats::jetstream::provision_streams;
-use a2a_nats::{A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig, apply_timeout_overrides, nats_connect_timeout};
+use a2a_nats::{
+    A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
+    apply_timeout_overrides, nats_connect_timeout,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;

@@ -107,7 +107,10 @@ async fn tasks_get_returns_jsonrpc_result() {
 #[tokio::test]
 async fn tasks_get_not_found_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agent.test-agent.tasks.get", error_response_bytes(-32001, "not found"));
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.get",
+        error_response_bytes(-32001, "not found"),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -244,7 +247,10 @@ async fn agent_card_endpoint_returns_json() {
 #[tokio::test]
 async fn message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agent.test-agent.message.stream", send_message_response_bytes("ts1"));
+    nats.set_response(
+        "a2a.agent.test-agent.message.stream",
+        send_message_response_bytes("ts1"),
+    );
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = trogon_nats::jetstream::mocks::MockJetStreamConsumer::new();
@@ -340,17 +346,75 @@ fn runtime_error_display_shows_env_var_name() {
     assert!(RuntimeError::MissingAgentId.to_string().contains("A2A_AGENT_ID"));
 }
 
+#[tokio::test]
+async fn gateway_routed_message_send_targets_gateway_subject() {
+    let nats = AdvancedMockNatsClient::new();
+    nats.set_response(
+        "a2a.gateway.test-agent.message.send",
+        send_message_response_bytes("t-gw"),
+    );
+
+    let js = MockJetStreamConsumerFactory::new();
+    let client = Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress();
+    let app = router::build(client);
+
+    let response = app
+        .oneshot(jsonrpc_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"messageId":"m1","role":1,"parts":[]}}}"#,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert!(body["result"].is_object(), "expected result, got {body}");
+}
+
+#[tokio::test]
+async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
+    let nats = AdvancedMockNatsClient::new();
+    nats.set_response(
+        "a2a.agent.test-agent.tasks.get",
+        task_response_bytes("should-not-be-hit"),
+    );
+
+    let js = MockJetStreamConsumerFactory::new();
+    let client = Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress();
+    let app = router::build(client);
+
+    let response = app
+        .oneshot(jsonrpc_request(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tasks/get","params":{"id":"x","tenant":""}}"#,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert!(
+        body.get("error").is_some(),
+        "agent-routed mock should not satisfy gateway-routed request; got {body}"
+    );
+}
+
 #[test]
 fn client_error_to_jsonrpc_code_maps_known_errors() {
-    use a2a_nats::client::ClientError;
     use crate::sse::client_error_to_jsonrpc_code;
+    use a2a_nats::client::ClientError;
 
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotFound).0, -32001);
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotCancelable).0, -32002);
-    assert_eq!(client_error_to_jsonrpc_code(&ClientError::PushNotificationNotSupported).0, -32003);
+    assert_eq!(
+        client_error_to_jsonrpc_code(&ClientError::PushNotificationNotSupported).0,
+        -32003
+    );
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::AgentUnavailable).0, -32050);
     assert_eq!(
-        client_error_to_jsonrpc_code(&ClientError::JsonRpc { code: -32099, message: "x".into() }).0,
+        client_error_to_jsonrpc_code(&ClientError::JsonRpc {
+            code: -32099,
+            message: "x".into()
+        })
+        .0,
         -32099
     );
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::StreamClosed).0, -32603);

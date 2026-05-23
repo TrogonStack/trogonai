@@ -2,6 +2,7 @@
 name = "a2a-nats-server"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
 
 [[bin]]
 name = "a2a-nats-server"

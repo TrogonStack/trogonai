@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use a2a_nats::client::{
     CancelTaskRequest, Client, ClientError, DeleteTaskPushNotificationConfigRequest,
-    GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest,
-    ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
+    GetTaskPushNotificationConfigRequest, GetTaskRequest, ListTaskPushNotificationConfigsRequest, ListTasksRequest,
+    SendMessageRequest, TaskPushNotificationConfig,
 };
 use a2a_nats::task_id::A2aTaskId;
 use axum::Json;
@@ -133,8 +133,7 @@ where
                     });
                     let snapshot_sse = futures::stream::once(async move {
                         Ok::<Event, Infallible>(
-                            Event::default()
-                                .data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
+                            Event::default().data(serde_json::to_string(&snapshot_event).unwrap_or_default()),
                         )
                     });
                     let sse_stream = typed_event_stream_to_sse(stream, id);
@@ -255,7 +254,5 @@ fn sse_response<S>(stream: S) -> Response
 where
     S: Stream<Item = Result<Event, Infallible>> + Send + 'static,
 {
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }

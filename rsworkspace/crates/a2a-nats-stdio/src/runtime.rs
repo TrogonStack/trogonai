@@ -1,7 +1,9 @@
 use std::fmt;
 
 use a2a_nats::client::Client;
-use a2a_nats::{A2aAgentId, A2aPrefixError, AgentIdError, Config, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout};
+use a2a_nats::{
+    A2aAgentId, A2aPrefixError, AgentIdError, Config, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout,
+};
 use trogon_nats::connect::ConnectError;
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_std::env::SystemEnv;
@@ -64,8 +66,7 @@ pub async fn run() -> Result<(), RuntimeError> {
         .unwrap_or_else(|_| a2a_nats::DEFAULT_A2A_PREFIX.to_string());
     let prefix = a2a_nats::A2aPrefix::new(raw_prefix)?;
 
-    let agent_id_str = trogon_std::env::ReadEnv::var(&env, "A2A_AGENT_ID")
-        .map_err(|_| RuntimeError::MissingAgentId)?;
+    let agent_id_str = trogon_std::env::ReadEnv::var(&env, "A2A_AGENT_ID").map_err(|_| RuntimeError::MissingAgentId)?;
     let agent_id = A2aAgentId::new(agent_id_str)?;
 
     let nats_config = trogon_nats::NatsConfig::from_env(&env);

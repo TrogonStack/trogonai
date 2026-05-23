@@ -36,11 +36,13 @@ version = "0.1.0"
 dependencies = [
  "a2a-auth-callout",
  "a2a-nats",
+ "a2a-types",
  "async-nats",
  "async-trait",
  "axum",
  "bytes",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
