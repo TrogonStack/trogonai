@@ -1,38 +1,44 @@
-#[allow(dead_code)]
-#[derive(Debug, thiserror::Error)]
+use std::fmt;
+
+#[derive(Debug)]
 pub enum BridgeError {
-    #[error("missing Authorization header")]
     MissingAuthorization,
-    #[error("request body was not UTF-8: {0}")]
-    Utf8Body(#[source] std::str::Utf8Error),
-    #[error("failed to deserialize JSON-RPC body: {0}")]
-    Deserialize(#[source] serde_json::Error),
-    #[error("failed to serialize bridge response: {0}")]
-    Serialize(#[source] serde_json::Error),
-    #[error("missing X-A2A-Agent-Id header")]
+    Utf8Body(std::str::Utf8Error),
+    Deserialize(serde_json::Error),
+    Serialize(serde_json::Error),
     MissingAgentHeader,
-    #[error("JSON-RPC body missing method")]
     MissingJsonRpcMethod,
-    #[error("auth callout mint failed: {0}")]
     Mint(String),
-    #[error("NATS gateway publish failed: {0}")]
     NatsPublish(String),
-    #[error("JetStream SSE consumer attach failed: {0}")]
     JetStreamConsume(String),
-    #[error("HTTPS upstream forward failed: {0}")]
     UpstreamHttps(String),
-    #[error("JSON-RPC streaming request missing usable id")]
-    MissingJsonRpcId,
-    #[error("invalid streaming RPC params: {0}")]
-    StreamingParams(String),
-    #[error("gateway unary returned JSON-RPC error: {0}")]
-    JsonRpcUpstream(String),
-    #[error("catalog registration publish failed: {0}")]
-    CatalogRegistration(String),
-    #[error("invalid agent identifier: {0}")]
-    InvalidAgent(String),
-    #[error("failed to build HTTP response: {0}")]
-    ResponseBuild(String),
+}
+
+impl fmt::Display for BridgeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAuthorization => write!(f, "missing Authorization header"),
+            Self::Utf8Body(e) => write!(f, "request body was not UTF-8: {e}"),
+            Self::Deserialize(e) => write!(f, "failed to deserialize JSON-RPC body: {e}"),
+            Self::Serialize(e) => write!(f, "failed to serialize bridge response: {e}"),
+            Self::MissingAgentHeader => write!(f, "missing X-A2A-Agent-Id header"),
+            Self::MissingJsonRpcMethod => write!(f, "JSON-RPC body missing method"),
+            Self::Mint(msg) => write!(f, "auth callout mint failed: {msg}"),
+            Self::NatsPublish(msg) => write!(f, "NATS gateway publish failed: {msg}"),
+            Self::JetStreamConsume(msg) => write!(f, "JetStream SSE consumer attach failed: {msg}"),
+            Self::UpstreamHttps(msg) => write!(f, "HTTPS upstream forward failed: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for BridgeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Utf8Body(e) => Some(e),
+            Self::Deserialize(e) | Self::Serialize(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
