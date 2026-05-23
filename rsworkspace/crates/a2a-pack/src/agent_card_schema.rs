@@ -2,6 +2,7 @@
 //!
 //! Guards writes to the agent catalog KV bucket before cards are published.
 
+use std::fmt;
 use std::sync::OnceLock;
 
 use jsonschema::Validator;
@@ -33,7 +34,6 @@ impl AgentCardJsonSchema {
         }
     }
 
-    #[allow(clippy::expect_used)]
     fn compile_bundled() -> Self {
         let schema: Value =
             serde_json::from_str(AGENT_CARD_JSON_SCHEMA).expect("bundled AgentCard JSON Schema must parse");
@@ -51,8 +51,7 @@ impl Clone for AgentCardJsonSchema {
 }
 
 /// Validation failure for an AgentCard document.
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
+#[derive(Debug)]
 pub struct AgentCardValidateError {
     message: String,
 }
@@ -72,11 +71,22 @@ impl AgentCardValidateError {
             .collect();
         lines.sort();
         lines.dedup();
-        Self {
-            message: lines.join("; "),
-        }
+        let message = if lines.is_empty() {
+            "AgentCard failed JSON Schema validation".to_string()
+        } else {
+            lines.join("; ")
+        };
+        Self { message }
     }
 }
+
+impl fmt::Display for AgentCardValidateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for AgentCardValidateError {}
 
 /// Validates an AgentCard value against the bundled schema.
 pub fn validate_agent_card_value(doc: &Value) -> Result<(), AgentCardValidateError> {
