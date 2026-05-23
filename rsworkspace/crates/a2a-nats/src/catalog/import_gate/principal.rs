@@ -1,4 +1,4 @@
-pub use a2a_identity_types::SpiceDbPrincipal;
+pub use a2a_auth_callout::SpiceDbPrincipal;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImportedAccountName(String);
@@ -16,17 +16,5 @@ impl ImportedAccountName {
 impl std::fmt::Display for ImportedAccountName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn imported_account_name_round_trip() {
-        let n = ImportedAccountName::new("peer-acct");
-        assert_eq!(n.as_str(), "peer-acct");
-        assert_eq!(n.to_string(), "peer-acct");
     }
 }

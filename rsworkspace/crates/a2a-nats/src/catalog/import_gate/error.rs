@@ -1,8 +1,19 @@
-#[derive(Debug, thiserror::Error)]
+use std::fmt;
+
+#[derive(Debug)]
 pub enum ImportGateError {
-    #[error("federated discovery import gate: {0}")]
     Gateway(String),
 }
+
+impl fmt::Display for ImportGateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Gateway(msg) => write!(f, "federated discovery import gate: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ImportGateError {}
 
 #[cfg(test)]
 mod tests {
