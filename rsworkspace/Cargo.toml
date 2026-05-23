@@ -12,6 +12,7 @@ all = "deny"
 [workspace.dependencies]
 # Internal crates
 a2a-auth-callout = { path = "crates/a2a-auth-callout" }
+a2a-bridge = { path = "crates/a2a-bridge" }
 a2a-nats = { path = "crates/a2a-nats" }
 a2a-pack = { path = "crates/a2a-pack" }
 a2a-redaction = { path = "crates/a2a-redaction" }
