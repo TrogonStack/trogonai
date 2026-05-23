@@ -23,10 +23,7 @@ impl A2aHandler for NoopHandler {
         Err(A2aError::unsupported_operation("no handler registered"))
     }
 
-    async fn tasks_list(
-        &self,
-        _req: a2a_types::ListTasksRequest,
-    ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+    async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
         Err(A2aError::unsupported_operation("no handler registered"))
     }
 
@@ -34,10 +31,7 @@ impl A2aHandler for NoopHandler {
         Err(A2aError::unsupported_operation("no handler registered"))
     }
 
-    async fn tasks_resubscribe(
-        &self,
-        _req: a2a_types::SubscribeToTaskRequest,
-    ) -> Result<a2a_types::Task, A2aError> {
+    async fn tasks_resubscribe(&self, _req: a2a_types::SubscribeToTaskRequest) -> Result<a2a_types::Task, A2aError> {
         Err(A2aError::unsupported_operation("no handler registered"))
     }
 
@@ -69,10 +63,7 @@ impl A2aHandler for NoopHandler {
         Err(A2aError::push_notification_not_supported("no handler registered"))
     }
 
-    async fn agent_card(
-        &self,
-        _req: a2a_types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a_types::AgentCard, A2aError> {
+    async fn agent_card(&self, _req: a2a_types::GetExtendedAgentCardRequest) -> Result<a2a_types::AgentCard, A2aError> {
         Err(A2aError::unsupported_operation("no handler registered"))
     }
 }
