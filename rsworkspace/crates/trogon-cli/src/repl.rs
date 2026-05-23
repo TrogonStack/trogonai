@@ -142,7 +142,7 @@ fn join_continuation(s: &str) -> String {
 pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStore>(
     factory: SF,
     prefix: &str,
-    cwd: PathBuf,
+    mut cwd: PathBuf,
     fs: F,
     mut switcher: SW,
     registry: Registry<RS>,
@@ -217,7 +217,41 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     let mut parts = line.splitn(2, ' ');
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("");
-                    if cmd == "/clear" {
+                    if cmd == "/cd" {
+                        let target = if arg.is_empty() {
+                            std::env::var("HOME")
+                                .map(PathBuf::from)
+                                .unwrap_or_else(|_| cwd.clone())
+                        } else {
+                            let raw = arg.trim();
+                            let expanded = if raw.starts_with('~') {
+                                if let Ok(home) = std::env::var("HOME") {
+                                    PathBuf::from(home).join(&raw[1..].trim_start_matches('/'))
+                                } else {
+                                    cwd.join(raw)
+                                }
+                            } else {
+                                PathBuf::from(raw)
+                            };
+                            if expanded.is_absolute() {
+                                expanded
+                            } else {
+                                cwd.join(expanded)
+                            }
+                        };
+                        match target.canonicalize() {
+                            Ok(resolved) if resolved.is_dir() => {
+                                cwd = resolved.clone();
+                                if let Some(helper) = rl.helper_mut() {
+                                    helper.cwd = resolved.clone();
+                                }
+                                eprintln!("{}", resolved.display());
+                            }
+                            Ok(_) => eprintln!("not a directory: {}", target.display()),
+                            Err(e) => eprintln!("cd: {e}"),
+                        }
+                        continue;
+                    } else if cmd == "/clear" {
                         mcp_manager.shutdown_session(session.session_id()).await;
                         session.close().await;
                         match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
@@ -880,6 +914,7 @@ Commands:
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
+  {m}/cd{r} [path]          change working directory (~ supported)
 
 Multiline: end a line with \\ to continue on the next line
 Ctrl+C    cancel active response
