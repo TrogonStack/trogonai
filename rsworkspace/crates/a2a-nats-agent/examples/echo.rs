@@ -1,7 +1,6 @@
 use a2a_nats::agent::{A2aError, A2aHandler, TaskEventStream};
 use a2a_types::{
-    Message, Part, Role, SendMessageResponse, StreamResponse, Task, TaskState, TaskStatus,
-    TaskStatusUpdateEvent,
+    Message, Part, Role, SendMessageResponse, StreamResponse, Task, TaskState, TaskStatus, TaskStatusUpdateEvent,
 };
 use tracing::error;
 
@@ -54,10 +53,7 @@ fn completed_task(task_id: &str, context_id: &str, input: &Message) -> Task {
 
 #[async_trait::async_trait]
 impl A2aHandler for EchoHandler {
-    async fn message_send(
-        &self,
-        req: a2a_types::SendMessageRequest,
-    ) -> Result<SendMessageResponse, A2aError> {
+    async fn message_send(&self, req: a2a_types::SendMessageRequest) -> Result<SendMessageResponse, A2aError> {
         let input = req.message.unwrap_or_default();
         let task_id = uuid::Uuid::new_v4().to_string();
         let context_id = if input.context_id.is_empty() {
@@ -73,10 +69,7 @@ impl A2aHandler for EchoHandler {
         })
     }
 
-    async fn message_stream(
-        &self,
-        req: a2a_types::SendMessageRequest,
-    ) -> Result<(Task, TaskEventStream), A2aError> {
+    async fn message_stream(&self, req: a2a_types::SendMessageRequest) -> Result<(Task, TaskEventStream), A2aError> {
         let input = req.message.unwrap_or_default();
         let task_id = uuid::Uuid::new_v4().to_string();
         let context_id = if input.context_id.is_empty() {
@@ -114,10 +107,7 @@ impl A2aHandler for EchoHandler {
             payload: Some(a2a_types::stream_response::Payload::Task(completed_task)),
         };
 
-        let stream: TaskEventStream = Box::pin(futures::stream::iter([
-            Ok(working_event),
-            Ok(completed_event),
-        ]));
+        let stream: TaskEventStream = Box::pin(futures::stream::iter([Ok(working_event), Ok(completed_event)]));
 
         Ok((initial, stream))
     }
@@ -126,24 +116,15 @@ impl A2aHandler for EchoHandler {
         Err(A2aError::unsupported_operation("not implemented"))
     }
 
-    async fn tasks_list(
-        &self,
-        _req: a2a_types::ListTasksRequest,
-    ) -> Result<a2a_types::ListTasksResponse, A2aError> {
+    async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
         Err(A2aError::unsupported_operation("not implemented"))
     }
 
-    async fn tasks_cancel(
-        &self,
-        _req: a2a_types::CancelTaskRequest,
-    ) -> Result<Task, A2aError> {
+    async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<Task, A2aError> {
         Err(A2aError::unsupported_operation("not implemented"))
     }
 
-    async fn tasks_resubscribe(
-        &self,
-        _req: a2a_types::SubscribeToTaskRequest,
-    ) -> Result<Task, A2aError> {
+    async fn tasks_resubscribe(&self, _req: a2a_types::SubscribeToTaskRequest) -> Result<Task, A2aError> {
         Err(A2aError::unsupported_operation("not implemented"))
     }
 
@@ -175,10 +156,7 @@ impl A2aHandler for EchoHandler {
         Err(A2aError::push_notification_not_supported("not implemented"))
     }
 
-    async fn agent_card(
-        &self,
-        _req: a2a_types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a_types::AgentCard, A2aError> {
+    async fn agent_card(&self, _req: a2a_types::GetExtendedAgentCardRequest) -> Result<a2a_types::AgentCard, A2aError> {
         Err(A2aError::unsupported_operation("not implemented"))
     }
 }
