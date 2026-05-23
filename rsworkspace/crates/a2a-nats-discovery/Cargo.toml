@@ -1,0 +1,26 @@
+[package]
+name = "a2a-nats-discovery"
+version = "0.1.0"
+edition = "2024"
+readme = "README.md"
+
+[[bin]]
+name = "a2a-nats-discovery"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-nats = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+clap = { workspace = true, features = ["derive", "env"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+trogon-std = { workspace = true, features = ["test-support"] }
