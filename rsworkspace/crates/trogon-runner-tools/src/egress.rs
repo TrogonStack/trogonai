@@ -63,10 +63,8 @@ fn is_link_local(host: &str) -> bool {
     if host == "169.254.169.254" {
         return true;
     }
-    if let Some(rest) = host.strip_prefix("169.254.") {
-        if !rest.is_empty() {
-            return true;
-        }
+    if host.strip_prefix("169.254.").is_some_and(|rest| !rest.is_empty()) {
+        return true;
     }
     false
 }

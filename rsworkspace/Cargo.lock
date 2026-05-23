@@ -5397,6 +5397,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
+ "libc",
  "opentelemetry",
  "reqwest",
  "rustyline",

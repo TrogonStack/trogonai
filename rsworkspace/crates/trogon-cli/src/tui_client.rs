@@ -46,9 +46,37 @@ fn flush_stderr() {
 }
 
 fn read_char_from_dev_tty() -> io::Result<char> {
+    use std::os::unix::io::AsRawFd;
     let mut tty = open_dev_tty(true, false)?;
+    let fd = tty.as_raw_fd();
+
+    // Save current terminal settings, switch to raw mode so the user's keypress
+    // arrives without waiting for Enter, and flush any stale buffered input
+    // (e.g. the '\r' / '\n' left over from the previous rustyline readline call).
+    let original = unsafe {
+        let mut t: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut t) != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        t
+    };
+    let mut raw = original;
+    unsafe {
+        libc::cfmakeraw(&mut raw);
+        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VTIME] = 0;
+        libc::tcsetattr(fd, libc::TCSAFLUSH, &raw);
+        // TCSAFLUSH discards any pending (unread) input, giving us a clean slate.
+    }
+
     let mut buf = [0u8; 1];
-    tty.read_exact(&mut buf)?;
+    let result = tty.read_exact(&mut buf);
+
+    unsafe {
+        libc::tcsetattr(fd, libc::TCSANOW, &original);
+    }
+
+    result?;
     Ok(char::from(buf[0]))
 }
 
