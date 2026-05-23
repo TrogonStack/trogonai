@@ -16,7 +16,7 @@ use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
 use crate::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
 use crate::config::Config;
 use crate::nats::subjects::wildcards::AgentAllSubject;
-use crate::push::{PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
+use crate::push::{CallerId, PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
 use crate::task_id::A2aTaskId;
 
 /// Errors that can occur while running the `Bridge`.
@@ -202,7 +202,7 @@ async fn dispatch<H, N, J>(
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
-    push_dlq_caller_segment: String,
+    push_dlq_caller_segment: CallerId,
 ) where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
@@ -276,10 +276,24 @@ async fn dispatch<H, N, J>(
             .await;
         }
         Some(A2aMethod::PushNotificationGet) => {
-            push_notification::handle_get(handler.as_ref(), payload, reply, &nats, push_delivery_semantics.as_ref()).await;
+            push_notification::handle_get(
+                handler.as_ref(),
+                payload,
+                reply,
+                &nats,
+                push_delivery_semantics.as_ref(),
+            )
+            .await;
         }
         Some(A2aMethod::PushNotificationList) => {
-            push_notification::handle_list(handler.as_ref(), payload, reply, &nats, push_delivery_semantics.as_ref()).await;
+            push_notification::handle_list(
+                handler.as_ref(),
+                payload,
+                reply,
+                &nats,
+                push_delivery_semantics.as_ref(),
+            )
+            .await;
         }
         Some(A2aMethod::PushNotificationDelete) => {
             push_notification::handle_delete(
@@ -473,7 +487,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
         assert!(nats.published_messages().is_empty());
@@ -501,7 +515,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["reply"]);
@@ -529,7 +543,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();

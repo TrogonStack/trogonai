@@ -1,15 +1,10 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use a2a_identity_types::SpiceDbPrincipal;
-use tracing::warn;
+use a2a_auth_callout::{SpiceDbPrincipal, UserJwtClaims};
+use serde_json::Value;
 
 use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
-
-// `CallerId::from_user_jwt_claims` lives with the `a2a-auth-callout` crate
-// that owns the `UserJwtClaims` struct — it's a thin convenience wrapper over
-// `from_principal(&claims.data)` and lands in the auth-callout PR alongside
-// the minted-JWT integration tests.
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CallerId(String);
@@ -33,35 +28,16 @@ pub(crate) fn sanitize_subject_token(raw: &str) -> Cow<'_, str> {
 
 impl CallerId {
     pub fn from_principal(principal: &SpiceDbPrincipal) -> Self {
-        match principal.spicedb_subject() {
-            Some(subject) => Self(sanitize_subject_token(subject.as_str()).into_owned()),
-            None => Self(DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string()),
-        }
+        let raw = principal.0.get("spicedb_subject").and_then(Value::as_str).unwrap_or("");
+        Self(sanitize_subject_token(raw).into_owned())
+    }
+
+    pub fn from_user_jwt_claims(claims: &UserJwtClaims) -> Self {
+        Self::from_principal(&claims.data)
     }
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
-    }
-}
-
-/// Resolves the push DLQ `{caller_id}` segment from an optional gateway principal.
-pub fn resolve_push_dlq_caller_id(principal: Option<&SpiceDbPrincipal>, fallback: &CallerId) -> CallerId {
-    let Some(p) = principal else {
-        return fallback.clone();
-    };
-    // A whitespace-only `spicedb_subject` is treated as absent — letting it
-    // through to `from_principal` would silently sanitise to the
-    // DEFAULT_PUSH_DLQ_CALLER_SEGMENT instead of honouring the operator's
-    // configured fallback.
-    let has_subject = p
-        .spicedb_subject()
-        .map(|s| !s.as_str().trim().is_empty())
-        .unwrap_or(false);
-    if has_subject {
-        CallerId::from_principal(p)
-    } else {
-        warn!(%fallback, "push DLQ caller_id: principal present but spicedb_subject absent/blank; using fallback segment");
-        fallback.clone()
     }
 }
 
@@ -84,4 +60,54 @@ impl From<&str> for CallerId {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn from_principal_reads_spicedb_subject_and_sanitizes() {
+        let p = SpiceDbPrincipal(json!({"spicedb_subject": "user/al.ice"}));
+        assert_eq!(CallerId::from_principal(&p).as_str(), "user/al_ice");
+    }
+
+    #[test]
+    fn from_principal_without_subject_claim_is_placeholder() {
+        let p = SpiceDbPrincipal(json!({}));
+        assert_eq!(CallerId::from_principal(&p).as_str(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+    }
+
+    #[test]
+    fn sanitization_recovers_single_segment_from_spaces_and_dots() {
+        assert_eq!(
+            CallerId::from_principal(&SpiceDbPrincipal(json!({"spicedb_subject": " u1.id "}))).as_str(),
+            "u1_id"
+        );
+    }
+
+    #[test]
+    fn from_principal_sanitizes_ascii_control_chars() {
+        let p = SpiceDbPrincipal(json!({"spicedb_subject": "a\u{1}b"}));
+        assert_eq!(CallerId::from_principal(&p).as_str(), "a_b");
+    }
+
+    #[test]
+    fn from_str_behaves_like_sanitizer() {
+        assert_eq!(CallerId::from("_").as_str(), "_");
+    }
+
+    #[test]
+    fn from_user_jwt_claims_delegates_to_principal_data() {
+        let claims = UserJwtClaims {
+            sub: a2a_auth_callout::jwt::ExternalSubject::new("ext").unwrap(),
+            aud: a2a_auth_callout::AudienceAccount::new("tenant-x"),
+            data: SpiceDbPrincipal(json!({"spicedb_subject": "p.q"})),
+            caller_id: a2a_auth_callout::jwt::CallerId::new("ok").unwrap(),
+        };
+        assert_eq!(CallerId::from_user_jwt_claims(&claims).as_str(), "p_q");
+    }
+
+    #[test]
+    fn default_matches_env_placeholder_literal() {
+        assert_eq!(CallerId::default().as_str(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+    }
+}
