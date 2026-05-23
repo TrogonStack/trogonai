@@ -2,9 +2,6 @@
 name = "a2a-auth-callout"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
-description = "NATS auth-callout server for A2A: caller credential verification + minted user JWT issuance"
-publish = false
 
 [[bin]]
 name = "a2a-auth-callout"
@@ -20,36 +17,10 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true }
 async-trait = { workspace = true }
-base64 = { workspace = true }
 futures = { workspace = true }
-hex = { workspace = true }
-hmac = { workspace = true }
-jsonwebtoken = { workspace = true }
-nats-jwt-rs = { workspace = true }
-nkeys = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
-rustls-pemfile = { workspace = true }
-rustls-pki-types = { workspace = true }
-rustls-webpki = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-thiserror = { workspace = true }
-time = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tracing = { workspace = true }
-tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
-uuid = { workspace = true }
-x509-parser = { version = "=0.16.0", features = ["verify"] }
-data-encoding = "=2.10.0"
-
-[dev-dependencies]
-tempfile = { workspace = true }
-rand = { workspace = true }
-rcgen = "=0.13.2"
-rsa = { version = "=0.9.10", features = ["pem"] }
-testcontainers = "=0.27.0"
-wiremock = { workspace = true }
-
-[features]
-test-support = []
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+jsonwebtoken = { workspace = true }
