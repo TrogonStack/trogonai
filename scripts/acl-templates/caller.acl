@@ -1,34 +1,52 @@
-# A2A Phase 0 — Caller User subject ACL template
+# =============================================================================
+# A2A Account User — Caller (subject ACL template for nsc-derived provisioning)
 #
-# Role: Caller User
-# Identity: external or bridge-originated; minted per-caller by the auth callout in production.
-#           This template is used for static bootstrap and documentation only.
+# Role: Caller User (external or bridge identity; JWT mint path is the auth callout
+#       in production; this file describes the bound subject ACL inside one tenant
+#       Account).
 #
-# Tenancy model: one NATS Account per tenant; subjects carry no {tenant} segment.
-# Default prefix: a2a — substitute A2A_PREFIX if the tenant uses a custom value.
+# Bounded subject set (substitute `{prefix}` = A2A_PREFIX, usually `a2a`; replace
+# `{caller_id}` with the stable token-safe caller segment from the minted JWT):
+#   Publish: `{prefix}.gateway.>`
+#   Subscribe: `_INBOX.{caller_id}.>`, `{prefix}.push.{caller_id}.>`
 #
-# References:
-#   docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md  §Subject ACL templates
-#   docs/A2A_SUBJECT_ACL_QUICKREF.md
-#   https://nats-io.github.io/nsc/nsc_add_user.html
+# NSC / JWT semantics — “deny outside scope”:
+#   User JWT authorization uses narrow allowlists. Listing `--allow-pub` /
+#   `--allow-sub` entries means publishes/subscribes to any OTHER subject are
+#   rejected unless separately permitted (`--allow-pub-response` only relaxes reply
+#   publishes matching that rule). Explicit `--deny-pub` / `--deny-sub` lines below
+#   add defense-in-depth for sibling `{prefix}` branches that MUST NOT be used even
+#   if a buggy client widens allowances later.
+#
+# NSC flags (repeat --allow-* / --deny-* per line):
+#   --allow-pub   for each "# allow-pub" subject (below)
+#   --allow-sub   for each "# allow-sub" subject (below)
+#   --allow-pub-response   (recommended; dynamic reply subjects beyond `_INBOX.*`)
+#   --deny-pub    for each "# deny-pub" subject (below)
+#   --deny-sub    for each "# deny-sub" subject (below)
+#
+# References: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §Subject ACL templates,
+#             docs/A2A_SUBJECT_ACL_QUICKREF.md
+# =============================================================================
 
-# allow-pub
-# Subjects the Caller User may PUBLISH to.
-# Request/reply into the gateway ingress namespace.
-a2a.gateway.>
+# allow-pub — request/reply and ingress traffic to gateway only
+{prefix}.gateway.>
 
-# allow-sub
-# Subjects the Caller User may SUBSCRIBE to.
-# Caller-owned inbox prefix for request/reply replies.
-# Replace _INBOX.{caller_id} with the stable token-safe caller identifier
-# encoded in the minted User JWT; the auth callout derives this from the
-# external identity (e.g. OIDC sub).
+# allow-sub — inbound replies + caller-scoped JetStream push read path (Phase 0)
 _INBOX.{caller_id}.>
-# Push read path — caller receives task-status push events on their own prefix.
-# Provision even in Phase 0; the auth callout sets {caller_id} at mint time.
-a2a.push.{caller_id}.>
+{prefix}.push.{caller_id}.>
 
-# deny-pub
-# Subjects the Caller User must NOT publish to.
-# Catalog register writes are registrar-only; deny here as defense in depth.
-a2a.catalog.register.>
+# deny-pub — non-gateway `{prefix}` tree (caller MUST NOT originate these)
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>
+{prefix}.catalog.register.>
+{prefix}.discover.>
+
+# deny-sub — prevent lateral subscribe on shared service planes (everything outside
+# the bounded subscribe set uses implicit deny already; listed here intentionally)
+{prefix}.gateway.>
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.catalog.register.>
+{prefix}.discover.>
