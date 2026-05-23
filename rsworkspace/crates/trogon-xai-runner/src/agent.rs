@@ -1573,13 +1573,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     };
 
                     info!(session_id, call_id = %call_id, tool = %name, "xai: tool executed");
+                    let update_status = if allowed { ToolCallStatus::Completed } else { ToolCallStatus::Failed };
                     self.notifier.notify(SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::ToolCallUpdate(
                             ToolCallUpdate::new(
                                 call_id.clone(),
                                 ToolCallUpdateFields::new()
-                                    .status(ToolCallStatus::Completed)
+                                    .title(name.clone())
+                                    .status(update_status)
                                     .raw_output(serde_json::Value::String(result.clone())),
                             ),
                         ),

@@ -139,7 +139,7 @@ fn cancelled_outcome() -> agent_client_protocol::Result<RequestPermissionRespons
     Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
 }
 
-fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<RequestPermissionResponse> {
+async fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<RequestPermissionResponse> {
     let options = exit_plan_mode_options(allow_bypass());
     eprintln!();
     eprintln!("Exit plan mode — choose new mode:");
@@ -148,10 +148,14 @@ fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<RequestPe
     }
     flush_stderr();
 
-    let line = match read_line_from_dev_tty("Choice: ") {
-        Ok(l) => l,
-        Err(e) => {
+    let line = match tokio::task::spawn_blocking(|| read_line_from_dev_tty("Choice: ")).await {
+        Ok(Ok(l)) => l,
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "ExitPlanMode tty read failed");
+            return cancelled_outcome();
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "ExitPlanMode spawn_blocking panicked");
             return cancelled_outcome();
         }
     };
@@ -163,17 +167,21 @@ fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<RequestPe
     selected_outcome(opt.option_id.0.to_string())
 }
 
-fn handle_tool_permission(req: &RequestPermissionRequest) -> agent_client_protocol::Result<RequestPermissionResponse> {
+async fn handle_tool_permission(req: &RequestPermissionRequest) -> agent_client_protocol::Result<RequestPermissionResponse> {
     let summary = format_tool_summary(req);
     eprintln!();
     eprintln!("┆ {summary}");
     eprintln!("[a]llow  [A]lways allow  [r]eject");
     flush_stderr();
 
-    let key = match read_char_from_dev_tty() {
-        Ok(k) => k,
-        Err(e) => {
+    let key = match tokio::task::spawn_blocking(read_char_from_dev_tty).await {
+        Ok(Ok(k)) => k,
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "permission tty read failed");
+            return cancelled_outcome();
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "permission spawn_blocking panicked");
             return cancelled_outcome();
         }
     };
@@ -200,9 +208,9 @@ impl Client for TuiClient {
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
         let title = req.tool_call.fields.title.as_deref().unwrap_or("");
         if title == "ExitPlanMode" || req.tool_call.fields.title.as_deref() == Some("Exit Plan Mode") {
-            return handle_exit_plan_mode_permission();
+            return handle_exit_plan_mode_permission().await;
         }
-        handle_tool_permission(&req)
+        handle_tool_permission(&req).await
     }
 
     async fn read_text_file(&self, _: ReadTextFileRequest) -> agent_client_protocol::Result<ReadTextFileResponse> {

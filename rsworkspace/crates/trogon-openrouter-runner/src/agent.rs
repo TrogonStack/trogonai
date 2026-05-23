@@ -1423,13 +1423,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
                 };
 
+                let update_status = if allowed { ToolCallStatus::Completed } else { ToolCallStatus::Failed };
                 notifier.notify(agent_client_protocol::SessionNotification::new(
                     notification_session_id.clone(),
                     SessionUpdate::ToolCallUpdate(
                         ToolCallUpdate::new(
                             call.id.clone(),
                             ToolCallUpdateFields::new()
-                                .status(ToolCallStatus::Completed)
+                                .title(call.name.clone())
+                                .status(update_status)
                                 .raw_output(serde_json::Value::String(result.clone())),
                         ),
                     ),
