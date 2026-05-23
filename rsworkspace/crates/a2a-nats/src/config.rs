@@ -7,10 +7,11 @@ use trogon_std::env::ReadEnv;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
-    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
-    DEFAULT_PUSH_DLQ_CALLER_SEGMENT, DEFAULT_TASK_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS, ENV_MAX_CONCURRENT_CLIENT_TASKS,
-    ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT, ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
+    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT, DEFAULT_TASK_TIMEOUT,
+    ENV_CONNECT_TIMEOUT_SECS, ENV_MAX_CONCURRENT_CLIENT_TASKS, ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT,
+    ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
 };
+use crate::push::CallerId;
 
 pub use crate::constants::{DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 
@@ -21,8 +22,7 @@ pub struct Config {
     pub(crate) operation_timeout: Duration,
     pub(crate) task_timeout: Duration,
     pub(crate) max_concurrent_client_tasks: usize,
-    /// Segment used as `{caller_id}` in push DLQ subjects when no richer identity is available.
-    pub(crate) push_dlq_caller_segment: String,
+    pub(crate) push_dlq_caller_segment: CallerId,
 }
 
 impl Config {
@@ -33,7 +33,7 @@ impl Config {
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
             task_timeout: DEFAULT_TASK_TIMEOUT,
             max_concurrent_client_tasks: DEFAULT_MAX_CONCURRENT_CLIENT_TASKS,
-            push_dlq_caller_segment: DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            push_dlq_caller_segment: CallerId::default(),
         }
     }
 
@@ -52,13 +52,12 @@ impl Config {
         self
     }
 
-    /// Overrides the DLQ `{caller_id}` subject segment (see [`crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT`]).
     pub fn with_push_dlq_caller_segment(mut self, segment: impl Into<String>) -> Self {
         let s = segment.into();
         self.push_dlq_caller_segment = if s.trim().is_empty() {
-            DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string()
+            CallerId::default()
         } else {
-            s
+            CallerId::from(s.trim())
         };
         self
     }
@@ -87,8 +86,8 @@ impl Config {
         self.max_concurrent_client_tasks
     }
 
-    pub fn push_dlq_caller_segment(&self) -> &str {
-        self.push_dlq_caller_segment.as_str()
+    pub fn push_dlq_caller_segment(&self) -> &CallerId {
+        &self.push_dlq_caller_segment
     }
 
     #[cfg(test)]
@@ -176,7 +175,8 @@ pub fn nats_connect_timeout<E: ReadEnv>(env_provider: &E) -> Duration {
 mod tests {
     use super::*;
     use crate::constants::{
-        DEFAULT_PUSH_DLQ_CALLER_SEGMENT, ENV_MAX_CONCURRENT_CLIENT_TASKS, ENV_PUSH_DLQ_CALLER_SEGMENT,
+        DEFAULT_PUSH_DLQ_CALLER_SEGMENT as PLACEHOLDER_CALLER_SEGMENT, ENV_MAX_CONCURRENT_CLIENT_TASKS,
+        ENV_PUSH_DLQ_CALLER_SEGMENT,
     };
 
     fn default_nats() -> NatsConfig {
@@ -230,13 +230,13 @@ mod tests {
     #[test]
     fn config_push_dlq_caller_segment_trim_empty_falls_back() {
         let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("");
-        assert_eq!(config.push_dlq_caller_segment(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+        assert_eq!(config.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
     }
 
     #[test]
     fn config_push_dlq_caller_segment_preserves_explicit_value() {
         let config = Config::new(A2aPrefix::new("a2a").unwrap(), default_nats()).with_push_dlq_caller_segment("alice");
-        assert_eq!(config.push_dlq_caller_segment(), "alice");
+        assert_eq!(config.push_dlq_caller_segment().as_str(), "alice");
     }
 
     #[test]
@@ -358,7 +358,7 @@ mod tests {
         let env = trogon_std::env::InMemoryEnv::new();
         env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "oidc-sub-7");
         let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.push_dlq_caller_segment(), "oidc-sub-7");
+        assert_eq!(cfg.push_dlq_caller_segment().as_str(), "oidc-sub-7");
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
         let env = trogon_std::env::InMemoryEnv::new();
         env.set(ENV_PUSH_DLQ_CALLER_SEGMENT, "   ");
         let cfg = apply_timeout_overrides(Config::for_test("a2a"), &env);
-        assert_eq!(cfg.push_dlq_caller_segment(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+        assert_eq!(cfg.push_dlq_caller_segment().as_str(), PLACEHOLDER_CALLER_SEGMENT);
     }
 
     #[test]

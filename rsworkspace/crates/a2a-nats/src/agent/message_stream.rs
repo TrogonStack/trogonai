@@ -13,8 +13,9 @@ use crate::audit::emitter::AuditEmitter;
 use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
 use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::task::TaskEventsSubject;
+use crate::push::CallerId;
 use crate::push::PushDeliverySemanticsRegistry;
-use crate::push::dispatcher::{maybe_terminal_push_idempotency_key, DispatchError, PushDispatcher};
+use crate::push::dispatcher::{DispatchError, PushDispatcher, maybe_terminal_push_idempotency_key};
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::push::push_payload::augment_terminal_push_notification_bytes;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
@@ -45,7 +46,7 @@ use crate::task_id::A2aTaskId;
         cancel,
         audit_emitter,
         push_delivery_semantics,
-        push_dlq_caller_segment
+        push_dlq_caller_id
     )
 )]
 pub async fn handle<H, N, J, D>(
@@ -60,7 +61,7 @@ pub async fn handle<H, N, J, D>(
     dispatcher: Arc<D>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     cancel: CancellationToken,
-    push_dlq_caller_segment: String,
+    push_dlq_caller_id: CallerId,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
     H: A2aHandler,
@@ -139,7 +140,7 @@ where
     let audit_emitter_clone = audit_emitter.clone();
     let prefix_clone = prefix.clone();
     let agent_id_clone = agent_id.clone();
-    let dlq_seg = push_dlq_caller_segment;
+    let dlq_caller = push_dlq_caller_id;
 
     let push_delivery_clone = Arc::clone(&push_delivery_semantics);
 
@@ -158,7 +159,7 @@ where
             agent_id_clone,
             json_rpc_req_id,
             bootstrap_task_state,
-            dlq_seg,
+            dlq_caller,
         )
         .await;
     });
@@ -181,7 +182,7 @@ async fn pump_events<J, H, D>(
     agent_id: Arc<A2aAgentId>,
     json_rpc_req_id: Option<String>,
     bootstrap_task_state: i32,
-    push_dlq_caller_segment: String,
+    push_dlq_caller_id: CallerId,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
     H: A2aHandler,
@@ -239,7 +240,7 @@ async fn pump_events<J, H, D>(
                                 Arc::clone(&push_delivery_semantics),
                                 &js,
                                 &prefix,
-                                push_dlq_caller_segment.as_str(),
+                                &push_dlq_caller_id,
                             )
                             .await;
                         }
@@ -302,7 +303,7 @@ async fn dispatch_push_notifications<H, D, J>(
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     js: &J,
     prefix: &crate::a2a_prefix::A2aPrefix,
-    push_dlq_caller_segment: &str,
+    push_dlq_caller_id: &CallerId,
 ) where
     H: A2aHandler,
     D: PushDispatcher + ?Sized,
@@ -349,7 +350,7 @@ async fn dispatch_push_notifications<H, D, J>(
                 crate::push::dlq::publish_push_delivery_failure(
                     js,
                     prefix,
-                    push_dlq_caller_segment,
+                    push_dlq_caller_id,
                     task_id,
                     config,
                     delivery_payload_bytes,
@@ -361,19 +362,19 @@ async fn dispatch_push_notifications<H, D, J>(
             }
         };
 
-        let augmented = match augment_terminal_push_notification_bytes(delivery_payload_bytes, &semantics, derived_opt.as_ref())
-        {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(
-                    task_id = %task_id,
-                    config_id = %config.id,
-                    error = %e,
-                    "failed to augment push notification JSON; skipping"
-                );
-                continue;
-            }
-        };
+        let augmented =
+            match augment_terminal_push_notification_bytes(delivery_payload_bytes, &semantics, derived_opt.as_ref()) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(
+                        task_id = %task_id,
+                        config_id = %config.id,
+                        error = %e,
+                        "failed to augment push notification JSON; skipping"
+                    );
+                    continue;
+                }
+            };
 
         match dispatcher
             .dispatch(task_id, config, semantics, terminal_state, augmented.as_ref())
@@ -385,7 +386,7 @@ async fn dispatch_push_notifications<H, D, J>(
                 crate::push::dlq::publish_push_delivery_failure(
                     js,
                     prefix,
-                    push_dlq_caller_segment,
+                    push_dlq_caller_id,
                     task_id,
                     config,
                     augmented.as_ref(),
@@ -614,7 +615,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
 
@@ -643,7 +644,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
         assert!(result.is_none());
@@ -672,7 +673,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
         assert!(result.is_none());
@@ -702,7 +703,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             cancel.clone(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
 
@@ -737,7 +738,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
 
@@ -788,7 +789,7 @@ mod tests {
             Arc::clone(&dispatcher),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
 
@@ -845,7 +846,7 @@ mod tests {
             Arc::clone(&dispatcher),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+            CallerId::default(),
         )
         .await;
 
@@ -868,6 +869,70 @@ mod tests {
             "unexpected error summary: {}",
             msg["error"]
         );
+        assert_eq!(dispatcher.recorded_calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn terminal_push_dlq_subject_uses_derived_principal_caller_id() {
+        use a2a_auth_callout::SpiceDbPrincipal;
+        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+
+        let nats = AdvancedMockNatsClient::new();
+        let js = mock_js();
+
+        let terminal_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "dlq-task".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Completed as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let push_cfg = TaskPushNotificationConfig {
+            id: "pcfg-1".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            ..Default::default()
+        };
+
+        let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
+        let handler = Arc::new(StreamingHandler {
+            task: make_task("dlq-task"),
+            events: vec![terminal_event],
+            push_configs: vec![push_cfg],
+        });
+
+        let caller = CallerId::from_principal(&SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "p.q"})));
+
+        let result = handle(
+            handler,
+            &rpc_payload("message/stream", 62),
+            Some("reply".into()),
+            &nats,
+            &js,
+            &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
+            Arc::clone(&dispatcher),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            CancellationToken::new(),
+            caller,
+        )
+        .await;
+
+        let (_task_id, pump) = result.unwrap();
+        pump.await.unwrap();
+
+        let subjects = js.published_subjects();
+        let dlq_idx = subjects
+            .iter()
+            .position(|s| s == "a2a.push.dlq.p_q.dlq-task")
+            .unwrap_or_else(|| panic!("missing DLQ publish; got {subjects:?}"));
+        let _: serde_json::Value = serde_json::from_slice(&js.published_payloads()[dlq_idx]).expect("DLQ payload JSON");
         assert_eq!(dispatcher.recorded_calls().len(), 1);
     }
 
