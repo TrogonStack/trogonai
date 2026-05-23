@@ -36,18 +36,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provision_creates_events_stream() {
+    async fn provision_creates_both_streams() {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("a2a")).await.unwrap();
-        assert_eq!(ctx.created_streams().len(), 1);
+        assert_eq!(ctx.created_streams().len(), 2);
     }
 
     #[tokio::test]
-    async fn provision_creates_correct_stream_name() {
+    async fn provision_creates_correct_stream_names() {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("a2a")).await.unwrap();
         let names: Vec<String> = ctx.created_streams().iter().map(|c| c.name.clone()).collect();
         assert!(names.contains(&"A2A_EVENTS".to_string()));
+        assert!(names.contains(&"A2A_PUSH_DLQ".to_string()));
     }
 
     #[tokio::test]
@@ -72,6 +73,6 @@ mod tests {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("a2a")).await.unwrap();
         provision_streams(&ctx, &p("a2a")).await.unwrap();
-        assert_eq!(ctx.created_streams().len(), 2);
+        assert_eq!(ctx.created_streams().len(), 4);
     }
 }

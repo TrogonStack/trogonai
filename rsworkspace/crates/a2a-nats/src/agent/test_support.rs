@@ -49,10 +49,7 @@ impl A2aHandler for std::sync::Mutex<StubHandler> {
         take_or_unimplemented(&mut self.lock().unwrap().tasks_cancel_result)
     }
 
-    async fn tasks_resubscribe(
-        &self,
-        _req: a2a_types::SubscribeToTaskRequest,
-    ) -> Result<a2a_types::Task, A2aError> {
+    async fn tasks_resubscribe(&self, _req: a2a_types::SubscribeToTaskRequest) -> Result<a2a_types::Task, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().tasks_resubscribe_result)
     }
 
@@ -84,10 +81,7 @@ impl A2aHandler for std::sync::Mutex<StubHandler> {
         take_or_unimplemented(&mut self.lock().unwrap().push_delete_result)
     }
 
-    async fn agent_card(
-        &self,
-        _req: a2a_types::GetExtendedAgentCardRequest,
-    ) -> Result<a2a_types::AgentCard, A2aError> {
+    async fn agent_card(&self, _req: a2a_types::GetExtendedAgentCardRequest) -> Result<a2a_types::AgentCard, A2aError> {
         take_or_unimplemented(&mut self.lock().unwrap().agent_card_result)
     }
 }

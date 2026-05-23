@@ -28,6 +28,21 @@ pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 /// NATS message header carrying the [`crate::ReqId`] across the request/reply boundary.
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
+/// Maximum attempts for terminal task push delivery over HTTPS, core NATS (`subject:` URLs), and JetStream (`jetstream:` URLs).
+///
+/// HTTPS retries are status- and transport-aware in [`crate::push::HttpPushDispatcher`]. NATS targets use the same
+/// attempt cap with exponential backoff in [`crate::push::NatsPublishPushDispatcher`] and
+/// [`crate::push::JetStreamPublishPushDispatcher`].
+pub const HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS: u32 = 3;
+
+/// Default `{caller_id}` segment for `{prefix}.push.dlq.{caller_id}.{task_id}` when the agent
+/// bridge has no authenticated external caller identity (until gateway/auth-callout propagates one).
+pub const DEFAULT_PUSH_DLQ_CALLER_SEGMENT: &str = "_";
+
+pub const ENV_PUSH_DLQ_CALLER_SEGMENT: &str = "A2A_PUSH_DLQ_CALLER_SEGMENT";
+
+pub const ENV_MAX_CONCURRENT_CLIENT_TASKS: &str = "A2A_MAX_CONCURRENT_CLIENT_TASKS";
+
 #[cfg(test)]
 pub const TEST_TASK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -59,6 +74,8 @@ mod tests {
             ENV_OPERATION_TIMEOUT_SECS,
             ENV_TASK_TIMEOUT_SECS,
             ENV_CONNECT_TIMEOUT_SECS,
+            ENV_PUSH_DLQ_CALLER_SEGMENT,
+            ENV_MAX_CONCURRENT_CLIENT_TASKS,
         ] {
             assert!(name.starts_with("A2A_"), "{name} not A2A-namespaced");
         }
@@ -67,5 +84,11 @@ mod tests {
     #[test]
     fn headers_use_x_prefix() {
         assert!(REQ_ID_HEADER.starts_with("X-"));
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn http_push_max_attempts_is_positive() {
+        assert!(crate::constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS > 0);
     }
 }

@@ -188,6 +188,7 @@ mod tests {
     #[test]
     fn a2a_stream_display() {
         assert_eq!(A2aStream::Events.to_string(), "EVENTS");
+        assert_eq!(A2aStream::PushDlq.to_string(), "PUSH_DLQ");
     }
 
     #[test]
@@ -205,12 +206,17 @@ mod tests {
     fn a2a_stream_subjects() {
         let patterns = A2aStream::Events.subject_patterns(&p("a2a"));
         assert_eq!(patterns, vec!["a2a.task.*.events.*"]);
+        let dlq_patterns = A2aStream::PushDlq.subject_patterns(&p("a2a"));
+        assert_eq!(dlq_patterns, vec!["a2a.push.dlq.*.*"]);
     }
 
     #[test]
     fn a2a_stream_all_configs_covers_every_variant() {
         let configs = A2aStream::all_configs(&p("a2a"));
         assert_eq!(configs.len(), A2aStream::ALL.len());
+        let names: Vec<String> = configs.iter().map(|c| c.name.clone()).collect();
+        assert!(names.contains(&"A2A_EVENTS".to_string()));
+        assert!(names.contains(&"A2A_PUSH_DLQ".to_string()));
     }
 
     #[test]
@@ -222,9 +228,7 @@ mod tests {
         let req_id = rid("r1");
 
         assert_eq!(
-            agent::MessageSendSubject::new(&prefix, &agent_id)
-                .to_subject()
-                .as_str(),
+            agent::MessageSendSubject::new(&prefix, &agent_id).to_subject().as_str(),
             "a2a.agent.planner.message.send"
         );
         assert_eq!(
