@@ -1599,7 +1599,7 @@ called at exactly two sites:
   in the `set_session_config_option` gap fix
 - **Line 996** (`set_session_model`) — replaced by the new `set_session_model` body
 
-After both replacements, `resolve_model` has no callers — dead code. More importantly,
+After both replacements, `resolve_model` has no production callers. More importantly,
 `set_session_model_impl` calls `resolve_prefix_for_model(model_id)` which does an exact
 registry lookup. Aliases like `"claude opus 4"` are not registered, so the lookup returns
 `Err("no runner registered for model claude opus 4")`.
@@ -1608,13 +1608,33 @@ The Zed `/model` slash command sends the user's text directly to
 `set_session_config_option("model", <text>)`. A user typing `/model claude opus 4` gets an
 error after this PR.
 
-**Fix for v1:** document as Known Limitation. The IDE model picker sends canonical IDs from
-the registry, so the normal workflow is unaffected. Only free-text alias input is broken.
+**Fix for v1 — alias breakage:** document as Known Limitation. The IDE model picker sends
+canonical IDs from the registry, so the normal workflow is unaffected. Only free-text alias
+input is broken.
 
-**Follow-up fix:** before calling `resolve_prefix_for_model`, apply alias normalisation.
-Since alias resolution is now cross-runner (grok models, codex models, etc.), the right
-long-term fix is for runners to include aliases in their `"models"` metadata list. That
-way the registry itself resolves `"grok 3"` → finds a runner → routing works.
+**Follow-up fix for aliases:** before calling `resolve_prefix_for_model`, apply alias
+normalisation. Since alias resolution is now cross-runner (grok models, codex models, etc.),
+the right long-term fix is for runners to include aliases in their `"models"` metadata list.
+That way the registry itself resolves `"grok 3"` → finds a runner → routing works.
+
+**Fix for dead code warning:** `resolve_model` is called only from five test functions
+inside the `#[cfg(test)]` module (lines 1780–1827). In non-test builds those callers don't
+exist, so `cargo build` emits `warning: method resolve_model is never used`. There is no
+`#![deny(warnings)]` in the crate so it is a warning, not an error. However, keeping tests
+that exercise removed production code is misleading.
+
+Delete `resolve_model` (line 453) and its five test functions:
+
+```
+fn resolve_model_exact_id_match()       // ~line 1780
+fn resolve_model_case_insensitive_name() // ~line 1796
+fn resolve_model_substring_match()      // ~line 1808
+fn resolve_model_tokenized_match()      // ~line 1821
+fn resolve_model_empty_returns_none()   // ~line 1826
+```
+
+`TestAgent` (line 1598) is used only for static calls to `build_mode_state` and
+`build_config_options` — it does not need changes.
 
 ---
 
@@ -1896,6 +1916,26 @@ Some((current_prefix, current_runner_sid)) => {
 
 ## Known limitations after this PR
 
+### `new_session` latency increased by runner setup round-trips
+
+`new_session` now performs up to 3 NATS round-trips before returning:
+`list_all()` (registry lookup) + `new_session()` (runner) + `set_session_model()` (runner).
+On a local NATS cluster this adds ~5–50 ms. On a cold Docker runner or under NATS load
+the delay may reach several hundred milliseconds.
+
+The `if let Ok(...)` wrapping prevents a hung `new_session` if runners are entirely
+unreachable (failure is silently swallowed and the session is created without a runner).
+But a slow runner that eventually responds still delays the `new_session` return for the
+full round-trip duration.
+
+**Workaround (follow-up PR):** move runner session creation out of `new_session` entirely.
+Create the runner session lazily on the first `prompt()` call — the same lazy
+re-initialization path already planned for the restart Known Limitation. This restores
+`new_session` to sub-millisecond latency and keeps the "no runner" graceful-degradation
+path as the only code path for session creation.
+
+---
+
 ### `active_sessions` lost on restart
 
 `active_sessions` and `id_remap` are in-memory (`Rc<RefCell<HashMap<...>>>`). If `trogon-acp`
@@ -1947,6 +1987,54 @@ runner responds). Implementation touches `acp-nats-agent` (runner side, local cr
 `agent-client-protocol` (external fixed crate). Once implemented the in-process
 `TrogonAgent` in `main.rs` can be removed, as all runners — including Claude — will
 support IDE permission dialogs via NATS.
+
+### MCP tools not transferred when using Docker `acp-runner`
+
+The in-process `TrogonAgent` shares `NatsSessionStore` with `trogon-acp`. When
+`trogon-acp`'s `new_session` stores `mcp_servers` (the HTTP URLs of the started stdio
+bridges) in KV, the in-process runner reads them on the next prompt and calls
+`build_session_mcp`. This works because both sides share the same store.
+
+After this PR, `create_runner_session` calls `bridge.new_session(NewSessionRequest::new(cwd))`
+on Docker runners. `trogon-acp-runner`'s `new_session` uses `..Default::default()` for
+`mcp_servers` — it ignores what arrives in the request and creates a bare session. The
+Docker runner's session always has `mcp_servers: []`, so `build_session_mcp` is never
+called and MCP tools are unavailable.
+
+`xai-runner`, `openrouter-runner`, and `codex-runner` have no MCP support — unaffected.
+This limitation applies only to `acp-runner` Docker.
+
+**Workaround:** use the in-process runner (local development, not Docker). MCP tools
+continue to work there because the shared store path is unaffected by this PR.
+
+**Long-term fix (follow-up PR, two steps):**
+
+1. `trogon-acp-runner/src/agent.rs` — read `req.mcp_servers` in `new_session` and store
+   them, instead of using `..Default::default()`:
+   ```rust
+   let state = SessionState {
+       cwd: req.cwd.to_string_lossy().to_string(),
+       mcp_servers: convert_mcp_servers(&req.mcp_servers), // ← new
+       mode, system_prompt, ..Default::default()
+   };
+   ```
+
+2. `trogon-acp/src/agent.rs` — `create_runner_session` loads `state.mcp_servers` from the
+   `trogon-acp` store and passes the already-resolved HTTP URLs in the request:
+   ```rust
+   let state = self.store.load(acp_sid).await?;
+   let resp = bridge.new_session(
+       NewSessionRequest::new(state.cwd.clone())
+           .mcp_servers(state.mcp_servers_as_acp())
+   ).await?;
+   ```
+
+   The HTTP URLs in `state.mcp_servers` are already resolved (the stdio bridges are
+   running in `trogon-acp`). The Docker runner can call them over the network.
+
+This fix is excluded from the current PR because it requires modifying a runner crate
+(`trogon-acp-runner`). The plan's constraint "no changes to any runner crate" is preserved
+here; the runner change ships as a separate PR.
 
 ### `codex-runner` TROGON.md injection
 
