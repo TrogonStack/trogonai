@@ -238,12 +238,12 @@ impl PushDispatcher for HttpPushDispatcher {
                 request = request.header(reqwest::header::AUTHORIZATION, auth_value.clone());
             }
 
-            if let Some(hn) = delivery_semantics.webhook_idempotency_carrier() {
-                if let Some(ref k) = maybe_key {
-                    let hv =
-                        reqwest::header::HeaderValue::from_str(k.as_str()).map_err(|e| DispatchError::InvalidHeader(Box::new(e)))?;
-                    request = request.header(hn.clone(), hv);
-                }
+            if let Some(hn) = delivery_semantics.webhook_idempotency_carrier()
+                && let Some(ref k) = maybe_key
+            {
+                let hv =
+                    reqwest::header::HeaderValue::from_str(k.as_str()).map_err(|e| DispatchError::InvalidHeader(Box::new(e)))?;
+                request = request.header(hn.clone(), hv);
             }
 
             match request.send().await {

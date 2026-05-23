@@ -59,6 +59,7 @@ fn notification_body_json(payload: &[u8]) -> serde_json::Value {
 }
 
 /// Publishes a JSON failure record onto the push DLQ subject (captures **`A2A_PUSH_DLQ`**).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_push_delivery_failure<J>(
     js: &J,
     prefix: &A2aPrefix,

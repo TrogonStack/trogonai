@@ -292,6 +292,7 @@ fn is_terminal_status_update(ev: &a2a_types::StreamResponse) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_push_notifications<H, D, J>(
     task_id: &A2aTaskId,
     handler: &H,
