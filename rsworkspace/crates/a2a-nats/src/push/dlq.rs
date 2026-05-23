@@ -1,12 +1,12 @@
 //! JetStream publishes for [`super::dispatcher::PushDispatcher`] terminal failures (`A2A_PUSH_DLQ`).
 
-use std::borrow::Cow;
-
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
+use crate::push::CallerId;
+use crate::push::caller_id::sanitize_subject_token;
 use crate::push::dispatcher::DispatchError;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::task_id::A2aTaskId;
@@ -14,31 +14,13 @@ use crate::task_id::A2aTaskId;
 pub(crate) const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
 
 /// `{prefix}.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.push.dlq.*.*`.
-pub(crate) fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_segment: &str, task_id: &A2aTaskId) -> String {
+pub(crate) fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId, task_id: &A2aTaskId) -> String {
     format!(
         "{}.push.dlq.{}.{}",
         prefix.as_str(),
-        sanitize_subject_token(caller_segment),
+        sanitize_subject_token(caller_id.as_str()),
         task_id.as_str()
     )
-}
-
-fn sanitize_subject_token(raw: &str) -> Cow<'_, str> {
-    // NATS `.` breaks the `{caller_id}` single-token invariant for this segment.
-    const fn forbidden(c: char) -> bool {
-        matches!(c, '.' | '*' | '>' | ' ' | '\t' | '\n' | '\r' | '\0'..='\x1f')
-    }
-
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Cow::Borrowed("_");
-    }
-
-    if !trimmed.chars().any(forbidden) {
-        Cow::Borrowed(trimmed)
-    } else {
-        Cow::Owned(trimmed.chars().map(|c| if forbidden(c) { '_' } else { c }).collect())
-    }
 }
 
 #[derive(Serialize)]
@@ -63,7 +45,7 @@ fn notification_body_json(payload: &[u8]) -> serde_json::Value {
 pub(crate) async fn publish_push_delivery_failure<J>(
     js: &J,
     prefix: &A2aPrefix,
-    caller_segment: &str,
+    caller_id: &CallerId,
     task_id: &A2aTaskId,
     config: &a2a_types::TaskPushNotificationConfig,
     notification_payload: &[u8],
@@ -72,7 +54,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
-    let subject = push_dlq_publish_subject(prefix, caller_segment, task_id);
+    let subject = push_dlq_publish_subject(prefix, caller_id, task_id);
 
     let body = PushDlqMessageV1 {
         schema: PUSH_DLQ_SCHEMA_V1,
@@ -133,7 +115,23 @@ mod tests {
     fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
         let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
         let tid = A2aTaskId::new("task7").unwrap();
-        assert_eq!(push_dlq_publish_subject(&prefix, "_", &tid), "a2a.push.dlq._.task7");
+        assert_eq!(
+            push_dlq_publish_subject(&prefix, &CallerId::default(), &tid),
+            "a2a.push.dlq._.task7"
+        );
+    }
+
+    #[test]
+    fn push_dlq_subject_includes_derived_principal_caller_segment() {
+        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+        let tid = A2aTaskId::new("task7").unwrap();
+        let cid = CallerId::from_principal(&a2a_auth_callout::SpiceDbPrincipal(
+            serde_json::json!({"spicedb_subject": "c1.d2"}),
+        ));
+        assert_eq!(
+            push_dlq_publish_subject(&prefix, &cid, &tid),
+            "a2a.push.dlq.c1_d2.task7"
+        );
     }
 
     #[test]
