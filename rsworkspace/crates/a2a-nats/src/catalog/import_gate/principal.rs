@@ -1,4 +1,4 @@
-pub use a2a_identity_types::SpiceDbPrincipal;
+pub use a2a_auth_callout::SpiceDbPrincipal;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImportedAccountName(String);
@@ -18,6 +18,3 @@ impl std::fmt::Display for ImportedAccountName {
         f.write_str(&self.0)
     }
 }
-
-#[cfg(test)]
-mod tests;
