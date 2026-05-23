@@ -71,7 +71,9 @@ mod tests {
         let (consumer, _tx) = MockJetStreamConsumer::new();
         js.add_consumer(consumer);
 
-        let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 99).await.unwrap();
+        let stream = open_resubscribe_stream(&js, &test_prefix(), &test_task_id(), 99)
+            .await
+            .unwrap();
         assert_eq!(stream.last_seq(), 99);
     }
 

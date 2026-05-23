@@ -1,41 +1,55 @@
-//! JetStream publishes for push dispatcher terminal failures (`A2A_PUSH_DLQ`).
+//! JetStream publishes for [`super::dispatcher::PushDispatcher`] terminal failures (`A2A_PUSH_DLQ`).
+
+use std::borrow::Cow;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::NATS_MSG_ID_HEADER;
-use crate::push::caller_id::{CallerId, sanitize_subject_token};
-use crate::push::dispatch_error::DispatchError;
-use crate::push::dlq_dedup::PushDlqDedupGate;
+use crate::push::dispatcher::DispatchError;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
-use crate::push::status_transition_id::StatusTransitionId;
 use crate::task_id::A2aTaskId;
 
-pub const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
+pub(crate) const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
 
 /// `{prefix}.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.push.dlq.*.*`.
-pub fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId, task_id: &A2aTaskId) -> String {
+pub(crate) fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_segment: &str, task_id: &A2aTaskId) -> String {
     format!(
         "{}.push.dlq.{}.{}",
         prefix.as_str(),
-        sanitize_subject_token(caller_id.as_str()),
+        sanitize_subject_token(caller_segment),
         task_id.as_str()
     )
 }
 
-/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.push.dlq/v1`**).
-///
-/// `idempotency_key` is deterministic: `{task_id}:{status_transition_id}:{target_url}`.
+fn sanitize_subject_token(raw: &str) -> Cow<'_, str> {
+    // NATS `.` breaks the `{caller_id}` single-token invariant for this segment.
+    const fn forbidden(c: char) -> bool {
+        matches!(c, '.' | '*' | '>' | ' ' | '\t' | '\n' | '\r' | '\0'..='\x1f')
+    }
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Cow::Borrowed("_");
+    }
+
+    if !trimmed.chars().any(forbidden) {
+        Cow::Borrowed(trimmed)
+    } else {
+        Cow::Owned(trimmed.chars().map(|c| if forbidden(c) { '_' } else { c }).collect())
+    }
+}
+
 #[derive(Serialize)]
-pub struct PushDlqMessageV1<'a> {
+pub(crate) struct PushDlqMessageV1<'a> {
     pub schema: &'static str,
     pub task_id: &'a str,
     pub push_config_id: &'a str,
     pub target_url: &'a str,
     pub error: String,
-    pub idempotency_key: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<&'a str>,
     pub notification: serde_json::Value,
 }
 
@@ -45,53 +59,42 @@ fn notification_body_json(payload: &[u8]) -> serde_json::Value {
 }
 
 /// Publishes a JSON failure record onto the push DLQ subject (captures **`A2A_PUSH_DLQ`**).
-#[allow(clippy::too_many_arguments)]
-pub async fn publish_push_delivery_failure<J>(
+pub(crate) async fn publish_push_delivery_failure<J>(
     js: &J,
     prefix: &A2aPrefix,
-    caller_id: &CallerId,
+    caller_segment: &str,
     task_id: &A2aTaskId,
-    config: &a2a::types::TaskPushNotificationConfig,
+    config: &a2a_types::TaskPushNotificationConfig,
     notification_payload: &[u8],
     dispatch_error: &DispatchError,
-    status_transition_id: StatusTransitionId,
-    dedup: &PushDlqDedupGate,
+    idempotency_key: Option<&PushIdempotencyKey>,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
-    let idempotency_key = PushIdempotencyKey::derive_dlq(task_id, &status_transition_id, config.url.as_str());
-
-    let config_id_str = config.id.as_deref().unwrap_or("");
-    if !dedup.try_acquire(&idempotency_key) {
-        tracing::info!(
-            task_id = %task_id,
-            push_config_id = config_id_str,
-            idempotency_key = %idempotency_key,
-            "push DLQ publish suppressed by in-process dedup gate"
-        );
-        return;
-    }
-
-    let subject = push_dlq_publish_subject(prefix, caller_id, task_id);
+    let subject = push_dlq_publish_subject(prefix, caller_segment, task_id);
 
     let body = PushDlqMessageV1 {
         schema: PUSH_DLQ_SCHEMA_V1,
         task_id: task_id.as_str(),
-        push_config_id: config_id_str,
+        push_config_id: config.id.as_str(),
         target_url: config.url.as_str(),
         error: dispatch_error.to_string(),
-        idempotency_key: idempotency_key.as_str(),
+        idempotency_key: idempotency_key.map(PushIdempotencyKey::as_str),
         notification: notification_body_json(notification_payload),
     };
 
-    // PushDlqMessageV1 is plain Serialize — serde_json::to_vec never fails at
-    // runtime for it, so fall back to an empty body in the impossible error
-    // case instead of carrying a dead match arm forever.
-    let bytes_vec = serde_json::to_vec(&body).unwrap_or_default();
+    let Ok(bytes_vec) = serde_json::to_vec(&body) else {
+        tracing::warn!(
+            subject = subject.as_str(),
+            task_id = %task_id,
+            push_config_id = %config.id,
+            "failed to serialize push DLQ envelope; skipping publish"
+        );
+        return;
+    };
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/json");
-    headers.insert(NATS_MSG_ID_HEADER, idempotency_key.as_str());
 
     match js
         .publish_with_headers(
@@ -103,130 +106,33 @@ pub async fn publish_push_delivery_failure<J>(
     {
         Ok(fut) => {
             if let Err(e) = fut.await {
-                tracing::warn!(%task_id, error = %e, "JetStream ack failed for push DLQ publish on {subject}");
+                tracing::warn!(
+                    subject = subject.as_str(),
+                    task_id = %task_id,
+                    error = %e,
+                    "JetStream ack failed for push DLQ publish"
+                );
             }
         }
-        Err(e) => {
-            tracing::warn!(%task_id, error = %e, "failed to publish push DLQ message on {subject}");
-        }
+        Err(e) => tracing::warn!(
+            subject = subject.as_str(),
+            task_id = %task_id,
+            error = %e,
+            "failed to publish push DLQ message"
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
-    use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
-    use crate::push::caller_id::resolve_push_dlq_caller_id;
-    use crate::push::dispatch_error::DispatchError;
-    use crate::push::push_notification_target::PushNotificationTargetError;
-    use crate::push::terminal_push_task_state::TerminalPushTaskState;
-    use bytes::Bytes;
-    use trogon_nats::jetstream::JetStreamPublisher;
-
-    #[derive(Clone, Default)]
-    struct RecordingPublisher {
-        publishes: Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
-    }
-
-    impl JetStreamPublisher for RecordingPublisher {
-        type PublishError = std::io::Error;
-        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
-
-        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
-            &self,
-            subject: S,
-            headers: HeaderMap,
-            payload: Bytes,
-        ) -> Result<Self::AckFuture, Self::PublishError> {
-            self.publishes
-                .lock()
-                .unwrap()
-                .push((subject.to_subject().to_string(), headers, payload));
-            Ok(std::future::ready(Ok(async_nats::jetstream::publish::PublishAck {
-                duplicate: false,
-                stream: "A2A_PUSH_DLQ".into(),
-                sequence: 1,
-                domain: String::new(),
-                value: None,
-            })))
-        }
-    }
-
-    /// Publisher whose `publish_with_headers` returns an immediate transport error.
-    #[derive(Clone, Default)]
-    struct FailingPublisher;
-
-    impl JetStreamPublisher for FailingPublisher {
-        type PublishError = std::io::Error;
-        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
-
-        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
-            &self,
-            _subject: S,
-            _headers: HeaderMap,
-            _payload: Bytes,
-        ) -> Result<Self::AckFuture, Self::PublishError> {
-            Err(std::io::Error::other("transport down"))
-        }
-    }
-
-    /// Publisher whose publish succeeds but whose ack future resolves to an error.
-    #[derive(Clone, Default)]
-    struct AckFailingPublisher;
-
-    impl JetStreamPublisher for AckFailingPublisher {
-        type PublishError = std::io::Error;
-        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
-
-        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
-            &self,
-            _subject: S,
-            _headers: HeaderMap,
-            _payload: Bytes,
-        ) -> Result<Self::AckFuture, Self::PublishError> {
-            Ok(std::future::ready(Err(std::io::Error::other("ack timeout"))))
-        }
-    }
-
-    fn prefix() -> A2aPrefix {
-        A2aPrefix::new("a2a".to_string()).unwrap()
-    }
-
-    fn sample_config() -> a2a::types::TaskPushNotificationConfig {
-        a2a::types::TaskPushNotificationConfig {
-            id: Some("pcfg-1".to_string()),
-            url: "https://example.com/webhook".to_string(),
-            task_id: String::new(),
-            token: None,
-            authentication: None,
-            tenant: None,
-        }
-    }
 
     #[test]
     fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
         let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
         let tid = A2aTaskId::new("task7").unwrap();
-        assert_eq!(
-            push_dlq_publish_subject(&prefix, &CallerId::default(), &tid),
-            "a2a.push.dlq._.task7"
-        );
-    }
-
-    #[test]
-    fn push_dlq_subject_includes_derived_principal_caller_segment() {
-        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-        let tid = A2aTaskId::new("task7").unwrap();
-        let cid = CallerId::from_principal(&a2a_identity_types::SpiceDbPrincipal(
-            serde_json::json!({"spicedb_subject": "c1.d2"}),
-        ));
-        assert_eq!(
-            push_dlq_publish_subject(&prefix, &cid, &tid),
-            "a2a.push.dlq.c1_d2.task7"
-        );
+        assert_eq!(push_dlq_publish_subject(&prefix, "_", &tid), "a2a.push.dlq._.task7");
     }
 
     #[test]
@@ -243,188 +149,10 @@ mod tests {
 
     #[test]
     fn notification_body_json_fallback_to_string_for_non_utfish() {
-        let value = notification_body_json(&[0xffu8, 0xfe]);
-        assert!(matches!(value, serde_json::Value::String(ref s) if s.contains('\u{fffd}')));
-    }
-
-    #[test]
-    fn resolve_absent_principal_keeps_fallback_caller_segment() {
-        let fallback = CallerId::default();
-        assert_eq!(
-            resolve_push_dlq_caller_id(None, &fallback).as_str(),
-            DEFAULT_PUSH_DLQ_CALLER_SEGMENT
-        );
-    }
-
-    #[test]
-    fn resolve_principal_with_spicedb_subject_builds_dlq_subject() {
-        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-        let tid = A2aTaskId::new("task7").unwrap();
-        let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1.d2"}));
-        let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-        assert_eq!(
-            push_dlq_publish_subject(&prefix, &cid, &tid),
-            "a2a.push.dlq.c1_d2.task7"
-        );
-    }
-
-    #[test]
-    fn resolve_principal_without_spicedb_subject_falls_back() {
-        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
-        let tid = A2aTaskId::new("task7").unwrap();
-        let p = a2a_identity_types::SpiceDbPrincipal(serde_json::json!({}));
-        let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
-        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq._.task7");
-    }
-
-    #[tokio::test]
-    async fn second_publish_with_same_key_is_suppressed_by_lru() {
-        let js = RecordingPublisher::default();
-        let dedup = PushDlqDedupGate::with_capacity(32);
-        let prefix = prefix();
-        let task_id = A2aTaskId::new("task-1").unwrap();
-        let config = sample_config();
-        let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
-
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            transition.clone(),
-            &dedup,
-        )
-        .await;
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            transition,
-            &dedup,
-        )
-        .await;
-
-        assert_eq!(js.publishes.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn different_transition_ids_both_publish() {
-        let js = RecordingPublisher::default();
-        let dedup = PushDlqDedupGate::with_capacity(32);
-        let prefix = prefix();
-        let task_id = A2aTaskId::new("task-1").unwrap();
-        let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
-
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
-            &dedup,
-        )
-        .await;
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            StatusTransitionId::from_terminal(TerminalPushTaskState::Completed),
-            &dedup,
-        )
-        .await;
-
-        assert_eq!(js.publishes.lock().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn publish_sets_nats_msg_id_header() {
-        let js = RecordingPublisher::default();
-        let dedup = PushDlqDedupGate::with_capacity(32);
-        let prefix = prefix();
-        let task_id = A2aTaskId::new("task-1").unwrap();
-        let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
-
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
-            &dedup,
-        )
-        .await;
-
-        let published = js.publishes.lock().unwrap();
-        assert_eq!(published.len(), 1);
-        assert_eq!(
-            published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
-            "3:dlq|6:task-1|6:failed|27:https://example.com/webhook"
-        );
-    }
-
-    #[tokio::test]
-    async fn publish_path_swallows_transport_error_without_panicking() {
-        let js = FailingPublisher;
-        let dedup = PushDlqDedupGate::default();
-        let prefix = prefix();
-        let task_id = A2aTaskId::new("task-x").unwrap();
-        let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
-
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
-            &dedup,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn publish_path_swallows_ack_failure_without_panicking() {
-        let js = AckFailingPublisher;
-        let dedup = PushDlqDedupGate::default();
-        let prefix = prefix();
-        let task_id = A2aTaskId::new("task-y").unwrap();
-        let config = sample_config();
-        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
-
-        publish_push_delivery_failure(
-            &js,
-            &prefix,
-            &CallerId::default(),
-            &task_id,
-            &config,
-            br#"{}"#,
-            &err,
-            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
-            &dedup,
-        )
-        .await;
+        let payload = &[0xffu8, 0xfe];
+        match notification_body_json(payload) {
+            serde_json::Value::String(s) => assert!(s.contains('\u{fffd}')),
+            _ => panic!("expected string fallback"),
+        }
     }
 }

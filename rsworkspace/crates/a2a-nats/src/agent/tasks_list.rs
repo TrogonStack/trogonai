@@ -60,8 +60,10 @@ mod tests {
     async fn success_publishes_result() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handler.lock().unwrap().tasks_list_result =
-            Some(Ok(a2a_types::ListTasksResponse { tasks: vec![], ..Default::default() }));
+        handler.lock().unwrap().tasks_list_result = Some(Ok(a2a_types::ListTasksResponse {
+            tasks: vec![],
+            ..Default::default()
+        }));
         handle(&handler, &rpc_payload("tasks/list", 1), Some("reply".into()), &nats).await;
         let body = parse_response(&nats.published_payloads()[0]);
         // pbjson omits empty repeated fields; presence of "result" key confirms success

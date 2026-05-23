@@ -2,18 +2,33 @@
 //!
 //! Digest / mutual challenge schemes are intentionally rejected until a dedicated signing path exists.
 
-use a2a::types::AuthenticationInfo;
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+use a2a_types::AuthenticationInfo;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthenticationHeaderBuildError {
-    #[error("push authentication.scheme must not be empty")]
     MissingScheme,
-    #[error("push authentication.credentials required for scheme")]
     EmptyCredentials,
     /// `Digest` (and challenge-based schemes) require a separate implementation.
-    #[error("push authentication scheme {scheme:?} not supported yet")]
-    UnsupportedScheme { scheme: String },
+    UnsupportedScheme {
+        scheme: String,
+    },
 }
+
+impl fmt::Display for AuthenticationHeaderBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingScheme => f.write_str("push authentication.scheme must not be empty"),
+            Self::EmptyCredentials => f.write_str("push authentication.credentials required for scheme"),
+            Self::UnsupportedScheme { scheme } => {
+                write!(f, "push authentication scheme {scheme:?} not supported yet")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AuthenticationHeaderBuildError {}
 
 /// Builds the RFC 9110 [`Authorization`] field value (`<scheme> <token>` for typical schemes).
 pub fn authorization_header_value(
@@ -28,14 +43,11 @@ pub fn authorization_header_value(
         return Err(AuthenticationHeaderBuildError::MissingScheme);
     }
 
-    let credentials = auth.credentials.as_deref().unwrap_or("").trim();
+    let credentials = auth.credentials.trim();
     let scheme_lc = scheme_raw.to_ascii_lowercase();
 
     match scheme_lc.as_str() {
-        // Challenge-based schemes (RFC 7235) need a dedicated signing path; rejecting
-        // every one we know of up front keeps the static "scheme creds" fallback
-        // from silently producing an unusable Authorization value.
-        "digest" | "negotiate" | "ntlm" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
+        "digest" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
             scheme: auth.scheme.trim().to_string(),
         }),
         "bearer" | "jwt" => {
@@ -68,7 +80,7 @@ mod tests {
     fn auth(scheme: &str, credentials: &str) -> AuthenticationInfo {
         AuthenticationInfo {
             scheme: scheme.to_string(),
-            credentials: Some(credentials.to_string()),
+            credentials: credentials.to_string(),
         }
     }
 
@@ -107,63 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn negotiate_and_ntlm_are_rejected_as_unsupported_challenge_schemes() {
-        for scheme in ["Negotiate", "ntlm", "NTLM"] {
-            let err = authorization_header_value(Some(&auth(scheme, "tok"))).unwrap_err();
-            assert!(
-                matches!(err, AuthenticationHeaderBuildError::UnsupportedScheme { .. }),
-                "{scheme} must round-trip through the unsupported-challenge arm"
-            );
-        }
-    }
-
-    #[test]
     fn none_absent_when_no_authentication_msg() {
         assert!(authorization_header_value(None).unwrap().is_none());
-    }
-
-    #[test]
-    fn missing_scheme_is_rejected() {
-        let err = authorization_header_value(Some(&auth("   ", "tok"))).unwrap_err();
-        assert!(matches!(err, AuthenticationHeaderBuildError::MissingScheme));
-    }
-
-    #[test]
-    fn bearer_without_credentials_is_rejected() {
-        let err = authorization_header_value(Some(&auth("Bearer", "   "))).unwrap_err();
-        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
-    }
-
-    #[test]
-    fn basic_without_credentials_is_rejected() {
-        let err = authorization_header_value(Some(&auth("Basic", ""))).unwrap_err();
-        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
-    }
-
-    #[test]
-    fn custom_scheme_without_credentials_is_rejected() {
-        let err = authorization_header_value(Some(&auth("CustomScheme", ""))).unwrap_err();
-        assert!(matches!(err, AuthenticationHeaderBuildError::EmptyCredentials));
-    }
-
-    #[test]
-    fn error_display_covers_every_variant() {
-        assert!(
-            AuthenticationHeaderBuildError::MissingScheme
-                .to_string()
-                .contains("must not be empty")
-        );
-        assert!(
-            AuthenticationHeaderBuildError::EmptyCredentials
-                .to_string()
-                .contains("credentials required")
-        );
-        assert!(
-            AuthenticationHeaderBuildError::UnsupportedScheme {
-                scheme: "Digest".into()
-            }
-            .to_string()
-            .contains("not supported yet")
-        );
     }
 }

@@ -61,7 +61,13 @@ mod tests {
             name: "my-agent".into(),
             ..Default::default()
         }));
-        handle(&handler, &rpc_payload("agent/getAuthenticatedExtendedCard", 1), Some("r".into()), &nats).await;
+        handle(
+            &handler,
+            &rpc_payload("agent/getAuthenticatedExtendedCard", 1),
+            Some("r".into()),
+            &nats,
+        )
+        .await;
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["result"]["name"], "my-agent");
     }
@@ -71,7 +77,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         handler.lock().unwrap().agent_card_result = Some(Err(A2aError::unsupported_operation("no card")));
-        handle(&handler, &rpc_payload("agent/getAuthenticatedExtendedCard", 2), Some("r".into()), &nats).await;
+        handle(
+            &handler,
+            &rpc_payload("agent/getAuthenticatedExtendedCard", 2),
+            Some("r".into()),
+            &nats,
+        )
+        .await;
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["error"]["code"], crate::error::UNSUPPORTED_OPERATION);
     }
@@ -80,7 +92,13 @@ mod tests {
     async fn no_reply_drops() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handle(&handler, &rpc_payload("agent/getAuthenticatedExtendedCard", 3), None, &nats).await;
+        handle(
+            &handler,
+            &rpc_payload("agent/getAuthenticatedExtendedCard", 3),
+            None,
+            &nats,
+        )
+        .await;
         assert!(nats.published_messages().is_empty());
     }
 
@@ -89,9 +107,10 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         handler.lock().unwrap().agent_card_result = Some(Ok(a2a_types::AgentCard::default()));
-        let payload =
-            serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"agent/getAuthenticatedExtendedCard"}))
-                .unwrap();
+        let payload = serde_json::to_vec(
+            &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"agent/getAuthenticatedExtendedCard"}),
+        )
+        .unwrap();
         handle(&handler, &payload, Some("r".into()), &nats).await;
         let body = parse_response(&nats.published_payloads()[0]);
         assert!(body.get("result").is_some());

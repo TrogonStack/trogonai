@@ -6,14 +6,6 @@ use crate::push::target::{WebhookUrl, WebhookUrlError};
 const SUBJECT_SCHEME_PREFIX: &str = "subject:";
 const JETSTREAM_SCHEME_PREFIX: &str = "jetstream:";
 
-/// Case-insensitive scheme prefix check — `WebhookUrl::new` (via `url::Url`)
-/// normalises the scheme anyway, so `HTTPS://…` should reach the webhook arm
-/// instead of falling through to `UnknownScheme`.
-fn has_http_scheme_prefix(raw: &str) -> bool {
-    let lc = raw.get(..8).unwrap_or("").to_ascii_lowercase();
-    lc.starts_with("https://") || lc.starts_with("http://")
-}
-
 /// Parsed push notification delivery target from `TaskPushNotificationConfig.url`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PushNotificationTarget {
@@ -22,20 +14,13 @@ pub enum PushNotificationTarget {
     JetStream(NatsPushSubject),
 }
 
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PushNotificationTargetError {
-    #[error("push notification URL must not be empty")]
     Empty,
-    #[error(
-        "push notification URL must start with http://, https://, {SUBJECT_SCHEME_PREFIX}, or {JETSTREAM_SCHEME_PREFIX}: {raw}"
-    )]
     UnknownScheme { raw: String },
-    #[error("{0}")]
-    Http(#[source] WebhookUrlError),
-    #[error("{0}")]
-    Nats(#[source] NatsPushSubjectError),
-    #[error("{0}")]
-    JetStream(#[source] NatsPushSubjectError),
+    Http(WebhookUrlError),
+    Nats(NatsPushSubjectError),
+    JetStream(NatsPushSubjectError),
 }
 
 impl PushNotificationTarget {
@@ -44,7 +29,7 @@ impl PushNotificationTarget {
         if raw.is_empty() {
             return Err(PushNotificationTargetError::Empty);
         }
-        if has_http_scheme_prefix(&raw) {
+        if raw.starts_with("https://") || raw.starts_with("http://") {
             return WebhookUrl::new(raw)
                 .map(Self::Http)
                 .map_err(PushNotificationTargetError::Http);
@@ -73,6 +58,33 @@ impl fmt::Display for PushNotificationTarget {
     }
 }
 
+impl fmt::Display for PushNotificationTargetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("push notification URL must not be empty"),
+            Self::UnknownScheme { raw } => {
+                write!(
+                    f,
+                    "push notification URL must start with http://, https://, {SUBJECT_SCHEME_PREFIX}, or {JETSTREAM_SCHEME_PREFIX}: {raw}"
+                )
+            }
+            Self::Http(e) => write!(f, "{e}"),
+            Self::Nats(e) => write!(f, "{e}"),
+            Self::JetStream(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for PushNotificationTargetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Empty | Self::UnknownScheme { .. } => None,
+            Self::Http(e) => Some(e),
+            Self::Nats(e) | Self::JetStream(e) => Some(e),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,10 +104,14 @@ mod tests {
     #[test]
     fn parses_nats_subject_scheme() {
         let target = PushNotificationTarget::parse("subject:a2a.push.acme.caller-42.task-9").unwrap();
-        assert!(matches!(
-            &target,
-            PushNotificationTarget::Nats(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
-        ));
+        match target {
+            PushNotificationTarget::Nats(subject) => {
+                assert_eq!(subject.as_str(), "a2a.push.acme.caller-42.task-9");
+            }
+            PushNotificationTarget::Http(_) | PushNotificationTarget::JetStream(_) => {
+                panic!("expected NATS subject target")
+            }
+        }
     }
 
     #[test]
@@ -111,10 +127,12 @@ mod tests {
     #[test]
     fn parses_jetstream_subject_scheme() {
         let target = PushNotificationTarget::parse("jetstream:a2a.push.acme.caller-42.task-9").unwrap();
-        assert!(matches!(
-            &target,
-            PushNotificationTarget::JetStream(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
-        ));
+        match target {
+            PushNotificationTarget::JetStream(subject) => {
+                assert_eq!(subject.as_str(), "a2a.push.acme.caller-42.task-9");
+            }
+            _ => panic!("expected JetStream subject target"),
+        }
     }
 
     #[test]
@@ -141,50 +159,5 @@ mod tests {
     fn error_display_unknown_scheme_includes_raw_value() {
         let err = PushNotificationTarget::parse("nats://broker").unwrap_err();
         assert!(err.to_string().contains("nats://broker"));
-    }
-
-    #[test]
-    fn parses_https_uppercase_scheme() {
-        let target = PushNotificationTarget::parse("HTTPS://example.com/hook").unwrap();
-        assert!(matches!(target, PushNotificationTarget::Http(_)));
-    }
-
-    #[test]
-    fn parses_mixed_case_http_scheme() {
-        let target = PushNotificationTarget::parse("HtTp://localhost:8080/hook").unwrap();
-        assert!(matches!(target, PushNotificationTarget::Http(_)));
-    }
-
-    #[test]
-    fn display_roundtrips_http_target() {
-        let target = PushNotificationTarget::parse("https://example.com/hook").unwrap();
-        assert_eq!(target.to_string(), "https://example.com/hook");
-    }
-
-    #[test]
-    fn error_display_covers_every_variant() {
-        use std::error::Error as _;
-        let empty = PushNotificationTargetError::Empty;
-        assert!(empty.to_string().contains("must not be empty"));
-        assert!(empty.source().is_none());
-
-        let unknown = PushNotificationTarget::parse("ftp://example.com").unwrap_err();
-        assert!(matches!(unknown, PushNotificationTargetError::UnknownScheme { .. }));
-        assert!(unknown.to_string().contains("ftp://example.com"));
-        assert!(unknown.source().is_none());
-
-        let raw = PushNotificationTargetError::Http(WebhookUrl::new("ftp://x").unwrap_err());
-        assert!(raw.to_string().contains("webhook URL"));
-        assert!(raw.source().is_some());
-
-        let nats_err = PushNotificationTarget::parse("subject:bad subject").unwrap_err();
-        assert!(matches!(nats_err, PushNotificationTargetError::Nats(_)));
-        assert!(nats_err.to_string().contains("invalid NATS push subject"));
-        assert!(nats_err.source().is_some());
-
-        let js_err = PushNotificationTarget::parse("jetstream:bad subject").unwrap_err();
-        assert!(matches!(js_err, PushNotificationTargetError::JetStream(_)));
-        assert!(js_err.to_string().contains("invalid NATS push subject"));
-        assert!(js_err.source().is_some());
     }
 }

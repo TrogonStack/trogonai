@@ -67,7 +67,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         handler.lock().unwrap().tasks_resubscribe_result = Some(Ok(make_task("t-resub")));
-        handle(&handler, &rpc_payload("tasks/resubscribe", 1), Some("reply".into()), &nats).await;
+        handle(
+            &handler,
+            &rpc_payload("tasks/resubscribe", 1),
+            Some("reply".into()),
+            &nats,
+        )
+        .await;
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["result"]["id"], "t-resub");
     }
@@ -77,7 +83,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
         handler.lock().unwrap().tasks_resubscribe_result = Some(Err(A2aError::task_not_found("gone")));
-        handle(&handler, &rpc_payload("tasks/resubscribe", 2), Some("reply".into()), &nats).await;
+        handle(
+            &handler,
+            &rpc_payload("tasks/resubscribe", 2),
+            Some("reply".into()),
+            &nats,
+        )
+        .await;
         let body = parse_response(&nats.published_payloads()[0]);
         assert_eq!(body["error"]["code"], crate::error::TASK_NOT_FOUND);
     }
