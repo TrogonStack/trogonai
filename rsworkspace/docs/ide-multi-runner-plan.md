@@ -1638,6 +1638,41 @@ fn resolve_model_empty_returns_none()   // ~line 1826
 
 ---
 
+### Gap — 4 existing tests will fail after this PR
+
+**File:** `trogon-acp/src/agent.rs`
+
+**Problem:** Four tests call `set_session_model` or `set_session_config_option("model")` and
+expect `Ok`. After the PR, both paths delegate to `set_session_model_impl`, which calls
+`resolve_prefix_for_model(model_id)` → `registry.find_by_model(model_id)`. In test environments
+no runner is registered in the registry (`MockRegistryStore::new()` creates an empty HashMap;
+`make_agent` / `make_agent_with_nats` do not pre-populate it). `find_by_model` returns
+`Ok(None)` → error "no runner registered for model …" → the `?` propagates → `.unwrap()` panics.
+
+| Line | Test | Registry | Value passed | Why it panics |
+|------|------|----------|--------------|---------------|
+| 2206 | `set_session_config_option_model_persists_to_store` | `MockRegistryStore` (empty) | `"sonnet"` alias | No runner for alias |
+| 3095 | `set_session_config_option_model_persists` | real NATS, empty | `"claude-opus-4-6"` | No runner registered |
+| 3154 | `set_session_model_fuzzy_persists` | real NATS, empty | `"sonnet"` alias | No runner for alias |
+| 4928 | `set_session_model_resolves_token_to_full_id` | real NATS, empty | `"opus"` alias | No runner for alias |
+
+**Fix:**
+
+- **Delete** tests at lines 2206, 3154, and 4928. They verify alias resolution via `resolve_model`
+  — behavior deliberately removed by this PR. The production code no longer resolves aliases;
+  keeping these tests would be testing dead functionality.
+
+- **Update** test at line 3095 — it tests that `set_session_config_option("model", ...)` persists
+  the value. After the PR the expected behavior changes: without a registered runner the call must
+  return an error. Replace the `.unwrap()` assert with:
+
+  ```rust
+  let result = agent.set_session_config_option(req).await;
+  assert!(result.is_err(), "set_session_config_option(model) must fail when no runner registered");
+  ```
+
+---
+
 ### Gap — `fork_session` first prompt fails if IDE skips `set_session_model`
 
 **File:** `trogon-acp/src/agent.rs` — `fork_session` in `impl Agent for TrogonAcpAgent`
