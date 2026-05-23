@@ -2,8 +2,8 @@ use a2a_nats::client::Client;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
-use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 use trogon_nats::RequestClient;
+use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::dispatch::dispatch_request;
 use crate::wire::{InboundRequest, OutboundError, OutboundFrame, RpcId};
@@ -123,7 +123,10 @@ mod tests {
     fn test_config() -> Config {
         Config::new(
             A2aPrefix::new("a2a".to_string()).unwrap(),
-            NatsConfig { servers: vec!["localhost:4222".to_string()], auth: trogon_nats::NatsAuth::None },
+            NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
         )
     }
 

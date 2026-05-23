@@ -8,8 +8,8 @@ use a2a_types::StreamResponse;
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::mpsc;
-use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 use trogon_nats::RequestClient;
+use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, OutboundResponse, RpcId};
 
@@ -34,9 +34,8 @@ fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, OutboundFrame> {
-    serde_json::from_value(params).map_err(|e| {
-        OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, e.to_string()))
-    })
+    serde_json::from_value(params)
+        .map_err(|e| OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, e.to_string())))
 }
 
 fn stream_event_to_frame(id: &RpcId, event: &StreamResponse) -> OutboundFrame {
@@ -324,7 +323,10 @@ mod tests {
     fn test_config() -> Config {
         Config::new(
             A2aPrefix::new("a2a".to_string()).unwrap(),
-            NatsConfig { servers: vec!["localhost:4222".to_string()], auth: trogon_nats::NatsAuth::None },
+            NatsConfig {
+                servers: vec!["localhost:4222".to_string()],
+                auth: trogon_nats::NatsAuth::None,
+            },
         )
     }
 
@@ -441,7 +443,11 @@ mod tests {
             json!({"message": {"messageId": "m1", "role": "ROLE_USER", "parts": []}}),
         )
         .await;
-        assert!(matches!(frame, OutboundFrame::Response(_)), "got: {}", serde_json::to_string(&frame).unwrap());
+        assert!(
+            matches!(frame, OutboundFrame::Response(_)),
+            "got: {}",
+            serde_json::to_string(&frame).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -516,7 +522,13 @@ mod tests {
             .into(),
         );
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
-        let frame = dispatch(&client, RpcId::Number(6), "agent/getAuthenticatedExtendedCard", json!({})).await;
+        let frame = dispatch(
+            &client,
+            RpcId::Number(6),
+            "agent/getAuthenticatedExtendedCard",
+            json!({}),
+        )
+        .await;
         assert!(matches!(frame, OutboundFrame::Response(_)));
     }
 
@@ -525,7 +537,13 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(&client, RpcId::Number(7), "bogus/method", json!({})).await;
-        assert!(matches!(frame, OutboundFrame::Error(OutboundError { error: RpcError { code: -32601, .. }, .. })));
+        assert!(matches!(
+            frame,
+            OutboundFrame::Error(OutboundError {
+                error: RpcError { code: -32601, .. },
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
@@ -533,6 +551,12 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(&client, RpcId::Number(8), "tasks/get", json!("not an object")).await;
-        assert!(matches!(frame, OutboundFrame::Error(OutboundError { error: RpcError { code: -32602, .. }, .. })));
+        assert!(matches!(
+            frame,
+            OutboundFrame::Error(OutboundError {
+                error: RpcError { code: -32602, .. },
+                ..
+            })
+        ));
     }
 }
