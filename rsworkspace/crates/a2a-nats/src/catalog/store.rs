@@ -1,10 +1,14 @@
 use std::fmt;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use serde_json::Value;
-use trogon_nats::jetstream::{JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet};
+use trogon_nats::jetstream::{
+    JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys,
+};
 
 use crate::agent_id::A2aAgentId;
+use crate::catalog::import_gate::{ImportGate, ImportGateError, ImportedAccountName, SpiceDbPrincipal};
 
 #[derive(Debug)]
 pub enum CatalogStoreError {
@@ -12,6 +16,7 @@ pub enum CatalogStoreError {
     Deserialize(serde_json::Error),
     /// AgentCard document failed bundled JSON-Schema validation ([`a2a_pack`]).
     AgentCardSchema(a2a_pack::AgentCardValidateError),
+    ImportGate(ImportGateError),
     Kv(String),
 }
 
@@ -21,6 +26,7 @@ impl fmt::Display for CatalogStoreError {
             Self::Serialize(e) => write!(f, "failed to serialize agent card: {e}"),
             Self::Deserialize(e) => write!(f, "failed to deserialize agent card: {e}"),
             Self::AgentCardSchema(e) => write!(f, "AgentCard rejected by JSON Schema: {e}"),
+            Self::ImportGate(e) => write!(f, "{e}"),
             Self::Kv(msg) => write!(f, "KV store error: {msg}"),
         }
     }
@@ -31,9 +37,15 @@ impl std::error::Error for CatalogStoreError {
         match self {
             Self::Serialize(e) | Self::Deserialize(e) => Some(e),
             Self::AgentCardSchema(e) => Some(e),
+            Self::ImportGate(e) => Some(e),
             Self::Kv(_) => None,
         }
     }
+}
+
+fn deserialize_validated_agent_card(parsed: Value) -> Result<a2a_types::AgentCard, CatalogStoreError> {
+    a2a_pack::validate_agent_card_value(&parsed).map_err(CatalogStoreError::AgentCardSchema)?;
+    serde_json::from_value::<a2a_types::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)
 }
 
 pub trait CatalogStore: Send + Sync + 'static {
@@ -57,6 +69,75 @@ pub struct KvCatalogStore<K> {
 impl<K> KvCatalogStore<K> {
     pub fn new(store: K) -> Self {
         Self { store }
+    }
+}
+
+impl<K> KvCatalogStore<K>
+where
+    K: JetStreamKvGet
+        + JetStreamKvEntry
+        + JetStreamKvCreate
+        + JetStreamKeyValueUpdate
+        + JetStreamKvKeys
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+{
+    pub async fn list_cards(&self) -> Result<Vec<(A2aAgentId, a2a_types::AgentCard)>, CatalogStoreError> {
+        let keys: Vec<String> = self
+            .store
+            .keys()
+            .await
+            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?
+            .try_collect()
+            .await
+            .map_err(|e| CatalogStoreError::Kv(e.to_string()))?;
+        let mut keys = keys;
+        keys.sort_unstable();
+
+        let mut out = Vec::new();
+        for key in keys {
+            let agent_id = A2aAgentId::new(&key).map_err(|_| {
+                CatalogStoreError::Kv(format!("catalog KV key `{key}` is not a valid A2aAgentId segment"))
+            })?;
+            if let Some(card) = self.get_card(&agent_id).await? {
+                out.push((agent_id, card));
+            }
+        }
+        Ok(out)
+    }
+
+    // TODO(card-source-account): hydrate import provenance from catalog wire decoding instead of the caller-supplied resolver.
+    pub async fn list_cards_gated<G, F>(
+        &self,
+        gate: &G,
+        principal: &SpiceDbPrincipal,
+        imported_source: F,
+    ) -> Result<Vec<a2a_types::AgentCard>, CatalogStoreError>
+    where
+        G: ImportGate + Sync,
+        F: Fn(&A2aAgentId, &a2a_types::AgentCard) -> Option<ImportedAccountName> + Send + Sync,
+    {
+        let pairs = self.list_cards().await?;
+
+        let mut gated = Vec::new();
+        for (agent_id, card) in pairs {
+            match imported_source(&agent_id, &card) {
+                None => gated.push(card),
+                Some(imported_from) => {
+                    if gate
+                        .permit(principal, &imported_from, &agent_id)
+                        .await
+                        .map_err(CatalogStoreError::ImportGate)?
+                    {
+                        gated.push(card);
+                    }
+                }
+            }
+        }
+
+        Ok(gated)
     }
 }
 
@@ -108,10 +189,7 @@ where
             Some(bytes) => {
                 let parsed: serde_json::Value =
                     serde_json::from_slice(&bytes).map_err(CatalogStoreError::Deserialize)?;
-                a2a_pack::validate_agent_card_value(&parsed).map_err(CatalogStoreError::AgentCardSchema)?;
-                let card =
-                    serde_json::from_value::<a2a_types::AgentCard>(parsed).map_err(CatalogStoreError::Deserialize)?;
-                Ok(Some(card))
+                Ok(Some(deserialize_validated_agent_card(parsed)?))
             }
         }
     }
