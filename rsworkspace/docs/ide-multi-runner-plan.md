@@ -738,7 +738,7 @@ let registry = trogon_registry::Registry::new(reg_store);
 // With (bridge removed, factory fields + registry added):
 let acp_agent = agent::TrogonAcpAgent::new(
     nats.clone(),                           // nats  (factory field, replaces bridge)
-    js_client.clone(),                      // js
+    js_client,                              // js — not cloned: Bridge::new block removed, no prior consumer
     trogon_std::time::SystemClock,          // clock (SystemClock: Clone)
     config,                                 // base_config — existing acp_nats::Config (line ~168 in main.rs)
     // Config::new(AcpPrefix, NatsConfig) takes two args; acp_prefix is String not AcpPrefix.
