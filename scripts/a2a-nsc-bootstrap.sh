@@ -18,6 +18,7 @@
 #
 # Optional env vars:
 #   A2A_PREFIX          — subject prefix (default: a2a)
+#   A2A_CATALOG_KV_BUCKET — JetStream KV bucket name for AgentCards (default: A2A_AGENT_CARDS)
 #   A2A_JS_MEM_STORAGE  — JetStream mem-storage quota (default: 1G)
 #   A2A_JS_DISK_STORAGE — JetStream disk-storage quota (default: 10G)
 #   A2A_JS_STREAMS      — max streams (default: 10)
@@ -77,6 +78,7 @@ A2A_JS_DISK_STORAGE="${A2A_JS_DISK_STORAGE:-10G}"
 A2A_JS_STREAMS="${A2A_JS_STREAMS:-10}"
 A2A_JS_CONSUMERS="${A2A_JS_CONSUMERS:-50}"
 A2A_PUSH_JWT="${A2A_PUSH_JWT:-1}"
+A2A_CATALOG_KV_BUCKET="${A2A_CATALOG_KV_BUCKET:-A2A_AGENT_CARDS}"
 
 NSC_CONFIG_DIR="${A2A_NSC_DIR}/config"
 NSC_DATA_DIR="${A2A_NSC_DIR}/data"
@@ -94,12 +96,15 @@ TASK_PUB="${PREFIX}.task.>"
 PUSH_PUB="${PREFIX}.push.>"
 CATALOG_REG="${PREFIX}.catalog.register.>"
 DISCOVER="${PREFIX}.discover.>"
+# JetStream KV data-plane publish wildcard (literal $KV.<bucket>.> for nsc)
+KV_PUB="\$KV.${A2A_CATALOG_KV_BUCKET}.>"
 
 log "Starting A2A NSC bootstrap"
 log "  Operator   : ${A2A_OPERATOR_NAME}"
 log "  Account    : ${A2A_ACCOUNT_NAME}"
 log "  NSC dir    : ${A2A_NSC_DIR}"
 log "  Prefix     : ${PREFIX}"
+log "  KV bucket  : ${A2A_CATALOG_KV_BUCKET}"
 
 # Verify nsc is available.
 if ! command -v nsc >/dev/null 2>&1; then
@@ -151,6 +156,7 @@ run_nsc edit account ${NSC_DIR_FLAGS} \
 #   --allow-sub   : subjects this User may subscribe to
 #   --allow-pub   : subjects this User may publish to
 #   --deny-pub    : subjects this User must not publish to (defense in depth)
+#   --deny-sub    : subjects this User must not subscribe to (catalog ingress)
 # Reference: https://nats-io.github.io/nsc/nsc_add_user.html
 #
 # Note: nsc add user is idempotent for existing user names — it updates the
@@ -162,10 +168,14 @@ run_nsc add user ${NSC_DIR_FLAGS} \
     -n "a2a-gateway" \
     --allow-sub "${GATEWAY_INGRESS}" \
     --allow-sub "${DISCOVER}" \
+    --allow-sub "${AGENT_PUB}" \
+    --allow-sub "${TASK_PUB}" \
+    --allow-sub "${PUSH_PUB}" \
     --allow-pub "${AGENT_PUB}" \
     --allow-pub "${TASK_PUB}" \
     --allow-pub "${PUSH_PUB}" \
-    --deny-pub "${CATALOG_REG}"
+    --deny-pub "${CATALOG_REG}" \
+    --deny-sub "${CATALOG_REG}"
 
 # ---------------------------------------------------------------------------
 # Step 5 — Create the Caller template User
@@ -194,7 +204,16 @@ run_nsc add user ${NSC_DIR_FLAGS} \
     --allow-sub "_INBOX.{caller_id}.>" \
     --allow-sub "${PREFIX}.push.{caller_id}.>" \
     --allow-pub-response \
-    --deny-pub "${CATALOG_REG}"
+    --deny-pub "${AGENT_PUB}" \
+    --deny-pub "${TASK_PUB}" \
+    --deny-pub "${PUSH_PUB}" \
+    --deny-pub "${CATALOG_REG}" \
+    --deny-pub "${DISCOVER}" \
+    --deny-sub "${GATEWAY_INGRESS}" \
+    --deny-sub "${AGENT_PUB}" \
+    --deny-sub "${TASK_PUB}" \
+    --deny-sub "${CATALOG_REG}" \
+    --deny-sub "${DISCOVER}"
 
 # ---------------------------------------------------------------------------
 # Step 6 — Create the Registrar service User
@@ -204,24 +223,34 @@ run_nsc add user ${NSC_DIR_FLAGS} \
 # Long-lived identity for a2a-nats-discovery. Subscribes to catalog.register.*
 # and discover.* subjects; replies via --allow-pub-response.
 #
-# KV write exclusivity: after Account JWT is pushed, grant JetStream KV put/update
-# on A2A_AGENT_CARDS to this User only (Account admin or platform IAM step —
-# see docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §6 and §JetStream/KV).
+# KV write exclusivity: catalog bucket `${A2A_CATALOG_KV_BUCKET}` data-plane publishes are
+# enumerated via `--allow-pub` on `$KV.<bucket>.>` — keep gateway/caller Users off that class
+# and still validate fleet IAM (docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §JetStream/KV).
 #
 # Flags used:
-#   --allow-sub          : catalog register ingress + discover request/reply
-#   --allow-pub-response : allows reply publishes for both request/reply paths
-#   --deny-pub           : gateway ingress is caller-only
+#   --allow-pub          — JetStream KV `$KV.<bucket>.>` publishes (AgentCard payloads)
+#   --allow-sub          — catalog.register + discover ingress; `_INBOX.>` correlates KV / RR
+#   --allow-pub-response — RR replies plus dynamic reply publishes on scoped paths
+#   --deny-pub/sub       — forbid gateway/agent/task/push subjects (outside registrar scope)
 # Reference: https://nats-io.github.io/nsc/nsc_add_user.html
 log "Step 6: creating Registrar service User 'a2a-registrar'"
 run_nsc add user ${NSC_DIR_FLAGS} \
     --operator "${A2A_OPERATOR_NAME}" \
     -a "${A2A_ACCOUNT_NAME}" \
     -n "a2a-registrar" \
+    --allow-pub "${KV_PUB}" \
     --allow-sub "${CATALOG_REG}" \
     --allow-sub "${DISCOVER}" \
+    --allow-sub "_INBOX.>" \
     --allow-pub-response \
-    --deny-pub "${GATEWAY_INGRESS}"
+    --deny-pub "${GATEWAY_INGRESS}" \
+    --deny-pub "${AGENT_PUB}" \
+    --deny-pub "${TASK_PUB}" \
+    --deny-pub "${PUSH_PUB}" \
+    --deny-sub "${GATEWAY_INGRESS}" \
+    --deny-sub "${AGENT_PUB}" \
+    --deny-sub "${TASK_PUB}" \
+    --deny-sub "${PUSH_PUB}"
 
 # ---------------------------------------------------------------------------
 # Step 7 — (Optional) Push Account and User JWTs to the operator resolver
