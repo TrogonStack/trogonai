@@ -1,0 +1,40 @@
+# A2A Phase 0 — Registrar service User subject ACL template
+#
+# Role: Registrar service User
+# Identity: long-lived principal for the a2a-nats-discovery process.
+#           Owns catalog write ingress (catalog.register.*) and discover request/reply.
+#           Only this User may write to the A2A_AGENT_CARDS JetStream KV bucket.
+#
+# Tenancy model: one NATS Account per tenant; subjects carry no {tenant} segment.
+# Default prefix: a2a — substitute A2A_PREFIX if the tenant uses a custom value.
+#
+# References:
+#   docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md  §Subject ACL templates
+#   docs/A2A_SUBJECT_ACL_QUICKREF.md
+#   https://nats-io.github.io/nsc/nsc_add_user.html
+#
+# Note on --allow-pub-response: nsc adds a response permission that allows one
+# reply publish per matched subscription (used for request/reply patterns).
+# The bootstrap script passes --allow-pub-response for both catalog.register
+# and discover paths so the registrar can send replies to request/reply callers.
+# Flag reference: https://nats-io.github.io/nsc/nsc_add_user.html
+
+# allow-sub
+# Subjects the Registrar User may SUBSCRIBE to.
+# CatalogRegistrarService subscribe path — receives AgentCard JSON register requests.
+a2a.catalog.register.>
+# DiscoverService subscribe path — handles discover request/reply from callers/gateway.
+a2a.discover.>
+
+# allow-pub
+# Subjects the Registrar User may PUBLISH to.
+# KV write subjects for A2A_AGENT_CARDS bucket (JetStream internal subject space).
+# The nsc bootstrap grants --allow-pub-response rather than listing KV subjects
+# explicitly; KV bucket ACL is enforced at the JetStream level after Account JWT
+# provisioning (Account admin or platform IAM step — see bootstrap runbook §6).
+# No explicit allow-pub subject lines are needed here beyond --allow-pub-response.
+
+# deny-pub
+# Subjects the Registrar User must NOT publish to.
+# Gateway ingress is caller-only inbound; registrar has no business publishing here.
+a2a.gateway.>
