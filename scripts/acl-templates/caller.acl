@@ -1,0 +1,34 @@
+# A2A Phase 0 — Caller User subject ACL template
+#
+# Role: Caller User
+# Identity: external or bridge-originated; minted per-caller by the auth callout in production.
+#           This template is used for static bootstrap and documentation only.
+#
+# Tenancy model: one NATS Account per tenant; subjects carry no {tenant} segment.
+# Default prefix: a2a — substitute A2A_PREFIX if the tenant uses a custom value.
+#
+# References:
+#   docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md  §Subject ACL templates
+#   docs/A2A_SUBJECT_ACL_QUICKREF.md
+#   https://nats-io.github.io/nsc/nsc_add_user.html
+
+# allow-pub
+# Subjects the Caller User may PUBLISH to.
+# Request/reply into the gateway ingress namespace.
+a2a.gateway.>
+
+# allow-sub
+# Subjects the Caller User may SUBSCRIBE to.
+# Caller-owned inbox prefix for request/reply replies.
+# Replace _INBOX.{caller_id} with the stable token-safe caller identifier
+# encoded in the minted User JWT; the auth callout derives this from the
+# external identity (e.g. OIDC sub).
+_INBOX.{caller_id}.>
+# Push read path — caller receives task-status push events on their own prefix.
+# Provision even in Phase 0; the auth callout sets {caller_id} at mint time.
+a2a.push.{caller_id}.>
+
+# deny-pub
+# Subjects the Caller User must NOT publish to.
+# Catalog register writes are registrar-only; deny here as defense in depth.
+a2a.catalog.register.>
