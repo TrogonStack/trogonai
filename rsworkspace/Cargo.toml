@@ -14,6 +14,7 @@ all = "deny"
 a2a-auth-callout = { path = "crates/a2a-auth-callout" }
 a2a-nats = { path = "crates/a2a-nats" }
 a2a-pack = { path = "crates/a2a-pack" }
+a2a-redaction = { path = "crates/a2a-redaction" }
 a2a-nats-agent = { path = "crates/a2a-nats-agent" }
 a2a-nats-discovery = { path = "crates/a2a-nats-discovery" }
 a2a-gateway = { path = "crates/a2a-gateway" }
@@ -30,6 +31,8 @@ trogon-std = { path = "crates/trogon-std" }
 
 # A2A
 a2a-types = { version = "=0.2.0" }
+
+wasmtime = "=45.0.0"
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
