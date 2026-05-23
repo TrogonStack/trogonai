@@ -85,7 +85,17 @@ tempfile = "=3.27.0"
 time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 sha2 = "=0.10.8"
+hex = "=0.4.3"
+rustls-pemfile = "=2.2.0"
+rustls-pki-types = { version = "=1.14.0", default-features = false, features = ["std"] }
+rustls-webpki = { version = "=0.103.10", default-features = false, features = ["std", "alloc", "ring"] }
 jsonwebtoken = "=9.3.0"
+x509-parser = "=0.16.0"
+rcgen = "=0.13.2"
+base64 = "=0.22.1"
+rsa = "=0.9.9"
+rand = "=0.8.5"
+wiremock = "=0.6.3"
 
 [profile.release]
 lto = "thin"
