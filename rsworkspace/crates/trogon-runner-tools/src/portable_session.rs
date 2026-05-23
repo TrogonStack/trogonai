@@ -225,6 +225,9 @@ pub fn parse_export_json(json: &str) -> Result<ParsedExport, serde_json::Error> 
     if value.is_array() {
         return serde_json::from_value(value).map(ParsedExport::V1);
     }
+    if !value.is_object() {
+        return Err(serde::de::Error::custom("expected array or object"));
+    }
     // Single object without version — treat as one v1 message wrapper.
     if value.get("role").is_some() && value.get("text").is_some() {
         let one: PortableMessage = serde_json::from_value(value)?;
