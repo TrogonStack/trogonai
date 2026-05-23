@@ -1,0 +1,13 @@
+[package]
+name = "a2a-pack"
+version = "0.0.0-skeleton"
+edition = "2024"
+description = "First-party A2A policy bundle surface (skeleton placeholder)"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+jsonschema = { workspace = true, default-features = false }
+serde_json = { workspace = true }
