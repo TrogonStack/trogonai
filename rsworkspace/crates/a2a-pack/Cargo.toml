@@ -1,16 +1,13 @@
 [package]
 name = "a2a-pack"
-version = "0.1.0"
+version = "0.0.0-skeleton"
 edition = "2024"
-license = "Apache-2.0"
-description = "AgentCard read-side validation for the A2A protocol"
+description = "First-party A2A policy bundle surface (skeleton placeholder)"
 publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 serde_json = { workspace = true }
-tracing = { workspace = true }
