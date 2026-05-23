@@ -1,12 +1,13 @@
+use std::fmt;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest as _, Sha256};
 
 use crate::error::AuthCalloutError;
 
-/// Token-safe NATS Account name that serves as the tenant boundary (`aud` claim).
-///
-/// Must not contain characters that break NATS subject tokens. Wraps a `String`
-/// rather than exposing bare strings so call-sites cannot mix up account names with
-/// arbitrary strings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountName(String);
 
@@ -20,23 +21,25 @@ impl AccountName {
     }
 }
 
-impl std::fmt::Display for AccountName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for AccountName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-/// SpiceDB authorization principal carried in the `data` JWT claim.
-///
-/// Opaque to NATS and the A2A transport; consumed downstream by the gateway
-/// policy engine for SpiceDB `CheckPermission` calls (Phase 1). Wraps `String`
-/// for now — the full SpiceDB principal schema is defined outside this repo.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpiceDbPrincipal(String);
+pub type AudienceAccount = AccountName;
 
-impl SpiceDbPrincipal {
-    pub fn new(principal: impl Into<String>) -> Self {
-        Self(principal.into())
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ExternalSubject(String);
+
+impl ExternalSubject {
+    pub fn new(subject: impl Into<String>) -> Result<Self, JwtError> {
+        let s = subject.into();
+        if s.is_empty() {
+            return Err(JwtError::InvalidExternalSubject);
+        }
+        Ok(Self(s))
     }
 
     pub fn as_str(&self) -> &str {
@@ -44,115 +47,272 @@ impl SpiceDbPrincipal {
     }
 }
 
-impl std::fmt::Display for SpiceDbPrincipal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CallerId(String);
+
+impl CallerId {
+    pub fn new(segment: impl Into<String>) -> Result<Self, JwtError> {
+        let s = segment.into();
+        validate_caller_segment(&s).map(|()| Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
-/// Opaque handle to the signing key used to mint User JWTs.
-///
-/// Phase 0 scaffold: the key is loaded from a file path supplied via env; the
-/// concrete key type is kept behind this newtype so callers cannot accidentally
-/// serialize or log raw key material.
-#[allow(dead_code)]
-pub struct SigningKey(pub(crate) jsonwebtoken::EncodingKey);
+fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
+    if s.is_empty() || s.contains('.') {
+        return Err(JwtError::InvalidCallerId);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SpiceDbPrincipal(pub Value);
+
+pub struct SigningKey(pub(crate) EncodingKey);
+
+impl fmt::Debug for SigningKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SigningKey")
+    }
+}
 
 impl SigningKey {
-    /// Load an HMAC-SHA256 signing key from a raw secret bytes slice.
     pub fn from_secret(secret: &[u8]) -> Self {
-        Self(jsonwebtoken::EncodingKey::from_secret(secret))
+        Self(EncodingKey::from_secret(secret))
     }
 }
 
-/// JWT error type for mint failures.
 #[derive(Debug)]
-pub struct JwtError(jsonwebtoken::errors::Error);
+pub enum JwtError {
+    Encode(jsonwebtoken::errors::Error),
+    Decode(jsonwebtoken::errors::Error),
+    SystemTime(std::time::SystemTimeError),
+    InvalidCallerId,
+    InvalidExternalSubject,
+    IssuedAtOutOfRange,
+}
 
-impl std::fmt::Display for JwtError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "JWT error: {}", self.0)
+impl fmt::Display for JwtError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Encode(e) => write!(f, "JWT encode error: {e}"),
+            Self::Decode(e) => write!(f, "JWT decode error: {e}"),
+            Self::SystemTime(e) => write!(f, "system time error: {e}"),
+            Self::InvalidCallerId => f.write_str("caller_id invalid for NATS subject token"),
+            Self::InvalidExternalSubject => f.write_str("external subject must be non-empty"),
+            Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
+        }
     }
 }
 
 impl std::error::Error for JwtError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
+        match self {
+            Self::Encode(e) | Self::Decode(e) => Some(e),
+            Self::SystemTime(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
 impl From<JwtError> for AuthCalloutError {
-    fn from(e: JwtError) -> Self {
-        Self::JwtMint(e.to_string())
+    fn from(value: JwtError) -> Self {
+        Self::JwtMint(value.to_string())
     }
 }
 
-/// Claims carried inside the Account-bound User JWT minted by the auth callout.
-///
-/// See `docs/A2A_AUTH_CALLOUT_SKETCH.md` §3 for the full claim layout.
-///
-/// - `sub` — external identity as issued by the IdP or mTLS/API-key layer.
-/// - `aud` — NATS Account public key or name (tenant boundary).
-/// - `data` — SpiceDB-ready principal payload; opaque to the NATS transport.
-/// - `caller_id` — stable, token-safe segment reused in subject ACLs
-///   (`_INBOX.{caller_id}.>`, `a2a.push.{caller_id}.>`, DLQ segments).
-///
-/// `exp`, `iat`, and `nbf` are standard JWT fields; include them in the
-/// `jsonwebtoken::Header` / `Claims` wrapper when minting (not in this struct
-/// to avoid forcing a specific time representation on callers).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserJwtClaims {
-    pub sub: String,
+    pub sub: ExternalSubject,
     pub aud: AccountName,
     pub data: SpiceDbPrincipal,
-    /// Stable, single-token subject segment. Must not contain `.`.
-    pub caller_id: String,
+    pub caller_id: CallerId,
 }
 
 impl UserJwtClaims {
-    /// Mint a signed User JWT from these claims.
-    ///
-    /// The verify path and full claim enrichment (`exp`, `iat`, `nbf`,
-    /// subject ACL embedding) remain `unimplemented!()` — the shape and
-    /// types are the deliverable for Phase 0 scaffold.
-    pub fn mint(&self, _signing_key: &SigningKey) -> Result<String, JwtError> {
-        unimplemented!("JWT mint: OIDC/mTLS verify paths + ACL embedding not implemented yet")
+    pub fn mint(
+        &self,
+        signing_key: &SigningKey,
+        issued_at: SystemTime,
+        ttl: Duration,
+    ) -> Result<String, JwtError> {
+        let iat_secs = secs_since_unix(issued_at)?;
+        let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
+        let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
+
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            aud: &'a str,
+            caller_id: &'a str,
+            data: &'a Value,
+            exp: i64,
+            iat: i64,
+            nbf: i64,
+        }
+
+        let claims = Claims {
+            sub: self.sub.as_str(),
+            aud: self.aud.as_str(),
+            caller_id: self.caller_id.as_str(),
+            data: &self.data.0,
+            exp: exp_secs,
+            iat: iat_secs,
+            nbf: iat_secs,
+        };
+
+        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0).map_err(JwtError::Encode)
     }
+
+    #[cfg(test)]
+    fn mint_for_test_ttl(&self, signing_key: &SigningKey, ttl: Duration) -> Result<String, JwtError> {
+        self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
+    }
+}
+
+pub(crate) fn derive_caller_id(external_sub: &str, tenant: &AccountName) -> Result<CallerId, JwtError> {
+    let mut hasher = Sha256::new();
+    hasher.update(external_sub.as_bytes());
+    hasher.update(b"|");
+    hasher.update(tenant.as_str().as_bytes());
+    let digest = hasher.finalize();
+    CallerId::new(hex::encode(&digest[..16]))
+}
+
+pub(crate) fn spicedb_bundle_for_opaque(principal_hint: impl Into<Value>) -> SpiceDbPrincipal {
+    SpiceDbPrincipal(principal_hint.into())
+}
+
+pub(crate) fn spicedb_principal_from_oidc_claims(claims: &Value) -> SpiceDbPrincipal {
+    if let Some(p) = claims.get("spicedb_principal") {
+        SpiceDbPrincipal(p.clone())
+    } else if let Some(sub) = claims.get("sub") {
+        SpiceDbPrincipal(json!({ "spicedb_subject": sub }))
+    } else {
+        SpiceDbPrincipal(json!({}))
+    }
+}
+
+pub(crate) fn external_subject_from_der(prefix: &str, cert_der: &[u8]) -> Result<ExternalSubject, JwtError> {
+    let mut hasher = Sha256::new();
+    hasher.update(cert_der);
+    ExternalSubject::new(format!("{}|{}", prefix, hex::encode(hasher.finalize())))
+}
+
+fn secs_since_unix(t: SystemTime) -> Result<i64, JwtError> {
+    let secs = t.duration_since(UNIX_EPOCH).map_err(JwtError::SystemTime)?.as_secs();
+    i64::try_from(secs).map_err(|_| JwtError::IssuedAtOutOfRange)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
-    #[test]
-    fn account_name_roundtrip() {
-        let name = AccountName::new("acme-account");
-        assert_eq!(name.as_str(), "acme-account");
-        assert_eq!(name.to_string(), "acme-account");
+    #[derive(Debug, serde::Deserialize)]
+    struct ParsedMinted {
+        sub: String,
+        aud: String,
+        caller_id: String,
+        data: serde_json::Value,
     }
 
     #[test]
-    fn spicedb_principal_roundtrip() {
-        let p = SpiceDbPrincipal::new("user:alice");
-        assert_eq!(p.as_str(), "user:alice");
-        assert_eq!(p.to_string(), "user:alice");
-    }
-
-    #[test]
-    fn user_jwt_claims_fields_accessible() {
+    fn mint_decodes_expected_claims() {
+        let signing_key = SigningKey::from_secret(b"secret-for-hs256-test");
         let claims = UserJwtClaims {
-            sub: "oidc|acme|user-123".into(),
-            aud: AccountName::new("ABCTenantKey"),
-            data: SpiceDbPrincipal::new(r#"{"principal_type":"user","tenant_ref":"acme"}"#),
-            caller_id: "usr_abc123".into(),
+            sub: ExternalSubject::new("alice").unwrap(),
+            aud: AccountName::new("tenant-acme"),
+            data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
+            caller_id: CallerId::new("caller1").unwrap(),
         };
-        assert_eq!(claims.sub, "oidc|acme|user-123");
-        assert_eq!(claims.aud.as_str(), "ABCTenantKey");
-        assert!(!claims.caller_id.contains('.'));
+        let token = claims
+            .mint_for_test_ttl(&signing_key, Duration::from_secs(60))
+            .unwrap();
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let decoded = decode::<ParsedMinted>(
+            &token,
+            &DecodingKey::from_secret(b"secret-for-hs256-test"),
+            &validation,
+        )
+        .unwrap();
+        assert_eq!(decoded.claims.sub, "alice");
+        assert_eq!(decoded.claims.aud, "tenant-acme");
+        assert_eq!(decoded.claims.caller_id, "caller1");
+        assert_eq!(
+            decoded.claims.data.get("spicedb_subject"),
+            Some(&json!("user/alice"))
+        );
     }
 
     #[test]
-    fn signing_key_from_secret_does_not_panic() {
-        let _key = SigningKey::from_secret(b"test-secret-not-for-production");
+    fn mint_wrong_alg_fails_decode() {
+        let signing_key = SigningKey::from_secret(b"a");
+        let claims = UserJwtClaims {
+            sub: ExternalSubject::new("alice").unwrap(),
+            aud: AccountName::new("tenant-acme"),
+            data: SpiceDbPrincipal(json!({})),
+            caller_id: CallerId::new("cid").unwrap(),
+        };
+        let token = claims
+            .mint_for_test_ttl(&signing_key, Duration::from_secs(10))
+            .unwrap();
+        let mut validation = Validation::new(Algorithm::RS384);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let err =
+            decode::<ParsedMinted>(&token, &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
+        assert!(
+            matches!(err.kind(), jsonwebtoken::errors::ErrorKind::InvalidAlgorithm)
+                || err.to_string().to_lowercase().contains("algorithm"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn mint_rejects_wrong_verification_key() {
+        let signing_key = SigningKey::from_secret(b"signer-a------------------------");
+        let claims = UserJwtClaims {
+            sub: ExternalSubject::new("s").unwrap(),
+            aud: AudienceAccount::new("a"),
+            data: SpiceDbPrincipal(json!({})),
+            caller_id: CallerId::new("cid").unwrap(),
+        };
+        let token = claims
+            .mint_for_test_ttl(&signing_key, Duration::from_secs(60))
+            .unwrap();
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let wrong = decode::<ParsedMinted>(
+            &token,
+            &DecodingKey::from_secret(b"signer-b------------------------"),
+            &validation,
+        );
+        assert!(wrong.is_err());
+    }
+
+    #[test]
+    fn caller_id_rejects_dots() {
+        assert!(CallerId::new("a.b").unwrap_err().to_string().contains("caller_id"));
+    }
+
+    #[test]
+    fn external_subject_requires_non_empty() {
+        assert!(ExternalSubject::new("").unwrap_err().to_string().contains("external subject"));
+    }
+
+    #[test]
+    fn spicedb_principal_prefers_custom_claim() {
+        let v = json!({ "sub": "x", "spicedb_principal": { "kind": "special" } });
+        let p = spicedb_principal_from_oidc_claims(&v);
+        assert_eq!(p.0["kind"], "special");
     }
 }

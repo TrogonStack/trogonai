@@ -18,9 +18,25 @@ workspace = true
 async-nats = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true, features = ["std"] }
+rustls-webpki = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+x509-parser = { workspace = true, features = ["verify"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
-jsonwebtoken = { workspace = true }
+
+[dev-dependencies]
+base64 = { workspace = true }
+rand = { workspace = true }
+rcgen = { workspace = true }
+rsa = { workspace = true }
+serde_json = { workspace = true }
+wiremock = { workspace = true }
