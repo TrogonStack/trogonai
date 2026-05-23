@@ -20,6 +20,7 @@
 
 pub mod config;
 pub mod planned;
+pub mod policy;
 pub mod runtime;
 
 pub use config::{Args, Config, ConfigError};
