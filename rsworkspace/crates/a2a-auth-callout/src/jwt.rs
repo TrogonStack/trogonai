@@ -73,6 +73,12 @@ fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
 #[serde(transparent)]
 pub struct SpiceDbPrincipal(pub Value);
 
+impl SpiceDbPrincipal {
+    pub fn new(subject: impl Into<String>) -> Self {
+        Self(json!({ "spicedb_subject": subject.into() }))
+    }
+}
+
 pub struct SigningKey(pub(crate) EncodingKey);
 
 impl fmt::Debug for SigningKey {
