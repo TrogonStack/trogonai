@@ -11,7 +11,7 @@ use agent_client_protocol::{
     WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 
 /// Shared session metadata updated by the REPL (prefix rebind in PR 6).
@@ -47,12 +47,11 @@ fn flush_stderr() {
 
 fn read_char_from_dev_tty() -> io::Result<char> {
     use std::os::unix::io::AsRawFd;
-    let mut tty = open_dev_tty(true, false)?;
+    // O_RDWR required: tcsetattr behaves more reliably on a read-write fd,
+    // and we need it for the explicit drain step below.
+    let tty = open_dev_tty(true, true)?;
     let fd = tty.as_raw_fd();
 
-    // Save current terminal settings, switch to raw mode so the user's keypress
-    // arrives without waiting for Enter, and flush any stale buffered input
-    // (e.g. the '\r' / '\n' left over from the previous rustyline readline call).
     let original = unsafe {
         let mut t: libc::termios = std::mem::zeroed();
         if libc::tcgetattr(fd, &mut t) != 0 {
@@ -60,23 +59,52 @@ fn read_char_from_dev_tty() -> io::Result<char> {
         }
         t
     };
-    let mut raw = original;
+
     unsafe {
+        let mut raw = original;
         libc::cfmakeraw(&mut raw);
-        raw.c_cc[libc::VMIN] = 1;
+        raw.c_cc[libc::VMIN] = 0;
         raw.c_cc[libc::VTIME] = 0;
         libc::tcsetattr(fd, libc::TCSAFLUSH, &raw);
-        // TCSAFLUSH discards any pending (unread) input, giving us a clean slate.
+
+        let mut drain = [0u8; 64];
+        let mut drained: i64 = 0;
+        loop {
+            let n = libc::read(fd, drain.as_mut_ptr() as *mut libc::c_void, drain.len());
+            if n <= 0 {
+                break;
+            }
+            drained += n as i64;
+        }
+        eprintln!("[TTY-DBG] drained {drained} bytes before keypress");
+
+        raw.c_cc[libc::VMIN] = 1;
+        libc::tcsetattr(fd, libc::TCSANOW, &raw);
     }
 
+    eprintln!("[TTY-DBG] waiting for keypress…");
     let mut buf = [0u8; 1];
-    let result = tty.read_exact(&mut buf);
-
-    unsafe {
-        libc::tcsetattr(fd, libc::TCSANOW, &original);
+    loop {
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, 1) };
+        if n == 1 {
+            eprintln!("[TTY-DBG] got byte {} ('{}')", buf[0], buf[0] as char);
+            break;
+        } else if n < 0 {
+            let e = io::Error::last_os_error();
+            eprintln!("[TTY-DBG] read error: {e}");
+            if e.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            unsafe { libc::tcsetattr(fd, libc::TCSANOW, &original); }
+            return Err(e);
+        } else {
+            eprintln!("[TTY-DBG] EOF on tty");
+            unsafe { libc::tcsetattr(fd, libc::TCSANOW, &original); }
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "tty closed"));
+        }
     }
 
-    result?;
+    unsafe { libc::tcsetattr(fd, libc::TCSANOW, &original); }
     Ok(char::from(buf[0]))
 }
 
@@ -199,7 +227,7 @@ async fn handle_tool_permission(req: &RequestPermissionRequest) -> agent_client_
     let summary = format_tool_summary(req);
     eprintln!();
     eprintln!("┆ {summary}");
-    eprintln!("[a]llow  [A]lways allow  [r]eject");
+    eprintln!("[a] allow  [w] always allow  [r] reject");
     flush_stderr();
 
     let key = match tokio::task::spawn_blocking(read_char_from_dev_tty).await {
@@ -217,7 +245,7 @@ async fn handle_tool_permission(req: &RequestPermissionRequest) -> agent_client_
 
     match key {
         'a' => selected_outcome("allow"),
-        'A' => selected_outcome("allow_always"),
+        'w' | 'W' => selected_outcome("allow_always"),
         'r' | 'R' => selected_outcome("reject"),
         '\x03' | '\x04' => cancelled_outcome(),
         _ => selected_outcome("reject"),
