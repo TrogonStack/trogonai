@@ -1,0 +1,34 @@
+# A2A Phase 0 — Gateway User subject ACL template
+#
+# Role: Gateway User
+# Identity: long-lived service principal for the a2a-gateway process inside a tenant Account.
+#           One static credential per Account; provisioned here rather than via auth callout.
+#
+# Tenancy model: one NATS Account per tenant; subjects carry no {tenant} segment.
+# Default prefix: a2a — substitute A2A_PREFIX if the tenant uses a custom value.
+#
+# References:
+#   docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md  §Subject ACL templates
+#   docs/A2A_SUBJECT_ACL_QUICKREF.md
+#   https://nats-io.github.io/nsc/nsc_add_user.html
+
+# allow-pub
+# Subjects the Gateway User may PUBLISH to.
+# Forward to agent dispatch subjects.
+a2a.agent.>
+# Task event publishing (lifecycle events on the A2A_EVENTS stream).
+a2a.task.>
+# Push notification envelopes toward caller-owned push targets.
+a2a.push.>
+
+# allow-sub
+# Subjects the Gateway User may SUBSCRIBE to.
+# Queue-group consumer on gateway ingress; receives all inbound caller requests.
+a2a.gateway.>
+# Read-only catalog access via discover request/reply path.
+a2a.discover.>
+
+# deny-pub
+# Subjects the Gateway User must NOT publish to.
+# Catalog register writes are registrar-only.
+a2a.catalog.register.>
