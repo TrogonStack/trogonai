@@ -85,6 +85,7 @@ where
         tracing::error!(
             error = %error,
             subject = %subject,
+            payload = %String::from_utf8_lossy(&response.payload),
             "Failed to deserialize NATS response"
         );
         NatsError::Deserialize(error)
