@@ -11,8 +11,12 @@ all = "deny"
 
 [workspace.dependencies]
 # Internal crates
+a2a-auth-callout = { path = "crates/a2a-auth-callout" }
 a2a-nats = { path = "crates/a2a-nats" }
+a2a-pack = { path = "crates/a2a-pack" }
 a2a-nats-agent = { path = "crates/a2a-nats-agent" }
+a2a-nats-discovery = { path = "crates/a2a-nats-discovery" }
+a2a-gateway = { path = "crates/a2a-gateway" }
 a2a-nats-server = { path = "crates/a2a-nats-server" }
 a2a-nats-stdio = { path = "crates/a2a-nats-stdio" }
 acp-nats = { path = "crates/acp-nats" }
@@ -50,6 +54,7 @@ tower-http = { version = "=0.6.8", features = ["trace"] }
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+jsonschema = { version = "=0.46.5", default-features = false }
 
 # CLI
 clap = { version = "=4.6.1", features = ["derive"] }
@@ -76,6 +81,7 @@ tempfile = "=3.27.0"
 time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 sha2 = "=0.10.8"
+jsonwebtoken = "=9.3.0"
 
 [profile.release]
 lto = "thin"
