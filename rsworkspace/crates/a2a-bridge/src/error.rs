@@ -12,6 +12,11 @@ pub enum BridgeError {
     NatsPublish(String),
     JetStreamConsume(String),
     UpstreamHttps(String),
+    MissingJsonRpcId,
+    StreamingParams(String),
+    JsonRpcUpstream(String),
+    CatalogRegistration(String),
+    InvalidAgent(String),
 }
 
 impl fmt::Display for BridgeError {
@@ -27,6 +32,11 @@ impl fmt::Display for BridgeError {
             Self::NatsPublish(msg) => write!(f, "NATS gateway publish failed: {msg}"),
             Self::JetStreamConsume(msg) => write!(f, "JetStream SSE consumer attach failed: {msg}"),
             Self::UpstreamHttps(msg) => write!(f, "HTTPS upstream forward failed: {msg}"),
+            Self::MissingJsonRpcId => write!(f, "JSON-RPC streaming request missing usable id"),
+            Self::StreamingParams(msg) => write!(f, "invalid streaming RPC params: {msg}"),
+            Self::JsonRpcUpstream(msg) => write!(f, "gateway unary returned JSON-RPC error: {msg}"),
+            Self::CatalogRegistration(msg) => write!(f, "catalog registration publish failed: {msg}"),
+            Self::InvalidAgent(msg) => write!(f, "invalid agent identifier: {msg}"),
         }
     }
 }

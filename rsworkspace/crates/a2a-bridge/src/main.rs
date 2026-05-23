@@ -1,6 +1,9 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
-use a2a_bridge::{AppState, StubAuthCalloutClient, StubInboundGatewayPublish, gateway_router};
+use a2a_bridge::{
+    AppState, StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort,
+    default_a2a_prefix, gateway_router,
+};
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +18,12 @@ async fn main() {
 
     tracing::info!(%listen, ?nats_url, ?auth_callout_url, "a2a-bridge env bound (NATS wired later)");
 
-    let state = AppState::new(Arc::new(StubAuthCalloutClient), Arc::new(StubInboundGatewayPublish));
+    let state = AppState::new(
+        Arc::new(StubAuthCalloutClient),
+        Arc::new(StubInboundGatewayPublish),
+        Arc::new(StubTaskJetStreamPort),
+        default_a2a_prefix(),
+    );
     let router = gateway_router(state);
 
     let listener = tokio::net::TcpListener::bind(listen).await.expect("listen");
