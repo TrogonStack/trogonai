@@ -18,16 +18,22 @@ The result is opaque agent-to-agent collaboration with the same semantics as HTT
 
 The same gateway and policy engine described in `MCP_GATEWAY_PLAN.md` apply on top — A2A is the second tenant of that engine.
 
+**Documentation hub (operators + embedders):** [`docs/A2A_DOCS_INDEX.md`](docs/A2A_DOCS_INDEX.md) · env reference [`docs/A2A_RUNTIME_ENV.md`](docs/A2A_RUNTIME_ENV.md) · streaming back-pressure [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
+
 ## Implementation Status
 
 Snapshot of what is in-tree vs. what this plan still describes as future work.
 
 ### Shipped crates
 
-- `rsworkspace/crates/a2a-nats` — protocol binding: subjects, JetStream stream/consumer/provision, JSON-RPC envelope, `Bridge` (agent runtime) and `Client`.
+- `rsworkspace/crates/a2a-nats` — protocol binding: subjects, JetStream stream/consumer/provision, JSON-RPC envelope, `Bridge` (agent runtime), **`Client`**, **`gateway_ingress`** helpers. Also ships in-crate modules for catalog (`catalog/`), push delivery (`push/`), and audit (`audit/`).
 - `rsworkspace/crates/a2a-nats-agent` — daemon shell that drives a user-supplied `A2aHandler` against the `Bridge`. Ships a `NoopHandler` and an `examples/echo.rs` reference handler.
-- `rsworkspace/crates/a2a-nats-server` — axum HTTP/SSE front-end that adapts JSON-RPC over HTTP to the NATS client. Not yet an A2A↔HTTPS interop bridge — it speaks to its own agent only.
+- `rsworkspace/crates/a2a-nats-server` — axum HTTP/SSE surface over **`a2a_nats::Client`**; **`A2A_USE_GATEWAY=1`** optionally targets **`{prefix}.gateway.{agent_id}.{method}`** for **`a2a-gateway`** (see crate README). Not an A2A↔HTTPS interop bridge yet — bridges foreign HTTPS clients separately.
 - `rsworkspace/crates/a2a-nats-stdio` — line-delimited JSON-RPC stdio bridge for tools that cannot embed NATS.
+- `rsworkspace/crates/a2a-nats-discovery` — standalone KV provisioning plus `DiscoverService` on `{prefix}.discover.*` and `CatalogRegistrarService` on `{prefix}.catalog.register.*` (catalog registrar process).
+- `rsworkspace/crates/a2a-bridge` — **stub** Cargo surface for Phase&nbsp;4 HTTPS↔NATS bridge (`BridgeConfig`, tests); TLS/SSE/agent-card ingress **not** implemented ([`docs/A2A_BRIDGE_SKETCH.md`](./docs/A2A_BRIDGE_SKETCH.md)).
+- `rsworkspace/crates/a2a-gateway` — NATS-connected process with optional queue group on **`{prefix}.gateway.>`**; **opaque request/reply forward** from gateway-shaped subjects to **`{prefix}.agent.{agent_id}.{method}`** (`a2a_nats::gateway_ingress`). Auth callout / policy hooks / auditing at ingress remain future (see README). The **`planned::`** submodule collects **compile-only** roadmap seams (back-pressure egress planner traits, Unary deadline metadata hooks, NSC ACL snippets, Wasmtime pool traits, SpiceDB seam traits, auth-callout consts, HTTPS bridge structs).
+- `rsworkspace/crates/a2a-pack` — **stub** placeholder modules for tuples, schemas, redaction, audit envelope extensions (**no bundles shipped**).
 
 ### Working surface (Phase 2 partial)
 
@@ -35,22 +41,25 @@ Snapshot of what is in-tree vs. what this plan still describes as future work.
 - Streaming: `message/stream` (bootstrap reply + JetStream pump) and `tasks/resubscribe` (RPC for snapshot + JetStream consumer at `last_seq + 1`). Backed by a single `A2A_EVENTS` stream filtered to `a2a.task.*.events.*`.
 - Backpressure: `Config::max_concurrent_client_tasks` enforced via a Semaphore in the `Bridge` dispatch loop.
 - Consumer hygiene: ephemeral consumers carry `inactive_threshold = 5m` so client crashes don't leak server state.
+- Push delivery (partial): on terminal `TaskStatusUpdateEvent`, the `message/stream` event pump calls `dispatch_push_notifications` via `CompositePushDispatcher` — **HTTP(S)** (Bearer/Basic/jwt→Bearer; bounded retries on retryable response codes and transient transport failures), core NATS **`subject:{…}`**, and JetStream **`jetstream:{…}`** (ack’d publish; bounded retries with the same attempt cap / backoff as HTTPS on publish + ack failures; stream must pre-exist with a matching subject filter). **`provision_streams`** creates **`A2A_EVENTS`** plus **`A2A_PUSH_DLQ`**; **`push::dlq`** JetStream-publishes JSON failure envelopes (`schema`=`a2a.push.dlq/v1`) after terminal dispatch failures (default **`caller_id`** DLQ segment **`_`** via **`Config`**). **`a2a-gateway`** does **not** emit DLQ traffic. Digest signing / fuller auth schemes remain open.
+- Agent catalog (partial): `CatalogStore` / `KvCatalogStore` over `A2A_AGENT_CARDS`, plus `DiscoverService` on `{prefix}.discover.*` request/reply and **`CatalogRegistrarService` on `{prefix}.catalog.register.{agent_id}`** (NATS `request` writes). The `rsworkspace/crates/a2a-nats-discovery` binary provisions the KV bucket and runs both services. **`KvCatalogStore` applies the bundled `a2a-pack` AgentCard schema on KV get/put.** Tenant-scoped discovery and **ACL-only enforcement** that only the registrar Principal may hit `catalog.register` remain operator work.
+- Audit (partial): `Bridge::dispatch` emits one `AuditEnvelope` per handled RPC (`AuditEmitter`; default noop). **`message/stream` pump emits `TaskLifecycleEnvelope` payloads to `{prefix}.audit.lifecycle` when streamed task numeric state transitions** (`NatsAuditEmitter`). Gateway policy attribution fields (`rules_fired`, etc.) remain future once a gateway path exists.
 
 ### Intentional simplifications vs. the design below
 
-- **No gateway / tenant axis yet.** Live subjects are `a2a.agent.{agent_id}.{method}` and `a2a.task.{task_id}.events.{req_id}` — the `a2a.gateway.{tenant}.>` namespace and the `{tenant}` segment on task subjects are not yet wired. Adding the tenant axis is a rename + an upstream gateway service; the handler trait is unaffected.
-- **Single stream `A2A_EVENTS`** instead of per-tenant `A2A_TASKS_{tenant}`.
-- **No auth callout, no policy engine, no SpiceDB authz, no audit emitter.** Anything that reaches the NATS subject is dispatched. Auth is delegated to the underlying NATS account / NKey.
-- **Push notification delivery is not implemented.** The `tasks/pushNotificationConfig/*` methods round-trip config through the handler, but no component reads that config and POSTs/publishes when an event fires.
-- **AgentCard generation is the handler's responsibility.** No KV catalog, no JSON-Schema validation, no `a2a.discover.{tenant}.>` service.
-- **No HTTPS↔NATS interop bridge** for foreign A2A clients.
+- **No multi-Account provisioning yet.** Subjects already match the decided Account-scoped shape — operationally everything runs inside a single shared NATS Account today. Outstanding work is NSC operator/account provisioning and auth-callout deployment.
+- **No gateway auth callout / policy engine / SpiceDB authz yet.** Anything that reaches the agent NATS subject is dispatched unchanged; `a2a-gateway` only routes **`{prefix}.gateway.…`** → **`{prefix}.agent.…`** and does **not** validate JWTs or emit gateway decision audits. Gateway decision sites (`rules_fired`, rewrites), full §Audit attribution (`trace_id`, …), and bundle signing remain to be built.
+- **Push delivery is terminal-status-only; targets are HTTP, core NATS `subject:` and JetStream `jetstream:` publishes.** Caller-provisioned streams must bind the JetStream subjects. In-process retries with backoff ship for **HTTPS and for NATS / JetStream push publishes** (**`constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS`** caps attempts for all three; HTTPS additionally gates retries by status code / error kind). **`provision_streams`** creates **`A2A_PUSH_DLQ`**, and the agent **`Bridge`** publishes DLQ JSON on terminal push delivery failures (see **`push::dlq`**). **Exactly-once opt-in**, JWT-derived **`caller_id`** DLQ segments end-to-end, and optional gateway-side DLQ mirroring remain to be built (Digest webhook auth deferred per §Decisions).
+- **Agent catalog is partial.** `catalog/` plus `a2a-nats-discovery` provide KV-backed cards, `{prefix}.discover.*` reads, and **`{prefix}.catalog.register.*` writes** into KV. **`a2a-pack` ships the minimal JSON Schema**; **`KvCatalogStore`** enforces it on **KV get/put** (registrar path uses the same validator). Remaining gaps: **enforced** registrar-only ACL posture in every environment, gateway / edge AgentCard flows that bypass KV reads, federation-shaping, KV watch ergonomics, and fuller registration policy.
+- **No HTTPS↔NATS interop bridge listeners yet** for foreign A2A clients. The **`a2a-bridge`** crate is types-only today; **`a2a-nats-server`** exposes HTTP for the embedded Rust **`a2a_nats::Client`**, not generic HTTPS-Agent interop.
 
 ### Crates this plan still calls for
 
-- `a2a-gateway` — queue-group gateway sitting between clients and agents (auth, policy, audit, stream/consumer provisioning).
-- `a2a-bridge` — HTTPS↔NATS interop sidecar in both directions.
-- `a2a-pack` — first-party policy bundle (resource tuples, catalog shaping, redaction, audit envelope).
-- A discovery service that owns the `A2A_AGENTCARDS_{tenant}` KV bucket.
+The following remain separate deliverables. Catalog, push, and audit *modules* already live inside `a2a-nats`; `a2a-nats-discovery` covers KV ownership + discover request/reply, but gateway integration is still open.
+
+- **`a2a-gateway` / `a2a-pack`** — `a2a-gateway` connects and relays ingress; authz/policy bundles consume `a2a-pack`, which currently ships placeholder modules. Bundles (resource tuples, AgentCard schema, redaction rules, audit envelope) remain to be built per §Decisions.
+- **`a2a-bridge`** — HTTPS↔NATS interop sidecar in both directions (Phase&nbsp;4). Cargo stub lands config types now; terminating ingress, minted User JWT client, SSE↔JetStream mapping remain to be shipped.
+- Registrar hardening beyond `a2a-nats-discovery` — AgentCard JSON-Schema on write + KV watch ergonomics documented for clients.
 
 ## Inspiration
 
@@ -84,17 +93,22 @@ Same caveats as the MCP plan: validates the demand and the policy-engine choices
 
 ## Protocol Mapping
 
+### Tenancy model
+
+**Tenant = NATS Account** *(decided 2026-05-23, see `A2A_PENDING_DECISION.md`)*. Each tenant runs in a dedicated NATS Account; subjects below have **no `{tenant}` segment** because Account membership is the tenancy boundary. Cross-tenant traffic requires explicit operator-signed Account exports/imports — federation is opt-in. JetStream streams and KV buckets use the same names across Accounts (`A2A_EVENTS`, `A2A_AGENT_CARDS`); the Account namespace disambiguates.
+
 ### Subject layout
 
-Two namespaces separated by NATS authorization:
+Two namespaces separated by NATS authorization, **scoped inside each Account**:
 
-| Subject                                         | Role                                                          | Who publishes              |
-|-------------------------------------------------|---------------------------------------------------------------|----------------------------|
-| `a2a.gateway.{tenant}.{agent_id}.{method}`      | Client → gateway request inbox                                | Clients                    |
-| `a2a.agent.{agent_id}.{method}`                 | Gateway → agent backend                                       | Gateway                    |
-| `a2a.task.{tenant}.{task_id}.events`            | Per-task event stream (JetStream)                             | Agent (via gateway)        |
-| `a2a.push.{tenant}.{caller_id}.{task_id}`       | Caller-owned push delivery subject                            | Gateway                    |
-| `a2a.discover.{tenant}.>`                       | AgentCard catalog (KV-backed; also a service subject)         | Registrars                 |
+| Subject                                       | Role                                                          | Who publishes              |
+|-----------------------------------------------|---------------------------------------------------------------|----------------------------|
+| `a2a.gateway.{agent_id}.{method}`             | Client → gateway request inbox                                | Clients                    |
+| `a2a.agent.{agent_id}.{method}`               | Gateway → agent backend                                       | Gateway                    |
+| `a2a.task.{task_id}.events.{req_id}`          | Per-task event stream (JetStream)                             | Agent (via gateway)        |
+| `a2a.push.{caller_id}.{task_id}`              | Caller-owned push delivery subject                            | Gateway                    |
+| `a2a.discover.{agent_id}`                     | AgentCard catalog (KV-backed; also a service subject)         | Registrars                 |
+| `a2a.catalog.register.{agent_id}`             | AgentCard catalog **write** (registrar `request` → KV put)     | Registrars (ACL-gated)     |
 
 `{method}` is the JSON-RPC method with `/` replaced by `.` — `message.send`, `message.stream`, `tasks.get`, `tasks.cancel`, `tasks.resubscribe`, `tasks.pushNotificationConfig.set`, etc.
 
@@ -205,13 +219,15 @@ Push deliveries use the same JSON envelope as the SSE stream; payload semantics 
 
 ### Components
 
-1. **Auth callout service** — same shape as in MCP plan; mints scoped JWT with subject ACL on `a2a.gateway.{tenant}.>` and consumer ACL on caller-owned push subjects.
-2. **A2A gateway service** — queue-group subscriber on `a2a.gateway.>`; stateless per-message except for streaming where it owns the consumer-to-caller pipe.
-3. **Discovery / catalog service** — owns `A2A_AGENTCARDS_{tenant}` KV bucket; serves `a2a.discover.{tenant}.>` requests. Registrars publish AgentCards; gateway validates against AgentCard JSON Schema before accepting.
-4. **Task stream manager** — ensures `A2A_TASKS_{tenant}` JetStream stream exists, configures retention (default `interest` with `max_age = 24h`, per-tenant override), provisions consumers.
-5. **Policy engine** — reused from MCP plan; A2A resource-tuple derivation table layered as a bundle.
-6. **Audit emitter** — `a2a.audit.{tenant}.{outcome}.{method}`.
-7. **HTTP↔NATS bridge (optional, sidecar)** — accepts vanilla A2A HTTPS clients on one side, publishes NATS on the other. Lets external agents that only speak HTTP A2A participate without code change.
+All components run **inside the tenant's NATS Account**; cross-Account traffic is gated by operator-signed exports/imports.
+
+1. **Auth callout service** — terminates external OIDC / mTLS / API keys and mints a **User JWT bound to the tenant's Account**. Subject ACL inside the Account confines the caller to `a2a.gateway.>` and an `_INBOX.{caller_id}.>` reply space, plus consumer ACL on caller-owned push subjects.
+2. **A2A gateway service** — queue-group subscriber on `a2a.gateway.>` inside the Account; stateless per-message except for streaming where it owns the consumer-to-caller pipe.
+3. **Discovery / catalog service** — owns the Account's `A2A_AGENT_CARDS` KV bucket; serves `a2a.discover.>` requests. Registrars publish AgentCards; gateway validates against AgentCard JSON Schema before accepting. Federated discovery (across Accounts) requires explicit Account exports of `a2a.discover.>`.
+4. **Task stream manager** — ensures the Account's `A2A_EVENTS` JetStream stream exists with subject filter `a2a.task.>`, configures retention (default `interest` with `max_age = 24h`, per-Account override), provisions consumers.
+5. **Policy engine** — reused from MCP plan; A2A resource-tuple derivation table layered as a bundle. Policies evaluate inside the Account; cross-Account SpiceDB principals carry Account identity.
+6. **Audit emitter** — `a2a.audit.{outcome}.{method}` inside the Account (Account namespace = tenant attribution).
+7. **HTTP↔NATS bridge (optional, sidecar)** — accepts vanilla A2A HTTPS clients on one side, mints an Account-bound NATS User JWT, publishes inside the caller's tenant Account on the other. Lets external agents that only speak HTTP A2A participate without code change.
 
 ### Backend agents
 
@@ -253,13 +269,15 @@ Caller disconnect: ephemeral consumer dies; on `tasks/resubscribe` the gateway r
 
 ## Auth Model
 
+**Tenant boundary = NATS Account** *(decision 2026-05-23)*. Each tenant runs in a dedicated Account; auth produces an Account-bound User JWT, and subject ACLs are written *inside* that Account.
+
 AgentCards declare `auth_schemes` per transport. NATS-bound schemes:
 
-- **`nats-callout`** — external OIDC / mTLS / API key terminates at a callout service that mints a scoped user JWT. Subject ACL bounds the caller to `a2a.gateway.{tenant}.{agent_id}.>` and an `_INBOX.{caller_id}.>` reply space.
-- **`nkey`** — direct NKey-based account for service-to-service agents.
-- **`jwt-bearer`** — passthrough JWT carried in the JSON-RPC envelope `metadata`, validated by the gateway against AgentCard-declared issuers.
+- **`nats-callout`** — external OIDC / mTLS / API key terminates at a callout service that mints a **User JWT bound to the tenant's Account**. Subject ACL inside the Account bounds the caller to `a2a.gateway.{agent_id}.>` and an `_INBOX.{caller_id}.>` reply space.
+- **`nkey`** — direct NKey-based User inside the tenant's Account for service-to-service agents.
+- **`jwt-bearer`** — passthrough JWT carried in the JSON-RPC envelope `metadata`, validated by the gateway against AgentCard-declared issuers; Account membership still required at the connection layer.
 
-Cross-binding: when the HTTPS↔NATS bridge accepts an HTTPS A2A client, it terminates HTTP auth and re-mints a NATS JWT scoped to the caller's identity. AgentCard's `security` block stays HTTPS-shaped on the outside; NATS-bound peers see the NATS-native schemes.
+Cross-binding: when the HTTPS↔NATS bridge accepts an HTTPS A2A client, it terminates HTTP auth and re-mints a NATS **User JWT in the caller's tenant Account**. AgentCard's `security` block stays HTTPS-shaped on the outside; NATS-bound peers see the NATS-native schemes. Cross-tenant access is only possible through operator-signed Account exports — off by default.
 
 ## Policy Engine
 
@@ -335,32 +353,45 @@ A standalone `a2a-bridge` service makes the NATS binding interoperable with the 
 
 Auth is re-minted at the bridge in both directions. AgentCards declare both transports so polyglot clients pick.
 
-## Open Questions
+## Decisions
 
-1. **Stream-per-task vs. shared stream with subject filter** — one JetStream stream per tenant filtered by `a2a.task.{tenant}.>` is operationally cleaner than one stream per task. Retention and quota then live at the tenant level, which is what the audit team will want anyway. Confirm at scale.
-2. **Retention default for task events** — A2A doesn't specify SSE history beyond resubscribe. We pick a default (24h?) and let tenants override. Too short kills resubscribe; too long inflates storage.
-3. **Push delivery semantics** — at-least-once via durable consumer is the obvious default. Exactly-once is achievable with JetStream double-ack but adds a hop; probably not worth it until someone asks.
-4. **AgentCard registry write path** — only the agent owner can publish its card (KV key per agent, with NKey-bound write ACL) versus a central catalog service that validates and republishes. The latter gives schema enforcement; the former gives autonomy.
-5. **Streaming back-pressure** — JetStream consumer flow control vs. blocking publishes on the agent side. Default to flow-controlled pull consumer for the gateway, but agents publishing fast enough to fill a stream is a real failure mode worth designing for.
-6. **`message/send` task lifecycle** — A2A allows `message/send` to return either a complete `Task` or be polled later. Over NATS this is just request/reply latency; the question is whether to enforce a max blocking window and force long-running work onto `message/stream`.
-7. **Bridge identity model** — does the HTTPS↔NATS bridge present as a single NATS identity (its own) with the caller's sub in `metadata`, or does it impersonate per request via a delegated auth callout?
-8. **Discovery scope** — tenant-scoped catalog only, or also a cross-tenant federated catalog with SpiceDB-gated visibility?
+All architectural decisions are landed.
+
+- **Tenancy = NATS Account per tenant** (2026-05-23). Cross-Account traffic requires explicit operator-signed exports/imports; federation is opt-in. Subject table in §Protocol Mapping carries no `{tenant}` segment; stream/KV names are reused across Accounts.
+- **Stream topology = shared `A2A_EVENTS` per Account, subject-filtered `a2a.task.>`**. Per-task streams rejected — JS metadata cost dominates at fleet scale.
+- **Retention default = 24h baseline, per-Account override**. JetStream `max_age = 24h`.
+- **Push delivery semantics = at-least-once default**, exactly-once as opt-in flag on `PushNotificationConfig`.
+- **AgentCard write path = central registrar (`a2a-nats-discovery`) validates against JSON-Schema, then writes KV.** Schema lives in `a2a-pack`; gateway re-validates on read.
+- **Streaming back-pressure = gateway pull consumer with flow control + stream policy `retention=interest, discard=old`.** Agents never block on publish.
+- **`message/send` max blocking window = 30s.** Longer work forced onto `message/stream`.
+- **Bridge identity = auth-callout mints per-request User inside the caller's tenant Account.** Single-bridge-User rejected to preserve caller attribution in audit.
+- **Federated discovery = off by default; opt-in via operator-signed exports of `a2a.discover.>`**; SpiceDB gates the import side.
+- **Cross-process push DLQ = per-Account `A2A_PUSH_DLQ` JetStream stream** at `a2a.push.dlq.{caller_id}.{task_id}`.
+- **Digest webhook auth = deferred.** Currently rejected with a clear error.
+- **NATS-push auth = gateway NATS User + subject ACL on `a2a.push.>`** (gateway publish) and `a2a.push.{caller_id}.>` (caller read).
+- **Audit envelope = plan §Audit shape verbatim, no `tenant` field** (Account namespace carries the attribution).
+- **Auth callout = NATS subscriber on `$SYS.REQ.USER.AUTH`**; OIDC primary, mTLS for service-to-service, API keys transitional. Mints Account-bound User JWT.
+- **Policy substrate = single Wasmtime runtime in the gateway** hosting Tier 2 (CEL compiled to WASM at bundle build) and Tier 3 (WASM redaction).
+- **SpiceDB = org-standard cluster, gateway holds the client.** Resource tuples per §SpiceDB.
+- **`a2a-bridge` = HTTPS sidecar; per-request re-mint into caller's Account; SSE↔JetStream consumer mapping** on `a2a.task.{task_id}.events.>`.
 
 ## Phased Delivery
 
 Aligned with the MCP plan's phases so they share infrastructure.
 
-- **Phase 0** *(partial)* — auth callout + subject ACL + AgentCard KV bucket + unary `message/send` and `tasks/get` end-to-end. No streaming, no push, no policy. Prove the perimeter and the catalog.
-  - Done: unary `message/send`, `tasks/get`, and the rest of the unary surface.
-  - Pending: auth callout, subject ACL, AgentCard KV bucket / catalog service.
-- **Phase 1** *(not started)* — Tier 1 policies, SpiceDB authz on `message/send` and `tasks/*`, audit to JetStream. Discovery shaping via `BulkCheckPermission`.
+- **Phase 0** *(partial)* — Account provisioning + auth callout + subject ACL + AgentCard KV bucket + unary `message/send` and `tasks/get` end-to-end. No streaming, no push, no policy. Prove the perimeter and the catalog.
+  - Done: unary `message/send`, `tasks/get`, and the rest of the unary surface; in-crate `catalog/` (`CatalogStore`, `KvCatalogStore`, `DiscoverService`, `CatalogRegistrarService`); standalone registrar binary (`a2a-nats-discovery`) provisions `A2A_AGENT_CARDS`, serves `{prefix}.discover.*`, and accepts `{prefix}.catalog.register.*` writes. Subject layout already matches the Account-per-tenant decision (no `{tenant}` segment).
+  - Pending: NSC operator/account provisioning runbook (**outline:** [`docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md)); JetStream asset cheat sheet (**[`docs/A2A_JETSTREAM_ACCOUNT_STREAMS.md`](./docs/A2A_JETSTREAM_ACCOUNT_STREAMS.md)**); auth callout that mints Account-bound User JWTs; subject ACL inside each Account; **`catalog.register` publish restricted to registrar User** via deployed ACLs (not just documentation); KV watch ergonomics for clients.
+- **Phase 1** *(partial)* — Tier 1 policies, SpiceDB authz on `message/send` and `tasks/*`, audit to JetStream. Discovery shaping via `BulkCheckPermission`.
+  - Done: in-crate `audit/` emitter + envelope; per-RPC audit from agent `Bridge::dispatch` when a non-noop emitter is configured.
+  - Pending: gateway decision-site wiring, full envelope schema (§Audit example — `trace_id`, `rules_fired`, `rewrites`, `stream_consumer`; no `tenant` field per §Decisions), Tier 1 policies, SpiceDB authz, discovery shaping.
 - **Phase 2** *(partial)* — `message/stream` and `tasks/resubscribe` over JetStream consumers. Task-lifecycle audit. Tier 2 CEL.
-  - Done: `message/stream` and `tasks/resubscribe` end-to-end, ephemeral pull consumers with `inactive_threshold`, resubscribe RPC + JetStream replay at `last_seq + 1`.
-  - Pending: task-lifecycle audit envelopes, Tier 2 CEL.
-- **Phase 3** *(not started)* — `tasks/pushNotificationConfig/*` with NATS-subject and JetStream-stream targets; HTTPS webhook target as a special case. Tier 3 WASM redaction over `parts[*]`.
-  - Done: `tasks/pushNotificationConfig/*` CRUD round-trips through the handler.
-  - Pending: delivery — nothing currently reads the config and dispatches notifications. Tier 3 WASM redaction.
-- **Phase 4** *(not started)* — HTTPS↔NATS bridge, federated catalog, cross-binding agent collaboration.
+  - Done: `message/stream` and `tasks/resubscribe` end-to-end, ephemeral pull consumers with `inactive_threshold`, resubscribe RPC + JetStream replay at `last_seq + 1`; per-state-transition `TaskLifecycleEnvelope` emitted to `{prefix}.audit.lifecycle` when streamed `TaskStatusUpdateEvent.status.state` changes.
+  - Pending: equivalent lifecycle coverage for unary `message/send` task evolution — tracked as product-scope in [`A2A_PENDING_DECISION.md`](./A2A_PENDING_DECISION.md) §Unary RPC vs streamed lifecycle envelopes (callers observe post-reply transitions today only by attaching via `message/stream` / `tasks/resubscribe` or to the task event subject); Tier 2 CEL.
+- **Phase 3** *(partial)* — `tasks/pushNotificationConfig/*` with NATS-subject and JetStream-stream targets; HTTPS webhook target as a special case. Tier 3 WASM redaction over `parts[*]`.
+  - Done: `tasks/pushNotificationConfig/*` CRUD round-trips through the handler; in-crate `push/` dispatcher; terminal-status delivery wired in the `message/stream` event pump via `CompositePushDispatcher` covering HTTP(S) (`http(s)://…`), core NATS (`subject:{…}`), and JetStream ack-publish (`jetstream:{…}`; caller-provisioned stream covering the subject); bounded in-process retries with backoff (**`constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS`**) — status- and transport-aware for HTTPS; same attempt cap / exponential backoff for NATS core and JetStream publish paths; `pushNotificationAuthenticationInfo` mapping via `push/authentication_header.rs` (Bearer / Basic / jwt → Bearer); **`A2A_PUSH_DLQ`** JetStream asset created alongside **`A2A_EVENTS`** (`provision_streams` / `nats/subjects/stream.rs`); **`push::dlq`** publishes JSON envelopes on terminal dispatch failure (default DLQ **`caller_id`** segment **`_`**).
+  - Pending: optional gateway-side DLQ mirroring, exactly-once opt-in flag (sketch **[`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)**), Tier 3 WASM redaction. Digest webhook auth deferred per §Decisions.
+- **Phase 4** *(not started)* — HTTPS↔NATS bridge (see **`docs/A2A_BRIDGE_SKETCH.md`**), federated catalog (**[`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md)**), cross-binding agent collaboration.
 
 ## Existing Code to Lean On
 
@@ -371,10 +402,11 @@ Aligned with the MCP plan's phases so they share infrastructure.
 
 New crates this plan adds:
 
-- `a2a-nats` *(shipped)* — protocol binding (encoding, subject layout, task event helpers, AgentCard types). Peer of `mcp-nats`.
+- `a2a-nats` *(shipped)* — protocol binding (encoding, subject layout, task event helpers, AgentCard types) plus in-crate `catalog/`, `push/`, and `audit/` modules. Peer of `mcp-nats`.
 - `a2a-nats-agent` *(shipped, not originally in plan)* — daemon shell wrapping a user-supplied `A2aHandler`. Equivalent of an MCP "stdio server" entry point.
-- `a2a-nats-server` *(shipped, narrower than `a2a-bridge`)* — axum HTTP/SSE adapter for the local agent. A starting point for the planned interop bridge but does not yet bridge foreign A2A HTTPS clients.
+- `a2a-nats-server` *(shipped, narrower than `a2a-bridge`)* — axum HTTP/SSE adapter for the local **`a2a_nats::Client`**; README documents gateway env knobs. Does not bridge foreign HTTPS A2A clients end-to-end.
 - `a2a-nats-stdio` *(shipped, not originally in plan)* — line-delimited JSON-RPC stdio adapter.
-- `a2a-gateway` *(not yet)* — queue-group gateway service. Peer of `mcp-gateway`.
+- `a2a-nats-discovery` *(shipped, not originally in plan)* — KV registrar binary; provisions `A2A_AGENT_CARDS` and runs `DiscoverService` on `{prefix}.discover.*` plus `CatalogRegistrarService` on `{prefix}.catalog.register.*`.
+- `a2a-gateway` *(partial ingress relay)* — optional queue-group subscriber on **`{prefix}.gateway.>`**; forwards JSON-RPC payloads to **`{prefix}.agent.{agent_id}.{method}`** with the caller reply inbox. Auth callout / policy engine / ingress audit hooks remain to be built.
+- `a2a-pack` *(skeleton)* — placeholder module layout for tuples/schemas/redaction/audit-envelope extensions. No bundles shipped.
 - `a2a-bridge` *(not yet)* — HTTPS↔NATS interop sidecar in both directions.
-- `a2a-pack` *(not yet)* — first-party policy bundle (resource tuples, shaping, redaction, audit envelope).
