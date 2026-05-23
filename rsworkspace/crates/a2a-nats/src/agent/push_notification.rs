@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use tracing::{instrument, warn};
 
 use crate::agent::handler::{A2aError, A2aHandler};
@@ -42,7 +41,7 @@ async fn reply_success<N: trogon_nats::PublishClient>(
         Ok(b) => {
             let headers = async_nats::HeaderMap::new();
             if let Err(e) = nats
-                .publish_with_headers(async_nats::Subject::from(reply), headers, Bytes::from(b))
+                .publish_with_headers(async_nats::Subject::from(reply), headers, b)
                 .await
             {
                 warn!(error = %e, "failed to publish push_notification success reply");
@@ -152,7 +151,7 @@ fn inject_registry_semantics(
     task_id: &str,
     config_object: &mut serde_json::Map<String, serde_json::Value>,
 ) {
-    let Some(task_id_dom) = A2aTaskId::new(task_id.to_owned()).ok() else {
+    let Some(task_id_dom) = A2aTaskId::new(task_id).ok() else {
         return;
     };
     let cid_str = match config_object.get("id").and_then(|v| v.as_str()) {
@@ -294,7 +293,7 @@ pub async fn handle_delete<H, N>(
                 Ok(b) => {
                     let headers = async_nats::HeaderMap::new();
                     if let Err(e) = nats
-                        .publish_with_headers(async_nats::Subject::from(reply.as_str()), headers, Bytes::from(b))
+                        .publish_with_headers(async_nats::Subject::from(reply.as_str()), headers, b)
                         .await
                     {
                         warn!(error = %e, "failed to publish push_notification_delete reply");
@@ -313,7 +312,7 @@ async fn send_error<N: trogon_nats::PublishClient>(nats: &N, reply: &str, id: Op
         Ok(b) => {
             let headers = async_nats::HeaderMap::new();
             if let Err(e) = nats
-                .publish_with_headers(async_nats::Subject::from(reply), headers, Bytes::from(b))
+                .publish_with_headers(async_nats::Subject::from(reply), headers, b)
                 .await
             {
                 warn!(error = %e, "failed to publish push error reply");
