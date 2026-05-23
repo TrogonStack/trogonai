@@ -1,13 +1,14 @@
-//! Symmetric egress: **`a2a.agent.{agent_id}.>` → HTTPS** for catalog-registered proxies.
-
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use a2a_nats::catalog::RegistrarSubject;
+use a2a_nats::{A2aAgentId, A2aPrefix};
 
 use crate::error::BridgeError;
+use crate::identity::BridgeAgentId;
 
-/// HTTP upstream for an externally hosted A2A agent reached from the NATS-facing bridge.
 #[async_trait]
 pub trait OutboundHttpsAgentUpstream: Send + Sync {
     async fn proxy_jsonrpc_post(
@@ -18,7 +19,7 @@ pub trait OutboundHttpsAgentUpstream: Send + Sync {
     ) -> Result<Bytes, BridgeError>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct StubOutboundForwarder;
 
 #[async_trait]
@@ -27,14 +28,15 @@ impl OutboundHttpsAgentUpstream for StubOutboundForwarder {
         &self,
         agent_id: AgentRegistrationId,
         method: MethodSegment,
-        _body: Bytes,
+        body: Bytes,
     ) -> Result<Bytes, BridgeError> {
-        let _: (AgentRegistrationId, MethodSegment) = (agent_id, method);
-        unimplemented!("wired when outbound HTTPS path is provisioned against catalog-registered proxies")
+        let _: (_, _, _) = (agent_id, method, body.len());
+        Err(BridgeError::UpstreamHttps(
+            "HTTPS upstream forwarder not wired for this runtime".into(),
+        ))
     }
 }
 
-/// Agent identifier as registered via the registrar (catalog key).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentRegistrationId(String);
 
@@ -54,7 +56,6 @@ impl fmt::Display for AgentRegistrationId {
     }
 }
 
-/// JSON-RPC method path segment with `/` as in A2A wire names (`message/send`, …).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MethodSegment(String);
 
@@ -74,6 +75,129 @@ impl fmt::Display for MethodSegment {
     }
 }
 
+#[async_trait]
+pub trait JsonHttpPost: Send + Sync {
+    async fn post_application_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, BridgeError>;
+}
+
+#[async_trait]
+pub trait OutboundUpstreamUrlResolve: Send + Sync {
+    async fn downstream_post_root(&self, agent_id: &AgentRegistrationId) -> Result<String, BridgeError>;
+}
+
+pub struct ReqwestJsonHttpPoster {
+    client: reqwest::Client,
+}
+
+impl ReqwestJsonHttpPoster {
+    #[must_use]
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+
+    #[must_use = "poster must be wired into upstream before use"]
+    pub fn default_https_client() -> Result<Self, BridgeError> {
+        reqwest::Client::builder()
+            .build()
+            .map(Self::new)
+            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl JsonHttpPost for ReqwestJsonHttpPoster {
+    async fn post_application_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, BridgeError> {
+        let response = self
+            .client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))?;
+        response
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| BridgeError::UpstreamHttps(e.to_string()))
+    }
+}
+
+#[derive(Clone)]
+pub struct MappedHttpsUpstream<H, U> {
+    http: Arc<H>,
+    resolve: Arc<U>,
+}
+
+impl<H: JsonHttpPost, U: OutboundUpstreamUrlResolve> MappedHttpsUpstream<H, U> {
+    pub fn new(http: Arc<H>, resolve: Arc<U>) -> Self {
+        Self { http, resolve }
+    }
+}
+
+#[async_trait]
+impl<H: JsonHttpPost + Send + Sync, U: OutboundUpstreamUrlResolve> OutboundHttpsAgentUpstream for MappedHttpsUpstream<H, U> {
+    async fn proxy_jsonrpc_post(
+        &self,
+        agent_id: AgentRegistrationId,
+        _method: MethodSegment,
+        body: Bytes,
+    ) -> Result<Bytes, BridgeError> {
+        let url = self.resolve.downstream_post_root(&agent_id).await?;
+        let bytes = self.http.post_application_json(&url, &body).await?;
+        Ok(Bytes::from(bytes))
+    }
+}
+
+#[async_trait]
+pub trait CatalogRegistrationPublish: Send + Sync {
+    async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError>;
+}
+
+pub async fn publish_https_agent_card_to_catalog<R: CatalogRegistrationPublish + ?Sized>(
+    registrar: &R,
+    prefix: &A2aPrefix,
+    agent_id: &A2aAgentId,
+    card_json: &[u8],
+) -> Result<(), BridgeError> {
+    let subject = RegistrarSubject::new(prefix).for_agent(agent_id);
+    registrar
+        .publish_core(subject.as_str(), card_json)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn publish_https_agent_card_registered<R: CatalogRegistrationPublish + ?Sized>(
+    registrar: &R,
+    prefix: &A2aPrefix,
+    agent_id: &BridgeAgentId,
+    card_json: &[u8],
+) -> Result<(), BridgeError> {
+    publish_https_agent_card_to_catalog(registrar, prefix, agent_id.as_agent_id(), card_json).await
+}
+
+pub struct NatsCoreCatalogRegistrar {
+    client: Arc<async_nats::Client>,
+}
+
+impl NatsCoreCatalogRegistrar {
+    #[must_use]
+    pub fn new(client: Arc<async_nats::Client>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl CatalogRegistrationPublish for NatsCoreCatalogRegistrar {
+    async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError> {
+        self.client
+            .publish(subject.as_ref().to_owned(), Bytes::copy_from_slice(payload))
+            .await
+            .map_err(|e| BridgeError::CatalogRegistration(e.to_string()))
+    }
+}
+
 pub async fn forward<U: OutboundHttpsAgentUpstream + ?Sized>(
     upstream: &U,
     agent_id: AgentRegistrationId,
@@ -87,6 +211,89 @@ pub async fn forward<U: OutboundHttpsAgentUpstream + ?Sized>(
 mod tests {
     use super::*;
     use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
+    struct MockPoster {
+        last_url: std::sync::Mutex<Option<String>>,
+    }
+
+    impl MockPoster {
+        fn new() -> Self {
+            Self {
+                last_url: std::sync::Mutex::new(None),
+            }
+        }
+
+        fn url(&self) -> Option<String> {
+            self.last_url.lock().ok().and_then(|g| (*g).clone())
+        }
+    }
+
+    #[async_trait]
+    impl JsonHttpPost for MockPoster {
+        async fn post_application_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, BridgeError> {
+            *self.last_url.lock().unwrap() = Some(url.to_owned());
+            assert!(!body.is_empty());
+            Ok(br#"{"ok":true}"#.to_vec())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct UrlOk;
+
+    #[async_trait]
+    impl OutboundUpstreamUrlResolve for UrlOk {
+        async fn downstream_post_root(&self, _agent_id: &AgentRegistrationId) -> Result<String, BridgeError> {
+            Ok("https://upstream.example/jsonrpc".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn mapped_https_upstream_hits_resolved_root() {
+        let poster = Arc::new(MockPoster::new());
+        let up: MappedHttpsUpstream<MockPoster, UrlOk> =
+            MappedHttpsUpstream::new(poster.clone(), Arc::new(UrlOk));
+        let out = OutboundHttpsAgentUpstream::proxy_jsonrpc_post(
+            &up,
+            AgentRegistrationId::new("ext"),
+            MethodSegment::new("message/send"),
+            Bytes::from_static(br"{}"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(poster.url().as_deref(), Some("https://upstream.example/jsonrpc"));
+        assert!(out.starts_with(br#"{"ok""#));
+    }
+
+    type RegistrarCapture = std::sync::Arc<std::sync::Mutex<Option<(String, Vec<u8>)>>>;
+
+    #[derive(Clone, Default)]
+    struct MockRegistrar(RegistrarCapture);
+
+    #[async_trait]
+    impl CatalogRegistrationPublish for MockRegistrar {
+        async fn publish_core(&self, subject: impl AsRef<str> + Send, payload: &[u8]) -> Result<(), BridgeError> {
+            let mut guard = self.0.lock().map_err(|_| {
+                BridgeError::CatalogRegistration("mock registrar mutex poisoned".into())
+            })?;
+            *guard = Some((subject.as_ref().to_owned(), payload.to_vec()));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_registration_writes_expected_subject() -> Result<(), BridgeError> {
+        let captured = Arc::new(std::sync::Mutex::new(None));
+        let reg = MockRegistrar(captured.clone());
+        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+        let agent_id = A2aAgentId::new("card-bot").unwrap();
+        let card = br#"{"name":"HTTPS proxy agent"}"#;
+        publish_https_agent_card_to_catalog(&reg, &prefix, &agent_id, card).await?;
+        let g = captured.lock().unwrap();
+        let (topic, payload) = g.as_ref().unwrap();
+        assert_eq!(topic.as_str(), "a2a.catalog.register.card-bot");
+        assert_eq!(payload.as_slice(), card.as_slice());
+        Ok(())
+    }
 
     #[test]
     fn identity_newtypes_roundtrip() {
