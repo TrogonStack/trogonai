@@ -2,18 +2,33 @@
 //!
 //! Digest / mutual challenge schemes are intentionally rejected until a dedicated signing path exists.
 
-use a2a::types::AuthenticationInfo;
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+use a2a_types::AuthenticationInfo;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthenticationHeaderBuildError {
-    #[error("push authentication.scheme must not be empty")]
     MissingScheme,
-    #[error("push authentication.credentials required for scheme")]
     EmptyCredentials,
     /// `Digest` (and challenge-based schemes) require a separate implementation.
-    #[error("push authentication scheme {scheme:?} not supported yet")]
-    UnsupportedScheme { scheme: String },
+    UnsupportedScheme {
+        scheme: String,
+    },
 }
+
+impl fmt::Display for AuthenticationHeaderBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingScheme => f.write_str("push authentication.scheme must not be empty"),
+            Self::EmptyCredentials => f.write_str("push authentication.credentials required for scheme"),
+            Self::UnsupportedScheme { scheme } => {
+                write!(f, "push authentication scheme {scheme:?} not supported yet")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AuthenticationHeaderBuildError {}
 
 /// Builds the RFC 9110 [`Authorization`] field value (`<scheme> <token>` for typical schemes).
 pub fn authorization_header_value(
@@ -28,14 +43,11 @@ pub fn authorization_header_value(
         return Err(AuthenticationHeaderBuildError::MissingScheme);
     }
 
-    let credentials = auth.credentials.as_deref().unwrap_or("").trim();
+    let credentials = auth.credentials.trim();
     let scheme_lc = scheme_raw.to_ascii_lowercase();
 
     match scheme_lc.as_str() {
-        // Challenge-based schemes (RFC 7235) need a dedicated signing path; rejecting
-        // every one we know of up front keeps the static "scheme creds" fallback
-        // from silently producing an unusable Authorization value.
-        "digest" | "negotiate" | "ntlm" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
+        "digest" => Err(AuthenticationHeaderBuildError::UnsupportedScheme {
             scheme: auth.scheme.trim().to_string(),
         }),
         "bearer" | "jwt" => {
@@ -62,4 +74,52 @@ pub fn authorization_header_value(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    fn auth(scheme: &str, credentials: &str) -> AuthenticationInfo {
+        AuthenticationInfo {
+            scheme: scheme.to_string(),
+            credentials: credentials.to_string(),
+        }
+    }
+
+    #[test]
+    fn bearer_normalized() {
+        let v = authorization_header_value(Some(&auth("Bearer", "tok")))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v, "Bearer tok");
+        let v2 = authorization_header_value(Some(&auth("jwt", "signed.jwt.here")))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v2, "Bearer signed.jwt.here");
+    }
+
+    #[test]
+    fn basic_passes_through_base64_token() {
+        let v = authorization_header_value(Some(&auth("basic", "dXNlcjpwdw==")))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v, "Basic dXNlcjpwdw==");
+    }
+
+    #[test]
+    fn custom_scheme_formats_token_pair() {
+        let v = authorization_header_value(Some(&auth("BearerToken", "abc")))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v, "BearerToken abc");
+    }
+
+    #[test]
+    fn digest_errors() {
+        let err = authorization_header_value(Some(&auth("digest", "opaque"))).unwrap_err();
+        assert!(matches!(err, AuthenticationHeaderBuildError::UnsupportedScheme { .. }));
+    }
+
+    #[test]
+    fn none_absent_when_no_authentication_msg() {
+        assert!(authorization_header_value(None).unwrap().is_none());
+    }
+}

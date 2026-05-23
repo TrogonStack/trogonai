@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use futures::StreamExt as _;
@@ -7,9 +8,16 @@ use tracing::{instrument, warn};
 
 use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::agent_id::A2aAgentId;
+use crate::audit::emitter::AuditEmitter;
+use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
 use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::task::TaskEventsSubject;
-use crate::push::PushDispatcher;
+use crate::push::PushDeliverySemanticsRegistry;
+use crate::push::dispatcher::{maybe_terminal_push_idempotency_key, DispatchError, PushDispatcher};
+use crate::push::push_notification_config_id::PushNotificationConfigId;
+use crate::push::push_payload::augment_terminal_push_notification_bytes;
+use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
@@ -25,7 +33,21 @@ use crate::task_id::A2aTaskId;
 /// the stream pump if the task is terminated externally. The caller (Bridge) is responsible
 /// for registering and cleaning up the cancellation token.
 #[allow(clippy::too_many_arguments)]
-#[instrument(name = "a2a.agent.message_stream", skip(handler, payload, reply_subject, nats, js, dispatcher, cancel))]
+#[instrument(
+    name = "a2a.agent.message_stream",
+    skip(
+        handler,
+        payload,
+        reply_subject,
+        nats,
+        js,
+        dispatcher,
+        cancel,
+        audit_emitter,
+        push_delivery_semantics,
+        push_dlq_caller_segment
+    )
+)]
 pub async fn handle<H, N, J, D>(
     handler: Arc<H>,
     payload: &[u8],
@@ -33,8 +55,12 @@ pub async fn handle<H, N, J, D>(
     nats: &N,
     js: &J,
     prefix: &crate::a2a_prefix::A2aPrefix,
+    audit_emitter: Arc<dyn AuditEmitter>,
+    agent_id: Arc<A2aAgentId>,
     dispatcher: Arc<D>,
+    push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     cancel: CancellationToken,
+    push_dlq_caller_segment: String,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
     H: A2aHandler,
@@ -85,6 +111,10 @@ where
         }
     };
 
+    let bootstrap_task_state = initial_task.status.as_ref().map(|s| s.state).unwrap_or(0);
+
+    let json_rpc_req_id = id.as_ref().map(|jid| jid.to_string());
+
     let bootstrap_bytes = match JsonRpcResponse::new(id, &initial_task).to_bytes() {
         Ok(b) => b,
         Err(e) => {
@@ -106,14 +136,37 @@ where
     let events_subject = TaskEventsSubject::new(prefix, &task_id, &req_id);
     let js_clone = js.clone();
     let task_id_clone = task_id.clone();
+    let audit_emitter_clone = audit_emitter.clone();
+    let prefix_clone = prefix.clone();
+    let agent_id_clone = agent_id.clone();
+    let dlq_seg = push_dlq_caller_segment;
+
+    let push_delivery_clone = Arc::clone(&push_delivery_semantics);
 
     let pump_handle = tokio::spawn(async move {
-        pump_events(event_stream, js_clone, events_subject, task_id_clone, handler, dispatcher, cancel).await;
+        pump_events(
+            event_stream,
+            js_clone,
+            events_subject,
+            task_id_clone,
+            handler,
+            dispatcher,
+            push_delivery_clone,
+            cancel,
+            audit_emitter_clone,
+            prefix_clone,
+            agent_id_clone,
+            json_rpc_req_id,
+            bootstrap_task_state,
+            dlq_seg,
+        )
+        .await;
     });
 
     Some((task_id, pump_handle))
 }
 
+#[allow(clippy::too_many_arguments)] // internal JetStream/event pump closure — bundled refactor deferred
 async fn pump_events<J, H, D>(
     mut stream: crate::agent::handler::TaskEventStream,
     js: J,
@@ -121,12 +174,20 @@ async fn pump_events<J, H, D>(
     task_id: A2aTaskId,
     handler: Arc<H>,
     dispatcher: Arc<D>,
+    push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     cancel: CancellationToken,
+    audit_emitter: Arc<dyn AuditEmitter>,
+    prefix: crate::a2a_prefix::A2aPrefix,
+    agent_id: Arc<A2aAgentId>,
+    json_rpc_req_id: Option<String>,
+    bootstrap_task_state: i32,
+    push_dlq_caller_segment: String,
 ) where
-    J: trogon_nats::jetstream::JetStreamPublisher,
+    J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
     H: A2aHandler,
     D: PushDispatcher + ?Sized,
 {
+    let mut prev_task_state = bootstrap_task_state;
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
@@ -140,6 +201,26 @@ async fn pump_events<J, H, D>(
                         break;
                     }
                     Some(Ok(ev)) => {
+                        if let Some(new_state) = status_update_task_state(&ev)
+                            && new_state != prev_task_state
+                        {
+                            let emitted_at = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                                as u64;
+                            let env = TaskLifecycleEnvelope::new(
+                                agent_id.as_ref(),
+                                task_id.as_str(),
+                                json_rpc_req_id.clone(),
+                                prev_task_state,
+                                new_state,
+                                emitted_at,
+                            );
+                            audit_emitter.publish_task_lifecycle(&prefix, agent_id.as_ref(), env).await;
+                            prev_task_state = new_state;
+                        }
+
                         let bytes = match serde_json::to_vec(&ev) {
                             Ok(b) => Bytes::from(b),
                             Err(e) => {
@@ -149,7 +230,18 @@ async fn pump_events<J, H, D>(
                         };
 
                         if is_terminal_status_update(&ev) {
-                            dispatch_push_notifications(&task_id, handler.as_ref(), dispatcher.as_ref(), &bytes).await;
+                            dispatch_push_notifications(
+                                &task_id,
+                                handler.as_ref(),
+                                dispatcher.as_ref(),
+                                &bytes,
+                                &ev,
+                                Arc::clone(&push_delivery_semantics),
+                                &js,
+                                &prefix,
+                                push_dlq_caller_segment.as_str(),
+                            )
+                            .await;
                         }
 
                         let headers = async_nats::HeaderMap::new();
@@ -177,33 +269,52 @@ async fn pump_events<J, H, D>(
     }
 }
 
-fn is_terminal_status_update(ev: &a2a_types::StreamResponse) -> bool {
+fn status_update_task_state(ev: &a2a_types::StreamResponse) -> Option<i32> {
     use a2a_types::stream_response::Payload;
+    match &ev.payload {
+        Some(Payload::StatusUpdate(update)) => update.status.as_ref().map(|s| s.state),
+        _ => None,
+    }
+}
+
+fn is_terminal_status_update(ev: &a2a_types::StreamResponse) -> bool {
     use a2a_types::TaskState;
+    use a2a_types::stream_response::Payload;
     match &ev.payload {
         Some(Payload::StatusUpdate(update)) => {
             let state = update.status.as_ref().map(|s| s.state).unwrap_or(0);
             matches!(
                 TaskState::try_from(state),
-                Ok(TaskState::Completed)
-                    | Ok(TaskState::Failed)
-                    | Ok(TaskState::Canceled)
-                    | Ok(TaskState::Rejected)
+                Ok(TaskState::Completed) | Ok(TaskState::Failed) | Ok(TaskState::Canceled) | Ok(TaskState::Rejected)
             )
         }
         _ => false,
     }
 }
 
-async fn dispatch_push_notifications<H, D>(
+async fn dispatch_push_notifications<H, D, J>(
     task_id: &A2aTaskId,
     handler: &H,
     dispatcher: &D,
-    payload: &[u8],
+    delivery_payload_bytes: &[u8],
+    ev: &a2a_types::StreamResponse,
+    push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
+    js: &J,
+    prefix: &crate::a2a_prefix::A2aPrefix,
+    push_dlq_caller_segment: &str,
 ) where
     H: A2aHandler,
     D: PushDispatcher + ?Sized,
+    J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
+    let Some(terminal_state) = TerminalPushTaskState::from_stream_terminal_response(ev) else {
+        warn!(
+            task_id = %task_id,
+            "skipped terminal push dispatch: stream response lacked a terminal TaskState classification"
+        );
+        return;
+    };
+
     let list_req = a2a_types::ListTaskPushNotificationConfigsRequest {
         task_id: task_id.as_str().to_owned(),
         ..Default::default()
@@ -216,18 +327,77 @@ async fn dispatch_push_notifications<H, D>(
         }
     };
     for config in &configs {
-        if let Err(e) = dispatcher.dispatch(config, payload).await {
-            warn!(task_id = %task_id, config_id = %config.id, error = %e, "push notification delivery failed");
+        let cfg_id_res = PushNotificationConfigId::new(config.id.clone());
+        let semantics = cfg_id_res
+            .as_ref()
+            .map(|cid| push_delivery_semantics.get(task_id, cid))
+            .unwrap_or_default();
+
+        let derived_key_result = maybe_terminal_push_idempotency_key(config, task_id, &semantics, terminal_state);
+
+        let derived_opt = match &derived_key_result {
+            Ok(ok) => ok,
+            Err(prep_err) => {
+                let dispatch_err = DispatchError::Prep(prep_err.clone());
+                warn!(
+                    task_id = %task_id,
+                    config_id = %config.id,
+                    error = %dispatch_err,
+                    "push notification dispatch prep failed"
+                );
+                crate::push::dlq::publish_push_delivery_failure(
+                    js,
+                    prefix,
+                    push_dlq_caller_segment,
+                    task_id,
+                    config,
+                    delivery_payload_bytes,
+                    &dispatch_err,
+                    None,
+                )
+                .await;
+                continue;
+            }
+        };
+
+        let augmented = match augment_terminal_push_notification_bytes(delivery_payload_bytes, &semantics, derived_opt.as_ref())
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(
+                    task_id = %task_id,
+                    config_id = %config.id,
+                    error = %e,
+                    "failed to augment push notification JSON; skipping"
+                );
+                continue;
+            }
+        };
+
+        match dispatcher
+            .dispatch(task_id, config, semantics, terminal_state, augmented.as_ref())
+            .await
+        {
+            Ok(()) => {}
+            Err(ref e) => {
+                warn!(task_id = %task_id, config_id = %config.id, error = %e, "push notification delivery failed");
+                crate::push::dlq::publish_push_delivery_failure(
+                    js,
+                    prefix,
+                    push_dlq_caller_segment,
+                    task_id,
+                    config,
+                    augmented.as_ref(),
+                    e,
+                    derived_opt.as_ref(),
+                )
+                .await;
+            }
         }
     }
 }
 
-async fn send_reply_error<N: trogon_nats::PublishClient>(
-    nats: &N,
-    reply: &str,
-    id: Option<JsonRpcId>,
-    err: A2aError,
-) {
+async fn send_reply_error<N: trogon_nats::PublishClient>(nats: &N, reply: &str, id: Option<JsonRpcId>, err: A2aError) {
     let bytes = match JsonRpcErrorResponse::new(id, err.code, err.message).to_bytes() {
         Ok(b) => b,
         Err(e) => {
@@ -252,6 +422,8 @@ mod tests {
     use crate::a2a_prefix::A2aPrefix;
     use crate::agent::handler::{A2aError, A2aHandler, TaskEventStream};
     use crate::agent::test_support::{make_task, parse_response, rpc_payload};
+    use crate::agent_id::A2aAgentId;
+    use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
     use crate::push::dispatcher::tests::MockPushDispatcher;
     use futures::stream;
     use trogon_nats::AdvancedMockNatsClient;
@@ -261,9 +433,18 @@ mod tests {
         Arc::new(MockPushDispatcher::new())
     }
 
+    fn stream_test_agent() -> Arc<A2aAgentId> {
+        Arc::new(A2aAgentId::new("stream-agent").unwrap())
+    }
+
+    fn noop_audit_emitter() -> Arc<dyn AuditEmitter> {
+        Arc::new(NoopAuditEmitter)
+    }
+
     struct StreamingHandler {
         task: a2a_types::Task,
         events: Vec<a2a_types::StreamResponse>,
+        push_configs: Vec<a2a_types::TaskPushNotificationConfig>,
     }
 
     #[async_trait::async_trait]
@@ -318,7 +499,10 @@ mod tests {
             &self,
             _req: a2a_types::ListTaskPushNotificationConfigsRequest,
         ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
-            Err(A2aError::unsupported_operation("stub"))
+            Ok(a2a_types::ListTaskPushNotificationConfigsResponse {
+                configs: self.push_configs.clone(),
+                ..Default::default()
+            })
         }
         async fn push_notification_delete(
             &self,
@@ -415,6 +599,7 @@ mod tests {
         let handler = Arc::new(StreamingHandler {
             task: make_task("stream-t1"),
             events: vec![],
+            push_configs: vec![],
         });
         let result = handle(
             handler,
@@ -423,8 +608,12 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             mock_dispatcher(),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
 
@@ -448,8 +637,12 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             mock_dispatcher(),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
         assert!(result.is_none());
@@ -464,6 +657,7 @@ mod tests {
         let handler = Arc::new(StreamingHandler {
             task: make_task("t"),
             events: vec![],
+            push_configs: vec![],
         });
         let result = handle(
             handler,
@@ -472,8 +666,12 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             mock_dispatcher(),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
         assert!(result.is_none());
@@ -489,6 +687,7 @@ mod tests {
         let handler = Arc::new(StreamingHandler {
             task: make_task("t-cancel"),
             events: vec![],
+            push_configs: vec![],
         });
         let result = handle(
             handler,
@@ -497,8 +696,12 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             mock_dispatcher(),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             cancel.clone(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
 
@@ -518,6 +721,7 @@ mod tests {
         let handler = Arc::new(StreamingHandler {
             task: make_task("t-event"),
             events: vec![event],
+            push_configs: vec![],
         });
 
         let result = handle(
@@ -527,8 +731,12 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             mock_dispatcher(),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
 
@@ -564,6 +772,7 @@ mod tests {
         let handler = Arc::new(StreamingHandler {
             task: make_task("t-push"),
             events: vec![terminal_event],
+            push_configs: vec![],
         });
 
         let result = handle(
@@ -573,18 +782,92 @@ mod tests {
             &nats,
             &js,
             &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
             Arc::clone(&dispatcher),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
 
         let (_task_id, pump) = result.unwrap();
         pump.await.unwrap();
 
-        // push_notification_list returns unsupported; no dispatch expected but the
-        // path was exercised (configs list is empty)
+        // No push configs; dispatch path is exercised but skips before calling the dispatcher.
         let calls = dispatcher.recorded_calls();
         assert_eq!(calls.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn terminal_push_delivery_failure_writes_push_dlq() {
+        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+
+        let nats = AdvancedMockNatsClient::new();
+        let js = mock_js();
+
+        let terminal_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "dlq-task".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Completed as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let push_cfg = TaskPushNotificationConfig {
+            id: "pcfg-1".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            ..Default::default()
+        };
+
+        let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
+        let handler = Arc::new(StreamingHandler {
+            task: make_task("dlq-task"),
+            events: vec![terminal_event],
+            push_configs: vec![push_cfg],
+        });
+
+        let result = handle(
+            handler,
+            &rpc_payload("message/stream", 61),
+            Some("reply".into()),
+            &nats,
+            &js,
+            &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
+            Arc::clone(&dispatcher),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            CancellationToken::new(),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
+        )
+        .await;
+
+        let (_task_id, pump) = result.unwrap();
+        pump.await.unwrap();
+
+        let subjects = js.published_subjects();
+        let dlq_idx = subjects
+            .iter()
+            .position(|s| s == "a2a.push.dlq._.dlq-task")
+            .unwrap_or_else(|| panic!("missing DLQ publish; got {subjects:?}"));
+
+        let msg: serde_json::Value =
+            serde_json::from_slice(&js.published_payloads()[dlq_idx]).expect("DLQ payload JSON");
+        assert_eq!(msg["schema"].as_str().unwrap(), crate::push::dlq::PUSH_DLQ_SCHEMA_V1);
+        assert_eq!(msg["task_id"], "dlq-task");
+        assert_eq!(msg["push_config_id"], "pcfg-1");
+        assert!(
+            msg["error"].as_str().unwrap().contains("boom"),
+            "unexpected error summary: {}",
+            msg["error"]
+        );
+        assert_eq!(dispatcher.recorded_calls().len(), 1);
     }
 
     #[test]
@@ -610,7 +893,12 @@ mod tests {
     fn terminal_states_detected_correctly() {
         use a2a_types::{TaskState, TaskStatus};
 
-        for state in [TaskState::Completed, TaskState::Failed, TaskState::Canceled, TaskState::Rejected] {
+        for state in [
+            TaskState::Completed,
+            TaskState::Failed,
+            TaskState::Canceled,
+            TaskState::Rejected,
+        ] {
             let ev = a2a_types::StreamResponse {
                 payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
                     a2a_types::TaskStatusUpdateEvent {

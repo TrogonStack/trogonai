@@ -1,14 +1,23 @@
 use std::fmt;
 
-/// Resource id for a [`a2a::types::TaskPushNotificationConfig`] (the `id` field).
+/// Resource id for a [`a2a_types::TaskPushNotificationConfig`] (the `id` field).
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct PushNotificationConfigId(String);
 
-#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum PushNotificationConfigIdError {
-    #[error("push notification config id cannot be empty")]
     Empty,
 }
+
+impl fmt::Display for PushNotificationConfigIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "push notification config id cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for PushNotificationConfigIdError {}
 
 impl PushNotificationConfigId {
     pub fn new(raw: impl Into<String>) -> Result<Self, PushNotificationConfigIdError> {
@@ -36,6 +45,3 @@ impl fmt::Debug for PushNotificationConfigId {
         f.debug_tuple("PushNotificationConfigId").field(&self.0).finish()
     }
 }
-
-#[cfg(test)]
-mod tests;

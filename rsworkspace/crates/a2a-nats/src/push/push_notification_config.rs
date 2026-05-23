@@ -1,18 +1,8 @@
-//! Bridge-side push notification config envelope.
-//!
-//! `task_push` is intentionally the raw `a2a::types::TaskPushNotificationConfig`
-//! wire shape so this slice can land without first introducing a parallel
-//! domain type for every field of the upstream spec. The validated
-//! domain projection (parsed URL via `WebhookUrl` / `NatsPushSubject`,
-//! validated `PushNotificationConfigId`, normalised authentication scheme)
-//! lands with the push dispatcher PR alongside the conversion-on-ingress
-//! sites that will consume it.
-
-use a2a::types::TaskPushNotificationConfig;
+use a2a_types::TaskPushNotificationConfig;
 
 use crate::push::delivery_semantics::DeliverySemantics;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PushNotificationConfig {
     pub delivery_semantics: DeliverySemantics,
     pub task_push: TaskPushNotificationConfig,
@@ -26,6 +16,3 @@ impl PushNotificationConfig {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

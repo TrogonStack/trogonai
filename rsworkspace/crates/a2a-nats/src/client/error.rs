@@ -10,7 +10,9 @@ pub enum ClientError {
     Serialize(serde_json::Error),
     Deserialize(serde_json::Error),
     Transport(String),
-    Timeout { subject: String },
+    Timeout {
+        subject: String,
+    },
     JetStream(String),
     TaskNotFound,
     TaskNotCancelable,
@@ -19,9 +21,14 @@ pub enum ClientError {
     ContentTypeNotSupported,
     InvalidAgentResponse,
     AgentUnavailable,
-    JsonRpc { code: i32, message: String },
+    JsonRpc {
+        code: i32,
+        message: String,
+    },
     ConsumerSetup(String),
     StreamClosed,
+    /// Returned when deriving a gateway ingress overlay from built-in agent subjects fails (internal invariant).
+    InvalidRpcSubjectOverlay,
 }
 
 impl ClientError {
@@ -57,6 +64,7 @@ impl fmt::Display for ClientError {
             Self::JsonRpc { code, message } => write!(f, "JSON-RPC error {code}: {message}"),
             Self::ConsumerSetup(msg) => write!(f, "failed to set up event consumer: {msg}"),
             Self::StreamClosed => write!(f, "event stream closed unexpectedly"),
+            Self::InvalidRpcSubjectOverlay => write!(f, "internal error deriving gateway ingress subject"),
         }
     }
 }
@@ -144,7 +152,9 @@ mod tests {
 
     #[test]
     fn display_timeout() {
-        let err = ClientError::Timeout { subject: "a.b.c".into() };
+        let err = ClientError::Timeout {
+            subject: "a.b.c".into(),
+        };
         assert!(err.to_string().contains("'a.b.c' timed out"));
     }
 
@@ -176,7 +186,11 @@ mod tests {
 
     #[test]
     fn display_content_type() {
-        assert!(ClientError::ContentTypeNotSupported.to_string().contains("content type"));
+        assert!(
+            ClientError::ContentTypeNotSupported
+                .to_string()
+                .contains("content type")
+        );
     }
 
     #[test]
@@ -191,7 +205,10 @@ mod tests {
 
     #[test]
     fn display_jsonrpc_generic() {
-        let err = ClientError::JsonRpc { code: -32001, message: "oops".into() };
+        let err = ClientError::JsonRpc {
+            code: -32001,
+            message: "oops".into(),
+        };
         assert!(err.to_string().contains("-32001"));
         assert!(err.to_string().contains("oops"));
     }
@@ -205,6 +222,15 @@ mod tests {
     #[test]
     fn display_stream_closed() {
         assert!(ClientError::StreamClosed.to_string().contains("closed"));
+    }
+
+    #[test]
+    fn display_invalid_rpc_subject_overlay() {
+        assert!(
+            ClientError::InvalidRpcSubjectOverlay
+                .to_string()
+                .contains("gateway ingress")
+        );
     }
 
     #[test]

@@ -9,12 +9,14 @@ use tracing::{info, warn};
 
 use crate::agent::dispatch::A2aMethod;
 use crate::agent::handler::A2aHandler;
-use crate::agent::{agent_card, message_send, message_stream, push_notification, tasks_cancel, tasks_get, tasks_list, tasks_resubscribe};
+use crate::agent::{
+    agent_card, message_send, message_stream, push_notification, tasks_cancel, tasks_get, tasks_list, tasks_resubscribe,
+};
 use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
-use crate::audit::envelope::{AuditEnvelope, AuditOutcome};
+use crate::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
 use crate::config::Config;
 use crate::nats::subjects::wildcards::AgentAllSubject;
-use crate::push::{HttpPushDispatcher, PushDispatcher};
+use crate::push::{PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
 use crate::task_id::A2aTaskId;
 
 /// Errors that can occur while running the `Bridge`.
@@ -66,6 +68,7 @@ pub struct Bridge<H, N, J> {
     semaphore: Arc<Semaphore>,
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
+    push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
 }
 
 impl<H, N, J> Bridge<H, N, J>
@@ -76,7 +79,7 @@ where
 {
     pub fn new(config: Config, handler: H, nats: N, js: J) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
-        let http_client = reqwest::Client::new();
+        let push_dispatcher = composite_push_dispatcher(nats.clone(), js.clone(), reqwest::Client::new());
         Self {
             config,
             handler: Arc::new(handler),
@@ -84,7 +87,8 @@ where
             js,
             semaphore,
             audit_emitter: Arc::new(NoopAuditEmitter),
-            push_dispatcher: Arc::new(HttpPushDispatcher::new(http_client)),
+            push_dispatcher,
+            push_delivery_semantics: Arc::new(PushDeliverySemanticsRegistry::default()),
         }
     }
 
@@ -150,8 +154,10 @@ where
                             let agent_id_inner = Arc::clone(&agent_id_arc);
                             let audit_emitter = Arc::clone(&self.audit_emitter);
                             let push_dispatcher = Arc::clone(&self.push_dispatcher);
+                            let push_delivery_semantics = Arc::clone(&self.push_delivery_semantics);
                             let payload = msg.payload.to_vec();
                             let reply = msg.reply.map(|s| s.to_string());
+                            let push_dlq_seg = self.config.push_dlq_caller_segment.clone();
 
                             tokio::spawn(async move {
                                 dispatch(
@@ -166,6 +172,8 @@ where
                                     &agent_id_inner,
                                     audit_emitter,
                                     push_dispatcher,
+                                    push_delivery_semantics,
+                                    push_dlq_seg,
                                 )
                                 .await;
                                 drop(permit);
@@ -193,6 +201,8 @@ async fn dispatch<H, N, J>(
     agent_id: &crate::agent_id::A2aAgentId,
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
+    push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
+    push_dlq_caller_segment: String,
 ) where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
@@ -216,6 +226,7 @@ async fn dispatch<H, N, J>(
         }
         Some(A2aMethod::MessageStream) => {
             let cancel = CancellationToken::new();
+            let agent_id_stream = Arc::new(agent_id.clone());
             if let Some((task_id, pump)) = message_stream::handle(
                 Arc::clone(&handler),
                 payload,
@@ -223,8 +234,12 @@ async fn dispatch<H, N, J>(
                 &nats,
                 &js,
                 prefix,
+                Arc::clone(&audit_emitter),
+                agent_id_stream,
                 push_dispatcher,
+                Arc::clone(&push_delivery_semantics),
                 cancel.clone(),
+                push_dlq_caller_segment.clone(),
             )
             .await
             {
@@ -251,16 +266,30 @@ async fn dispatch<H, N, J>(
             tasks_resubscribe::handle(handler.as_ref(), payload, reply, &nats).await;
         }
         Some(A2aMethod::PushNotificationSet) => {
-            push_notification::handle_set(handler.as_ref(), payload, reply, &nats).await;
+            push_notification::handle_set(
+                handler.as_ref(),
+                payload,
+                reply,
+                &nats,
+                push_delivery_semantics.as_ref(),
+            )
+            .await;
         }
         Some(A2aMethod::PushNotificationGet) => {
-            push_notification::handle_get(handler.as_ref(), payload, reply, &nats).await;
+            push_notification::handle_get(handler.as_ref(), payload, reply, &nats, push_delivery_semantics.as_ref()).await;
         }
         Some(A2aMethod::PushNotificationList) => {
-            push_notification::handle_list(handler.as_ref(), payload, reply, &nats).await;
+            push_notification::handle_list(handler.as_ref(), payload, reply, &nats, push_delivery_semantics.as_ref()).await;
         }
         Some(A2aMethod::PushNotificationDelete) => {
-            push_notification::handle_delete(handler.as_ref(), payload, reply, &nats).await;
+            push_notification::handle_delete(
+                handler.as_ref(),
+                payload,
+                reply,
+                &nats,
+                push_delivery_semantics.as_ref(),
+            )
+            .await;
         }
         Some(A2aMethod::AgentCard) => {
             agent_card::handle(handler.as_ref(), payload, reply, &nats).await;
@@ -280,6 +309,7 @@ async fn dispatch<H, N, J>(
             latency_ms,
             outcome,
             raw_params.as_deref(),
+            AuditEnvelopeFields::default(),
         );
         let prefix = prefix.clone();
         let agent_id = agent_id.clone();
@@ -354,9 +384,7 @@ mod tests {
         let shutdown = CancellationToken::new();
         let shutdown_clone = shutdown.clone();
 
-        let handle = tokio::spawn(async move {
-            bridge.run_with_agent_id(&agent_id, shutdown_clone).await
-        });
+        let handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent_id, shutdown_clone).await });
 
         shutdown.cancel();
         let result = handle.await.unwrap();
@@ -444,6 +472,8 @@ mod tests {
             &agent_id,
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
         assert!(nats.published_messages().is_empty());
@@ -453,8 +483,7 @@ mod tests {
     async fn dispatch_message_send_routes_to_handler() {
         let nats = AdvancedMockNatsClient::new();
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result =
-            Some(Ok(a2a_types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a_types::SendMessageResponse { payload: None }));
         let handler = Arc::new(handler_stub);
         let in_flight = InFlightTasks::default();
         let prefix = crate::a2a_prefix::A2aPrefix::new("a2a".to_string()).unwrap();
@@ -471,6 +500,8 @@ mod tests {
             &agent_id,
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["reply"]);
@@ -497,6 +528,8 @@ mod tests {
             &agent_id,
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string(),
         )
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
@@ -532,7 +565,8 @@ mod tests {
             async fn message_stream(
                 &self,
                 _req: a2a_types::SendMessageRequest,
-            ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError> {
+            ) -> Result<(a2a_types::Task, crate::agent::handler::TaskEventStream), crate::agent::handler::A2aError>
+            {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
@@ -581,7 +615,8 @@ mod tests {
             async fn push_notification_list(
                 &self,
                 _req: a2a_types::ListTaskPushNotificationConfigsRequest,
-            ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError> {
+            ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, crate::agent::handler::A2aError>
+            {
                 Err(crate::agent::handler::A2aError::unsupported_operation("not used"))
             }
 
@@ -624,9 +659,7 @@ mod tests {
         let shutdown = CancellationToken::new();
         let shutdown_clone = shutdown.clone();
 
-        let bridge_handle = tokio::spawn(async move {
-            bridge.run_with_agent_id(&agent_id, shutdown_clone).await
-        });
+        let bridge_handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent_id, shutdown_clone).await });
 
         let msg_subject = "a2a.agent.bot.message.send";
         let payload = bytes::Bytes::from(rpc_payload("message/send", 1));
@@ -684,8 +717,7 @@ mod tests {
         let inject = nats.inject_messages();
 
         let handler_stub = stub();
-        handler_stub.lock().unwrap().message_send_result =
-            Some(Ok(a2a_types::SendMessageResponse { payload: None }));
+        handler_stub.lock().unwrap().message_send_result = Some(Ok(a2a_types::SendMessageResponse { payload: None }));
 
         let config = Config::for_test("a2a").with_max_concurrent_client_tasks(1);
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
@@ -699,15 +731,14 @@ mod tests {
             js: MockJetStreamPublisher::new(),
             audit_emitter: Arc::new(crate::audit::emitter::NoopAuditEmitter),
             push_dispatcher: Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
+            push_delivery_semantics: Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
         };
 
         let agent_id = crate::agent_id::A2aAgentId::new("bot").unwrap();
         let shutdown = CancellationToken::new();
         let shutdown_clone = shutdown.clone();
 
-        let bridge_handle = tokio::spawn(async move {
-            bridge.run_with_agent_id(&agent_id, shutdown_clone).await
-        });
+        let bridge_handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent_id, shutdown_clone).await });
 
         let payload = bytes::Bytes::from(rpc_payload("message/send", 10));
         inject

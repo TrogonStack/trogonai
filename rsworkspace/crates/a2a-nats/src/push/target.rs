@@ -1,9 +1,9 @@
 use std::fmt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookUrl(String);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookUrlError {
     raw: String,
 }
@@ -52,9 +52,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_other_schemes() {
+    fn rejects_non_http_schemes() {
         assert!(WebhookUrl::new("ftp://example.com/hook").is_err());
         assert!(WebhookUrl::new("nats://example.com").is_err());
+        assert!(WebhookUrl::new("subject:a2a.push.t.caller.task").is_err());
         assert!(WebhookUrl::new("").is_err());
     }
 

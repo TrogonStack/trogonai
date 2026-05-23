@@ -1,6 +1,6 @@
 use tracing::{instrument, warn};
 
-use crate::agent::handler::{A2aHandler, A2aError};
+use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
 use crate::jsonrpc::JsonRpcId;
 
@@ -77,7 +77,10 @@ mod tests {
         async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
+        async fn tasks_list(
+            &self,
+            _req: a2a_types::ListTasksRequest,
+        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
@@ -138,7 +141,10 @@ mod tests {
         async fn tasks_get(&self, _req: a2a_types::GetTaskRequest) -> Result<a2a_types::Task, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
-        async fn tasks_list(&self, _req: a2a_types::ListTasksRequest) -> Result<a2a_types::ListTasksResponse, A2aError> {
+        async fn tasks_list(
+            &self,
+            _req: a2a_types::ListTasksRequest,
+        ) -> Result<a2a_types::ListTasksResponse, A2aError> {
             Err(A2aError::unsupported_operation("stub"))
         }
         async fn tasks_cancel(&self, _req: a2a_types::CancelTaskRequest) -> Result<a2a_types::Task, A2aError> {
