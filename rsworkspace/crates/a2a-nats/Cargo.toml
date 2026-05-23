@@ -7,6 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+a2a-auth-callout = { workspace = true }
 a2a-pack = { workspace = true }
 a2a-types = { workspace = true }
 opentelemetry = { workspace = true }
