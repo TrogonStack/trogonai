@@ -36,7 +36,7 @@ All architectural decisions are landed (see `A2A_PLAN.md` §Decisions). Items be
 
 - [~] Push dispatcher (HTTP/`subject:`/`jetstream:` shipped).
   - [~] `pushNotificationAuthenticationInfo` — Bearer/Basic/jwt→Bearer ship; Digest deferred.
-  - [ ] Exactly-once opt-in flag on `PushNotificationConfig` (double-ack + idempotency keys; default remains at-least-once) — see [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md).
+  - [~] Exactly-once opt-in flag on `PushNotificationConfig` (double-ack + idempotency keys; default remains at-least-once) — see [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md). Implemented: `deliverySemantics` JSON-RPC extension + **`PushDeliverySemanticsRegistry`**; **`DeliverySemantics`** in **`crate::push::delivery_semantics`**; **`PushIdempotencyKey`**, **`IdempotencyKeyHeader`**.
   - [~] Cross-process DLQ — per-Account **`A2A_PUSH_DLQ`** JetStream stream (**`provision_streams`**); agent **`Bridge`** **`message/stream`** terminal push path **JetStream-publishes** JSON failures (**`schema`=`a2a.push.dlq/v1`**) to **`{prefix}.push.dlq.{caller_id}.{task_id}`** (default **`caller_id`** segment **`_`** via **`Config`** until auth propagation). **`a2a-gateway`** ingress does **not** own DLQ. Remaining: optional gateway-side duplication, richer **`caller_id`** from minted User JWT everywhere.
 - [ ] Tier 3 WASM redaction over `Message.parts` / `Artifact.parts`, skill-id keyed.
 
