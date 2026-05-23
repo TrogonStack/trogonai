@@ -1,60 +1,32 @@
-//! A2A gateway service.
+//! A2A gateway service — ingress on `{prefix}.gateway.>` and forward to `{prefix}.agent.{id}.{method}`.
 //!
-//! Slice g2 wires the env-driven [`Config`] + [`Args`] CLI surface and a
-//! [`runtime`] entry point that subsequent slices flesh out with audit,
-//! ingress streaming, and policy execution. The boot path is `main.rs` →
-//! [`run`] → [`runtime::run_with_args`] so the binary and integration tests
-//! share a single seam.
+//! Engineering checklist beyond opaque forward: **[`docs/A2A_GATEWAY_ROADMAP.md`](../../../../docs/A2A_GATEWAY_ROADMAP.md)**.
 //!
-//! Modules:
-//! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
-//!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
-//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDeny`] carrying a
-//!   `ResourceChallenge` for the reply.
-//! - [`agent_card_surface`] — schema-validates AgentCard JSON before the
-//!   gateway's discover surface returns it, so a stored card that drifted
-//!   from the spec can't be surfaced unchecked.
-//! - [`caller_jwt_header`] — re-exports the wire-level header constants from
-//!   `a2a-auth-callout` so callers only depend on this crate.
-//! - [`config`] — clap-derived [`Args`] + env-resolved [`Config`].
-//! - [`jwt_caller_identity`] — resolves a verified caller identity from a
-//!   minted NATS User JWT carried on the inbound message, with a
-//!   labs-only header-trust fallback gated behind an env flag.
-//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.push.dlq.>`
-//!   into a tenant-readable `mirror.*` view with in-process dedupe so a
-//!   re-delivered DLQ envelope only publishes once.
-//! - [`runtime`] — boot orchestration; surfaces [`RuntimeError`] as the
-//!   terminal error for the `main` binary.
+//! Planned authorization and policy seams are documented in [`A2A_PLAN.md`](../../../../A2A_PLAN.md):
+//! queue-group subscriber (`A2A_GATEWAY_QUEUE_GROUP`) with opaque JSON-RPC bridging today; JWT
+//! validation, policy bundles (`a2a-pack`), and ingress audit emission remain future work.
+//!
+//! ## Future: authenticated caller identity
+//!
+//! The gateway will propagate authenticated caller identity from minted NATS User JWTs (auth-callout)
+//! into request handling for correlation and audit enrichment. Ingress spans already reserve a
+//! `caller_id` field for this JWT-derived identity once extraction is wired.
+//!
+//! If the gateway later owns push remediation, DLQ subjects may include caller segments such as
+//! `{prefix}.push.dlq.{caller_id}.{task_id}`. Terminal push DLQ publishes today originate from
+//! the `a2a-nats` agent `Bridge` / `message/stream` pump — not from this gateway forwarding layer.
+//!
+//! Compile-only roadmap scaffolding for future seams lives in **`planned`** (**`planned::`** first-wave stubs and **`planned::batch2`** one-file-per-`A2A_TODO` lane through Phase&nbsp;4).
 
-#![allow(clippy::module_name_repetitions)]
-#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
-
-pub mod aauth;
-pub mod agent_card_surface;
-pub mod caller_jwt_header;
 pub mod config;
-pub mod jwt_caller_identity;
-pub mod push_dlq_mirror;
+pub mod planned;
 pub mod runtime;
 
 pub use config::{Args, Config, ConfigError};
 pub use runtime::RuntimeError;
 
-/// Boot entrypoint: parse env + run the gateway runtime. Returns the
-/// runtime's terminal error if one fires. The binary calls this directly so
-/// `main.rs` stays a thin shim and integration tests can inject a fake env
-/// through [`runtime::run_with_args`].
-///
-/// Under `cfg(coverage)` this collapses to a stub that returns `Ok(())`
-/// matching the `main.rs` coverage stub. The real env-resolution path is
-/// exercised through `runtime::run_with_args` directly under the normal
-/// test profile, so coverage doesn't depend on running a tokio runtime.
-#[cfg(not(coverage))]
-pub async fn run(args: Args) -> Result<(), RuntimeError> {
-    runtime::run_with_args(args, &trogon_std::env::SystemEnv).await
-}
+use trogon_std::env::SystemEnv;
 
-#[cfg(coverage)]
-pub async fn run(_args: Args) -> Result<(), RuntimeError> {
-    Ok(())
+pub async fn run(args: Args) -> Result<(), RuntimeError> {
+    runtime::run_with_args(args, &SystemEnv).await
 }
