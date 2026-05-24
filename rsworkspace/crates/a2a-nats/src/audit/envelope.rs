@@ -2,6 +2,56 @@ use sha2::{Digest, Sha256};
 
 use crate::agent_id::A2aAgentId;
 
+/// Gateway ingress subject rewrite recorded on forward decision sites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditSubjectRewrite(String);
+
+impl AuditSubjectRewrite {
+    pub fn new(ingress_subject: &str, agent_subject: &str) -> Self {
+        Self(format!("ingress:{ingress_subject} -> agent:{agent_subject}"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_audit_json(self) -> serde_json::Value {
+        serde_json::Value::Array(vec![serde_json::Value::String(self.0)])
+    }
+}
+
+/// Stable JetStream consumer name derived for SSE-shaped gateway forwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayStreamConsumerName(String);
+
+impl GatewayStreamConsumerName {
+    pub fn for_sse_method(agent_id: &A2aAgentId, method_dots: &str) -> Option<Self> {
+        match method_dots {
+            "message.stream" | "tasks.resubscribe" => {
+                Some(Self(format!("gateway.{}.{}", agent_id.as_str(), method_dots)))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Optional audit extras populated when the gateway forwards ingress to an agent RPC subject.
+pub fn gateway_forward_audit_extras(
+    ingress_subject: &str,
+    agent_subject: &str,
+    agent_id: &A2aAgentId,
+    method_dots: &str,
+) -> (Option<serde_json::Value>, Option<String>) {
+    let rewrites = Some(AuditSubjectRewrite::new(ingress_subject, agent_subject).into_audit_json());
+    let stream_consumer = GatewayStreamConsumerName::for_sse_method(agent_id, method_dots)
+        .map(|name| name.as_str().to_owned());
+    (rewrites, stream_consumer)
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum AuditOutcome {
@@ -188,6 +238,71 @@ mod tests {
             AuditEnvelopeFields::default(),
         );
         assert_ne!(a.params_fingerprint, b.params_fingerprint);
+    }
+
+    #[test]
+    fn audit_subject_rewrite_formats_ingress_to_agent() {
+        let rewrite = AuditSubjectRewrite::new("a2a.gateway.bot.message.send", "a2a.agent.bot.message.send");
+        assert_eq!(
+            rewrite.as_str(),
+            "ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"
+        );
+        let json = rewrite.into_audit_json();
+        assert_eq!(
+            json,
+            serde_json::json!(["ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"])
+        );
+    }
+
+    #[test]
+    fn gateway_stream_consumer_name_for_sse_methods_only() {
+        let agent = agent();
+        assert_eq!(
+            GatewayStreamConsumerName::for_sse_method(&agent, "message.stream")
+                .unwrap()
+                .as_str(),
+            "gateway.test-agent.message.stream"
+        );
+        assert_eq!(
+            GatewayStreamConsumerName::for_sse_method(&agent, "tasks.resubscribe")
+                .unwrap()
+                .as_str(),
+            "gateway.test-agent.tasks.resubscribe"
+        );
+        assert!(GatewayStreamConsumerName::for_sse_method(&agent, "message.send").is_none());
+        assert!(GatewayStreamConsumerName::for_sse_method(&agent, "tasks.get").is_none());
+    }
+
+    #[test]
+    fn gateway_forward_audit_extras_populates_rewrite_and_sse_consumer() {
+        let agent = agent();
+        let (rewrites, stream_consumer) = gateway_forward_audit_extras(
+            "a2a.gateway.bot.message.stream",
+            "a2a.agent.bot.message.stream",
+            &agent,
+            "message.stream",
+        );
+        assert_eq!(
+            rewrites,
+            Some(serde_json::json!(["ingress:a2a.gateway.bot.message.stream -> agent:a2a.agent.bot.message.stream"]))
+        );
+        assert_eq!(stream_consumer.as_deref(), Some("gateway.test-agent.message.stream"));
+    }
+
+    #[test]
+    fn gateway_forward_audit_extras_omits_stream_consumer_for_unary() {
+        let agent = agent();
+        let (rewrites, stream_consumer) = gateway_forward_audit_extras(
+            "a2a.gateway.bot.message.send",
+            "a2a.agent.bot.message.send",
+            &agent,
+            "message.send",
+        );
+        assert_eq!(
+            rewrites,
+            Some(serde_json::json!(["ingress:a2a.gateway.bot.message.send -> agent:a2a.agent.bot.message.send"]))
+        );
+        assert!(stream_consumer.is_none());
     }
 
     #[test]
