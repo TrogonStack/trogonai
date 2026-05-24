@@ -15,6 +15,9 @@ pub const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// JetStream retention window for task events (replay budget for `tasks/resubscribe`).
 pub const DEFAULT_STREAM_MAX_AGE: Duration = Duration::from_hours(24);
 
+/// Per-Account override for [`DEFAULT_STREAM_MAX_AGE`] on **`A2A_EVENTS`** provisioning.
+pub const ENV_EVENTS_MAX_AGE_SECS: &str = "A2A_EVENTS_MAX_AGE_SECS";
+
 /// Default timeout for unary methods (message/send unary, tasks/get, etc).
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -86,6 +89,7 @@ mod tests {
             ENV_CONNECT_TIMEOUT_SECS,
             ENV_PUSH_DLQ_CALLER_SEGMENT,
             ENV_MAX_CONCURRENT_CLIENT_TASKS,
+            ENV_EVENTS_MAX_AGE_SECS,
         ] {
             assert!(name.starts_with("A2A_"), "{name} not A2A-namespaced");
         }

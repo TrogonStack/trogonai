@@ -1,24 +1,14 @@
 //! Phase 2 — Gateway pull consumer + flow control; **`A2A_EVENTS`** interest + discard-old.
 //!
-//! **Status:** compile-only seam — not wired into [`crate::runtime`]. Full operator and
+//! **Status:** shipped (env-gated) in [`crate::gw_pull_backpressure`]. Full operator and
 //! implementer guide:
 //! [`../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
 //!
 //! ## Operator delta vs in-tree provisioning
 //!
 //! In-tree [`provision_streams`](a2a_nats::jetstream::provision) / [`A2aStream::Events`]
-//! (`a2a-nats/src/nats/subjects/stream.rs`) already sets **`discard=old`** but **`retention=limits`**.
-//! Phase 2 requires **`retention=interest`** + **`discard=old`** on the Account stream **`A2A_EVENTS`**
-//! so agents never block on publish when downstream consumers lag or disconnect.
-//!
-//! | Setting | In-tree `provision_streams` today | Phase 2 target |
-//! |---------|-------------------------------------|----------------|
-//! | **`retention`** | **`limits`** | **`interest`** |
-//! | **`discard`** | **`old`** | **`old`** (unchanged) |
-//! | **`max_age`** | **`24h`** baseline | **`24h`** baseline (operator may extend) |
-//!
-//! Operators provisioning outside the helper (CLI, Terraform, platform tooling) should apply the
-//! Phase 2 pair now; see [`ADVISORY_JETSTREAM_REPROVISION_NOTE`] and the ops guide §Stream policy.
+//! (`a2a-nats/src/nats/subjects/stream.rs`) sets **`retention=interest`**, **`discard=old`**, and
+//! **`max_age=24h`** (override via **`A2A_EVENTS_MAX_AGE_SECS`**).
 
 use std::time::Duration;
 
@@ -247,14 +237,14 @@ mod tests {
     }
 
     #[test]
-    fn stream_policy_target_differs_from_in_tree_provision() {
+    fn stream_policy_target_matches_in_tree_provision() {
         let target = StreamPolicyTarget::a2a_events();
         let prefix = prefix();
         assert!(target.discard_old_interest_required);
         assert_eq!(target.retention(), RetentionPolicy::Interest);
         assert_eq!(target.discard(), DiscardPolicy::Old);
-        assert!(!target.matches_in_tree_provision(&prefix));
-        assert!(target.requires_operator_reprovision(&prefix));
+        assert!(target.matches_in_tree_provision(&prefix));
+        assert!(!target.requires_operator_reprovision(&prefix));
     }
 
     #[test]

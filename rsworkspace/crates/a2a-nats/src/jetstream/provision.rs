@@ -1,6 +1,7 @@
 use tracing::info;
 use trogon_nats::jetstream::JetStreamContext;
 
+use super::stream_options::StreamProvisionOptions;
 use super::streams;
 use crate::a2a_prefix::A2aPrefix;
 
@@ -16,7 +17,15 @@ impl std::fmt::Display for ProvisionError {
 impl std::error::Error for ProvisionError {}
 
 pub async fn provision_streams<J: JetStreamContext>(js: &J, prefix: &A2aPrefix) -> Result<(), ProvisionError> {
-    for config in streams::all_configs(prefix) {
+    provision_streams_with_options(js, prefix, &StreamProvisionOptions::default()).await
+}
+
+pub async fn provision_streams_with_options<J: JetStreamContext>(
+    js: &J,
+    prefix: &A2aPrefix,
+    options: &StreamProvisionOptions,
+) -> Result<(), ProvisionError> {
+    for config in streams::all_configs_with_options(prefix, options) {
         let name = config.name.clone();
         js.get_or_create_stream(config)
             .await
@@ -66,6 +75,26 @@ mod tests {
         let result = provision_streams(&ctx, &p("a2a")).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("A2A_EVENTS"));
+    }
+
+    #[tokio::test]
+    async fn provision_with_events_max_age_override() {
+        use async_nats::jetstream::stream::RetentionPolicy;
+
+        use crate::jetstream::stream_options::{EventsStreamMaxAge, StreamProvisionOptions};
+
+        let ctx = MockJetStreamContext::new();
+        let options = StreamProvisionOptions {
+            events_max_age: EventsStreamMaxAge::from_secs(3600),
+        };
+        provision_streams_with_options(&ctx, &p("a2a"), &options).await.unwrap();
+        let streams = ctx.created_streams();
+        let events = streams
+            .iter()
+            .find(|c| c.name == "A2A_EVENTS")
+            .expect("A2A_EVENTS");
+        assert_eq!(events.retention, RetentionPolicy::Interest);
+        assert_eq!(events.max_age, std::time::Duration::from_secs(3600));
     }
 
     #[tokio::test]
