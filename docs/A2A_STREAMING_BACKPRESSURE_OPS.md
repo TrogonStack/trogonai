@@ -150,6 +150,6 @@ export A2A_MAX_CONCURRENT_CLIENT_TASKS=64
 
 - **Publish path:** agent **`message_stream`** pump publishes via JetStream (`TaskEventsSubject`); failures surface in agent logs, not caller blocking.
 - **Client path:** `build_event_stream` acks after each message before yielding to the application stream — slow app readers back up the unbounded mpsc channel today; gateway flow control addresses this at the JetStream boundary for the ingress pipe.
-- **Audit:** `TaskLifecycleEnvelope` emission on streamed state transitions is agent-side today; gateway **`stream_consumer`** field on **`AuditEnvelope`** remains for future gateway-owned consumers ([A2A plan](../A2A_PLAN.md) §Audit).
+- **Audit:** `TaskLifecycleEnvelope` emission on streamed state transitions is agent-side today; gateway **`stream_consumer`** on forward decision-site **`AuditEnvelope`** is populated for SSE-shaped methods (`message.stream`, `tasks.resubscribe`) as `gateway.{agent_id}.{method_dots}` for downstream correlation ([A2A plan](../A2A_PLAN.md) §Audit).
 
 When implementing gateway streaming, treat [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md) coordination items (JWT, Tier 1, ingress audit) as prerequisites for production egress — flow control alone does not replace auth or policy.
