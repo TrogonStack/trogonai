@@ -6,6 +6,8 @@ pub struct VaultSigningKeySource;
 
 impl VaultSigningKeySource {
     pub fn load() -> Result<Self, AuthCalloutError> {
-        Err(AuthCalloutError::VaultNotConfigured)
+        Err(AuthCalloutError::Internal(
+            "vault source not implemented".into(),
+        ))
     }
 }

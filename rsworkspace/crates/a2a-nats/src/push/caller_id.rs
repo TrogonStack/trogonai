@@ -118,6 +118,7 @@ mod tests {
     fn from_user_jwt_claims_delegates_to_principal_data() {
         let caller_id = a2a_auth_callout::jwt::CallerId::new("ok").unwrap();
         let claims = UserJwtClaims {
+            kid: a2a_auth_callout::KeyVersion::new("pending").expect("fixture kid"),
             sub: a2a_auth_callout::jwt::ExternalSubject::new("ext").unwrap(),
             aud: a2a_auth_callout::AudienceAccount::new("tenant-x"),
             data: SpiceDbPrincipal(json!({"spicedb_subject": "p.q"})),

@@ -1,9 +1,8 @@
-use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 
-use super::SigningKeySource;
 use super::key_version::KeyVersion;
 use super::signing_key_handle::SigningKeyHandle;
+use super::SigningKeySource;
 
 #[derive(Debug)]
 pub struct StaticSigningKeySource {
@@ -12,26 +11,29 @@ pub struct StaticSigningKeySource {
 }
 
 impl StaticSigningKeySource {
-    pub fn new(seed: &str, version: KeyVersion) -> Result<Self, AuthCalloutError> {
-        Ok(Self {
-            current: SigningKeyHandle::new(version, SigningKey::from_seed(seed)?),
+    pub fn new(secret: &[u8], version: KeyVersion) -> Self {
+        Self {
+            current: SigningKeyHandle::new(version, SigningKey::from_secret(secret)),
             previous: None,
-        })
+        }
     }
 
     pub fn with_overlap(
-        current_seed: &str,
+        current_secret: &[u8],
         current_version: KeyVersion,
-        previous_seed: &str,
+        previous_secret: &[u8],
         previous_version: KeyVersion,
-    ) -> Result<Self, AuthCalloutError> {
-        Ok(Self {
-            current: SigningKeyHandle::new(current_version, SigningKey::from_seed(current_seed)?),
+    ) -> Self {
+        Self {
+            current: SigningKeyHandle::new(
+                current_version,
+                SigningKey::from_secret(current_secret),
+            ),
             previous: Some(SigningKeyHandle::new(
                 previous_version,
-                SigningKey::from_seed(previous_seed)?,
+                SigningKey::from_secret(previous_secret),
             )),
-        })
+        }
     }
 }
 
