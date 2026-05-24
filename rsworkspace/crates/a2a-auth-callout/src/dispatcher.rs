@@ -49,7 +49,7 @@ impl CalloutDispatcher {
     }
 
     fn select_scheme(&self, request: &ServerAuthRequestClaims) -> Result<AuthScheme, AuthCalloutError> {
-        if request.connect_opts_jwt().is_some() {
+        if request.connect_opts_jwt().is_some() || request.connect_opts_opaque_pass().is_some() {
             return Ok(AuthScheme::Oidc);
         }
         if request.primary_client_cert().is_some() {
@@ -76,9 +76,14 @@ impl AuthDispatcher for CalloutDispatcher {
                 let verifier = self.config.oidc.as_ref().ok_or_else(|| {
                     AuthCalloutError::CredentialVerification("OIDC verifier not configured".into())
                 })?;
-                let token = request.connect_opts_jwt().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification("OIDC scheme but connect_opts.jwt missing".into())
-                })?;
+                let token = request
+                    .connect_opts_jwt()
+                    .or_else(|| request.connect_opts_opaque_pass())
+                    .ok_or_else(|| {
+                        AuthCalloutError::CredentialVerification(
+                            "OIDC scheme but connect_opts.jwt and connect_opts.pass missing".into(),
+                        )
+                    })?;
                 verifier
                     .verify(&BearerToken::new(token.to_owned()), &account)
                     .await?
