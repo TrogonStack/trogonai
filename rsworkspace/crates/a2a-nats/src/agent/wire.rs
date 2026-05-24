@@ -39,6 +39,8 @@ pub struct JsonRpcErrorResponse {
 pub struct JsonRpcErrorBody {
     pub code: i32,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl<R: serde::Serialize> JsonRpcResponse<R> {
@@ -57,12 +59,22 @@ impl<R: serde::Serialize> JsonRpcResponse<R> {
 
 impl JsonRpcErrorResponse {
     pub fn new(id: Option<JsonRpcId>, code: i32, message: impl Into<String>) -> Self {
+        Self::with_data(id, code, message, None)
+    }
+
+    pub fn with_data(
+        id: Option<JsonRpcId>,
+        code: i32,
+        message: impl Into<String>,
+        data: Option<serde_json::Value>,
+    ) -> Self {
         Self {
             jsonrpc: "2.0",
             id,
             error: JsonRpcErrorBody {
                 code,
                 message: message.into(),
+                data,
             },
         }
     }
