@@ -189,6 +189,7 @@ dependencies = [
 name = "a2a-pack"
 version = "0.0.0-skeleton"
 dependencies = [
+ "a2a-redaction",
  "jsonschema",
  "serde_json",
  "tracing",
@@ -201,6 +202,8 @@ dependencies = [
  "a2a-types",
  "serde",
  "serde_json",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "wasmtime",
 ]
