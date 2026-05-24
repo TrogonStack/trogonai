@@ -16,7 +16,7 @@ use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
 use crate::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
 use crate::config::Config;
 use crate::nats::subjects::wildcards::AgentAllSubject;
-use crate::push::{CallerId, PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
+use crate::push::{PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
 use crate::task_id::A2aTaskId;
 
 /// Errors that can occur while running the `Bridge`.
@@ -157,7 +157,10 @@ where
                             let push_delivery_semantics = Arc::clone(&self.push_delivery_semantics);
                             let payload = msg.payload.to_vec();
                             let reply = msg.reply.map(|s| s.to_string());
-                            let push_dlq_seg = self.config.push_dlq_caller_segment.clone();
+                            let principal_carrier = crate::agent::PrincipalCarrier::from_nats_headers(
+                                msg.headers.as_ref(),
+                                self.config.push_dlq_caller_segment.clone(),
+                            );
 
                             tokio::spawn(async move {
                                 dispatch(
@@ -173,7 +176,7 @@ where
                                     audit_emitter,
                                     push_dispatcher,
                                     push_delivery_semantics,
-                                    push_dlq_seg,
+                                    principal_carrier,
                                 )
                                 .await;
                                 drop(permit);
@@ -202,7 +205,7 @@ async fn dispatch<H, N, J>(
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
-    push_dlq_caller_segment: CallerId,
+    principal_carrier: crate::agent::PrincipalCarrier,
 ) where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
@@ -239,7 +242,7 @@ async fn dispatch<H, N, J>(
                 push_dispatcher,
                 Arc::clone(&push_delivery_semantics),
                 cancel.clone(),
-                push_dlq_caller_segment.clone(),
+                principal_carrier.clone(),
             )
             .await
             {
@@ -360,8 +363,10 @@ fn extract_task_id(payload: &[u8]) -> Option<A2aTaskId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::PrincipalCarrier;
     use crate::agent::test_support::{make_task, rpc_payload, stub};
     use crate::config::Config;
+    use crate::push::CallerId;
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::MockJetStreamPublisher;
 
@@ -487,7 +492,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
         assert!(nats.published_messages().is_empty());
@@ -515,7 +520,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["reply"]);
@@ -543,7 +548,7 @@ mod tests {
             Arc::new(crate::audit::emitter::NoopAuditEmitter),
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();

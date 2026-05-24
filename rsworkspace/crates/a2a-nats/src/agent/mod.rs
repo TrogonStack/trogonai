@@ -4,6 +4,7 @@ mod dispatch;
 mod handler;
 mod message_send;
 mod message_stream;
+mod principal_carrier;
 mod push_notification;
 mod tasks_cancel;
 mod tasks_get;
@@ -16,3 +17,4 @@ pub(crate) mod test_support;
 
 pub use bridge::{Bridge, BridgeError};
 pub use handler::{A2aError, A2aHandler, TaskEventStream};
+pub use principal_carrier::PrincipalCarrier;

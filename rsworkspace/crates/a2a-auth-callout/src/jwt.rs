@@ -71,11 +71,33 @@ fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
+pub struct SpiceDbSubject(String);
+
+impl SpiceDbSubject {
+    pub fn new(subject: impl Into<String>) -> Self {
+        Self(subject.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SpiceDbPrincipal(pub Value);
 
 impl SpiceDbPrincipal {
     pub fn new(subject: impl Into<String>) -> Self {
         Self(json!({ "spicedb_subject": subject.into() }))
+    }
+
+    pub fn spicedb_subject(&self) -> Option<SpiceDbSubject> {
+        self.0
+            .get("spicedb_subject")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(SpiceDbSubject::new)
     }
 }
 
@@ -320,5 +342,17 @@ mod tests {
         let v = json!({ "sub": "x", "spicedb_principal": { "kind": "special" } });
         let p = spicedb_principal_from_oidc_claims(&v);
         assert_eq!(p.0["kind"], "special");
+    }
+
+    #[test]
+    fn spicedb_subject_accessor_reads_claim() {
+        let p = SpiceDbPrincipal::new("user/alice");
+        assert_eq!(p.spicedb_subject().unwrap().as_str(), "user/alice");
+    }
+
+    #[test]
+    fn spicedb_subject_accessor_absent_when_missing_or_empty() {
+        assert!(SpiceDbPrincipal(json!({})).spicedb_subject().is_none());
+        assert!(SpiceDbPrincipal(json!({"spicedb_subject": ""})).spicedb_subject().is_none());
     }
 }
