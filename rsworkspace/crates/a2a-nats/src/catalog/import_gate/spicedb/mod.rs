@@ -8,8 +8,8 @@ mod tests;
 pub use cache::{ImportGateCacheKey, ZedTokenCache, ZedTokenSnapshot};
 pub use client::BulkImportPermissionCheck;
 pub use config::{
-    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint,
-    SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenTtl, optional_spicedb_credentials, zed_token_ttl_from_env,
+    ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint, SpiceDbImportGateBuildError,
+    SpiceDbToken, ZedTokenTtl,
 };
 
 use std::sync::Arc;
@@ -21,12 +21,16 @@ use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, SubjectReference,
     ZedToken,
 };
+use trogon_std::env::ReadEnv;
 
 use crate::agent_id::A2aAgentId;
 
 use super::error::ImportGateError;
 use super::gate::ImportGate;
 use super::principal::{ImportedAccountName, SpiceDbPrincipal};
+
+use client::LiveBulkImportPermissionClient;
+use config::{optional_spicedb_credentials, zed_token_ttl_from_env};
 
 const FEDERATED_AGENT_CARD_RESOURCE_TYPE: &str = "agent_card";
 const FEDERATED_IMPORT_PERMISSION: &str = "view";
@@ -55,6 +59,18 @@ impl SpiceDbImportGate {
         self.client.is_some()
     }
 
+    pub async fn try_from_env<E: ReadEnv>(env: &E) -> Result<Self, SpiceDbImportGateBuildError> {
+        let ttl = zed_token_ttl_from_env(env)?;
+        let cache = ZedTokenCache::new(ttl);
+
+        let Some((endpoint, token)) = optional_spicedb_credentials(env)? else {
+            return Ok(Self::deny_only());
+        };
+
+        let live = LiveBulkImportPermissionClient::connect(&endpoint, &token).await?;
+        Ok(Self::configured(Arc::new(live), cache))
+    }
+
     async fn check_import(
         &self,
         principal: &SpiceDbPrincipal,
@@ -66,7 +82,7 @@ impl SpiceDbImportGate {
             return Ok(false);
         };
 
-        let Some((subject_type, subject_id)) = spicedb_subject_from_principal(principal) else {
+        let Some((subject_type, subject_id)) = import_subject(principal) else {
             tracing::warn!(
                 imported_from = %imported_from,
                 agent_id = %agent_id,
@@ -95,9 +111,11 @@ impl SpiceDbImportGate {
 
         if let Some(snapshot) = self.zed_token_cache.get(&cache_key).await {
             request.consistency = Some(Consistency {
-                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(ZedToken {
-                    token: snapshot.token,
-                })),
+                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(
+                    ZedToken {
+                        token: snapshot.token,
+                    },
+                )),
             });
         }
 
@@ -116,7 +134,9 @@ impl SpiceDbImportGate {
 
         let allowed = response.pairs.first().is_some_and(pair_is_allowed);
 
-        if allowed && let Some(token) = response.checked_at.map(|zed| zed.token) {
+        if allowed
+            && let Some(token) = response.checked_at.map(|zed| zed.token)
+        {
             self.zed_token_cache.insert(cache_key, token).await;
         }
 
@@ -125,15 +145,12 @@ impl SpiceDbImportGate {
 }
 
 fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
-    // `Response::Error(_)` and `None` both fail closed — the explicit `Error`
-    // arm isn't testable in isolation because `google::rpc::Status` is only
-    // re-exported privately by `spicedb-grpc-tonic`, so we collapse both
-    // failure paths into a single wildcard.
-    matches!(
-        pair.response.as_ref(),
-        Some(check_bulk_permissions_pair::Response::Item(item))
-            if item.permissionship == Permissionship::HasPermission as i32
-    )
+    match pair.response.as_ref() {
+        Some(check_bulk_permissions_pair::Response::Item(item)) => {
+            item.permissionship == Permissionship::HasPermission as i32
+        }
+        Some(check_bulk_permissions_pair::Response::Error(_)) | None => false,
+    }
 }
 
 impl Default for SpiceDbImportGate {
@@ -154,7 +171,7 @@ impl ImportGate for SpiceDbImportGate {
     }
 }
 
-pub fn spicedb_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
+fn import_subject(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
     if let Some(account) = principal
         .0
         .get("account")
@@ -172,7 +189,7 @@ pub fn spicedb_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(S
         .and_then(parse_subject_reference)
 }
 
-pub fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
+fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
     if let Some((object_type, object_id)) = raw.split_once('/')
         && !object_type.is_empty()
         && !object_id.is_empty()
@@ -188,9 +205,25 @@ pub fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
     None
 }
 
-fn federated_agent_card_resource(imported_from: &ImportedAccountName, agent_id: &A2aAgentId) -> ObjectReference {
+fn federated_agent_card_resource(
+    imported_from: &ImportedAccountName,
+    agent_id: &A2aAgentId,
+) -> ObjectReference {
     ObjectReference {
         object_type: FEDERATED_AGENT_CARD_RESOURCE_TYPE.to_owned(),
         object_id: format!("{}:{}", imported_from.as_str(), agent_id.as_str()),
+    }
+}
+
+pub async fn resolve_import_gate<E: ReadEnv>(env: &E) -> SpiceDbImportGate {
+    match SpiceDbImportGate::try_from_env(env).await {
+        Ok(gate) => gate,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "SpiceDbImportGate: invalid configuration — federated imports deny until env is corrected"
+            );
+            SpiceDbImportGate::deny_only()
+        }
     }
 }

@@ -72,17 +72,26 @@ impl Default for ZedTokenTtl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpiceDbImportGateBuildError {
-    #[error("invalid SpiceDB endpoint: {0}")]
     InvalidEndpoint(String),
-    #[error("invalid SpiceDB token: {0}")]
     InvalidToken(String),
-    #[error("invalid SpiceDB ZedToken TTL: {0}")]
     InvalidZedTokenTtl(String),
-    #[error("SpiceDB connect failed: {0}")]
     Connect(String),
 }
+
+impl fmt::Display for SpiceDbImportGateBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEndpoint(msg) => write!(f, "invalid SpiceDB endpoint: {msg}"),
+            Self::InvalidToken(msg) => write!(f, "invalid SpiceDB token: {msg}"),
+            Self::InvalidZedTokenTtl(msg) => write!(f, "invalid SpiceDB ZedToken TTL: {msg}"),
+            Self::Connect(msg) => write!(f, "SpiceDB connect failed: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SpiceDbImportGateBuildError {}
 
 pub fn zed_token_ttl_from_env<E: ReadEnv>(env: &E) -> Result<ZedTokenTtl, SpiceDbImportGateBuildError> {
     match env.var(ENV_SPICEDB_ZEDTOKEN_TTL_SECS) {
