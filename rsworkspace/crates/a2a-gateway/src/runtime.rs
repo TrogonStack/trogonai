@@ -5,7 +5,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
-use a2a_nats::constants::{DEFAULT_OPERATION_TIMEOUT, GATEWAY_CALLER_ID_HEADER};
+use a2a_nats::constants::DEFAULT_OPERATION_TIMEOUT;
+use a2a_nats::push::PushDlqDedupGate;
 use a2a_nats::{
     gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
     ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
@@ -24,6 +25,7 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_pull_backpressure;
+use crate::jwt_caller_identity::{gateway_audit_caller_attribution, resolve_gateway_caller_identity};
 use crate::policy::spicedb_tier1::{
     OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
     a2a_method_from_dots, derive_tuple, owner_tuple_for_message_send, tier1_principal_from_caller,
@@ -157,8 +159,16 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         let mirror_prefix = config.a2a_prefix.clone();
         let mirror_durable = mirror_settings.durable.clone();
         let mirror_shutdown = shutdown.clone();
+        let mirror_dedup = Arc::new(PushDlqDedupGate::from_env(env));
         tokio::spawn(async move {
-            crate::push_dlq_mirror::run_push_dlq_mirror(js, mirror_prefix, mirror_durable, mirror_shutdown).await;
+            crate::push_dlq_mirror::run_push_dlq_mirror(
+                js,
+                mirror_prefix,
+                mirror_durable,
+                mirror_shutdown,
+                mirror_dedup,
+            )
+            .await;
         });
         info!(
             durable = %mirror_settings.durable.as_str(),
@@ -273,11 +283,10 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     method_dots
                 );
                 let headers_owned = msg.headers.unwrap_or_default();
-                let caller_slug = gateway_caller_id_from_headers(&headers_owned);
-                if let Some(ref slug) = caller_slug
-                    && !slug.is_empty()
-                {
-                    tracing::Span::current().record("caller_id", slug.as_str());
+                let caller_identity = resolve_gateway_caller_identity(&headers_owned);
+                let (audit_caller_id, audit_caller_source) = gateway_audit_caller_attribution(caller_identity);
+                if audit_caller_id != "_" {
+                    tracing::Span::current().record("caller_id", audit_caller_id.as_str());
                 }
                 tracing::Span::current().record("agent_subject", tracing::field::display(&agent_subject));
                 let mut payload = msg.payload.clone();
@@ -291,7 +300,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 let mut tier1_zed_token: Option<String> = None;
                 if tier1.is_enabled() {
                     let account = config.a2a_prefix.as_str();
-                    let caller_slug = caller_slug.as_deref().unwrap_or("_");
+                    let caller_slug = audit_caller_id.as_str();
                     let principal = tier1_principal_from_caller(caller_slug, account);
                     let Some(session) = tier1_session_from_principal(&principal, account) else {
                         tracing::Span::current().record("routing_outcome", "tier1_denied");
@@ -307,6 +316,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 audit_enabled,
                                 started_wall_ms,
                                 started_mono,
+                                &audit_caller_id,
+                                &audit_caller_source,
                             ),
                             "tier-1 principal lacks session identity",
                         )
@@ -329,6 +340,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 audit_enabled,
                                 started_wall_ms,
                                 started_mono,
+                                &audit_caller_id,
+                                &audit_caller_source,
                             ),
                             "tier-1 unknown method suffix",
                         )
@@ -352,6 +365,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     audit_enabled,
                                     started_wall_ms,
                                     started_mono,
+                                    &audit_caller_id,
+                                    &audit_caller_source,
                                 ),
                                 "tier-1 resource tuple derivation failed",
                             )
@@ -391,6 +406,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     audit_enabled,
                                     started_wall_ms,
                                     started_mono,
+                                    &audit_caller_id,
+                                    &audit_caller_source,
                                 ),
                                 "tier-1 SpiceDB denied ingress",
                             )
@@ -411,6 +428,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     audit_enabled,
                                     started_wall_ms,
                                     started_mono,
+                                    &audit_caller_id,
+                                    &audit_caller_source,
                                 ),
                                 "tier-1 resource tuple derivation failed",
                             )
@@ -425,7 +444,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     && let Some(declarative_ctx) = tier1_declarative_context_from_ingress(
                         method_dots.as_str(),
                         &agent_id,
-                        caller_slug.as_deref(),
+                        Some(audit_caller_id.as_str()),
                         config.a2a_prefix.as_str(),
                         ingress_subject,
                     )
@@ -481,7 +500,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     let eval_ctx = tier2_evaluation_context_from_ingress(
                         &method_slashes,
                         &agent_id,
-                        caller_slug.as_deref(),
+                        Some(audit_caller_id.as_str()),
                         &headers_owned,
                         payload.as_ref(),
                     );
@@ -520,11 +539,15 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                         message: "tier-2 predicate rejected envelope".into(),
                                     },
                                     Some(payload.as_ref()),
-                                    AuditEnvelopeFields {
-                                        trace_id: Some(trace_id.clone()),
-                                        rules_fired: Some(vec![rule_fired]),
-                                        ..Default::default()
-                                    },
+                                    enrich_audit_caller(
+                                        AuditEnvelopeFields {
+                                            trace_id: Some(trace_id.clone()),
+                                            rules_fired: Some(vec![rule_fired]),
+                                            ..Default::default()
+                                        },
+                                        &audit_caller_id,
+                                        &audit_caller_source,
+                                    ),
                                 ),
                             );
                             return;
@@ -533,9 +556,10 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 }
 
                 let mut tier3_rewrites = Vec::new();
+                let tier3_caller = (audit_caller_id != "_").then(|| audit_caller_id.clone());
                 let mut tier3_ctx = Tier3EvaluationContext::from_json_rpc_payload(
                     method_slashes.clone(),
-                    caller_slug.clone(),
+                    tier3_caller,
                     payload.as_ref(),
                     policy.tier3_manifests.clone(),
                 );
@@ -545,7 +569,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                         if !tier3_rewrites.is_empty() {
                             info!(
                                 count = tier3_rewrites.len(),
-                                caller_id = caller_slug.as_deref().unwrap_or(""),
+                                caller_id = audit_caller_id.as_str(),
                                 method = %method_slashes,
                                 "gateway tier-3 redaction applied before forward",
                             );
@@ -554,7 +578,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                             Ok(bytes) => payload = bytes,
                             Err(err) => {
                                 error!(
-                                    caller_id = caller_slug.as_deref().unwrap_or(""),
+                                    caller_id = audit_caller_id.as_str(),
                                     method = %method_slashes,
                                     error = %err,
                                     "tier-3 rewritten payload serialization failed; denying ingress",
@@ -602,7 +626,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                         tracing::Span::current().record("routing_outcome", "tier3_refused");
                         warn!(
                             skill_id = %rule,
-                            caller_id = caller_slug.as_deref().unwrap_or(""),
+                            caller_id = audit_caller_id.as_str(),
                             method = %method_slashes,
                             reason = %reason.as_str(),
                             routing_outcome = "tier3_refused",
@@ -647,7 +671,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                         tracing::Span::current().record("routing_outcome", "tier3_engine_error");
                         error!(
                             skill_id = %rule,
-                            caller_id = caller_slug.as_deref().unwrap_or(""),
+                            caller_id = audit_caller_id.as_str(),
                             method = %method_slashes,
                             kind = %kind.as_str(),
                             routing_outcome = "tier3_engine_error",
@@ -788,14 +812,18 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                                 AuditOutcome::Ok,
                                 Some(payload.as_ref()),
-                                AuditEnvelopeFields {
-                                    trace_id: Some(trace_id),
-                                    rules_fired: Some(rules_fired),
-                                    rewrites,
-                                    stream_consumer,
-                                    zed_token_snapshot: tier1_zed_token.clone(),
-                                    ..Default::default()
-                                },
+                                enrich_audit_caller(
+                                    AuditEnvelopeFields {
+                                        trace_id: Some(trace_id),
+                                        rules_fired: Some(rules_fired),
+                                        rewrites,
+                                        stream_consumer,
+                                        zed_token_snapshot: tier1_zed_token.clone(),
+                                        ..Default::default()
+                                    },
+                                    &audit_caller_id,
+                                    &audit_caller_source,
+                                ),
                             ),
                         );
                     }
@@ -825,14 +853,18 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     message: format!("gateway failed to publish: {error}"),
                                 },
                                 Some(payload.as_ref()),
-                                AuditEnvelopeFields {
-                                    trace_id: Some(trace_id),
-                                    rules_fired: Some(rules_fired),
-                                    rewrites,
-                                    stream_consumer,
-                                    zed_token_snapshot: tier1_zed_token.clone(),
-                                    ..Default::default()
-                                },
+                                enrich_audit_caller(
+                                    AuditEnvelopeFields {
+                                        trace_id: Some(trace_id),
+                                        rules_fired: Some(rules_fired.clone()),
+                                        rewrites: rewrites.clone(),
+                                        stream_consumer: stream_consumer.clone(),
+                                        zed_token_snapshot: tier1_zed_token.clone(),
+                                        ..Default::default()
+                                    },
+                                    &audit_caller_id,
+                                    &audit_caller_source,
+                                ),
                             ),
                         );
                     }
@@ -868,14 +900,18 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     message: "gateway publish deadline exceeded for message/send".into(),
                                 },
                                 Some(payload.as_ref()),
-                                AuditEnvelopeFields {
-                                    trace_id: Some(trace_id),
-                                    rules_fired: Some(rules_fired),
-                                    rewrites,
-                                    stream_consumer,
-                                    zed_token_snapshot: tier1_zed_token.clone(),
-                                    ..Default::default()
-                                },
+                                enrich_audit_caller(
+                                    AuditEnvelopeFields {
+                                        trace_id: Some(trace_id),
+                                        rules_fired: Some(rules_fired),
+                                        rewrites,
+                                        stream_consumer,
+                                        zed_token_snapshot: tier1_zed_token.clone(),
+                                        ..Default::default()
+                                    },
+                                    &audit_caller_id,
+                                    &audit_caller_source,
+                                ),
                             ),
                         );
                     }
@@ -931,6 +967,8 @@ struct Tier1DenialCtx<'a> {
     audit_enabled: bool,
     started_wall_ms: u64,
     started_mono: Instant,
+    audit_caller_id: &'a str,
+    audit_caller_source: &'a Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -943,6 +981,8 @@ fn tier1_denial_ctx<'a>(
     audit_enabled: bool,
     started_wall_ms: u64,
     started_mono: Instant,
+    audit_caller_id: &'a str,
+    audit_caller_source: &'a Option<String>,
 ) -> Tier1DenialCtx<'a> {
     Tier1DenialCtx {
         config,
@@ -953,7 +993,19 @@ fn tier1_denial_ctx<'a>(
         audit_enabled,
         started_wall_ms,
         started_mono,
+        audit_caller_id,
+        audit_caller_source,
     }
+}
+
+fn enrich_audit_caller(
+    mut fields: AuditEnvelopeFields,
+    caller_id: &str,
+    caller_source: &Option<String>,
+) -> AuditEnvelopeFields {
+    fields.caller_id = Some(caller_id.to_owned());
+    fields.caller_source = caller_source.clone();
+    fields
 }
 
 async fn deny_tier1(
@@ -991,11 +1043,15 @@ async fn deny_tier1(
                 message: message.into(),
             },
             Some(ctx.payload.as_ref()),
-            AuditEnvelopeFields {
-                trace_id: Some(ctx.trace_id.to_owned()),
-                rules_fired: Some(vec!["gateway.tier1.spicedb_denied".into()]),
-                ..Default::default()
-            },
+            enrich_audit_caller(
+                AuditEnvelopeFields {
+                    trace_id: Some(ctx.trace_id.to_owned()),
+                    rules_fired: Some(vec!["gateway.tier1.spicedb_denied".into()]),
+                    ..Default::default()
+                },
+                ctx.audit_caller_id,
+                ctx.audit_caller_source,
+            ),
         ),
     );
 }
@@ -1133,14 +1189,6 @@ fn unary_deadline_for_method<E: ReadEnv>(env: &E, method_dots: &str) -> Option<D
     Some(Duration::from_secs(secs))
 }
 
-fn gateway_caller_id_from_headers(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(GATEWAY_CALLER_ID_HEADER)
-        .and_then(|value| std::str::from_utf8(value.as_ref()).ok())
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-}
-
 fn tier1_declarative_context_from_ingress(
     method_dots: &str,
     agent_id: &a2a_nats::A2aAgentId,
@@ -1158,6 +1206,7 @@ fn tier1_declarative_context_from_ingress(
         nats_subject,
     ))
 }
+
 
 fn unix_epoch_ms() -> u64 {
     SystemTime::now()

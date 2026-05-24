@@ -58,6 +58,8 @@ NATS agent bridge: subscribes on `{prefix}.agent.{agent_id}.*`, provisions JetSt
 | `A2A_TASK_TIMEOUT_SECS` | no | 7200 | Via `apply_timeout_overrides` |
 | `A2A_MAX_CONCURRENT_CLIENT_TASKS` | no | 256 | Via `apply_timeout_overrides` |
 | `A2A_PUSH_DLQ_CALLER_SEGMENT` | no | `_` | Via `apply_timeout_overrides` |
+| `A2A_PUSH_DLQ_DEDUP_LRU_SIZE` | no | `1024` | In-process push DLQ dedup LRU on agent `Bridge` |
+| `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 | `A2A_EVENTS_MAX_AGE_SECS` | no | 86400 (24h) | Per-Account **`A2A_EVENTS`** JetStream `max_age` at provision time |
 
@@ -81,6 +83,8 @@ HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run in
 | `A2A_TASK_TIMEOUT_SECS` | no | 7200 | Via `apply_timeout_overrides` |
 | `A2A_MAX_CONCURRENT_CLIENT_TASKS` | no | 256 | Via `apply_timeout_overrides` |
 | `A2A_PUSH_DLQ_CALLER_SEGMENT` | no | `_` | Via `apply_timeout_overrides` |
+| `A2A_PUSH_DLQ_DEDUP_LRU_SIZE` | no | `1024` | In-process push DLQ dedup LRU on agent `Bridge` |
+| `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 
 Source: [`a2a-nats-server/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-server/src/runtime.rs).
@@ -101,6 +105,8 @@ Line-delimited JSON-RPC over stdin/stdout using `a2a_nats::Client` (no HTTP).
 | `A2A_TASK_TIMEOUT_SECS` | no | 7200 | Via `apply_timeout_overrides` |
 | `A2A_MAX_CONCURRENT_CLIENT_TASKS` | no | 256 | Via `apply_timeout_overrides` |
 | `A2A_PUSH_DLQ_CALLER_SEGMENT` | no | `_` | Via `apply_timeout_overrides` |
+| `A2A_PUSH_DLQ_DEDUP_LRU_SIZE` | no | `1024` | In-process push DLQ dedup LRU on agent `Bridge` |
+| `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 
 Source: [`a2a-nats-stdio/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-stdio/src/runtime.rs).
@@ -144,6 +150,8 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
 | `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](./A2A_PUSH_DLQ_OPS.md)) |
 | `A2A_GATEWAY_PUSH_DLQ_DURABLE` | no | `a2a-gateway-push-dlq-mirror` | Durable name for the gateway push DLQ mirror consumer when mirror mode is enabled |
+| `A2A_PUSH_DLQ_DEDUP_LRU_SIZE` | no | `1024` | In-process LRU capacity for suppressing duplicate push DLQ publishes (agent `Bridge` + gateway mirror) |
+| `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` on **`A2A_PUSH_DLQ`** stream provisioning |
 | `A2A_GATEWAY_EVENTS_PULL` | no | off | Truthy spawns durable JetStream pull consumer on **`A2A_EVENTS`** (`{prefix}.task.*.events.*`); forwards to **`{prefix}.gateway.egress.{req_id}`** |
 | `A2A_GATEWAY_EVENTS_MAX_ACK_PENDING` | no | `1024` | JetStream **`max_ack_pending`** for the gateway events consumer |
 | `A2A_GATEWAY_EVENTS_FETCH_BATCH` | no | `1` | Pull fetch batch size (flow-control boundary) |
@@ -156,7 +164,7 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | no | off | Truthy loads `*.tier1.toml` declarative allow/deny matrices from `A2A_GATEWAY_TIER1_BUNDLE_DIR`; runs after SpiceDB Tier-1 (see [Tier-1 declarative](./A2A_TIER1_DECLARATIVE.md)) |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | when declarative on | — | Directory of `*.tier1.toml` bundle files for Tier-1 declarative policy |
 
-Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
+Optional attribution: callers can set [`GATEWAY_PRINCIPAL_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Spicedb-Principal`, JSON User JWT `data` claim from auth-callout mint) on NATS messages for gateway audit `caller_id`; [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) remains a deprecated header-trust fallback. `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 
 CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
 

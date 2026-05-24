@@ -16,7 +16,7 @@ use crate::audit::emitter::{AuditEmitter, NoopAuditEmitter};
 use crate::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
 use crate::config::Config;
 use crate::nats::subjects::wildcards::AgentAllSubject;
-use crate::push::{PushDeliverySemanticsRegistry, PushDispatcher, composite_push_dispatcher};
+use crate::push::{PushDeliverySemanticsRegistry, PushDispatcher, PushDlqDedupGate, composite_push_dispatcher};
 use crate::task_id::A2aTaskId;
 
 /// Errors that can occur while running the `Bridge`.
@@ -69,6 +69,7 @@ pub struct Bridge<H, N, J> {
     audit_emitter: Arc<dyn AuditEmitter>,
     push_dispatcher: Arc<dyn PushDispatcher>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
+    push_dlq_dedup: Arc<PushDlqDedupGate>,
 }
 
 impl<H, N, J> Bridge<H, N, J>
@@ -80,6 +81,7 @@ where
     pub fn new(config: Config, handler: H, nats: N, js: J) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent_client_tasks()));
         let push_dispatcher = composite_push_dispatcher(nats.clone(), js.clone(), reqwest::Client::new());
+        let push_dlq_dedup_lru_size = config.push_dlq_dedup_lru_size();
         Self {
             config,
             handler: Arc::new(handler),
@@ -89,6 +91,7 @@ where
             audit_emitter: Arc::new(NoopAuditEmitter),
             push_dispatcher,
             push_delivery_semantics: Arc::new(PushDeliverySemanticsRegistry::default()),
+            push_dlq_dedup: Arc::new(PushDlqDedupGate::with_capacity(push_dlq_dedup_lru_size)),
         }
     }
 
@@ -155,6 +158,7 @@ where
                             let audit_emitter = Arc::clone(&self.audit_emitter);
                             let push_dispatcher = Arc::clone(&self.push_dispatcher);
                             let push_delivery_semantics = Arc::clone(&self.push_delivery_semantics);
+                            let push_dlq_dedup = Arc::clone(&self.push_dlq_dedup);
                             let payload = msg.payload.to_vec();
                             let reply = msg.reply.map(|s| s.to_string());
                             let principal_carrier = crate::agent::PrincipalCarrier::from_nats_headers(
@@ -177,6 +181,7 @@ where
                                     push_dispatcher,
                                     push_delivery_semantics,
                                     principal_carrier,
+                                    push_dlq_dedup,
                                 )
                                 .await;
                                 drop(permit);
@@ -206,6 +211,7 @@ async fn dispatch<H, N, J>(
     push_dispatcher: Arc<dyn PushDispatcher>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     principal_carrier: crate::agent::PrincipalCarrier,
+    push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
     H: A2aHandler,
     N: trogon_nats::PublishClient + Clone + Send + 'static,
@@ -243,6 +249,7 @@ async fn dispatch<H, N, J>(
                 Arc::clone(&push_delivery_semantics),
                 cancel.clone(),
                 principal_carrier.clone(),
+                push_dlq_dedup,
             )
             .await
             {
@@ -472,6 +479,10 @@ mod tests {
         crate::agent_id::A2aAgentId::new("bot").unwrap()
     }
 
+    fn test_dlq_dedup() -> Arc<PushDlqDedupGate> {
+        Arc::new(PushDlqDedupGate::default())
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_method_is_noop() {
         let nats = AdvancedMockNatsClient::new();
@@ -493,6 +504,7 @@ mod tests {
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
         assert!(nats.published_messages().is_empty());
@@ -521,6 +533,7 @@ mod tests {
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
         assert_eq!(nats.published_messages(), vec!["reply"]);
@@ -549,6 +562,7 @@ mod tests {
             Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
         let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
@@ -751,6 +765,7 @@ mod tests {
             audit_emitter: Arc::new(crate::audit::emitter::NoopAuditEmitter),
             push_dispatcher: Arc::new(crate::push::dispatcher::tests::MockPushDispatcher::new()),
             push_delivery_semantics: Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            push_dlq_dedup: test_dlq_dedup(),
         };
 
         let agent_id = crate::agent_id::A2aAgentId::new("bot").unwrap();

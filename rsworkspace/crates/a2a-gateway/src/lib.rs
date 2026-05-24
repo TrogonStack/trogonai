@@ -21,6 +21,7 @@
 pub mod agent_card_surface;
 pub mod config;
 pub mod gw_pull_backpressure;
+pub mod jwt_caller_identity;
 pub mod planned;
 pub mod policy;
 pub mod push_dlq_mirror;

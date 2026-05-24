@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::push::push_notification_config_id::PushNotificationConfigId;
+use crate::push::status_transition_id::StatusTransitionId;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::task_id::A2aTaskId;
 
@@ -23,8 +24,22 @@ impl PushIdempotencyKey {
         Self(s)
     }
 
+    /// Stable DLQ dedupe key: `{task_id}:{status_transition_id}:{push_target_url}`.
+    pub fn derive_dlq(task_id: &A2aTaskId, transition_id: &StatusTransitionId, push_target_url: &str) -> Self {
+        Self(format!(
+            "{}:{}:{}",
+            task_id.as_str(),
+            transition_id.as_str(),
+            push_target_url
+        ))
+    }
+
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn from_dedupe_wire(raw: impl Into<String>) -> Self {
+        Self(raw.into())
     }
 }
 

@@ -1,7 +1,10 @@
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
+use a2a_nats::push::{PushDlqDedupGate, PushIdempotencyKey};
 use a2a_nats::A2aPrefix;
+use a2a_nats::constants::NATS_MSG_ID_HEADER;
 use a2a_nats::nats::subjects::A2aStream;
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull::Config;
@@ -132,6 +135,7 @@ pub async fn mirror_push_dlq_envelope<J>(
     source_subject: &str,
     headers: Option<&HeaderMap>,
     payload: &[u8],
+    dedup: &PushDlqDedupGate,
 ) -> MirrorDispatchOutcome
 where
     J: JetStreamPublisher + Clone + Send + Sync,
@@ -148,8 +152,26 @@ where
         return MirrorDispatchOutcome::Skipped;
     };
 
+    let Some(idempotency_key) = idempotency_key_from_dlq_payload(payload) else {
+        warn!(
+            source_subject,
+            "push DLQ mirror: envelope missing idempotency_key; skipping mirror publish"
+        );
+        return MirrorDispatchOutcome::Skipped;
+    };
+
+    if !dedup.try_acquire(&idempotency_key) {
+        info!(
+            source_subject,
+            idempotency_key = %idempotency_key,
+            "push DLQ mirror publish suppressed by in-process dedup gate"
+        );
+        return MirrorDispatchOutcome::Skipped;
+    }
+
     let mut mirror_headers = HeaderMap::new();
     mirror_headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
+    mirror_headers.insert(NATS_MSG_ID_HEADER, idempotency_key.as_str());
     if let Some(hdrs) = headers {
         if let Some(content_type) = hdrs.get("Content-Type") {
             mirror_headers.insert("Content-Type", content_type.clone());
@@ -206,11 +228,21 @@ where
     MirrorDispatchOutcome::PublishFailed
 }
 
+fn idempotency_key_from_dlq_payload(payload: &[u8]) -> Option<PushIdempotencyKey> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    let key = value.get("idempotency_key")?.as_str()?;
+    if key.is_empty() {
+        return None;
+    }
+    Some(PushIdempotencyKey::from_dedupe_wire(key))
+}
+
 pub async fn run_push_dlq_mirror(
     js: async_nats::jetstream::Context,
     prefix: A2aPrefix,
     durable: PushDlqMirrorDurable,
     shutdown: CancellationToken,
+    dedup: Arc<PushDlqDedupGate>,
 ) {
     let stream_name = A2aStream::PushDlq.stream_name(&prefix);
     let stream = match js.get_stream(&stream_name).await {
@@ -285,6 +317,7 @@ pub async fn run_push_dlq_mirror(
                             source_subject.as_str(),
                             headers,
                             payload,
+                            dedup.as_ref(),
                         )
                         .await;
 
@@ -319,6 +352,7 @@ pub async fn run_push_dlq_mirror(
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use a2a_nats::push::PushDlqDedupGate;
     use async_nats::HeaderMap;
     use bytes::Bytes;
     use trogon_nats::jetstream::JetStreamPublisher;
@@ -438,12 +472,15 @@ mod tests {
     async fn mirror_publish_adds_header_and_retries() {
         let js = RecordingPublisher::default();
         js.fail_next_n(2);
+        let dedup = PushDlqDedupGate::with_capacity(32);
+        let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
         let outcome = mirror_push_dlq_envelope(
             &js,
             &prefix(),
             "a2a.push.dlq.alice.task-1",
             None,
-            br#"{"schema":"a2a.push.dlq/v1"}"#,
+            payload,
+            &dedup,
         )
         .await;
         assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
@@ -451,20 +488,59 @@ mod tests {
         assert_eq!(published.len(), 1);
         assert_eq!(published[0].0, "a2a.push.dlq.mirror.alice.task-1");
         assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
+        assert_eq!(
+            published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
+            "task-1:failed:https://example.com/hook"
+        );
     }
 
     #[tokio::test]
     async fn mirror_skips_already_mirrored_subjects() {
         let js = RecordingPublisher::default();
+        let dedup = PushDlqDedupGate::with_capacity(32);
         let outcome = mirror_push_dlq_envelope(
             &js,
             &prefix(),
             "a2a.push.dlq.mirror.alice.task-1",
             None,
-            b"{}",
+            br#"{"idempotency_key":"k1"}"#,
+            &dedup,
         )
         .await;
         assert_eq!(outcome, MirrorDispatchOutcome::Skipped);
         assert!(js.publishes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn mirror_second_publish_with_same_key_is_suppressed() {
+        let js = RecordingPublisher::default();
+        let dedup = PushDlqDedupGate::with_capacity(32);
+        let payload = br#"{"schema":"a2a.push.dlq/v1","idempotency_key":"task-1:failed:https://example.com/hook"}"#;
+
+        assert_eq!(
+            mirror_push_dlq_envelope(
+                &js,
+                &prefix(),
+                "a2a.push.dlq.alice.task-1",
+                None,
+                payload,
+                &dedup,
+            )
+            .await,
+            MirrorDispatchOutcome::Mirrored
+        );
+        assert_eq!(
+            mirror_push_dlq_envelope(
+                &js,
+                &prefix(),
+                "a2a.push.dlq.alice.task-1",
+                None,
+                payload,
+                &dedup,
+            )
+            .await,
+            MirrorDispatchOutcome::Skipped
+        );
+        assert_eq!(js.publishes.lock().unwrap().len(), 1);
     }
 }
