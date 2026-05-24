@@ -56,6 +56,9 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
     let emit_stray_thread_event = std::env::var("MOCK_EMIT_STRAY_THREAD_EVENT").is_ok();
+    // Path to write the `userInput` field from the first `turn/start` request.
+    // Used by pending_history integration tests to verify the prepend.
+    let record_turn_input_file = std::env::var("MOCK_RECORD_TURN_INPUT_FILE").ok();
     let send_tool_event = std::env::var("MOCK_SEND_TOOL_EVENT").is_ok();
     let broadcast_error_after_turns: Option<usize> =
         std::env::var("MOCK_BROADCAST_ERROR_AFTER_TURNS")
@@ -155,6 +158,12 @@ fn main() {
                 }
 
                 let thread_id = msg["params"]["threadId"].as_str().unwrap_or("").to_string();
+
+                // Record the userInput to a file if requested (used by pending_history tests).
+                if let Some(ref path) = record_turn_input_file {
+                    let user_input = msg["params"]["userInput"].as_str().unwrap_or("");
+                    std::fs::write(path, user_input).ok();
+                }
 
                 // Ack the request first.
                 respond(&mut out, &id, Value::Null);

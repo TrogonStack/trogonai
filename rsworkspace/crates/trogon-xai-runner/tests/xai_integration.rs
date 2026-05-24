@@ -5655,3 +5655,119 @@ async fn fetch_url_egress_block_recorded_in_follow_up_call() {
         );
     }
 }
+
+// ── file/git tool dispatch via xAI wire ──────────────────────────────────────
+
+/// `glob` dispatched via xAI wire format — the `FunctionCallOutput` in the
+/// follow-up API call contains the matching filename.
+///
+/// This verifies that `dispatch_tool` is invoked end-to-end from the xai agent's
+/// tool-execution loop (not just the notification path used by `bash`).
+#[tokio::test]
+async fn xai_glob_tool_dispatched_via_wire_format() {
+    use trogon_xai_runner::InputItem;
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("needle.rs"), "fn main() {}").unwrap();
+    std::fs::write(dir.path().join("ignore.txt"), "ignored").unwrap();
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp-glob".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid-glob".to_string(),
+            name: "glob".to_string(),
+            arguments: r#"{"pattern":"**/*.rs"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response(&["done"]));
+
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()))
+        .await
+        .unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("find rust files"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-glob"));
+    let fco = fco.expect("follow-up must contain FunctionCallOutput for cid-glob");
+    if let InputItem::FunctionCallOutput { output, .. } = fco {
+        assert!(
+            !output.contains("Unknown tool"),
+            "glob must be dispatched to real impl; got: {output}"
+        );
+        assert!(
+            output.contains("needle.rs"),
+            "glob result must contain 'needle.rs'; got: {output}"
+        );
+    }
+}
+
+/// `read_file` dispatched via xAI wire format — the `FunctionCallOutput` in the
+/// follow-up API call contains the file's content.
+#[tokio::test]
+async fn xai_read_file_tool_dispatched_via_wire_format() {
+    use trogon_xai_runner::InputItem;
+
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("data.txt"), "xai-read-sentinel-abc123").unwrap();
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp-rf".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid-rf".to_string(),
+            name: "read_file".to_string(),
+            arguments: r#"{"path":"data.txt"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response(&["done"]));
+
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()))
+        .await
+        .unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("read the file"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-rf"));
+    let fco = fco.expect("follow-up must contain FunctionCallOutput for cid-rf");
+    if let InputItem::FunctionCallOutput { output, .. } = fco {
+        assert!(
+            output.contains("xai-read-sentinel-abc123"),
+            "read_file result must contain file content; got: {output}"
+        );
+    }
+}
