@@ -132,8 +132,32 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `--queue-group` / `A2A_GATEWAY_QUEUE_GROUP` | no | — | Optional NATS queue group for gateway subscribers; unset ⇒ ephemeral subscriber |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth via `NatsConfig::from_env` |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
+| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | no | — | Enables Wasmtime-hosted substrate Tier-3 redaction + noop Tier-2 seam on ingress |
+| `A2A_GATEWAY_POLICY_SKILLS` | no | — | Comma-separated skill slugs; preload `{skill}.wasm` bundles from `A2A_GATEWAY_POLICY_BUNDLE_DIR` (missing files skipped) |
+| `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
+| `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
+
+Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 
 CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
+
+---
+
+### `a2a-bridge`
+
+HTTPS shim that exchanges NATS-signed JWT mints for gateway unary + SSE task streams (`AsyncNatsToken*` clients).
+
+| Variable | Required | Default | Meaning |
+|----------|----------|---------|---------|
+| `A2A_BRIDGE_TRANSPORT` | no | `stub` | **`nats`** enables anonymous bootstrap `ConnectOptions::connect(NATS_URL)` + `AuthCalloutJsonMintClient<AsyncNatsAuthMintWire>` + publisher/JetStream ports |
+| `NATS_URL` | NATS transport | `nats://127.0.0.1:4222` | Servers for bootstrap + bearer connections |
+| `BRIDGE_LISTEN_ADDR` | no | `127.0.0.1:7443` | HTTPS listen address |
+| `BRIDGE_CONNECT_TIMEOUT_SECS` | no | `30` | Dial budget when transport is `nats` |
+| `BRIDGE_AUTH_MINT_TIMEOUT_SECS` | no | `30` | Budget for mint replies on `AUTH_CALLOUT_MINT_SUBJECT` |
+| `BRIDGE_GATEWAY_RPC_TIMEOUT_SECS` | no | `180` | Unary RPC + SSE consumer wiring budget |
+| `AUTH_CALLOUT_MINT_SUBJECT` | no | `a2a.bridge.auth.callout.request` | Override JSON-RPC mint NATS subject (`AuthCalloutJsonMintClient::<AsyncNatsAuthMintWire>::default_mint_subject()`) |
+
+Source: [`a2a-bridge/src/main.rs`](../../rsworkspace/crates/a2a-bridge/src/main.rs), [`inbound.rs`](../../rsworkspace/crates/a2a-bridge/src/inbound.rs).
 
 ---
 
