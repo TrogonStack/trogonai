@@ -31,7 +31,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 ## Phase 3 — push delivery & redaction
 
 - [ ] Tier 3 authoritative redaction in the gateway beyond preload-only skill hosts — deterministic policies, refusal semantics, telemetry once Tier 2 CEL enforces payloads (engine/module loader/skills ship in `a2a-redaction`; gateway invokes substrate when bundles configured).
-- [ ] End-to-end principal propagation into push DLQ `caller_id` once auth-callout is deployed — `CallerId::from_principal` keys off `SpiceDbPrincipal.spicedb_subject`; the `_` fallback only triggers when the minted JWT principal omits it.
+- [ ] End-to-end principal propagation into push DLQ `caller_id` — code wiring landed in agent `Bridge` / `message/stream` (`PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`); populates when JWT principal arrives via deployed auth-callout + gateway header forward. Still requires deployed mint.
 
 **Shipped (Phase 3):** Gateway-side push DLQ mirror — env-gated JetStream pull consumer republishes agent DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`**; exactly-once dedup across agent + mirror paths remains deferred ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)).
 
@@ -53,5 +53,5 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits atop the Wasmtime preload + unary deadline scaffolding now in-tree (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` ship today).
 3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping on the gateway request path (federated **`SpiceDbImportGate`** landed in `a2a-nats::catalog::import_gate`).
 4. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
-5. Hardened push residuals — end-to-end principal propagation once auth-callout deployed (gateway-side DLQ mirror already shipped, env-gated).
+5. Hardened push residuals — principal → DLQ `caller_id` wiring shipped in-tree; live when auth-callout + gateway header forward deploy (gateway-side DLQ mirror already shipped, env-gated).
 6. `a2a-bridge` env-gated **`A2A_BRIDGE_TRANSPORT=nats`** bootstrap (mint unary + unary gateway + SSE JetStream) alongside federated discovery exports + cross-binding collaboration tests (`stub` stays default so unit tests skip live NATS).

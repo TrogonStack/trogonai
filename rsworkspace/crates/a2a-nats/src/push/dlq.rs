@@ -110,6 +110,8 @@ pub(crate) async fn publish_push_delivery_failure<J>(
 mod tests {
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
+    use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
+    use crate::push::resolve_push_dlq_caller_id;
 
     #[test]
     fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
@@ -153,5 +155,35 @@ mod tests {
             serde_json::Value::String(s) => assert!(s.contains('\u{fffd}')),
             _ => panic!("expected string fallback"),
         }
+    }
+
+    #[test]
+    fn resolve_absent_principal_keeps_fallback_caller_segment() {
+        let fallback = CallerId::default();
+        assert_eq!(
+            resolve_push_dlq_caller_id(None, &fallback).as_str(),
+            DEFAULT_PUSH_DLQ_CALLER_SEGMENT
+        );
+    }
+
+    #[test]
+    fn resolve_principal_with_spicedb_subject_builds_dlq_subject() {
+        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+        let tid = A2aTaskId::new("task7").unwrap();
+        let p = a2a_auth_callout::SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "c1.d2"}));
+        let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
+        assert_eq!(push_dlq_publish_subject(&prefix, &cid, &tid), "a2a.push.dlq.c1_d2.task7");
+    }
+
+    #[test]
+    fn resolve_principal_without_spicedb_subject_falls_back() {
+        let prefix = A2aPrefix::new("a2a".to_string()).unwrap();
+        let tid = A2aTaskId::new("task7").unwrap();
+        let p = a2a_auth_callout::SpiceDbPrincipal(serde_json::json!({}));
+        let cid = resolve_push_dlq_caller_id(Some(&p), &CallerId::default());
+        assert_eq!(
+            push_dlq_publish_subject(&prefix, &cid, &tid),
+            "a2a.push.dlq._.task7"
+        );
     }
 }

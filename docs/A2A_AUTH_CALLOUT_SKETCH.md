@@ -150,7 +150,7 @@ Where Phase 0 auth callout work meets in-tree crates today (mostly seams and pla
 - **Field:** `Config::push_dlq_caller_segment` (builder: `with_push_dlq_caller_segment`)
 - **Default:** `"_"` (`DEFAULT_PUSH_DLQ_CALLER_SEGMENT` in `constants.rs`) when no richer identity is available.
 - **Used by:** agent `Bridge` / `message/stream` terminal push path → JetStream publish to `{prefix}.push.dlq.{caller_id}.{task_id}` (`push::dlq`).
-- **When agents run behind minted identities:** propagate JWT-derived **`caller_id`** into agent runtime config (env or bootstrap hook — **not wired in-tree yet**). Operators/agents should set the segment to the same token-safe value the callout encodes in ACLs so DLQ subjects align with `_INBOX.{caller_id}.>` and push consumer ACLs.
+- **When agents run behind minted identities:** gateway ingress forwards JWT `data` on NATS header **`X-A2a-Spicedb-Principal`**; agent **`Bridge`** reads it via **`PrincipalCarrier`** and derives DLQ **`{caller_id}`** from **`spicedb_subject`** (`CallerId::from_principal`). Code-side wiring is in-tree; population requires deployed auth-callout mint + gateway forward. **`A2A_PUSH_DLQ_CALLER_SEGMENT`** remains the fallback when no principal arrives.
 - **Constraint:** `{caller_id}` must be a **single NATS subject token** (no `.`); `push/dlq.rs` documents this invariant.
 
 ### Cross-cutting flow (Phase 0 target)
