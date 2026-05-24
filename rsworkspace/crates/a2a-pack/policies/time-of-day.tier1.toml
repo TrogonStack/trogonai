@@ -1,0 +1,17 @@
+_doc = """
+UTC business-hours deny (operational proxy). The Tier-1 declarative schema has
+no time predicates (needs extension, e.g. kind=time_utc_between). Until then,
+operators swap A2A_GATEWAY_TIER1_BUNDLE_DIR between this after-hours profile
+(deny-all) and an empty directory during open hours (default allow). Future
+shape: [[rule.matches]] kind = \"time_utc_between\" pattern = \"09:00-17:00\"
+with weekday constraints.
+"""
+
+[[rule]]
+id = "deny-all-after-hours"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "*"
