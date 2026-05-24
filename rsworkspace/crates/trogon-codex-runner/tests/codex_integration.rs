@@ -2192,3 +2192,152 @@ async fn ext_list_children_only_returns_direct_children_not_grandchildren_integr
         })
         .await;
 }
+
+// ── Fix 4: ToolStarted/ToolCompleted → PortableBlocks in history ──────────────
+
+/// When the mock subprocess emits a tool event pair (`MOCK_SEND_TOOL_EVENT=1`),
+/// `session/export` must include an assistant message with `PortableBlock::ToolCall`
+/// and a user message with `PortableBlock::ToolResult`.
+///
+/// This exercises Fix 4: the `TurnCompleted` handler writes separate history entries
+/// for tool_call_blocks and tool_result_blocks.
+#[tokio::test(flavor = "current_thread")]
+async fn codex_tool_events_written_as_portable_blocks_in_export() {
+    use trogon_runner_tools::portable_session::PortableBlock;
+
+    let _guard = bin_env_lock().lock().await;
+    unsafe { std::env::set_var("MOCK_SEND_TOOL_EVENT", "1") };
+    unsafe { std::env::set_var("MOCK_SEND_N_TEXT_EVENTS", "1") };
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let session_id = sess.session_id.to_string();
+
+            let resp = agent
+                .prompt(PromptRequest::new(
+                    session_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("run tool"))],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+            let raw_params = serde_json::value::RawValue::from_string(
+                serde_json::json!({ "sessionId": session_id }).to_string(),
+            )
+            .unwrap();
+            let export_resp = agent
+                .ext_method(ExtRequest::new("session/export", raw_params.into()))
+                .await
+                .expect("session/export must succeed after prompt with tool events");
+
+            let msgs: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+                serde_json::from_str(export_resp.0.get())
+                    .expect("export must be valid PortableMessage JSON");
+
+            // Expected layout:
+            //   [0] user: "run tool"
+            //   [1] assistant: "[tool call]"   blocks: [ToolCall{bash}]
+            //   [2] user: ""                   blocks: [ToolResult{hi}]
+            //   [3] assistant: "event 0"
+            assert_eq!(
+                msgs.len(),
+                4,
+                "must have user + tool_call + tool_result + assistant; got: {msgs:?}"
+            );
+
+            let has_tool_call = msgs.iter().any(|m| {
+                m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolCall { name, .. } if name == "bash"))
+            });
+            assert!(
+                has_tool_call,
+                "export must contain PortableBlock::ToolCall for 'bash'; got: {msgs:?}"
+            );
+
+            let has_tool_result = msgs.iter().any(|m| {
+                m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { content, .. } if content.contains("hi")))
+            });
+            assert!(
+                has_tool_result,
+                "export must contain PortableBlock::ToolResult with 'hi' output; got: {msgs:?}"
+            );
+        })
+        .await;
+    unsafe { std::env::remove_var("MOCK_SEND_TOOL_EVENT") };
+    unsafe { std::env::remove_var("MOCK_SEND_N_TEXT_EVENTS") };
+}
+
+// ── Fix 5: pending_history content reaches subprocess ────────────────────────
+
+/// After `session/import`, the first `prompt` must prepend the imported history
+/// as "Prior conversation: ..." to the `userInput` sent to the subprocess in
+/// the `turn/start` JSON-RPC request.
+///
+/// Verified by having the mock binary record `params.userInput` from the first
+/// `turn/start` call to a temp file (`MOCK_RECORD_TURN_INPUT_FILE`).
+#[tokio::test(flavor = "current_thread")]
+async fn codex_pending_history_prepended_in_subprocess_turn_start() {
+    let _guard = bin_env_lock().lock().await;
+
+    let record_file = tempfile::NamedTempFile::new().unwrap();
+    let record_path = record_file.path().to_str().unwrap().to_string();
+    unsafe { std::env::set_var("MOCK_RECORD_TURN_INPUT_FILE", &record_path) };
+
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = make_agent().await;
+            let sess = agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let session_id = sess.session_id.to_string();
+
+            // Import two messages as prior history.
+            let import_body = format!(
+                r#"{{"sessionId":"{}","messages":[{{"role":"user","text":"prior question"}},{{"role":"assistant","text":"prior answer"}}]}}"#,
+                session_id
+            );
+            let import_params =
+                serde_json::value::RawValue::from_string(import_body).unwrap();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params.into()))
+                .await
+                .expect("session/import must succeed");
+
+            // Prompt — this is the first turn, so pending_history must be prepended.
+            agent
+                .prompt(PromptRequest::new(
+                    session_id,
+                    vec![ContentBlock::Text(TextContent::new("follow-up question"))],
+                ))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    unsafe { std::env::remove_var("MOCK_RECORD_TURN_INPUT_FILE") };
+
+    let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
+    assert!(
+        recorded.contains("Prior conversation:"),
+        "subprocess userInput must begin with 'Prior conversation:' prefix; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("prior question"),
+        "subprocess userInput must include the imported user message; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("prior answer"),
+        "subprocess userInput must include the imported assistant message; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("follow-up question"),
+        "subprocess userInput must end with the actual user prompt; got: {recorded:?}"
+    );
+}
