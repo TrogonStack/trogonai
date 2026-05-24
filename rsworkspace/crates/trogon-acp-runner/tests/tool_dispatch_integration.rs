@@ -613,3 +613,285 @@ async fn acp_notebook_edit_tool_dispatched_via_wire_format() {
         "notebook cell must be updated on disk by notebook_edit; got: {source}"
     );
 }
+
+// ── read_file → ACP wire ──────────────────────────────────────────────────────
+
+/// `read_file` dispatched via ACP wire format — the file content appears in
+/// the tool_result sent in the second Anthropic API call.
+#[tokio::test]
+async fn acp_read_file_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("readme.txt"), "acp-read-sentinel-xyz\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-readfile";
+    let session_id = "sess-acp-readfile-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("acp-read-sentinel-xyz");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("file read"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_readfile_001",
+                "read_file",
+                serde_json::json!({"path": "readme.txt"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "read file", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after read_file dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "tool_result with file content must be hit once");
+}
+
+// ── write_file → ACP wire ─────────────────────────────────────────────────────
+
+/// `write_file` dispatched via ACP wire format — the file is created on disk
+/// and "OK" appears in the tool_result.
+#[tokio::test]
+async fn acp_write_file_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-writefile";
+    let session_id = "sess-acp-writefile-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("file written"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_writefile_001",
+                "write_file",
+                serde_json::json!({"path": "new.rs", "content": "fn hello() {}\n"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "write file", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after write_file dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for write_file");
+    let on_disk = std::fs::read_to_string(dir.path().join("new.rs")).unwrap();
+    assert_eq!(on_disk, "fn hello() {}\n", "write_file must persist content to disk");
+}
+
+// ── str_replace → ACP wire ────────────────────────────────────────────────────
+
+/// `str_replace` dispatched via ACP wire format — the file is edited and the
+/// diff appears in the tool_result sent to Anthropic.
+#[tokio::test]
+async fn acp_str_replace_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("code.rs"), "fn old_impl() {}\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-strreplace";
+    let session_id = "sess-acp-strreplace-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("replaced"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_strreplace_001",
+                "str_replace",
+                serde_json::json!({
+                    "path": "code.rs",
+                    "old_str": "fn old_impl()",
+                    "new_str": "fn new_impl()"
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "replace", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after str_replace dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for str_replace");
+    let on_disk = std::fs::read_to_string(dir.path().join("code.rs")).unwrap();
+    assert!(
+        on_disk.contains("fn new_impl()"),
+        "str_replace must apply the edit on disk; got: {on_disk}"
+    );
+    assert!(
+        !on_disk.contains("fn old_impl()"),
+        "old text must be removed from disk; got: {on_disk}"
+    );
+}
+
+// ── glob → ACP wire ───────────────────────────────────────────────────────────
+
+/// `glob` dispatched via ACP wire format — matching filenames appear in the
+/// tool_result sent in the second Anthropic API call.
+#[tokio::test]
+async fn acp_glob_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("match.rs"), "fn x() {}").unwrap();
+    std::fs::write(dir.path().join("ignore.txt"), "not rust").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-glob";
+    let session_id = "sess-acp-glob-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("match.rs");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("glob done"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_glob_001",
+                "glob",
+                serde_json::json!({"pattern": "**/*.rs"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "glob", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after glob dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "tool_result with match.rs must be hit once for glob");
+}
+
+// ── fetch_url → ACP wire ──────────────────────────────────────────────────────
+
+/// `fetch_url` dispatched via ACP wire format — the fetched page content
+/// appears in the tool_result sent in the second Anthropic API call.
+#[tokio::test]
+async fn acp_fetch_url_tool_dispatched_via_wire_format() {
+    use httpmock::prelude::*;
+
+    // Server that serves the URL being fetched.
+    let target_server = MockServer::start();
+    target_server.mock(|when, then| {
+        when.method(GET).path("/page");
+        then.status(200)
+            .header("content-type", "text/html")
+            .body("<html><body><p>acp-fetch-sentinel</p></body></html>");
+    });
+    let target_url = target_server.url("/page");
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-fetchurl";
+    let session_id = "sess-acp-fetchurl-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let api_server = MockServer::start();
+    let second_mock = api_server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("acp-fetch-sentinel");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("fetched"));
+    });
+    api_server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_fetch_001",
+                "fetch_url",
+                serde_json::json!({"url": target_url}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&api_server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "fetch", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after fetch_url dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "tool_result with fetched content must appear in second Anthropic API call"
+    );
+}

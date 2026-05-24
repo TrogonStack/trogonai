@@ -769,6 +769,126 @@ async fn or_notebook_edit_tool_dispatched_via_wire_format() {
         .await;
 }
 
+// ── write_file → OR wire ─────────────────────────────────────────────────────
+
+/// `write_file` dispatched via OR wire format — file is created on disk and
+/// the tool result is sent in the second OpenRouter API call.
+#[tokio::test]
+async fn or_write_file_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "write_file",
+        r#"{"path":"output.rs","content":"fn main() {}\n"}"#,
+        "call_wf_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            let result = agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("write file")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "expected end_turn: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+                .expect("second API call must include a tool-role message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "write_file must be dispatched; got: {}",
+                tool_msg.content
+            );
+
+            let on_disk = std::fs::read_to_string(dir.path().join("output.rs"))
+                .expect("write_file must create output.rs on disk");
+            assert!(
+                on_disk.contains("fn main()"),
+                "file content must match; got: {on_disk}"
+            );
+        })
+        .await;
+}
+
+// ── str_replace → OR wire ─────────────────────────────────────────────────────
+
+/// `str_replace` dispatched via OR wire format — edit is applied on disk and
+/// the tool result is sent in the second OpenRouter API call.
+#[tokio::test]
+async fn or_str_replace_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("code.rs"), "fn old_impl() {}\n").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "str_replace",
+        r#"{"path":"code.rs","old_str":"fn old_impl()","new_str":"fn new_impl()"}"#,
+        "call_str_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            let result = agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("replace fn")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "expected end_turn: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+                .expect("second API call must include a tool-role message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "str_replace must be dispatched; got: {}",
+                tool_msg.content
+            );
+            assert!(
+                !tool_msg.content.starts_with("Error"),
+                "str_replace must succeed; got: {}",
+                tool_msg.content
+            );
+
+            let on_disk = std::fs::read_to_string(dir.path().join("code.rs"))
+                .expect("code.rs must still exist after str_replace");
+            assert!(
+                on_disk.contains("fn new_impl()"),
+                "file must contain replacement; got: {on_disk}"
+            );
+            assert!(
+                !on_disk.contains("fn old_impl()"),
+                "file must not contain old text; got: {on_disk}"
+            );
+        })
+        .await;
+}
+
 // ── OR fork inherits disabled tool excluded from wire ─────────────────────────
 
 /// A forked session must inherit the parent's disabled tools and exclude them
