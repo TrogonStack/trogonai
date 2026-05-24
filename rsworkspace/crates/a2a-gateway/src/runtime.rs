@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
-use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
+use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
 use a2a_nats::constants::{DEFAULT_OPERATION_TIMEOUT, GATEWAY_CALLER_ID_HEADER};
 use a2a_nats::{
     gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
@@ -334,6 +334,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 } else {
                     rules_fired.push("gateway.tier2.layer_disabled".into());
                 }
+                let (rewrites, stream_consumer) =
+                    gateway_forward_audit_extras(ingress_subject, &agent_subject, &agent_id, method_dots.as_str());
 
                 match disposition {
                     ForwardDisposition::Ok => {
@@ -354,7 +356,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 AuditEnvelopeFields {
                                     trace_id: Some(trace_id),
                                     rules_fired: Some(rules_fired),
-                                    ..Default::default()
+                                    rewrites,
+                                    stream_consumer,
                                 },
                             ),
                         );
@@ -388,7 +391,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 AuditEnvelopeFields {
                                     trace_id: Some(trace_id),
                                     rules_fired: Some(rules_fired),
-                                    ..Default::default()
+                                    rewrites,
+                                    stream_consumer,
                                 },
                             ),
                         );
@@ -428,7 +432,8 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 AuditEnvelopeFields {
                                     trace_id: Some(trace_id),
                                     rules_fired: Some(rules_fired),
-                                    ..Default::default()
+                                    rewrites,
+                                    stream_consumer,
                                 },
                             ),
                         );
@@ -583,9 +588,10 @@ fn spawn_gateway_audit_publish(
 
 #[cfg(test)]
 mod gateway_dispatch_tests {
-    use trogon_std::env::InMemoryEnv;
-
+    use a2a_nats::agent_id::A2aAgentId;
+    use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
     use a2a_nats::resolve_gateway_ingress_subject;
+    use trogon_std::env::InMemoryEnv;
 
     use super::*;
     use crate::Args;
@@ -600,6 +606,34 @@ mod gateway_dispatch_tests {
         config_from_args(args, &env).unwrap().0
     }
 
+    fn test_agent() -> A2aAgentId {
+        A2aAgentId::new("planner").unwrap()
+    }
+
+    fn forward_audit_fields(
+        ingress_subject: &str,
+        agent_subject: &str,
+        agent_id: &A2aAgentId,
+        method_dots: &str,
+    ) -> AuditEnvelopeFields {
+        let (rewrites, stream_consumer) =
+            gateway_forward_audit_extras(ingress_subject, agent_subject, agent_id, method_dots);
+        AuditEnvelopeFields {
+            trace_id: Some("trace-test".into()),
+            rules_fired: Some(vec!["gateway.tier2.layer_disabled".into()]),
+            rewrites,
+            stream_consumer,
+        }
+    }
+
+    fn denial_audit_fields() -> AuditEnvelopeFields {
+        AuditEnvelopeFields {
+            trace_id: Some("trace-test".into()),
+            rules_fired: Some(vec!["gateway.tier2.predicate_denied_false".into()]),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn dispatch_builds_publish_args_from_valid_ingress_subject() {
         let cfg = test_config("a2a");
@@ -607,5 +641,98 @@ mod gateway_dispatch_tests {
             resolve_gateway_ingress_subject("a2a.gateway.planner.message.send", &cfg.a2a_prefix).unwrap(),
             "a2a.agent.planner.message.send"
         );
+    }
+
+    #[test]
+    fn forward_ok_audit_includes_rewrite_and_omits_stream_consumer_for_unary() {
+        let agent = test_agent();
+        let ingress = "a2a.gateway.planner.message.send";
+        let agent_subject = "a2a.agent.planner.message.send";
+        let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.send");
+        let envelope = AuditEnvelope::new(
+            &agent,
+            "message/send",
+            None,
+            0,
+            0,
+            AuditOutcome::Ok,
+            None,
+            extras,
+        );
+        let json = serde_json::to_value(envelope).unwrap();
+        assert_eq!(
+            json["rewrites"],
+            serde_json::json!(["ingress:a2a.gateway.planner.message.send -> agent:a2a.agent.planner.message.send"])
+        );
+        assert!(json.get("stream_consumer").is_none());
+    }
+
+    #[test]
+    fn forward_ok_audit_includes_stream_consumer_for_message_stream() {
+        let agent = test_agent();
+        let ingress = "a2a.gateway.planner.message.stream";
+        let agent_subject = "a2a.agent.planner.message.stream";
+        let extras = forward_audit_fields(ingress, agent_subject, &agent, "message.stream");
+        let envelope = AuditEnvelope::new(
+            &agent,
+            "message/stream",
+            None,
+            0,
+            0,
+            AuditOutcome::Ok,
+            None,
+            extras,
+        );
+        let json = serde_json::to_value(envelope).unwrap();
+        assert_eq!(json["stream_consumer"], "gateway.planner.message.stream");
+        assert!(json["rewrites"].is_array());
+    }
+
+    #[test]
+    fn forward_err_audit_includes_rewrite_for_resubscribe() {
+        let agent = test_agent();
+        let ingress = "a2a.gateway.planner.tasks.resubscribe";
+        let agent_subject = "a2a.agent.planner.tasks.resubscribe";
+        let extras = forward_audit_fields(ingress, agent_subject, &agent, "tasks.resubscribe");
+        let envelope = AuditEnvelope::new(
+            &agent,
+            "tasks/resubscribe",
+            None,
+            0,
+            0,
+            AuditOutcome::Err {
+                code: -32_803,
+                message: "gateway failed to publish".into(),
+            },
+            None,
+            extras,
+        );
+        let json = serde_json::to_value(envelope).unwrap();
+        assert_eq!(json["stream_consumer"], "gateway.planner.tasks.resubscribe");
+        assert_eq!(
+            json["rewrites"],
+            serde_json::json!(["ingress:a2a.gateway.planner.tasks.resubscribe -> agent:a2a.agent.planner.tasks.resubscribe"])
+        );
+    }
+
+    #[test]
+    fn policy_denied_audit_omits_rewrite_and_stream_consumer() {
+        let agent = test_agent();
+        let envelope = AuditEnvelope::new(
+            &agent,
+            "message/send",
+            None,
+            0,
+            0,
+            AuditOutcome::Err {
+                code: -32_801,
+                message: "tier-2 predicate rejected envelope".into(),
+            },
+            None,
+            denial_audit_fields(),
+        );
+        let json = serde_json::to_value(envelope).unwrap();
+        assert!(json.get("rewrites").is_none());
+        assert!(json.get("stream_consumer").is_none());
     }
 }
