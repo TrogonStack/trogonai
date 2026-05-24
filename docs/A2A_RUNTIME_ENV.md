@@ -59,6 +59,7 @@ NATS agent bridge: subscribes on `{prefix}.agent.{agent_id}.*`, provisions JetSt
 | `A2A_MAX_CONCURRENT_CLIENT_TASKS` | no | 256 | Via `apply_timeout_overrides` |
 | `A2A_PUSH_DLQ_CALLER_SEGMENT` | no | `_` | Via `apply_timeout_overrides` |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
+| `A2A_EVENTS_MAX_AGE_SECS` | no | 86400 (24h) | Per-Account **`A2A_EVENTS`** JetStream `max_age` at provision time |
 
 Source: [`a2a-nats-agent/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-agent/src/runtime.rs).
 
@@ -141,6 +142,11 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
 | `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](./A2A_PUSH_DLQ_OPS.md)) |
 | `A2A_GATEWAY_PUSH_DLQ_DURABLE` | no | `a2a-gateway-push-dlq-mirror` | Durable name for the gateway push DLQ mirror consumer when mirror mode is enabled |
+| `A2A_GATEWAY_EVENTS_PULL` | no | off | Truthy spawns durable JetStream pull consumer on **`A2A_EVENTS`** (`{prefix}.task.*.events.*`); forwards to **`{prefix}.gateway.egress.{req_id}`** |
+| `A2A_GATEWAY_EVENTS_MAX_ACK_PENDING` | no | `1024` | JetStream **`max_ack_pending`** for the gateway events consumer |
+| `A2A_GATEWAY_EVENTS_FETCH_BATCH` | no | `1` | Pull fetch batch size (flow-control boundary) |
+| `A2A_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS` | no | `5` | Pull fetch heartbeat interval |
+| `A2A_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER` | no | `32` | Max concurrent in-flight forwards per **`req_id`** (caller fan-out cap) |
 
 Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 

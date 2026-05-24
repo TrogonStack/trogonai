@@ -21,6 +21,7 @@ use uuid::Uuid;
 use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
+use crate::gw_pull_backpressure;
 use crate::policy::tier2::{CelProgramRef, PolicyEnvelopeBlob};
 use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
 
@@ -117,6 +118,26 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         info!(
             durable = %mirror_settings.durable.as_str(),
             "push DLQ mirror background task started"
+        );
+    }
+
+    if gw_pull_backpressure::gateway_events_pull_enabled(env) {
+        let pull_client = client.clone();
+        let pull_prefix = config.a2a_prefix.clone();
+        let pull_config = gw_pull_backpressure::GatewayEventsPullConfig::from_env(env);
+        let pull_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            gw_pull_backpressure::run_gateway_events_pull(
+                pull_client,
+                pull_prefix,
+                pull_config,
+                pull_shutdown,
+            )
+            .await;
+        });
+        info!(
+            prefix = %config.a2a_prefix,
+            "gateway events pull consumer task spawned (A2A_GATEWAY_EVENTS_PULL=on)"
         );
     }
 
