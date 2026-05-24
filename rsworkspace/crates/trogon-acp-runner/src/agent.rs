@@ -485,9 +485,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 || needs_perm
                 || needs_elic
                 || gateway.is_some()
-                || self.execution_nats.is_some();
+                || self.execution_nats.is_some()
+                || !state.cwd.is_empty();
             if needs_clone {
                 let mut a = (*self.agent).clone();
+                if !state.cwd.is_empty() {
+                    a.set_cwd(state.cwd.clone());
+                }
                 if let Some(ref model) = state.model {
                     a.set_model(model.clone());
                 }

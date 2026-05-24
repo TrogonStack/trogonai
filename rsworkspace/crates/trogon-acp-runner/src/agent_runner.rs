@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use trogon_agent_core::agent_loop::{AgentError, AgentEvent, ElicitationProvider, Message, PermissionChecker};
 use trogon_agent_core::tools::ToolDef;
+use trogon_tools::ToolContext;
 
 use crate::agent::GatewayConfig;
 
@@ -35,6 +36,9 @@ pub trait AgentRunner: Clone {
 
     /// Override proxy / token / extra-headers from a `GatewayConfig`.
     fn apply_gateway(&mut self, config: &GatewayConfig);
+
+    /// Set the working directory used by file tools for this session.
+    fn set_cwd(&mut self, cwd: String);
 
     /// Stream agent events while running the LLM tool-use loop.
     ///
@@ -85,6 +89,14 @@ impl AgentRunner for trogon_agent_core::agent_loop::AgentLoop {
         self.anthropic_base_url = Some(config.base_url.clone());
         self.anthropic_token = config.token.clone();
         self.anthropic_extra_headers = config.extra_headers.clone();
+    }
+
+    fn set_cwd(&mut self, cwd: String) {
+        self.tool_context = Arc::new(ToolContext {
+            cwd,
+            proxy_url: self.tool_context.proxy_url.clone(),
+            http_client: self.tool_context.http_client.clone(),
+        });
     }
 
     async fn run_chat_streaming(
@@ -371,6 +383,8 @@ pub mod mock {
         }
 
         fn apply_gateway(&mut self, _config: &GatewayConfig) {}
+
+        fn set_cwd(&mut self, _cwd: String) {}
 
         async fn run_chat_streaming(
             &self,

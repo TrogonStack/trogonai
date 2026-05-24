@@ -49,6 +49,10 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+fn invalid_params(msg: impl Into<String>) -> Error {
+    Error::new(ErrorCode::InvalidParams.into(), msg.into())
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -477,7 +481,7 @@ where
             .iter()
             .any(|m| m.model_id.0.as_ref() == model_id)
         {
-            return Err(internal_error(format!("unknown model: {model_id}")));
+            return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
         let mut sessions = self.sessions.lock().await;
@@ -531,7 +535,7 @@ where
             s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
                 "user", user_input.clone(),
             ));
-            (s.thread_id.clone(), s.model.clone(), ph)
+            (s.thread_id.clone(), s.model.clone().or_else(|| Some(self.default_model.clone())), ph)
         };
 
         let user_input = if let Some(prior) = pending_history {
