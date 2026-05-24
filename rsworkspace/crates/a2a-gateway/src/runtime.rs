@@ -1,12 +1,28 @@
 use std::fmt;
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use a2a_nats::{NatsConfig, ingress_invalid_request_response_bytes, resolve_gateway_ingress_subject};
+use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
+use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
+use a2a_nats::constants::{DEFAULT_OPERATION_TIMEOUT, GATEWAY_CALLER_ID_HEADER};
+use a2a_nats::{
+    gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
+    ingress_gateway_policy_denied_response_bytes, ingress_invalid_request_response_bytes, NatsConfig,
+};
+use a2a_redaction::wasm_bundle_path::WasmBundlePath;
+use a2a_redaction::SkillId;
 use async_nats::HeaderMap;
+use bytes::Bytes;
 use futures::stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, warn};
+use uuid::Uuid;
+
+use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
+use crate::policy::tier2::{CelProgramRef, PolicyEnvelopeBlob};
+use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -57,6 +73,8 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         .await
         .map_err(RuntimeError::NatsConnect)?;
 
+    let policy_layer = wasm_policy_layer_from_env(env);
+
     let gateway_subject_string = config.gateway_subscribe_subject();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
 
@@ -96,7 +114,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
             incoming = ingress.next() => {
                 match incoming {
                     Some(msg) => {
-                        dispatch_gateway_ingress(&client, &config, msg).await;
+                        dispatch_gateway_ingress(&client, &config, policy_layer.as_ref(), env, msg).await;
                     }
                     None => {
                         warn!("gateway ingress NATS subscription closed");
@@ -113,7 +131,13 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
     Ok(())
 }
 
-async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, msg: async_nats::Message) {
+async fn dispatch_gateway_ingress<E: ReadEnv>(
+    client: &async_nats::Client,
+    config: &Config,
+    policy: Option<&Arc<WasmtimeSubstrate>>,
+    env: &E,
+    msg: async_nats::Message,
+) {
     let ingress_subject = msg.subject.as_str();
     let reply_present = msg.reply.is_some();
 
@@ -121,7 +145,7 @@ async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, 
         "gateway.ingress.dispatch",
         gateway_ingress.subject = %ingress_subject,
         ingress.reply_present = reply_present,
-        caller_id = tracing::field::Empty, // future: JWT-derived identity from auth-callout
+        caller_id = tracing::field::Empty,
         agent_subject = tracing::field::Empty,
         routing_outcome = tracing::field::Empty,
     );
@@ -145,9 +169,121 @@ async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, 
             return;
         };
 
-        match resolve_gateway_ingress_subject(msg.subject.as_str(), &config.a2a_prefix) {
-            Ok(agent_subject) => {
+        match gateway_ingress_agent_and_method_dots(msg.subject.as_str(), &config.a2a_prefix) {
+            Ok((agent_id, method_dots)) => {
+                let agent_subject = format!(
+                    "{}.agent.{}.{}",
+                    config.a2a_prefix.as_str(),
+                    agent_id.as_str(),
+                    method_dots
+                );
+                let headers_owned = msg.headers.unwrap_or_default();
+                let caller_slug = gateway_caller_id_from_headers(&headers_owned);
+                if let Some(ref slug) = caller_slug
+                    && !slug.is_empty()
+                {
+                    tracing::Span::current().record("caller_id", slug.as_str());
+                }
                 tracing::Span::current().record("agent_subject", tracing::field::display(&agent_subject));
+                let payload = msg.payload.clone();
+                let started_mono = Instant::now();
+                let started_wall_ms = unix_epoch_ms();
+                let trace_id = Uuid::new_v4().to_string();
+                let audit_enabled = gateway_audit_publish_enabled(env);
+                let method_slashes = method_dots.replace('.', "/");
+
+                if let Some(sub) = policy {
+                    match sub.tier2.predicate_holds(
+                        CelProgramRef("true"),
+                        PolicyEnvelopeBlob(payload.as_ref()),
+                    ) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            tracing::Span::current().record("routing_outcome", "policy_denied");
+                            warn!(
+                                ingress.subject = %msg.subject,
+                                agent_subject = %agent_subject,
+                                routing_outcome = "policy_denied",
+                                "gateway tier-2 predicate rejected ingress envelope",
+                            );
+                            let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                                payload.as_ref(),
+                                "tier-2 predicate rejected envelope",
+                            ) else {
+                                return;
+                            };
+                            reply_error(client, reply, HeaderMap::new(), body).await;
+                            spawn_gateway_audit_publish(
+                                audit_enabled,
+                                client.clone(),
+                                config.a2a_prefix.clone(),
+                                agent_id.clone(),
+                                AuditEnvelope::new(
+                                    &agent_id,
+                                    method_slashes.clone(),
+                                    json_rpc_audit_req_id(payload.as_ref()),
+                                    started_wall_ms,
+                                    started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                    AuditOutcome::Err {
+                                        code: -32_801,
+                                        message: "tier-2 predicate rejected envelope".into(),
+                                    },
+                                    Some(payload.as_ref()),
+                                    AuditEnvelopeFields {
+                                        trace_id: Some(trace_id.clone()),
+                                        rules_fired: Some(vec![
+                                            "gateway.tier2.predicate_denied_false".into(),
+                                        ]),
+                                        ..Default::default()
+                                    },
+                                ),
+                            );
+                            return;
+                        }
+                        Err(policy_err) => {
+                            tracing::Span::current().record("routing_outcome", "policy_evaluation_error");
+                            warn!(
+                                ingress.subject = %msg.subject,
+                                agent_subject = %agent_subject,
+                                error = %policy_err,
+                                routing_outcome = "policy_evaluation_error",
+                                "gateway tier-2 evaluator error",
+                            );
+                            let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                                payload.as_ref(),
+                                policy_err.to_string(),
+                            ) else {
+                                return;
+                            };
+                            reply_error(client, reply, HeaderMap::new(), body).await;
+                            spawn_gateway_audit_publish(
+                                audit_enabled,
+                                client.clone(),
+                                config.a2a_prefix.clone(),
+                                agent_id.clone(),
+                                AuditEnvelope::new(
+                                    &agent_id,
+                                    method_slashes.clone(),
+                                    json_rpc_audit_req_id(payload.as_ref()),
+                                    started_wall_ms,
+                                    started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                    AuditOutcome::Err {
+                                        code: -32_801,
+                                        message: policy_err.to_string(),
+                                    },
+                                    Some(payload.as_ref()),
+                                    AuditEnvelopeFields {
+                                        trace_id: Some(trace_id.clone()),
+                                        rules_fired: Some(vec!["gateway.tier2.evaluation_error".into()]),
+                                        ..Default::default()
+                                    },
+                                ),
+                            );
+                            return;
+                        }
+                    }
+                }
+
                 debug!(
                     ingress.subject = %msg.subject,
                     agent_subject = %agent_subject,
@@ -155,15 +291,75 @@ async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, 
                     reply = %reply,
                     "gateway forwarding to agent subject",
                 );
-                let headers = msg.headers.unwrap_or_default();
-                match client
-                    .publish_with_reply_and_headers(agent_subject.clone(), reply.clone(), headers, msg.payload)
+
+                enum ForwardDisposition {
+                    Ok,
+                    Deadline,
+                    Publish(async_nats::client::PublishError),
+                }
+
+                let disposition = match unary_deadline_for_method(env, method_dots.as_str()) {
+                    Some(deadline) => match tokio::time::timeout(
+                        deadline,
+                        client.clone().publish_with_reply_and_headers(
+                            async_nats::Subject::from(agent_subject.clone().as_str()),
+                            reply.clone(),
+                            headers_owned.clone(),
+                            payload.clone(),
+                        ),
+                    )
                     .await
-                {
-                    Ok(()) => {
+                    {
+                        Ok(Ok(())) => ForwardDisposition::Ok,
+                        Ok(Err(err)) => ForwardDisposition::Publish(err),
+                        Err(_elapsed) => ForwardDisposition::Deadline,
+                    },
+                    None => match client
+                        .publish_with_reply_and_headers(
+                            async_nats::Subject::from(agent_subject.clone().as_str()),
+                            reply.clone(),
+                            headers_owned,
+                            payload.clone(),
+                        )
+                        .await
+                    {
+                        Ok(()) => ForwardDisposition::Ok,
+                        Err(err) => ForwardDisposition::Publish(err),
+                    },
+                };
+
+                let mut rules_fired: Vec<String> = Vec::new();
+                if policy.is_some() {
+                    rules_fired.push("gateway.tier2.no_op_evaluated_true".into());
+                } else {
+                    rules_fired.push("gateway.tier2.layer_disabled".into());
+                }
+
+                match disposition {
+                    ForwardDisposition::Ok => {
                         tracing::Span::current().record("routing_outcome", "forwarded");
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes,
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Ok,
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id),
+                                    rules_fired: Some(rules_fired),
+                                    ..Default::default()
+                                },
+                            ),
+                        );
                     }
-                    Err(error) => {
+                    ForwardDisposition::Publish(error) => {
                         tracing::Span::current().record("routing_outcome", "forward_failed");
                         warn!(
                             ingress.subject = %msg.subject,
@@ -172,6 +368,69 @@ async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, 
                             routing_outcome = "forward_failed",
                             error = %error,
                             "gateway failed to publish forward to agent subject",
+                        );
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes,
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Err {
+                                    code: -32_803,
+                                    message: format!("gateway failed to publish: {error}"),
+                                },
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id),
+                                    rules_fired: Some(rules_fired),
+                                    ..Default::default()
+                                },
+                            ),
+                        );
+                    }
+                    ForwardDisposition::Deadline => {
+                        tracing::Span::current().record("routing_outcome", "deadline_exceeded");
+                        warn!(
+                            ingress.subject = %msg.subject,
+                            agent_subject = %agent_subject,
+                            method = %method_dots,
+                            routing_outcome = "deadline_exceeded",
+                            "gateway unary publish exceeded deadline before agent reply routing",
+                        );
+                        let Ok(body) = ingress_gateway_deadline_exceeded_response_bytes(
+                            payload.as_ref(),
+                            "gateway publish deadline exceeded for message/send",
+                        ) else {
+                            return;
+                        };
+                        reply_error(client, reply, HeaderMap::new(), body).await;
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes,
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Err {
+                                    code: -32_800,
+                                    message: "gateway publish deadline exceeded for message/send".into(),
+                                },
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id),
+                                    rules_fired: Some(rules_fired),
+                                    ..Default::default()
+                                },
+                            ),
                         );
                     }
                 }
@@ -215,6 +474,111 @@ async fn dispatch_gateway_ingress(client: &async_nats::Client, config: &Config, 
     }
     .instrument(span)
     .await
+}
+
+fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstrate>> {
+    let raw = env.var("A2A_GATEWAY_POLICY_BUNDLE_DIR").ok()?;
+    let dir = raw.trim();
+    if dir.is_empty() {
+        return None;
+    }
+    match WasmtimeSubstrate::try_new(WasmBundlePath::new(dir)) {
+        Err(err) => {
+            warn!(
+                error = %err,
+                bundle_dir = dir,
+                "A2A_GATEWAY_POLICY_BUNDLE_DIR invalid — Wasmtime substrate disabled",
+            );
+            None
+        }
+        Ok(layer) => {
+            let substrate = Arc::new(layer);
+            if let Ok(slugs) = env.var("A2A_GATEWAY_POLICY_SKILLS") {
+                for slug in slugs.split(',').map(str::trim).filter(|slug| !slug.is_empty()) {
+                    let skill_id = SkillId::new(slug);
+                    let wasm_path = substrate.redaction.bundles_base().join_skill_wasm(&skill_id);
+                    match std::fs::read(&wasm_path) {
+                        Err(err) => {
+                            warn!(skill=%slug, path=?wasm_path, error=%err, "skipped gateway policy WASM preload");
+                        }
+                        Ok(bytes) => {
+                            if let Err(err) = substrate.register_redaction_skill(skill_id, &bytes) {
+                                warn!(skill=%slug, error=%err, "gateway failed to register redaction WASM");
+                            }
+                        }
+                    }
+                }
+            }
+            Some(substrate)
+        }
+    }
+}
+
+fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
+    let Ok(flag) = env.var("A2A_GATEWAY_AUDIT_PUBLISH") else {
+        return false;
+    };
+    matches!(
+        flag.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn unary_deadline_for_method<E: ReadEnv>(env: &E, method_dots: &str) -> Option<Duration> {
+    if method_dots != "message.send" {
+        return None;
+    }
+
+    let secs: u64 = env
+        .var("A2A_GATEWAY_UNARY_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_OPERATION_TIMEOUT.as_secs())
+        .max(1);
+
+    Some(Duration::from_secs(secs))
+}
+
+fn gateway_caller_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(GATEWAY_CALLER_ID_HEADER)
+        .and_then(|value| std::str::from_utf8(value.as_ref()).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+}
+
+fn unix_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
+    a2a_nats::extract_request_id(payload).map(|id| id.to_string())
+}
+
+async fn reply_error(client: &async_nats::Client, reply: async_nats::Subject, hdrs: HeaderMap, body: Bytes) {
+    if let Err(error) = client.publish_with_headers(reply, hdrs, body).await {
+        warn!(error=%error, routing_outcome = "error_reply_publish_failed");
+    }
+}
+
+fn spawn_gateway_audit_publish(
+    enabled: bool,
+    client: async_nats::Client,
+    prefix: a2a_nats::A2aPrefix,
+    agent_id: a2a_nats::A2aAgentId,
+    envelope: AuditEnvelope,
+) {
+    if !enabled {
+        return;
+    }
+
+    tokio::spawn(async move {
+        let emitter = NatsAuditEmitter::new(client);
+        emitter.publish(&prefix, &agent_id, envelope).await;
+    });
 }
 
 #[cfg(test)]

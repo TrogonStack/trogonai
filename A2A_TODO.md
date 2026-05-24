@@ -23,34 +23,34 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 ## Phase 2 — streaming & lifecycle
 
 - [ ] CEL → WASM compile path + real `Tier2CelEvaluator` impl to replace `NoopTier2Evaluator` in `a2a-gateway/src/policy/tier2.rs`.
-- [ ] Call `WasmtimeSubstrate` (Tier 2 + Tier 3) from the gateway request path — substrate type exists; ingress doesn't invoke it.
+- [ ] Extend gateway policy stack — authoritative Tier 2 CEL + richer Tier 3 skill matrix beyond preload-only redaction stubs (`A2A_GATEWAY_POLICY_BUNDLE_DIR` / `_SKILLS` already host Wasmtime preload today).
 - [ ] Streaming back-pressure — gateway pull consumer with flow control; `A2A_EVENTS` policy `retention=interest, discard=old`. Ops/design: [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
-- [ ] `message/send` 30s gateway deadline; longer work transitions to `message/stream`.
+- [ ] **`message/send` gateway deadline knobs** (`A2A_GATEWAY_UNARY_DEADLINE_SECS`, inherits [`DEFAULT_OPERATION_TIMEOUT`](./rsworkspace/crates/a2a-nats/src/constants.rs) by default); longer work still expected to migrate to `message/stream`.
 
 ## Phase 3 — push delivery & redaction
 
-- [ ] Tier 3 redaction call site in the gateway request path — engine, module loader, and skill-id dispatch already ship in `a2a-redaction`.
+- [ ] Tier 3 authoritative redaction in the gateway beyond preload-only skill hosts — deterministic policies, refusal semantics, telemetry once Tier 2 CEL enforces payloads (engine/module loader/skills ship in `a2a-redaction`; gateway invokes substrate when bundles configured).
 - [ ] Optional gateway-side `A2A_PUSH_DLQ` mirroring of agent-side DLQ envelopes (agent path already publishes).
 - [ ] End-to-end principal propagation into push DLQ `caller_id` once auth-callout is deployed — `CallerId::from_principal` keys off `SpiceDbPrincipal.spicedb_subject`; the `_` fallback only triggers when the minted JWT principal omits it.
 
 ## Phase 4 — interop & federation
 
-- [ ] `a2a-bridge` production wiring against a deployed auth-callout (axum HTTPS surface, NATS publish/consume, SSE↔JetStream framing already shipped; tests use trait mocks).
-- [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation — gated through `SpiceDbImportGate` at the import boundary.
-- [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge (depends on bridge production wiring and at least Tier 1 + auth-callout).
+- [ ] **`A2A_BRIDGE_TRANSPORT=nats`** path exercised end-to-end against a deployed auth-callout mint (HTTPS surface, unary gateway, SSE ↔ JetStream already wired; **`stub` remains default** for unit/integration without live NATS).
+- [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation — gated through `SpiceDbImportGate` at the import boundary (**stub still returns deny until SpiceDB-backed checks land; use `AllowAllImportGate` for labs — see crates/docs**).
+- [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge (depends on validating **`A2A_BRIDGE_TRANSPORT=nats`** + Tier 1 + deployed auth-callout mint).
 
 ## Cross-cutting
 
-- [ ] `a2a-gateway` request-path wiring — auth-callout client, JWT-derived `caller_id` extraction, `WasmtimeSubstrate` call sites, decision-site `AuditEnvelope` emission. Today the gateway forwards opaquely.
+- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 seam, optional decision-site audit publish, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, richer audit (`rules_fired`, `rewrites`), end-to-end auth-callout verifier in the gateway tier.
 
 ---
 
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines).
-2. Wire `a2a-gateway` request path end-to-end — auth-callout client, `caller_id` extraction, `WasmtimeSubstrate` call sites, decision-site audit envelopes (`rules_fired`, `rewrites`, `trace_id`).
+2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits (`rules_fired`, `rewrites`, stable `trace_id`) atop the Wasmtime preload + unary deadline scaffolding now in-tree.
 3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping, real `SpiceDbImportGate` impl.
-4. Streaming back-pressure (gateway pull consumer + `A2A_EVENTS` policy) and `message/send` 30s gateway deadline.
-5. CEL Tier 2 (compile CEL→WASM at bundle build; replace `NoopTier2Evaluator`) + Tier 3 redaction call site in the request path (engine already in `a2a-redaction`).
+4. Streaming back-pressure (gateway pull consumer + `A2A_EVENTS` policy); unary deadline knobs already wired via env.
+5. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
 6. Hardened push residuals — optional gateway-side DLQ mirroring, end-to-end principal propagation once auth-callout deployed.
-7. `a2a-bridge` production wiring + federated discovery exports + cross-binding collaboration tests.
+7. `a2a-bridge` env-gated **`A2A_BRIDGE_TRANSPORT=nats`** bootstrap (mint unary + unary gateway + SSE JetStream) alongside federated discovery exports + cross-binding collaboration tests (`stub` stays default so unit tests skip live NATS).

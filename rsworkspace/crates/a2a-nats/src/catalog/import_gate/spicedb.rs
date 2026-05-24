@@ -36,7 +36,10 @@ impl ImportGate for SpiceDbImportGate {
         _imported_from: &ImportedAccountName,
         _agent_id: &A2aAgentId,
     ) -> Result<bool, ImportGateError> {
-        // TODO(spicedb-client): Phase 1 gateway SpiceDB integration (see `A2A_TODO.md`).
-        unimplemented!("wired when gateway SpiceDB client lands");
+        // Authzed SpiceDB BulkCheck hooks land in Phase 1. Until `_client` is wired, federation imports deny
+        // rather than succeeding quietly or trapping with `unimplemented!`. Use [`AllowAllImportGate`] for labs.
+        let _ = (&self._client, &self._zed_token_cache);
+        tracing::debug!("SpiceDbImportGate: rejecting import — Authzed client not configured");
+        Ok(false)
     }
 }

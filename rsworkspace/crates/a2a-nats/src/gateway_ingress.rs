@@ -104,6 +104,26 @@ pub fn gateway_ingress_subject_from_agent_subject(agent_subject: &str, prefix: &
     (!remainder.is_empty()).then(|| format!("{}.gateway.{remainder}", prefix.as_str()))
 }
 
+/// Parses ingress subject → validated [`A2aAgentId`] plus dotted RPC method tail (`message.send`, …).
+///
+/// Uses the same matching rules as [`resolve_gateway_ingress_subject`].
+pub fn gateway_ingress_agent_and_method_dots(
+    subject: &str,
+    prefix: &A2aPrefix,
+) -> Result<(A2aAgentId, String), GatewayIngressError> {
+    let agent_subject = resolve_gateway_ingress_subject(subject, prefix)?;
+    let leader = format!("{}.agent.", prefix.as_str());
+    let remainder = agent_subject
+        .strip_prefix(&leader)
+        .ok_or(GatewayIngressError::BadSubjectShape)?;
+    let tokens: Vec<&str> = remainder.split('.').filter(|t| !t.is_empty()).collect();
+    if tokens.len() < 2 {
+        return Err(GatewayIngressError::BadSubjectShape);
+    }
+    let agent_id = A2aAgentId::new(tokens[0]).map_err(|_| GatewayIngressError::InvalidAgentId)?;
+    Ok((agent_id, tokens[1..].join(".")))
+}
+
 /// Resolve ingress subject → core agent RPC subject `{prefix}.agent.{agent_id}.{method…}`.
 pub fn resolve_gateway_ingress_subject(subject: &str, prefix: &A2aPrefix) -> Result<String, GatewayIngressError> {
     let leader = format!("{}.gateway.", prefix.as_str());
@@ -161,6 +181,24 @@ pub fn ingress_invalid_request_response_bytes(
 ) -> Result<bytes::Bytes, serde_json::Error> {
     let id = crate::extract_request_id(request_payload_hint);
     JsonRpcErrorResponse::new(id, -32600, message.into()).to_bytes()
+}
+
+/// Serialize a gateway policy denial reply for the correlating inbox.
+pub fn ingress_gateway_policy_denied_response_bytes(
+    request_payload_hint: &[u8],
+    message: impl Into<String>,
+) -> Result<bytes::Bytes, serde_json::Error> {
+    let id = crate::extract_request_id(request_payload_hint);
+    JsonRpcErrorResponse::new(id, -32_801, message.into()).to_bytes()
+}
+
+/// Serialize an upstream-gateway deadline overrun (-32800 — reserved for `{prefix}.gateway>` deadlines).
+pub fn ingress_gateway_deadline_exceeded_response_bytes(
+    request_payload_hint: &[u8],
+    message: impl Into<String>,
+) -> Result<bytes::Bytes, serde_json::Error> {
+    let id = crate::extract_request_id(request_payload_hint);
+    JsonRpcErrorResponse::new(id, -32_800, message.into()).to_bytes()
 }
 
 #[cfg(test)]
@@ -254,6 +292,19 @@ mod tests {
     fn ingress_from_agent_wrong_leader_returns_none() {
         assert!(gateway_ingress_subject_from_agent_subject("a2a.gateway.x.message.send", &pfx()).is_none());
         assert!(gateway_ingress_subject_from_agent_subject("wrong.agent.x.message.send", &pfx()).is_none());
+    }
+
+    #[test]
+    fn ingress_agent_method_matches_resolve_subject() {
+        let p = pfx();
+        let subject = "a2a.gateway.planner.message.send";
+        let (agent, method_dots) = gateway_ingress_agent_and_method_dots(subject, &p).unwrap();
+        assert_eq!(agent.as_str(), "planner");
+        assert_eq!(method_dots, "message.send");
+        assert_eq!(
+            resolve_gateway_ingress_subject(subject, &p).unwrap(),
+            "a2a.agent.planner.message.send"
+        );
     }
 
     #[test]
