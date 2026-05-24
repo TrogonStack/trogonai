@@ -278,3 +278,113 @@ async fn codex_runner_registers_with_code_edit_capability_and_model_ids() {
         "metadata.models must contain 'o3'; got: {model_strings:?}"
     );
 }
+
+/// Sending a prompt to an existing codex session via NATS returns `end_turn`.
+///
+/// This is the most important gap in the codex NATS coverage: all other tests
+/// only verify `session/new` and `initialize`. This test closes the entire
+/// NATS routing path: `session/new` → `session.{id}.agent.prompt` →
+/// mock_codex_server `turn/start` → `turn/completed` → NATS `end_turn`.
+#[tokio::test]
+async fn e2e_nats_prompt_returns_end_turn() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    // ── Step 1: create a session ──────────────────────────────────────────────
+    let new_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+    let new_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", new_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/new")
+    .expect("NATS request failed");
+
+    let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
+    let session_id = new_resp["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id.is_empty(), "session/new must return a non-empty sessionId");
+
+    // ── Step 2: send a prompt to the session ─────────────────────────────────
+    let prompt_subject = format!("acp.session.{session_id}.agent.prompt");
+    let prompt_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{"type": "text", "text": "write a hello world program"}]
+    }))
+    .unwrap();
+
+    let prompt_msg = tokio::time::timeout(
+        Duration::from_secs(15),
+        nats.request(prompt_subject, prompt_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for prompt response")
+    .expect("NATS prompt request failed");
+
+    let prompt_resp: Value = serde_json::from_slice(&prompt_msg.payload).unwrap();
+    assert_eq!(
+        prompt_resp["stopReason"].as_str(),
+        Some("end_turn"),
+        "prompt must complete with end_turn; got: {prompt_resp}"
+    );
+}
+
+/// `/clear` in the codex-runner is modelled as calling `session/new` again,
+/// which spawns a fresh Codex subprocess and returns a distinct session ID.
+///
+/// Verifies the real scenario: after a user issues `/clear`, the next prompt
+/// starts with a completely fresh context by sending two sequential
+/// `session/new` requests and asserting that the returned IDs differ.
+#[tokio::test]
+async fn clear_creates_distinct_session_id_in_codex_runner() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+
+    let msg1 = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", payload.clone().into()),
+    )
+    .await
+    .expect("timed out waiting for first session/new")
+    .expect("NATS request failed");
+
+    let resp1: Value = serde_json::from_slice(&msg1.payload).unwrap();
+    let session_id_1 = resp1["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id_1.is_empty(), "first session/new must return a non-empty sessionId");
+
+    let msg2 = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", payload.into()),
+    )
+    .await
+    .expect("timed out waiting for second session/new")
+    .expect("NATS request failed");
+
+    let resp2: Value = serde_json::from_slice(&msg2.payload).unwrap();
+    let session_id_2 = resp2["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id_2.is_empty(), "second session/new must return a non-empty sessionId");
+
+    assert_ne!(
+        session_id_1, session_id_2,
+        "/clear (second session/new) must produce a distinct session ID; both got: {session_id_1:?}"
+    );
+}

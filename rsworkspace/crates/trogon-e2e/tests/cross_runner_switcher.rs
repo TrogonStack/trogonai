@@ -257,6 +257,36 @@ async fn switch_model_migrates_session_to_codex_runner_prefix() {
         .await;
 }
 
+/// `CrossRunnerSwitcher::switch_model` returns a descriptive error when the
+/// requested model is not registered in the registry (`find_by_model` → `None`).
+///
+/// Exercises the first failure branch in `switch_model` without attaching any
+/// runner agents — only NATS connectivity and an empty registry are needed.
+#[tokio::test]
+async fn switch_model_returns_error_when_model_not_in_registry() {
+    let (_c, port) = start_nats_js().await;
+    let (nats, _js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            let registry = Registry::new(MockRegistryStore::new());
+            // Registry is empty — no runners registered.
+            let mut switcher = CrossRunnerSwitcher::new(nats, make_config(port), registry);
+
+            let result = switcher
+                .switch_model("acp.current", "session-xyz", "unknown-model-xyz", "/workspace")
+                .await;
+
+            assert_eq!(
+                result,
+                Err("no runner found for model: unknown-model-xyz".to_string()),
+                "switch_model must return a descriptive error when model is not in registry"
+            );
+        })
+        .await;
+}
+
 /// `CrossRunnerSwitcher::switch_model` migrates a session from a live XaiAgent to a live
 /// OpenRouterAgent over real NATS — exercises the full cross-runner export→new_session→import
 /// chain between two different runner implementations.
@@ -416,6 +446,84 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
                 messages[1]["text"].as_str(),
                 Some("answer from xai"),
                 "second message text must survive migration"
+            );
+        })
+        .await;
+}
+
+/// After `switch_model` migrates a session, the new runner can immediately
+/// accept and process a prompt on the new prefix+session_id.
+///
+/// Verifies the full post-switch flow: export → new_session → import → prompt
+/// → end_turn on the migrated session, exercising NATS routing for the new
+/// prefix end-to-end.
+#[tokio::test]
+async fn switch_model_prompt_on_new_runner_after_migration() {
+    let (_c, port) = start_nats_js().await;
+    let (nats, js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Seed source session ─────────────────────────────────────────
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let src_state = SessionState {
+                messages: vec![
+                    AgentMessage::user_text("first question"),
+                    AgentMessage::assistant(vec![AgentContentBlock::Text {
+                        text: "first answer".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("post-switch-src-1", &src_state).await.unwrap();
+
+            // ── 2. Start two TrogonAgent instances ─────────────────────────────
+            attach_agent(make_agent(store.clone(), "acp.ps.src"), nats.clone(), "acp.ps.src");
+            attach_agent(make_agent(store.clone(), "acp.ps.dst"), nats.clone(), "acp.ps.dst");
+            tokio::time::sleep(Duration::from_millis(80)).await;
+
+            // ── 3. Register the destination runner ────────────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut dst_cap =
+                AgentCapability::new("ps-dst-runner", ["chat"], "acp.ps.dst.agent.>");
+            dst_cap.metadata =
+                serde_json::json!({ "models": ["ps-model"], "acp_prefix": "acp.ps.dst" });
+            registry.register(&dst_cap).await.unwrap();
+
+            // ── 4. Migrate the session ────────────────────────────────────────
+            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let (new_prefix, new_session_id) = switcher
+                .switch_model("acp.ps.src", "post-switch-src-1", "ps-model", "/tmp")
+                .await
+                .expect("switch_model must succeed");
+
+            assert_eq!(new_prefix, "acp.ps.dst");
+            assert!(!new_session_id.is_empty());
+
+            // ── 5. Send a prompt to the migrated session ──────────────────────
+            let prompt_subject = format!("{new_prefix}.session.{new_session_id}.agent.prompt");
+            let body = serde_json::to_vec(&serde_json::json!({
+                "sessionId": new_session_id,
+                "prompt": [{"type": "text", "text": "continue the conversation"}]
+            }))
+            .unwrap();
+
+            let resp_msg = tokio::time::timeout(
+                Duration::from_secs(15),
+                nats.request(prompt_subject, body.into()),
+            )
+            .await
+            .expect("timed out waiting for prompt response on new runner")
+            .expect("NATS request failed");
+
+            let resp: serde_json::Value =
+                serde_json::from_slice(&resp_msg.payload).unwrap();
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt to migrated session must complete with end_turn; got: {resp}"
             );
         })
         .await;

@@ -5719,6 +5719,43 @@ async fn xai_glob_tool_dispatched_via_wire_format() {
     }
 }
 
+// ── helper: push one function_call turn then a done turn ─────────────────────
+
+fn push_function_call(mock: &MockXaiHttpClient, call_id: &str, name: &str, args: &str) {
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: format!("resp-{call_id}") },
+        XaiEvent::FunctionCall {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(text_response(&["done"]));
+}
+
+// ── helper: assert FunctionCallOutput in second API call ─────────────────────
+
+fn assert_fco_content(
+    mock: &MockXaiHttpClient,
+    call_id: &str,
+    check: impl Fn(&str) -> bool,
+    msg: &str,
+) {
+    use trogon_xai_runner::InputItem;
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+    let fco = calls[1]
+        .input
+        .iter()
+        .find(|i| matches!(i, InputItem::FunctionCallOutput { call_id: id, .. } if id == call_id));
+    let fco = fco.expect("follow-up must contain FunctionCallOutput");
+    if let InputItem::FunctionCallOutput { output, .. } = fco {
+        assert!(check(output), "{msg}; got: {output}");
+    }
+}
+
 /// `read_file` dispatched via xAI wire format — the `FunctionCallOutput` in the
 /// follow-up API call contains the file's content.
 #[tokio::test]
@@ -5768,6 +5805,323 @@ async fn xai_read_file_tool_dispatched_via_wire_format() {
         assert!(
             output.contains("xai-read-sentinel-abc123"),
             "read_file result must contain file content; got: {output}"
+        );
+    }
+}
+
+// ── wire-format integration tests: remaining 8 tools ─────────────────────────
+
+/// `write_file` dispatched via xAI wire format — creates the file on disk and
+/// the FunctionCallOutput confirms success.
+#[tokio::test]
+async fn xai_write_file_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    push_function_call(
+        &mock,
+        "cid-wf",
+        "write_file",
+        &format!(r#"{{"path":"out.txt","content":"xai-write-sentinel-789"}}"#),
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("write"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let written = std::fs::read_to_string(dir.path().join("out.txt")).expect("write_file must create the file");
+    assert!(written.contains("xai-write-sentinel-789"), "file must contain written content; got: {written}");
+    assert_fco_content(&mock, "cid-wf", |o| !o.contains("Unknown tool"), "write_file must be dispatched");
+}
+
+/// `list_dir` dispatched via xAI wire format — result contains filenames from
+/// the session cwd.
+#[tokio::test]
+async fn xai_list_dir_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("alpha.rs"), "fn a(){}").unwrap();
+    push_function_call(&mock, "cid-ld", "list_dir", r#"{}"#);
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("list"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(&mock, "cid-ld", |o| o.contains("alpha.rs"), "list_dir must include 'alpha.rs'");
+}
+
+/// `str_replace` dispatched via xAI wire format — modifies the file and the
+/// FunctionCallOutput shows the diff.
+#[tokio::test]
+async fn xai_str_replace_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("edit.rs"), "fn old_name() {}").unwrap();
+    push_function_call(
+        &mock,
+        "cid-sr",
+        "str_replace",
+        r#"{"path":"edit.rs","old_str":"old_name","new_str":"new_name"}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("replace"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let content = std::fs::read_to_string(dir.path().join("edit.rs")).unwrap();
+    assert!(content.contains("new_name"), "str_replace must have renamed the function; got: {content}");
+    assert_fco_content(&mock, "cid-sr", |o| !o.contains("Unknown tool"), "str_replace must be dispatched");
+}
+
+/// `git_status` dispatched via xAI wire format — result is non-empty git output.
+#[tokio::test]
+async fn xai_git_status_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    push_function_call(&mock, "cid-gs", "git_status", r#"{}"#);
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git status"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(&mock, "cid-gs", |o| !o.contains("Unknown tool"), "git_status must be dispatched");
+}
+
+/// `git_diff` dispatched via xAI wire format — result contains diff or "nothing".
+#[tokio::test]
+async fn xai_git_diff_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    std::fs::write(dir.path().join("f.rs"), "fn a(){}").unwrap();
+    std::process::Command::new("git").args(["add","."]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["commit","-m","init"]).current_dir(dir.path()).output().unwrap();
+    std::fs::write(dir.path().join("f.rs"), "fn b(){}").unwrap();
+    push_function_call(&mock, "cid-gd", "git_diff", r#"{}"#);
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git diff"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(&mock, "cid-gd", |o| !o.contains("Unknown tool"), "git_diff must be dispatched");
+}
+
+/// `git_log` dispatched via xAI wire format — result contains at least one commit.
+#[tokio::test]
+async fn xai_git_log_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::process::Command::new("git").args(["init"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.email","t@t.com"]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["config","user.name","T"]).current_dir(dir.path()).output().unwrap();
+    std::fs::write(dir.path().join("r.txt"), "init").unwrap();
+    std::process::Command::new("git").args(["add","."]).current_dir(dir.path()).output().unwrap();
+    std::process::Command::new("git").args(["commit","-m","initial commit"]).current_dir(dir.path()).output().unwrap();
+    push_function_call(&mock, "cid-gl", "git_log", r#"{}"#);
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("git log"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(
+        &mock,
+        "cid-gl",
+        |o| o.contains("initial commit"),
+        "git_log result must contain the commit message",
+    );
+}
+
+/// `notebook_edit` dispatched via xAI wire format — edits a real `.ipynb` file.
+#[tokio::test]
+async fn xai_notebook_edit_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let nb = serde_json::json!({
+        "nbformat": 4, "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [{"cell_type":"code","source":"print('old')","metadata":{},"outputs":[],"execution_count":null}]
+    });
+    std::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&nb).unwrap()).unwrap();
+
+    push_function_call(
+        &mock,
+        "cid-ne",
+        "notebook_edit",
+        r#"{"path":"nb.ipynb","cell_index":0,"content":"print('new')"}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("edit nb"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+    let nb_after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap()).unwrap();
+    let source = &nb_after["cells"][0]["source"];
+    let src_text = if let Some(s) = source.as_str() {
+        s.to_string()
+    } else if let Some(arr) = source.as_array() {
+        arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("")
+    } else {
+        String::new()
+    };
+    assert!(src_text.contains("new"), "notebook_edit must update cell source; got: {src_text}");
+    assert_fco_content(&mock, "cid-ne", |o| !o.contains("Unknown tool"), "notebook_edit must be dispatched");
+}
+
+/// `fetch_url` dispatched via xAI wire format — link-local addresses are blocked
+/// by the egress policy and the FunctionCallOutput contains an error message.
+#[tokio::test]
+async fn xai_fetch_url_egress_block_recorded_in_follow_up_call() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    push_function_call(
+        &mock,
+        "cid-fu",
+        "fetch_url",
+        r#"{"url":"http://169.254.169.254/metadata"}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(sess.session_id.to_string(), vec![ContentBlock::Text(TextContent::new("fetch"))]))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(
+        &mock,
+        "cid-fu",
+        |o| !o.contains("Unknown tool"),
+        "fetch_url must be dispatched (even if blocked by egress policy)",
+    );
+}
+
+/// `search_files` dispatched via xAI wire format — the `FunctionCallOutput` in
+/// the follow-up API call contains the file path that matched the search pattern.
+#[tokio::test]
+async fn xai_search_files_tool_dispatched_via_wire_format() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let agent = make_agent(mock.clone()).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("main.rs"),
+        "fn xai_search_needle_sentinel() {}\n",
+    )
+    .unwrap();
+
+    push_function_call(
+        &mock,
+        "cid-sf",
+        "search_files",
+        r#"{"pattern":"xai_search_needle_sentinel"}"#,
+    );
+
+    let sess = agent.new_session(NewSessionRequest::new(dir.path())).await.unwrap();
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("find needle"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    assert_fco_content(
+        &mock,
+        "cid-sf",
+        |o| !o.contains("Unknown tool") && o.contains("main.rs"),
+        "search_files must be dispatched via xAI wire format and return main.rs",
+    );
+}
+
+// ── TROGON.md absent ─────────────────────────────────────────────────────────
+
+/// When a session is started in a directory that has no `TROGON.md`, the
+/// runner must not crash and must complete prompts normally with `EndTurn`.
+///
+/// Exercises the real scenario where a user opens a project directory that
+/// doesn't have a TROGON.md (new projects, bare checkouts, etc.).
+#[tokio::test]
+async fn no_crash_when_trogon_md_absent_from_session_directory() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["hello there"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    // Intentionally NOT writing TROGON.md in dir
+
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()))
+        .await
+        .unwrap();
+
+    let resp = agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .expect("prompt must not error when TROGON.md is absent");
+
+    assert_eq!(
+        resp.stop_reason,
+        StopReason::EndTurn,
+        "prompt must complete with EndTurn when TROGON.md is absent"
+    );
+
+    // When TROGON.md is absent, any system message must not contain project rules.
+    let calls = mock.calls.lock().unwrap();
+    if let Some(system_msg) = calls[0].input.iter().find(|m| m.role() == Some("system")) {
+        let content = system_msg.content().unwrap_or("");
+        assert!(
+            !content.contains("TROGON"),
+            "system message must not inject TROGON.md content when file is absent; got: {content:?}"
         );
     }
 }
