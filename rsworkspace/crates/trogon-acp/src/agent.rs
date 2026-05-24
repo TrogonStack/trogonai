@@ -1173,6 +1173,10 @@ where
             token_budget: src_state.token_budget,
             todos: src_state.todos.clone(),
             permission_rules_text: src_state.permission_rules_text.clone(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
