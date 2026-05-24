@@ -1,8 +1,23 @@
 use std::fmt;
 
+use a2a_auth_callout::CallerId;
 use a2a_nats::{A2aAgentId, AgentIdError};
 
 use crate::error::BridgeError;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MintedCallerId(String);
+
+impl MintedCallerId {
+    #[must_use]
+    pub fn from_caller_id(id: CallerId) -> Self {
+        Self(id.as_str().to_owned())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallerHttpsAuth(String);

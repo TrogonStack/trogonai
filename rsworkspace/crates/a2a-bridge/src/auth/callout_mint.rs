@@ -1,10 +1,8 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-use a2a_auth_callout::dispatcher::AuthDispatcher;
-use a2a_auth_callout::wire::ServerAuthRequestClaims;
-use a2a_auth_callout::{BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
 use async_trait::async_trait;
+use a2a_auth_callout::{AuthCalloutRequest, AuthDispatcher, AuthScheme, dispatcher::ConnectOpts};
 
 use super::{AuthMintWire, BytesPayload};
 use crate::error::BridgeError;
@@ -53,42 +51,39 @@ impl InProcessCalloutDispatcherMintWire {
 impl AuthMintWire for InProcessCalloutDispatcherMintWire {
     async fn roundtrip_message(&self, _subject: String, payload: BytesPayload) -> Result<Vec<u8>, BridgeError> {
         self.mint_count.fetch_add(1, Ordering::SeqCst);
-        let mut request: BridgeMintRequest =
+        let mut request: AuthCalloutRequest =
             serde_json::from_slice(&payload.0).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
         if request.account.is_none() {
             request.account = Some(self.tenant.as_str().to_owned());
         }
         if request.connect_opts.is_none() && request.user_jwt.is_some() {
-            request.connect_opts = Some(BridgeConnectOpts {
-                auth_scheme: Some(BridgeAuthScheme::Oidc),
+            request.connect_opts = Some(ConnectOpts {
+                auth_scheme: Some(AuthScheme::Oidc),
                 api_key: None,
             });
         }
-        let claims =
-            ServerAuthRequestClaims::from_bridge_mint(request).map_err(|e| BridgeError::Mint(e.to_string()))?;
-        let user_jwt = self
+        let response = self
             .dispatcher
-            .dispatch(claims)
+            .dispatch(request)
             .await
             .map_err(|e| BridgeError::Mint(e.to_string()))?;
-        let response = BridgeMintResponse {
-            user_jwt: user_jwt.as_str().to_owned(),
-        };
         serde_json::to_vec(&response).map_err(|e: serde_json::Error| BridgeError::Serialize(e))
     }
 }
 
 #[cfg(test)]
-pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::dispatcher::CalloutDispatcher {
+pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::CalloutDispatcher {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use a2a_auth_callout::StaticAccountResolver;
+    use a2a_auth_callout::{
+        CalloutDispatcher, CalloutDispatcherConfig, StaticAccountResolver,
+    };
     use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
-    use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-    use a2a_auth_callout::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
+    use a2a_auth_callout::jwt::{
+        AudienceAccount, CallerId, ExternalSubject, SigningKey, SpiceDbPrincipal, UserJwtClaims,
+    };
     use a2a_auth_callout::permissions::IssuedPermissions;
-    use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
     use serde_json::json;
 
     struct HarnessOidcVerifier {
@@ -103,7 +98,6 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::d
             account: &AudienceAccount,
         ) -> Result<UserJwtClaims, a2a_auth_callout::AuthCalloutError> {
             Ok(UserJwtClaims {
-                kid: KeyVersion::new("pending").expect("fixture kid"),
                 sub: ExternalSubject::new("harness-sub").expect("fixture sub"),
                 aud: account.clone(),
                 data: SpiceDbPrincipal(json!({"spicedb_subject": "harness-sub"})),
@@ -117,14 +111,8 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::d
     let oidc: Arc<dyn OidcVerifier> = Arc::new(HarnessOidcVerifier { caller_id: caller });
     let resolver: Arc<dyn a2a_auth_callout::AccountResolver> =
         Arc::new(StaticAccountResolver::new(["tenant-harness".to_string()]));
-    let issuer = nkeys::KeyPair::new_account();
-    let issuer_seed = issuer.seed().expect("issuer seed");
-    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
-        StaticSigningKeySource::new(&issuer_seed, KeyVersion::new("test").expect("harness version"))
-            .expect("harness signing source"),
-    );
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key_source,
+        signing_key: SigningKey::from_secret(b"bridge-harness-callout-secret"),
         user_jwt_ttl: Duration::from_secs(60),
         account_resolver: resolver,
         oidc: Some(oidc),
@@ -148,8 +136,11 @@ mod tests {
         let tenant = BridgeTenantAccount::new("tenant-harness").unwrap();
         let dispatcher = Arc::new(harness_callout_dispatcher("bridge-harness-caller"));
         let wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant.clone()));
-        let client =
-            AuthCalloutJsonMintClient::with_tenant_account(wire, "a2a.bridge.auth.callout.request", Some(tenant));
+        let client = AuthCalloutJsonMintClient::with_tenant_account(
+            wire,
+            "a2a.bridge.auth.callout.request",
+            Some(tenant),
+        );
         let jwt = client
             .mint(&CallerHttpsAuth::new("Bearer fixture-token"))
             .await

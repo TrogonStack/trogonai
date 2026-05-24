@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
@@ -213,6 +213,24 @@ impl UserJwtClaims {
     fn mint_for_test_ttl(&self, signing_key: &SigningKey, ttl: Duration) -> Result<String, JwtError> {
         self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
+}
+
+/// Reads `caller_id` from a freshly minted User JWT without signature verification.
+///
+/// The bridge uses this only on tokens it just received from the auth callout mint path.
+pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
+    #[derive(Deserialize)]
+    struct Payload {
+        caller_id: String,
+    }
+
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_exp = false;
+    validation.validate_aud = false;
+    let decoded = decode::<Payload>(token, &DecodingKey::from_secret(b""), &validation)
+        .map_err(JwtError::Decode)?;
+    CallerId::new(decoded.claims.caller_id)
 }
 
 pub(crate) fn derive_caller_id(external_sub: &str, tenant: &AccountName) -> Result<CallerId, JwtError> {
