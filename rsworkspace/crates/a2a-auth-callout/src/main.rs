@@ -7,11 +7,13 @@ use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
 use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-use a2a_auth_callout::error::AuthCalloutError;
-use a2a_auth_callout::signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, SigningKeySource,
+use a2a_auth_callout::{
+    AccountResolver, CalloutIssuer, DenialPublisherConfig, SigningKey, StaticAccountResolver,
+    Subscriber,
 };
 use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
+
+const DEFAULT_CALLOUT_ISSUER: &str = "AUTH_CALLOUT_DEV_ISSUER";
 
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
@@ -113,10 +115,14 @@ async fn main() {
         .init();
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let signing_key_source = match load_signing_key_source() {
-        Ok(s) => s,
+    let signing_key_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
+        .unwrap_or_else(|_| "dev-secret-not-for-production".into());
+    let callout_issuer_raw = std::env::var("AUTH_CALLOUT_ISSUER")
+        .unwrap_or_else(|_| DEFAULT_CALLOUT_ISSUER.into());
+    let callout_issuer = match CalloutIssuer::new(callout_issuer_raw) {
+        Ok(i) => i,
         Err(e) => {
-            tracing::error!(error = %e, "failed to load signing key custody");
+            tracing::error!(error = %e, "AUTH_CALLOUT_ISSUER is invalid");
             std::process::exit(1);
         }
     };
@@ -158,7 +164,11 @@ async fn main() {
         mtls,
         api_key: None,
     });
-    let subscriber = Subscriber::new(client, dispatcher);
+    let denial = DenialPublisherConfig::new(
+        SigningKey::from_secret(signing_key_secret.as_bytes()),
+        callout_issuer,
+    );
+    let subscriber = Subscriber::new(client, dispatcher, denial);
 
     info!("auth callout subscriber running");
 

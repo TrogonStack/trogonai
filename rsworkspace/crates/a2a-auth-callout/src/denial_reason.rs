@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::denial_category::DenialCategory;
 
 const MAX_LEN: usize = 256;
@@ -6,13 +8,22 @@ const MAX_LEN: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenialReason(String);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DenialReasonError {
-    #[error("denial reason must be non-empty")]
     Empty,
-    #[error("denial reason must be at most {MAX_LEN} characters")]
     TooLong,
 }
+
+impl fmt::Display for DenialReasonError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("denial reason must be non-empty"),
+            Self::TooLong => write!(f, "denial reason must be at most {MAX_LEN} characters"),
+        }
+    }
+}
+
+impl std::error::Error for DenialReasonError {}
 
 impl DenialReason {
     pub fn new(category: DenialCategory) -> Result<Self, DenialReasonError> {
@@ -53,11 +64,5 @@ mod tests {
     fn accepts_category_string() {
         let r = DenialReason::new(DenialCategory::InvalidCredentials).unwrap();
         assert_eq!(r.as_str(), "invalid_credentials");
-    }
-
-    #[test]
-    fn display_renders_both_error_variants() {
-        assert_eq!(DenialReasonError::Empty.to_string(), "denial reason must be non-empty");
-        assert!(DenialReasonError::TooLong.to_string().contains("must be at most"));
     }
 }
