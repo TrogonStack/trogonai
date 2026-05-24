@@ -1,0 +1,41 @@
+_doc = """
+Method allowlist: permits only message/send, tasks/get, and tasks/list. All other
+agent_method values are denied. High-priority allow rules match the enumerated
+methods; a catch-all deny rule (agent_method *) rejects everything else.
+"""
+
+[[rule]]
+id = "allow-message-send"
+priority = 200
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "message/send"
+
+[[rule]]
+id = "allow-tasks-get"
+priority = 200
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "tasks/get"
+
+[[rule]]
+id = "allow-tasks-list"
+priority = 200
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "tasks/list"
+
+[[rule]]
+id = "deny-other-methods"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "*"
