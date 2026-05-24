@@ -25,7 +25,10 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_pull_backpressure;
-use crate::jwt_caller_identity::{gateway_audit_caller_attribution, resolve_gateway_caller_identity};
+use crate::jwt_caller_identity::{
+    gateway_audit_caller_attribution, gateway_caller_identity_policy, resolve_gateway_caller_identity,
+    UnavailableConnectionCallerIdentity,
+};
 use crate::policy::spicedb_tier1::{
     OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
     a2a_method_from_dots, derive_tuple, owner_tuple_for_message_send, tier1_principal_from_caller,
@@ -120,6 +123,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         .map_err(RuntimeError::NatsConnect)?;
 
     let policy_stack = gateway_policy_stack_from_env(env);
+    let caller_identity_policy = gateway_caller_identity_policy(env);
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
 
@@ -212,6 +216,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             tier1_layer.owner_emitter.as_ref(),
                             tier1_declarative_layer.gate.as_ref(),
                             &policy_stack,
+                            caller_identity_policy,
                             env,
                             msg,
                         )
@@ -240,6 +245,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
     policy: &GatewayPolicyStack,
+    caller_identity_policy: crate::jwt_caller_identity::GatewayCallerIdentityPolicy,
     env: &E,
     msg: async_nats::Message,
 ) {
@@ -283,7 +289,12 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     method_dots
                 );
                 let headers_owned = msg.headers.unwrap_or_default();
-                let caller_identity = resolve_gateway_caller_identity(&headers_owned);
+                let connection_identity = UnavailableConnectionCallerIdentity;
+                let caller_identity = resolve_gateway_caller_identity(
+                    &connection_identity,
+                    &headers_owned,
+                    caller_identity_policy,
+                );
                 let (audit_caller_id, audit_caller_source) = gateway_audit_caller_attribution(caller_identity);
                 if audit_caller_id != "_" {
                     tracing::Span::current().record("caller_id", audit_caller_id.as_str());
