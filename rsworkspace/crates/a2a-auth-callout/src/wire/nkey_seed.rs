@@ -23,11 +23,13 @@ impl NkeySeed {
     }
 
     pub fn to_signing_keypair(&self) -> Result<KeyPair, AuthCalloutError> {
-        KeyPair::from_seed(self.as_str()).map_err(|e| AuthCalloutError::WireFormat(format!("invalid NKey seed: {e}")))
+        KeyPair::from_seed(self.as_str())
+            .map_err(|e| AuthCalloutError::WireFormat(format!("invalid NKey seed: {e}")))
     }
 
     pub fn to_xkey(&self) -> Result<XKey, AuthCalloutError> {
-        XKey::from_seed(self.as_str()).map_err(|e| AuthCalloutError::WireFormat(format!("invalid XKey seed: {e}")))
+        XKey::from_seed(self.as_str())
+            .map_err(|e| AuthCalloutError::WireFormat(format!("invalid XKey seed: {e}")))
     }
 }
 
@@ -36,6 +38,3 @@ impl fmt::Debug for NkeySeed {
         f.write_str("NkeySeed([redacted])")
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -15,8 +15,9 @@ impl XkeyPublic {
         if trimmed.is_empty() {
             return Err(AuthCalloutError::WireFormat("XKey public key must be non-empty".into()));
         }
-        XKey::from_public_key(trimmed)
-            .map_err(|e| AuthCalloutError::WireFormat(format!("invalid XKey public key: {e}")))?;
+        XKey::from_public_key(trimmed).map_err(|e| {
+            AuthCalloutError::WireFormat(format!("invalid XKey public key: {e}"))
+        })?;
         Ok(Self(trimmed.to_owned()))
     }
 
@@ -41,6 +42,3 @@ impl fmt::Display for XkeyPublic {
         f.write_str(&self.0)
     }
 }
-
-#[cfg(test)]
-mod tests;

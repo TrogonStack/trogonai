@@ -1,13 +1,13 @@
 use std::fmt;
 
-use nats_jwt_rs::Claims;
 use nats_jwt_rs::authorization::AuthRequest;
+use nats_jwt_rs::Claims;
 use serde::Deserialize;
 
 use super::NkeyPublic;
 use crate::account_resolver::RequestedAccount;
 use crate::credentials::mtls::ClientCertPem;
-use crate::error::{AuthCalloutError, CredentialError};
+use crate::error::AuthCalloutError;
 
 /// Decoded inner authorization-request JWT (`nats` claims + standard JWT fields).
 #[derive(Clone)]
@@ -54,46 +54,19 @@ impl ServerAuthRequestClaims {
                 if tag.is_empty() { None } else { Some(tag) }
             });
         let hint = hint.ok_or_else(|| {
-            CredentialError::InvalidCredentials(
-                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)"
-                    .into(),
+            AuthCalloutError::CredentialVerification(
+                "authorization request missing tenant account hint (connect_opts.user, client_info.user, or name_tag)".into(),
             )
         })?;
         RequestedAccount::new(hint.to_owned()).map_err(AuthCalloutError::from)
     }
 
     pub fn connect_opts_jwt(&self) -> Option<&str> {
-        non_empty_opt(self.inner.nats.connect_opts.jwt.as_deref()).or_else(|| {
-            self.nats_json
-                .get("connect_opts")?
-                .get("jwt")?
-                .as_str()
-                .filter(|s| !s.is_empty())
-        })
-    }
-
-    pub fn connect_opts_opaque_pass(&self) -> Option<&str> {
-        non_empty_opt(self.inner.nats.connect_opts.pass.as_deref()).or_else(|| {
-            self.nats_json
-                .get("connect_opts")?
-                .get("pass")?
-                .as_str()
-                .filter(|s| !s.is_empty())
-        })
+        self.inner.nats.connect_opts.jwt.as_deref()
     }
 
     pub fn connect_opts_auth_token(&self) -> Option<&str> {
-        // Treat an empty / whitespace-only auth_token as absent so the
-        // dispatcher's `ok_or_else("missing api key")` path triggers
-        // correctly instead of forwarding an empty string into the
-        // verifier where it would mint a CredentialVerification message
-        // farther from the cause.
-        self.inner
-            .nats
-            .connect_opts
-            .auth_token
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
+        self.inner.nats.connect_opts.auth_token.as_deref()
     }
 
     pub fn client_tls_pem_certs(&self) -> Vec<ClientCertPem> {
@@ -107,7 +80,8 @@ impl ServerAuthRequestClaims {
             None => None,
         };
         let tls = tls.filter(|t| {
-            t.certs.as_ref().is_some_and(|c| !c.is_empty()) || t.verified_chains.as_ref().is_some_and(|c| !c.is_empty())
+            t.certs.as_ref().is_some_and(|c| !c.is_empty())
+                || t.verified_chains.as_ref().is_some_and(|c| !c.is_empty())
         });
         let Some(tls) = tls else {
             return Vec::new();
@@ -131,10 +105,7 @@ impl ServerAuthRequestClaims {
     pub fn primary_client_cert(&self) -> Option<ClientCertPem> {
         self.client_tls_pem_certs().into_iter().next()
     }
-}
 
-fn non_empty_opt(value: Option<&str>) -> Option<&str> {
-    value.filter(|s| !s.is_empty())
 }
 
 impl fmt::Debug for ServerAuthRequestClaims {
