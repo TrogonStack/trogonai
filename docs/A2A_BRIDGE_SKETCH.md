@@ -112,3 +112,16 @@ Unary **`message/send`** inherits the gateway **30s deadline** once wired; longe
 ## Implementation tracker
 
 See [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 4 — `a2a-bridge` crate, federated discovery exports, and cross-binding collaboration tests. Suggested ordering places bridge work after auth callout, gateway auth integration, and hardened push DLQ caller attribution.
+
+---
+
+## Testing the nats transport locally
+
+Default runtime uses `A2A_BRIDGE_TRANSPORT=stub` (no outbound NATS). To exercise the **nats** wiring:
+
+| Command | Purpose |
+|---------|---------|
+| `cd rsworkspace && cargo test -p a2a-bridge nats_transport_` | In-process harness (`StubAuthCalloutMint` + mock gateway/agent + audit assertions) — **no live NATS** |
+| `cd rsworkspace && cargo test -p a2a-bridge -- --ignored nats_transport_live` | Optional smoke against `NATS_URL` when `nats-server` is running locally |
+
+The in-process harness lives in `a2a-bridge::nats_transport_harness` and mirrors `bootstrap_nats_transport` (`AuthCalloutJsonMintClient` + `GatewayInboundPublisher` + JetStream SSE intake) using `trogon-nats::AdvancedMockNatsClient`. Production auth-callout mint deployment is still required for real clusters.

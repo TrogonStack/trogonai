@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 a2a-nats = { workspace = true }
+a2a-pack = { workspace = true }
 a2a-redaction = { workspace = true }
 a2a-types = { workspace = true }
 async-nats = { workspace = true }
