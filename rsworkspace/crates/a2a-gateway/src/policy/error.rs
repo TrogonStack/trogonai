@@ -11,6 +11,12 @@ pub enum PolicyError {
 #[derive(Debug)]
 pub struct Tier2EvalError(pub(crate) Box<str>);
 
+impl Tier2EvalError {
+    pub fn new(message: impl Into<Box<str>>) -> Self {
+        Self(message.into())
+    }
+}
+
 impl fmt::Display for Tier2EvalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
