@@ -1,0 +1,26 @@
+_doc = """
+Caller allowlist: permits ingress only from enumerated SpiceDB caller_subject
+values (user/alice, user/bob, service/internal-*). Callers not matching any
+allowlisted subject are denied for all methods. Anonymous callers (empty
+caller_subject) are denied.
+"""
+
+[[rule]]
+id = "deny-non-allowlisted-callers"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "caller_subject"
+pattern = "user/alice"
+negate = true
+
+[[rule.matches]]
+kind = "caller_subject"
+pattern = "user/bob"
+negate = true
+
+[[rule.matches]]
+kind = "caller_subject"
+pattern = "service/internal-*"
+negate = true
