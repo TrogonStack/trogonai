@@ -27,6 +27,10 @@ use crate::policy::spicedb_tier1::{
     a2a_method_from_dots, derive_tuple, owner_tuple_for_message_send, tier1_principal_from_caller,
     tier1_session_from_principal,
 };
+use crate::policy::tier1_declarative::{
+    Tier1DeclarativeBuildError, Tier1DeclarativeConfig, Tier1DeclarativeContext, Tier1DeclarativeDecision,
+    Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
+};
 use crate::policy::tier2::Tier2Decision;
 use crate::policy::tier2_cel::{
     tier2_evaluation_context_from_ingress, RealTier2CelEvaluator, Tier2CompiledBundle,
@@ -39,6 +43,7 @@ pub enum RuntimeError {
     NatsConnect(trogon_nats::ConnectError),
     Subscribe(String),
     Tier1Config(Tier1SpiceDbBuildError),
+    Tier1DeclarativeConfig(Tier1DeclarativeBuildError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -48,6 +53,7 @@ impl fmt::Display for RuntimeError {
             Self::NatsConnect(error) => write!(f, "NATS connection failed: {error}"),
             Self::Subscribe(msg) => write!(f, "gateway subscribe failed: {msg}"),
             Self::Tier1Config(error) => write!(f, "{error}"),
+            Self::Tier1DeclarativeConfig(error) => write!(f, "{error}"),
         }
     }
 }
@@ -59,7 +65,14 @@ impl std::error::Error for RuntimeError {
             Self::NatsConnect(error) => Some(error),
             Self::Subscribe(_) => None,
             Self::Tier1Config(_) => None,
+            Self::Tier1DeclarativeConfig(_) => None,
         }
+    }
+}
+
+impl From<Tier1DeclarativeBuildError> for RuntimeError {
+    fn from(error: Tier1DeclarativeBuildError) -> Self {
+        Self::Tier1DeclarativeConfig(error)
     }
 }
 
@@ -93,6 +106,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
 
     let policy_layer = wasm_policy_layer_from_env(env);
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
+    let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
 
     let gateway_subject_string = config.gateway_subscribe_subject();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
@@ -173,6 +187,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             &config,
                             tier1_layer.gate.as_ref(),
                             tier1_layer.owner_emitter.as_ref(),
+                            tier1_declarative_layer.gate.as_ref(),
                             policy_layer.as_ref(),
                             env,
                             msg,
@@ -194,11 +209,13 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments, clippy::needless_update)]
 async fn dispatch_gateway_ingress<E: ReadEnv>(
     client: &async_nats::Client,
     config: &Config,
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
+    tier1_declarative: &dyn Tier1DeclarativeGate,
     policy: Option<&Arc<WasmtimeSubstrate>>,
     env: &E,
     msg: async_nats::Message,
@@ -390,6 +407,63 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     }
                 }
 
+                let mut tier1_declarative_audit: Option<String> = None;
+                if tier1_declarative.is_enabled()
+                    && let Some(declarative_ctx) = tier1_declarative_context_from_ingress(
+                        method_dots.as_str(),
+                        &agent_id,
+                        caller_slug.as_deref(),
+                        config.a2a_prefix.as_str(),
+                        ingress_subject,
+                    )
+                {
+                    let decision = tier1_declarative.evaluate(&declarative_ctx);
+                    tier1_declarative_audit = Some(tier1_declarative_audit_rule_fired(&decision));
+                    if let Tier1DeclarativeDecision::Deny { rule } = decision {
+                        let rule_fired = format!("gateway.tier1.declarative.denied.{}", rule.as_str());
+                        tracing::Span::current().record("routing_outcome", "policy_denied");
+                        warn!(
+                            ingress.subject = %msg.subject,
+                            agent_subject = %agent_subject,
+                            rule = %rule,
+                            routing_outcome = "policy_denied",
+                            "gateway tier-1 declarative policy rejected ingress envelope",
+                        );
+                        let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                            payload.as_ref(),
+                            "tier-1 declarative policy rejected envelope",
+                        ) else {
+                            return;
+                        };
+                        reply_error(client, reply, HeaderMap::new(), body).await;
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes.clone(),
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Err {
+                                    code: -32_801,
+                                    message: "tier-1 declarative policy rejected envelope".into(),
+                                },
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id.clone()),
+                                    rules_fired: Some(vec![rule_fired]),
+                                    zed_token_snapshot: tier1_zed_token.clone(),
+                                    ..Default::default()
+                                },
+                            ),
+                        );
+                        return;
+                    }
+                }
+
                 if let Some(sub) = policy {
                     let eval_ctx = tier2_evaluation_context_from_ingress(
                         &method_slashes,
@@ -495,6 +569,14 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 } else {
                     rules_fired.push("gateway.tier1.layer_disabled".into());
                 }
+                if tier1_declarative.is_enabled() {
+                    rules_fired.push(
+                        tier1_declarative_audit
+                            .unwrap_or_else(|| "gateway.tier1.declarative.no_match_default_allow".into()),
+                    );
+                } else {
+                    rules_fired.push("gateway.tier1.declarative.layer_disabled".into());
+                }
                 if let Some(sub) = policy {
                     if sub.tier2_cel_active {
                         rules_fired.push("gateway.tier2.evaluated_allow".into());
@@ -529,6 +611,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rewrites,
                                     stream_consumer,
                                     zed_token_snapshot: tier1_zed_token.clone(),
+                                    ..Default::default()
                                 },
                             ),
                         );
@@ -565,6 +648,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rewrites,
                                     stream_consumer,
                                     zed_token_snapshot: tier1_zed_token.clone(),
+                                    ..Default::default()
                                 },
                             ),
                         );
@@ -607,6 +691,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rewrites,
                                     stream_consumer,
                                     zed_token_snapshot: tier1_zed_token.clone(),
+                                    ..Default::default()
                                 },
                             ),
                         );
@@ -838,6 +923,24 @@ fn gateway_caller_id_from_headers(headers: &HeaderMap) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn tier1_declarative_context_from_ingress(
+    method_dots: &str,
+    agent_id: &a2a_nats::A2aAgentId,
+    caller_slug: Option<&str>,
+    account: &str,
+    nats_subject: &str,
+) -> Option<Tier1DeclarativeContext> {
+    let method = a2a_method_from_dots(method_dots)?;
+    let principal = tier1_principal_from_caller(caller_slug.unwrap_or("_"), account);
+    let caller_subject = principal.spicedb_subject();
+    Some(Tier1DeclarativeContext::new(
+        method,
+        agent_id.clone(),
+        caller_subject,
+        nats_subject,
+    ))
+}
+
 fn unix_epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -881,7 +984,11 @@ mod gateway_dispatch_tests {
     use async_nats::HeaderMap;
     use trogon_std::env::InMemoryEnv;
 
-    use super::{config_from_args, Args, Config};
+    use super::{config_from_args, tier1_declarative_context_from_ingress, Args, Config};
+    use crate::policy::tier1_declarative::{
+        RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeDecision, Tier1DeclarativeGate,
+        tier1_declarative_audit_rule_fired,
+    };
     use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision};
     use crate::policy::tier2_cel::tier2_evaluation_context_from_ingress;
     use crate::policy::RuleName;
@@ -901,6 +1008,7 @@ mod gateway_dispatch_tests {
         A2aAgentId::new("planner").unwrap()
     }
 
+    #[allow(clippy::needless_update)]
     fn forward_audit_fields(
         ingress_subject: &str,
         agent_subject: &str,
@@ -915,6 +1023,7 @@ mod gateway_dispatch_tests {
             rewrites,
             stream_consumer,
             zed_token_snapshot: None,
+            ..Default::default()
         }
     }
 
@@ -1082,6 +1191,100 @@ mod gateway_dispatch_tests {
         assert_eq!(
             audit_json["rules_fired"],
             serde_json::json!(["gateway.tier2.deny_guests"])
+        );
+    }
+
+    #[test]
+    fn tier1_declarative_deny_rule_returns_policy_denied_code() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("deny-planner.tier1.toml"),
+            r#"
+[[rule]]
+id = "deny-planner"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "planner"
+"#,
+        )
+        .expect("write bundle");
+
+        let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle");
+        let gate = RealTier1DeclarativeGate::new(bundle);
+        let agent = test_agent();
+        let payload = br#"{"jsonrpc":"2.0","id":"1","method":"message/send","params":{}}"#;
+        let ctx = tier1_declarative_context_from_ingress(
+            "message.send",
+            &agent,
+            Some("alice"),
+            "a2a",
+            "a2a.gateway.planner.message.send",
+        )
+        .expect("declarative context");
+        let decision = gate.evaluate(&ctx);
+        assert_eq!(
+            decision,
+            Tier1DeclarativeDecision::Deny {
+                rule: crate::policy::tier1_declarative::Tier1DeclarativeRuleId::new("deny-planner")
+            }
+        );
+
+        let denied_body = ingress_gateway_policy_denied_response_bytes(
+            payload,
+            "tier-1 declarative policy rejected envelope",
+        )
+        .expect("deny response");
+        let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
+        assert_eq!(denied_json["error"]["code"], -32_801);
+
+        let rule_fired = tier1_declarative_audit_rule_fired(&decision);
+        assert_eq!(rule_fired, "gateway.tier1.declarative.denied.deny-planner");
+    }
+
+    #[test]
+    fn tier1_declarative_allow_rule_records_forward_audit_rule() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("allow-planner.tier1.toml"),
+            r#"
+[[rule]]
+id = "allow-planner"
+priority = 100
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "planner"
+"#,
+        )
+        .expect("write bundle");
+
+        let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle");
+        let gate = RealTier1DeclarativeGate::new(bundle);
+        let agent = test_agent();
+        let ctx = tier1_declarative_context_from_ingress(
+            "message.send",
+            &agent,
+            Some("alice"),
+            "a2a",
+            "a2a.gateway.planner.message.send",
+        )
+        .expect("declarative context");
+        let decision = gate.evaluate(&ctx);
+        assert_eq!(
+            decision,
+            Tier1DeclarativeDecision::Allow {
+                rule: Some(crate::policy::tier1_declarative::Tier1DeclarativeRuleId::new(
+                    "allow-planner"
+                ))
+            }
+        );
+        assert_eq!(
+            tier1_declarative_audit_rule_fired(&decision),
+            "gateway.tier1.declarative.allowed.allow-planner"
         );
     }
 }
