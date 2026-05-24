@@ -33,7 +33,10 @@ impl A2aStream {
         let p = prefix.as_str();
         match self {
             Self::Events => vec![format!("{p}.task.*.events.*")],
-            Self::PushDlq => vec![format!("{p}.push.dlq.*.*")],
+            Self::PushDlq => vec![
+                format!("{p}.push.dlq.*.*"),
+                format!("{p}.push.dlq.mirror.*.*"),
+            ],
         }
     }
 

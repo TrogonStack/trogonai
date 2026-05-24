@@ -136,6 +136,8 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_POLICY_SKILLS` | no | — | Comma-separated skill slugs; preload `{skill}.wasm` bundles from `A2A_GATEWAY_POLICY_BUNDLE_DIR` (missing files skipped) |
 | `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
 | `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
+| `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](./A2A_PUSH_DLQ_OPS.md)) |
+| `A2A_GATEWAY_PUSH_DLQ_DURABLE` | no | `a2a-gateway-push-dlq-mirror` | Durable name for the gateway push DLQ mirror consumer when mirror mode is enabled |
 
 Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 

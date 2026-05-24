@@ -75,7 +75,10 @@ mod tests {
     #[test]
     fn push_dlq_subjects_cover_caller_and_task() {
         let config = A2aStream::PushDlq.config(&p("a2a"));
-        assert_eq!(config.subjects, vec!["a2a.push.dlq.*.*"]);
+        assert_eq!(
+            config.subjects,
+            vec!["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"]
+        );
     }
 
     #[test]

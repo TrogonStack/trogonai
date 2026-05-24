@@ -29,8 +29,9 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 ## Phase 3 — push delivery & redaction
 
 - [ ] Tier 3 authoritative redaction in the gateway beyond preload-only skill hosts — deterministic policies, refusal semantics, telemetry once Tier 2 CEL enforces payloads (engine/module loader/skills ship in `a2a-redaction`; gateway invokes substrate when bundles configured).
-- [ ] Optional gateway-side `A2A_PUSH_DLQ` mirroring of agent-side DLQ envelopes (agent path already publishes).
 - [ ] End-to-end principal propagation into push DLQ `caller_id` once auth-callout is deployed — `CallerId::from_principal` keys off `SpiceDbPrincipal.spicedb_subject`; the `_` fallback only triggers when the minted JWT principal omits it.
+
+**Shipped (Phase 3):** Gateway-side push DLQ mirror — env-gated JetStream pull consumer republishes agent DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`**; exactly-once dedup across agent + mirror paths remains deferred ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)).
 
 ## Phase 4 — interop & federation
 
