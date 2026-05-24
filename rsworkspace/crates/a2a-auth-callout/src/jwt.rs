@@ -2,6 +2,8 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+
+use crate::signing_key_source::{KeyVersion, SigningKeyHandle, SigningKeySource};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
@@ -102,7 +104,8 @@ impl SpiceDbPrincipal {
     }
 }
 
-pub struct SigningKey(pub(crate) EncodingKey);
+#[derive(Clone)]
+pub struct SigningKey(Vec<u8>);
 
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -112,7 +115,15 @@ impl fmt::Debug for SigningKey {
 
 impl SigningKey {
     pub fn from_secret(secret: &[u8]) -> Self {
-        Self(EncodingKey::from_secret(secret))
+        Self(secret.to_vec())
+    }
+
+    pub(crate) fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::from_secret(&self.0)
+    }
+
+    pub(crate) fn decoding_key(&self) -> DecodingKey {
+        DecodingKey::from_secret(&self.0)
     }
 }
 
@@ -124,6 +135,7 @@ pub enum JwtError {
     InvalidCallerId,
     InvalidExternalSubject,
     IssuedAtOutOfRange,
+    NoSigningKeyForKid,
 }
 
 impl fmt::Display for JwtError {
@@ -135,6 +147,7 @@ impl fmt::Display for JwtError {
             Self::InvalidCallerId => f.write_str("caller_id invalid for NATS subject token"),
             Self::InvalidExternalSubject => f.write_str("external subject must be non-empty"),
             Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
+            Self::NoSigningKeyForKid => f.write_str("no accepted signing key matched token kid"),
         }
     }
 }
@@ -157,6 +170,7 @@ impl From<JwtError> for AuthCalloutError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserJwtClaims {
+    pub kid: KeyVersion,
     pub sub: ExternalSubject,
     pub aud: AccountName,
     pub data: SpiceDbPrincipal,
@@ -175,7 +189,7 @@ fn default_permissions_for_serde_back_compat() -> IssuedPermissions {
 impl UserJwtClaims {
     pub fn mint(
         &self,
-        signing_key: &SigningKey,
+        handle: &SigningKeyHandle,
         issued_at: SystemTime,
         ttl: Duration,
     ) -> Result<String, JwtError> {
@@ -185,6 +199,7 @@ impl UserJwtClaims {
 
         #[derive(Serialize)]
         struct Claims<'a> {
+            kid: &'a str,
             sub: &'a str,
             aud: &'a str,
             caller_id: &'a str,
@@ -195,7 +210,9 @@ impl UserJwtClaims {
             nbf: i64,
         }
 
+        let kid = handle.version().as_str();
         let claims = Claims {
+            kid,
             sub: self.sub.as_str(),
             aud: self.aud.as_str(),
             caller_id: self.caller_id.as_str(),
@@ -206,12 +223,59 @@ impl UserJwtClaims {
             nbf: iat_secs,
         };
 
-        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0).map_err(JwtError::Encode)
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = Some(kid.to_owned());
+        encode(
+            &header,
+            &claims,
+            &handle.signing_key().encoding_key(),
+        )
+        .map_err(JwtError::Encode)
+    }
+
+    pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
+        Self::verify_with_handles(token, &source.accepted())
+    }
+
+    pub fn verify_with_handles(token: &str, handles: &[SigningKeyHandle]) -> Result<Self, JwtError> {
+        if handles.is_empty() {
+            return Err(JwtError::NoSigningKeyForKid);
+        }
+
+        let header_kid = peek_header_kid(token)?;
+
+        if let Some(kid) = header_kid.as_deref()
+            && let Some(handle) = handles.iter().find(|h| h.version().as_str() == kid)
+        {
+            return Self::verify_with_handle(token, handle);
+        }
+
+        let mut last_err = None;
+        for handle in handles {
+            match Self::verify_with_handle(token, handle) {
+                Ok(claims) => return Ok(claims),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.unwrap_or(JwtError::NoSigningKeyForKid))
+    }
+
+    pub(crate) fn verify_with_handle(token: &str, handle: &SigningKeyHandle) -> Result<Self, JwtError> {
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let decoded = decode::<UserJwtClaims>(
+            token,
+            &handle.signing_key().decoding_key(),
+            &validation,
+        )
+        .map_err(JwtError::Decode)?;
+        Ok(decoded.claims)
     }
 
     #[cfg(test)]
-    fn mint_for_test_ttl(&self, signing_key: &SigningKey, ttl: Duration) -> Result<String, JwtError> {
-        self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
+    fn mint_for_test_ttl(&self, handle: &SigningKeyHandle, ttl: Duration) -> Result<String, JwtError> {
+        self.mint(handle, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
 }
 
@@ -262,6 +326,18 @@ pub(crate) fn external_subject_from_der(prefix: &str, cert_der: &[u8]) -> Result
     ExternalSubject::new(format!("{}|{}", prefix, hex::encode(hasher.finalize())))
 }
 
+fn peek_header_kid(token: &str) -> Result<Option<String>, JwtError> {
+    use jsonwebtoken::decode_header;
+
+    let header = decode_header(token).map_err(JwtError::Decode)?;
+    if header.alg != Algorithm::HS256 {
+        return Err(JwtError::Decode(jsonwebtoken::errors::Error::from(
+            jsonwebtoken::errors::ErrorKind::InvalidAlgorithm,
+        )));
+    }
+    Ok(header.kid)
+}
+
 fn secs_since_unix(t: SystemTime) -> Result<i64, JwtError> {
     let secs = t.duration_since(UNIX_EPOCH).map_err(JwtError::SystemTime)?.as_secs();
     i64::try_from(secs).map_err(|_| JwtError::IssuedAtOutOfRange)
@@ -282,9 +358,15 @@ mod tests {
 
     #[test]
     fn mint_decodes_expected_claims() {
-        let signing_key = SigningKey::from_secret(b"secret-for-hs256-test");
+        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
+
+        let handle = SigningKeyHandle::new(
+            KeyVersion::new("test").unwrap(),
+            SigningKey::from_secret(b"secret-for-hs256-test"),
+        );
         let caller_id = CallerId::new("caller1").unwrap();
         let claims = UserJwtClaims {
+            kid: handle.version().clone(),
             sub: ExternalSubject::new("alice").unwrap(),
             aud: AccountName::new("tenant-acme"),
             data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
@@ -292,7 +374,7 @@ mod tests {
             caller_id,
         };
         let token = claims
-            .mint_for_test_ttl(&signing_key, Duration::from_secs(60))
+            .mint_for_test_ttl(&handle, Duration::from_secs(60))
             .unwrap();
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = false;
@@ -314,9 +396,12 @@ mod tests {
 
     #[test]
     fn mint_wrong_alg_fails_decode() {
-        let signing_key = SigningKey::from_secret(b"a");
+        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
+
+        let handle = SigningKeyHandle::new(KeyVersion::new("test").unwrap(), SigningKey::from_secret(b"a"));
         let caller_id = CallerId::new("cid").unwrap();
         let claims = UserJwtClaims {
+            kid: handle.version().clone(),
             sub: ExternalSubject::new("alice").unwrap(),
             aud: AccountName::new("tenant-acme"),
             data: SpiceDbPrincipal(json!({})),
@@ -324,7 +409,7 @@ mod tests {
             caller_id,
         };
         let token = claims
-            .mint_for_test_ttl(&signing_key, Duration::from_secs(10))
+            .mint_for_test_ttl(&handle, Duration::from_secs(10))
             .unwrap();
         let mut validation = Validation::new(Algorithm::RS384);
         validation.validate_exp = false;
@@ -340,9 +425,15 @@ mod tests {
 
     #[test]
     fn mint_rejects_wrong_verification_key() {
-        let signing_key = SigningKey::from_secret(b"signer-a------------------------");
+        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
+
+        let handle = SigningKeyHandle::new(
+            KeyVersion::new("test").unwrap(),
+            SigningKey::from_secret(b"signer-a------------------------"),
+        );
         let caller_id = CallerId::new("cid").unwrap();
         let claims = UserJwtClaims {
+            kid: handle.version().clone(),
             sub: ExternalSubject::new("s").unwrap(),
             aud: AudienceAccount::new("a"),
             data: SpiceDbPrincipal(json!({})),
@@ -350,7 +441,7 @@ mod tests {
             caller_id,
         };
         let token = claims
-            .mint_for_test_ttl(&signing_key, Duration::from_secs(60))
+            .mint_for_test_ttl(&handle, Duration::from_secs(60))
             .unwrap();
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = false;

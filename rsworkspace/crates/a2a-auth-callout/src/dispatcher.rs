@@ -17,7 +17,7 @@ use crate::credentials::api_key::ApiKeyVerifier;
 use crate::credentials::mtls::{ClientCertPem, MTlsVerifier};
 use crate::credentials::oidc::{BearerToken, OidcVerifier};
 use crate::error::AuthCalloutError;
-use crate::jwt::SigningKey;
+use crate::signing_key_source::SigningKeySource;
 
 /// Illustrative shape of the auth callout request published by the NATS server
 /// on `$SYS.REQ.USER.AUTH`.
@@ -83,7 +83,7 @@ pub trait AuthDispatcher: Send + Sync + 'static {
 }
 
 pub struct CalloutDispatcherConfig {
-    pub signing_key: SigningKey,
+    pub signing_key_source: Arc<dyn SigningKeySource>,
     pub user_jwt_ttl: Duration,
     pub account_resolver: Arc<dyn AccountResolver>,
     pub oidc: Option<Arc<dyn OidcVerifier>>,
@@ -198,8 +198,11 @@ impl AuthDispatcher for CalloutDispatcher {
             }
         };
 
+        let handle = self.config.signing_key_source.current();
+        let mut claims = claims;
+        claims.kid = handle.version().clone();
         let token = claims
-            .mint(&self.config.signing_key, SystemTime::now(), self.config.user_jwt_ttl)
+            .mint(&handle, SystemTime::now(), self.config.user_jwt_ttl)
             .map_err(AuthCalloutError::from)?;
         Ok(AuthCalloutResponse { user_jwt: token })
     }
@@ -214,8 +217,9 @@ pub(crate) mod tests {
     use crate::credentials::mtls::ClientCertPem;
     use crate::credentials::oidc::BearerToken;
     use crate::jwt::{
-        AudienceAccount, CallerId, ExternalSubject, SigningKey, SpiceDbPrincipal, UserJwtClaims,
+        AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims,
     };
+    use crate::signing_key_source::{KeyVersion, StaticSigningKeySource};
     use crate::permissions::IssuedPermissions;
     use serde_json::json;
 
@@ -254,6 +258,7 @@ pub(crate) mod tests {
         ) -> Result<UserJwtClaims, AuthCalloutError> {
             let caller_id = CallerId::new("usrstub").unwrap();
             Ok(UserJwtClaims {
+                kid: crate::signing_key_source::unminted_placeholder(),
                 sub: ExternalSubject::new(self.sub).unwrap(),
                 aud: account.clone(),
                 data: SpiceDbPrincipal(json!({"spicedb_subject": self.sub})),
@@ -274,6 +279,7 @@ pub(crate) mod tests {
         ) -> Result<UserJwtClaims, AuthCalloutError> {
             let caller_id = CallerId::new("mtlsstub").unwrap();
             Ok(UserJwtClaims {
+                kid: crate::signing_key_source::unminted_placeholder(),
                 sub: ExternalSubject::new("CN=svc").unwrap(),
                 aud: account.clone(),
                 data: SpiceDbPrincipal(json!({"spicedb_subject": "svc"})),
@@ -292,8 +298,12 @@ pub(crate) mod tests {
         let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(
             allowed.iter().map(|s| s.to_string()),
         ));
+        let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(StaticSigningKeySource::new(
+            b"dispatcher-test-secret",
+            KeyVersion::new("test").expect("fixture version"),
+        ));
         CalloutDispatcher::new(CalloutDispatcherConfig {
-            signing_key: SigningKey::from_secret(b"dispatcher-test-secret"),
+            signing_key_source,
             user_jwt_ttl: Duration::from_secs(60),
             account_resolver: resolver,
             oidc,

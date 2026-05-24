@@ -173,6 +173,30 @@ CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gatew
 
 ---
 
+### `a2a-auth-callout`
+
+NATS auth callout subscriber on `$SYS.REQ.USER.AUTH`; mints short-lived User JWTs for tenant Accounts.
+
+| Variable | Required | Default | Meaning |
+|----------|----------|---------|---------|
+| `NATS_URL` | no | `nats://localhost:4222` | NATS servers |
+| `AUTH_CALLOUT_ALLOWED_ACCOUNTS` | **yes** | — | Comma-separated tenant Account names the resolver may bind |
+| `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | `env` \| `file` \| `vault` (vault not implemented) |
+| `AUTH_CALLOUT_SIGNING_SECRET` | env source | `dev-secret-not-for-production` if unset | Current HS256 secret (dev-only custody) |
+| `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS` | no | — | Previous secret for rotation overlap (env source) |
+| `AUTH_CALLOUT_SIGNING_KEY_PATH` | file source | — | Path to current signing key bytes |
+| `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH` | no | — | Path to previous signing key bytes (rotation overlap) |
+| `AUTH_CALLOUT_USER_JWT_TTL_SECS` | no | `300` | Minted User JWT lifetime |
+| `AUTH_CALLOUT_OIDC_ISSUER` | no | — | OIDC issuer URL; omit to disable OIDC verifier |
+| `AUTH_CALLOUT_OIDC_AUDIENCES` | when OIDC on | — | Comma-separated allowed `aud` values |
+| `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | no | — | PEM bundle path for mTLS client cert verification |
+
+Deployment notes: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
+
+Source: [`a2a-auth-callout/src/main.rs`](../../rsworkspace/crates/a2a-auth-callout/src/main.rs).
+
+---
+
 ### `a2a-bridge`
 
 HTTPS shim that exchanges NATS-signed JWT mints for gateway unary + SSE task streams (`AsyncNatsToken*` clients).

@@ -122,6 +122,7 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
             .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
+            kid: crate::signing_key_source::unminted_placeholder(),
             sub: entry.external_subject.clone(),
             aud: entry.audience.clone(),
             data: entry.spicedb_principal.clone(),

@@ -3,7 +3,6 @@ use std::fmt;
 use crate::jwt::SigningKey;
 
 use super::key_version::KeyVersion;
-use super::minting_material::MintingMaterial;
 
 #[derive(Clone)]
 pub struct SigningKeyHandle {
@@ -29,7 +28,7 @@ impl SigningKeyHandle {
         &self.version
     }
 
-    pub fn minting_material(&self) -> MintingMaterial {
-        MintingMaterial::new(self.key.keypair().clone(), self.version.clone())
+    pub(crate) fn signing_key(&self) -> &SigningKey {
+        &self.key
     }
 }
