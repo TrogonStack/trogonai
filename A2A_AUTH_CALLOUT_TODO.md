@@ -74,8 +74,8 @@ Today the gateway derives caller identity from `X-A2a-Spicedb-Principal` / `X-A2
 - [ ] Update `resolve_gateway_caller_identity` tests for both paths.
 
 ### 10. Bridge consumption path
-- [ ] In `a2a-bridge`, re-mint a per-request User JWT against the callout when `A2A_BRIDGE_TRANSPORT=nats` is live, instead of using the stub identity.
-- [ ] Cover via the existing `a2a-bridge::nats_transport_harness`; add a callout-mock dispatcher for unit tests.
+- [x] In `a2a-bridge`, re-mint a per-request User JWT against the callout when `A2A_BRIDGE_TRANSPORT=nats` is live, instead of using the stub identity.
+- [x] Cover via the existing `a2a-bridge::nats_transport_harness`; add a callout-mock dispatcher for unit tests.
 
 ### 11. Docs
 - [ ] Promote `docs/A2A_AUTH_CALLOUT_SKETCH.md` from "sketch" to "design" once wire format is pinned; rename if appropriate.
