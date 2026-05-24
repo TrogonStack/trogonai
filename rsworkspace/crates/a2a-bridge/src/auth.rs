@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::time::timeout;
 
-use a2a_auth_callout::{AuthCalloutRequest, AuthCalloutResponse};
+use a2a_auth_callout::{BridgeMintRequest, BridgeMintResponse};
 
 pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
 #[cfg(test)]
@@ -139,7 +139,7 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             .strip_prefix("Bearer ")
             .or_else(|| caller_auth.as_str().strip_prefix("bearer "))
             .map(str::to_owned);
-        let envelope = AuthCalloutRequest {
+        let envelope = BridgeMintRequest {
             user_nkey: None,
             user_jwt: bearer_jwt,
             account: self.tenant_account.as_ref().map(|a| a.as_str().to_owned()),
@@ -153,7 +153,7 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             .await
             .map_err(|_| BridgeError::Mint("auth mint client deadline exceeded".into()))??;
 
-        let response: AuthCalloutResponse =
+        let response: BridgeMintResponse =
             serde_json::from_slice(&reply).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
         Ok(BridgeUserJwt::new(response.user_jwt))
     }

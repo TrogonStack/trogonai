@@ -52,10 +52,10 @@ Today the gateway derives caller identity from `X-A2a-Spicedb-Principal` / `X-A2
 - [ ] Document expected secret-store integration points in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md` (new).
 
 ### 6. Wire format pin (NATS auth-callout extension)
-- [ ] Replace the illustrative `AuthCalloutRequest` / `AuthCalloutResponse` structs with the real NATS server wire format: NKey-signed envelope + JWT-encoded inner payload per the auth-callout extension.
-- [ ] Decode the server-signed request JWT using the server's configured xkey.
-- [ ] Encode the response as a callout-signed JWT the server can verify.
-- [ ] Pin against a specific `nats-server` minor version in tests; record the version in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`.
+- [x] Replace the illustrative `AuthCalloutRequest` / `AuthCalloutResponse` structs with the real NATS server wire format: NKey-signed envelope + JWT-encoded inner payload per the auth-callout extension.
+- [x] Decode the server-signed request JWT using the server's configured xkey.
+- [x] Encode the response as a callout-signed JWT the server can verify.
+- [x] Pin against a specific `nats-server` minor version in tests; record the version in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`.
 
 ### 7. Denial encoding
 - [ ] `subscriber.rs::publish_denial` today emits `{"error":"authorization denied"}`. Replace with the auth-callout extension's denial format (signed JWT carrying the deny indicator).

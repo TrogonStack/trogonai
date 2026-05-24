@@ -3,27 +3,27 @@ use std::sync::Arc;
 use futures::StreamExt as _;
 use tracing::{error, info, warn};
 
-use crate::dispatcher::{AuthCalloutRequest, AuthCalloutResponse, AuthDispatcher};
+use crate::dispatcher::AuthDispatcher;
 use crate::error::AuthCalloutError;
+use crate::wire::AuthCalloutWireCodec;
 
 /// NATS subject the server uses for auth callout requests.
 const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
 
 /// Subscriber loop that listens on `$SYS.REQ.USER.AUTH` and delegates each
 /// request to the injected `AuthDispatcher`.
-///
-/// Keeping I/O (NATS) and decision logic (dispatcher) separate makes the loop
-/// unit-testable without a live server.
 pub struct Subscriber<D> {
     client: async_nats::Client,
     dispatcher: Arc<D>,
+    wire: Arc<AuthCalloutWireCodec>,
 }
 
 impl<D: AuthDispatcher> Subscriber<D> {
-    pub fn new(client: async_nats::Client, dispatcher: D) -> Self {
+    pub fn new(client: async_nats::Client, dispatcher: D, wire: AuthCalloutWireCodec) -> Self {
         Self {
             client,
             dispatcher: Arc::new(dispatcher),
+            wire: Arc::new(wire),
         }
     }
 
@@ -45,27 +45,36 @@ impl<D: AuthDispatcher> Subscriber<D> {
                 }
             };
 
-            let request: AuthCalloutRequest = match serde_json::from_slice(&msg.payload) {
+            let request = match self
+                .wire
+                .decode_request(msg.payload.to_vec(), msg.headers.as_ref())
+            {
                 Ok(r) => r,
                 Err(e) => {
-                    warn!(error = %e, "failed to deserialize auth callout request; dropping");
+                    warn!(error = %e, "failed to decode auth callout request; dropping");
                     continue;
                 }
             };
 
             let dispatcher = Arc::clone(&self.dispatcher);
             let client = self.client.clone();
+            let wire = Arc::clone(&self.wire);
 
             tokio::spawn(async move {
-                match dispatcher.dispatch(request).await {
-                    Ok(response) => {
-                        if let Err(e) = publish_response(&client, &reply, &response).await {
+                match dispatcher.dispatch(request.clone()).await {
+                    Ok(user_jwt) => {
+                        if let Err(e) = publish_success(&client, &reply, &wire, &request, user_jwt).await
+                        {
                             error!(error = %e, "failed to publish auth callout response");
                         }
                     }
                     Err(e) => {
                         warn!(error = %e, "auth callout denied; sending error reply");
-                        publish_denial(&client, &reply).await;
+                        if let Err(pub_err) =
+                            publish_denial(&client, &reply, &wire, &request, e.to_string()).await
+                        {
+                            error!(error = %pub_err, "failed to publish auth callout denial");
+                        }
                     }
                 }
             });
@@ -76,23 +85,30 @@ impl<D: AuthDispatcher> Subscriber<D> {
     }
 }
 
-async fn publish_response(
+async fn publish_success(
     client: &async_nats::Client,
     reply: &str,
-    response: &AuthCalloutResponse,
+    wire: &AuthCalloutWireCodec,
+    request: &crate::wire::ServerAuthRequestClaims,
+    user_jwt: crate::jwt::MintedUserJwt,
 ) -> Result<(), AuthCalloutError> {
-    let payload = serde_json::to_vec(response).map_err(AuthCalloutError::Serialize)?;
+    let payload = wire.encode_success(request, user_jwt)?;
     client
         .publish(reply.to_string(), payload.into())
         .await
         .map_err(|e| AuthCalloutError::Reply(e.to_string()))
 }
 
-async fn publish_denial(client: &async_nats::Client, reply: &str) {
-    // A minimal denial response — the exact error encoding for the NATS auth callout
-    // protocol is TODO(spec) pending wire format confirmation.
-    let payload = serde_json::json!({ "error": "authorization denied" });
-    if let Ok(bytes) = serde_json::to_vec(&payload) {
-        let _ = client.publish(reply.to_string(), bytes.into()).await;
-    }
+async fn publish_denial(
+    client: &async_nats::Client,
+    reply: &str,
+    wire: &AuthCalloutWireCodec,
+    request: &crate::wire::ServerAuthRequestClaims,
+    message: String,
+) -> Result<(), AuthCalloutError> {
+    let payload = wire.encode_denial(request, message)?;
+    client
+        .publish(reply.to_string(), payload.into())
+        .await
+        .map_err(|e| AuthCalloutError::Reply(e.to_string()))
 }

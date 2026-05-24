@@ -1,58 +1,16 @@
-// TODO(spec): The exact wire encoding of $SYS.REQ.USER.AUTH request/reply payloads
-// is defined by the NATS server version and auth callout extension.
-// Reference: https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_callout
-//
-// The fields below are derived from the illustrative shape in
-// docs/A2A_AUTH_CALLOUT_SKETCH.md §2. Replace with the actual nkeys/jwt-encoded
-// request struct once the NATS auth callout wire format is pinned for this deployment.
-
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
-use crate::account_resolver::{AccountResolver, RequestedAccount};
+use crate::account_resolver::AccountResolver;
 #[allow(deprecated)]
 use crate::credentials::api_key::ApiKeyVerifier;
-use crate::credentials::mtls::{ClientCertPem, MTlsVerifier};
+use crate::credentials::mtls::MTlsVerifier;
 use crate::credentials::oidc::{BearerToken, OidcVerifier};
 use crate::error::AuthCalloutError;
-use crate::jwt::SigningKey;
-
-/// Illustrative shape of the auth callout request published by the NATS server
-/// on `$SYS.REQ.USER.AUTH`.
-///
-/// Field names follow the sketch in `docs/A2A_AUTH_CALLOUT_SKETCH.md` §2.
-/// The real server payload may be NKey-signed and/or JWT-encoded; replace this
-/// struct once the wire format is confirmed for the target NATS operator setup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthCalloutRequest {
-    /// Client-supplied credential material (NKey public key or JWT bearer).
-    pub user_nkey: Option<String>,
-    /// Client-supplied JWT if the connect options included an OIDC bearer token.
-    pub user_jwt: Option<String>,
-    /// Target Account the client is attempting to join (caller-claimed; verified by resolver).
-    pub account: Option<String>,
-    /// Opaque client connection metadata (TLS state, IP, client library id).
-    pub client_info: Option<ClientInfo>,
-    /// Optional tags or headers from the client connect options.
-    pub connect_opts: Option<ConnectOpts>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ClientInfo {
-    /// PEM-encoded client certificate chain when the connection used mTLS.
-    pub client_cert_pem: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ConnectOpts {
-    /// Caller-selected auth scheme hint; the dispatcher cross-checks against
-    /// available credential material in the request.
-    pub auth_scheme: Option<AuthScheme>,
-    /// Transitional API-key bearer; used only when `auth_scheme == ApiKey`.
-    pub api_key: Option<String>,
-}
+use crate::jwt::{MintedUserJwt, SigningKey};
+use crate::wire::ServerAuthRequestClaims;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,24 +20,13 @@ pub enum AuthScheme {
     ApiKey,
 }
 
-/// Illustrative shape of a successful auth callout reply (callout → server).
-///
-/// On success the service must return a signed User JWT bound to the tenant Account.
-/// On failure it must return an authorization denied indicator — represented here as
-/// an `Err` from the `AuthDispatcher`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthCalloutResponse {
-    /// Signed User JWT bound to the tenant Account (short TTL).
-    pub user_jwt: String,
-}
-
 /// Trait that the subscriber loop delegates auth decisions to.
-///
-/// Inject a test double via `Subscriber::new` to unit-test the loop without a
-/// live NATS connection.
 #[async_trait::async_trait]
 pub trait AuthDispatcher: Send + Sync + 'static {
-    async fn dispatch(&self, request: AuthCalloutRequest) -> Result<AuthCalloutResponse, AuthCalloutError>;
+    async fn dispatch(
+        &self,
+        request: ServerAuthRequestClaims,
+    ) -> Result<MintedUserJwt, AuthCalloutError>;
 }
 
 pub struct CalloutDispatcherConfig {
@@ -92,10 +39,6 @@ pub struct CalloutDispatcherConfig {
     pub api_key: Option<Arc<dyn ApiKeyVerifier>>,
 }
 
-/// Production dispatcher wiring the verifier library + account resolver + JWT mint.
-///
-/// Construction is split from `dispatch` so the main binary can build it from
-/// env-driven config while tests can supply trait-mocked verifiers directly.
 pub struct CalloutDispatcher {
     config: CalloutDispatcherConfig,
 }
@@ -105,46 +48,26 @@ impl CalloutDispatcher {
         Self { config }
     }
 
-    fn select_scheme(&self, request: &AuthCalloutRequest) -> Result<AuthScheme, AuthCalloutError> {
-        if let Some(opts) = &request.connect_opts
-            && let Some(scheme) = opts.auth_scheme
-        {
-            return Ok(scheme);
-        }
-        if request.user_jwt.is_some() {
+    fn select_scheme(&self, request: &ServerAuthRequestClaims) -> Result<AuthScheme, AuthCalloutError> {
+        if request.connect_opts_jwt().is_some() {
             return Ok(AuthScheme::Oidc);
         }
-        if request
-            .client_info
-            .as_ref()
-            .and_then(|c| c.client_cert_pem.as_ref())
-            .is_some()
-        {
+        if request.primary_client_cert().is_some() {
             return Ok(AuthScheme::MTls);
         }
-        if request
-            .connect_opts
-            .as_ref()
-            .and_then(|c| c.api_key.as_ref())
-            .is_some()
-        {
+        if request.connect_opts_auth_token().is_some() {
             return Ok(AuthScheme::ApiKey);
         }
         Err(AuthCalloutError::CredentialVerification(
-            "no credential material in request".into(),
+            "no credential material in authorization request".into(),
         ))
     }
 }
 
 #[async_trait::async_trait]
 impl AuthDispatcher for CalloutDispatcher {
-    async fn dispatch(&self, request: AuthCalloutRequest) -> Result<AuthCalloutResponse, AuthCalloutError> {
-        let requested = request
-            .account
-            .as_ref()
-            .ok_or_else(|| AuthCalloutError::CredentialVerification("request missing account".into()))?;
-        let requested = RequestedAccount::new(requested.clone())
-            .map_err(AuthCalloutError::from)?;
+    async fn dispatch(&self, request: ServerAuthRequestClaims) -> Result<MintedUserJwt, AuthCalloutError> {
+        let requested = request.requested_account()?;
         let account = self.config.account_resolver.resolve(&requested)?;
 
         let scheme = self.select_scheme(&request)?;
@@ -153,42 +76,36 @@ impl AuthDispatcher for CalloutDispatcher {
                 let verifier = self.config.oidc.as_ref().ok_or_else(|| {
                     AuthCalloutError::CredentialVerification("OIDC verifier not configured".into())
                 })?;
-                let token = request.user_jwt.clone().ok_or_else(|| {
-                    AuthCalloutError::CredentialVerification("OIDC scheme but user_jwt missing".into())
+                let token = request.connect_opts_jwt().ok_or_else(|| {
+                    AuthCalloutError::CredentialVerification("OIDC scheme but connect_opts.jwt missing".into())
                 })?;
-                verifier.verify(&BearerToken::new(token), &account).await?
+                verifier
+                    .verify(&BearerToken::new(token.to_owned()), &account)
+                    .await?
             }
             AuthScheme::MTls => {
                 let verifier = self.config.mtls.as_ref().ok_or_else(|| {
                     AuthCalloutError::CredentialVerification("mTLS verifier not configured".into())
                 })?;
-                let pem = request
-                    .client_info
-                    .as_ref()
-                    .and_then(|c| c.client_cert_pem.clone())
-                    .ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification(
-                            "mTLS scheme but client_cert_pem missing".into(),
-                        )
-                    })?;
-                verifier.verify(&ClientCertPem::new(pem), &account).await?
+                let pem = request.primary_client_cert().ok_or_else(|| {
+                    AuthCalloutError::CredentialVerification(
+                        "mTLS scheme but client_tls certs missing".into(),
+                    )
+                })?;
+                verifier.verify(&pem, &account).await?
             }
             AuthScheme::ApiKey => {
                 #[allow(deprecated)]
                 let verifier = self.config.api_key.as_ref().ok_or_else(|| {
                     AuthCalloutError::CredentialVerification("API-key verifier not configured".into())
                 })?;
-                let key = request
-                    .connect_opts
-                    .as_ref()
-                    .and_then(|c| c.api_key.clone())
-                    .ok_or_else(|| {
-                        AuthCalloutError::CredentialVerification(
-                            "API-key scheme but connect_opts.api_key missing".into(),
-                        )
-                    })?;
+                let key = request.connect_opts_auth_token().ok_or_else(|| {
+                    AuthCalloutError::CredentialVerification(
+                        "API-key scheme but connect_opts.auth_token missing".into(),
+                    )
+                })?;
                 #[allow(deprecated)]
-                let verified = verifier.verify(&key).await?;
+                let verified = verifier.verify(key).await?;
                 if verified.aud != account {
                     return Err(AuthCalloutError::CredentialVerification(
                         "API-key audience does not match resolved account".into(),
@@ -198,10 +115,9 @@ impl AuthDispatcher for CalloutDispatcher {
             }
         };
 
-        let token = claims
+        claims
             .mint(&self.config.signing_key, SystemTime::now(), self.config.user_jwt_ttl)
-            .map_err(AuthCalloutError::from)?;
-        Ok(AuthCalloutResponse { user_jwt: token })
+            .map_err(AuthCalloutError::from)
     }
 }
 
@@ -217,28 +133,42 @@ pub(crate) mod tests {
         AudienceAccount, CallerId, ExternalSubject, SigningKey, SpiceDbPrincipal, UserJwtClaims,
     };
     use crate::permissions::IssuedPermissions;
+    use crate::wire::test_encode::signed_auth_request;
+    use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
+    use nats_jwt_rs::authorization::AuthRequest;
+    use nats_jwt_rs::Claims;
+    use nkeys::KeyPair;
     use serde_json::json;
+
+    fn encode_fixture_request(
+        server: &KeyPair,
+        patch: impl FnMut(&mut Claims<AuthRequest>),
+    ) -> ServerAuthRequestClaims {
+        let user = KeyPair::new_user();
+        let token = signed_auth_request(server, &user, patch);
+        let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
+        ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
+            .decode(&server_pub, None, None)
+            .unwrap()
+    }
 
     pub struct AlwaysDenyDispatcher;
 
     #[async_trait::async_trait]
     impl AuthDispatcher for AlwaysDenyDispatcher {
-        async fn dispatch(&self, _request: AuthCalloutRequest) -> Result<AuthCalloutResponse, AuthCalloutError> {
+        async fn dispatch(
+            &self,
+            _request: ServerAuthRequestClaims,
+        ) -> Result<MintedUserJwt, AuthCalloutError> {
             Err(AuthCalloutError::CredentialVerification("stub: always deny".into()))
         }
     }
 
     #[tokio::test]
     async fn always_deny_returns_err() {
-        let d = AlwaysDenyDispatcher;
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: None,
-            account: None,
-            client_info: None,
-            connect_opts: None,
-        };
-        assert!(d.dispatch(req).await.is_err());
+        let server = KeyPair::new_account();
+        let req = encode_fixture_request(&server, |_| {});
+        assert!(AlwaysDenyDispatcher.dispatch(req).await.is_err());
     }
 
     struct StubOidcVerifier {
@@ -286,7 +216,7 @@ pub(crate) mod tests {
     fn dispatcher_with(
         oidc: Option<Arc<dyn OidcVerifier>>,
         mtls: Option<Arc<dyn MTlsVerifier>>,
-        #[allow(deprecated)] api_key: Option<Arc<dyn ApiKeyVerifier>>,
+        api_key: Option<Arc<dyn ApiKeyVerifier>>,
         allowed: &[&str],
     ) -> CalloutDispatcher {
         let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(
@@ -304,98 +234,69 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn dispatch_oidc_happy_path_mints_jwt() {
+        let server = KeyPair::new_account();
         let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
         let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: Some("opaque.jwt.token".into()),
-            account: Some("tenant-acme".into()),
-            client_info: None,
-            connect_opts: Some(ConnectOpts {
-                auth_scheme: Some(AuthScheme::Oidc),
-                api_key: None,
-            }),
-        };
+        let req = encode_fixture_request(&server, |_| {});
         let resp = d.dispatch(req).await.unwrap();
-        assert_eq!(resp.user_jwt.split('.').count(), 3);
+        assert_eq!(resp.as_str().split('.').count(), 3);
     }
 
     #[tokio::test]
     async fn dispatch_rejects_unknown_account() {
+        let server = KeyPair::new_account();
         let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
         let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: Some("t".into()),
-            account: Some("tenant-evil".into()),
-            client_info: None,
-            connect_opts: Some(ConnectOpts {
-                auth_scheme: Some(AuthScheme::Oidc),
-                api_key: None,
-            }),
-        };
+        let req = encode_fixture_request(&server, |c| {
+            c.nats.connect_opts.user = Some("tenant-evil".into());
+            c.nats.client_info.user = "tenant-evil".into();
+        });
         assert!(d.dispatch(req).await.is_err());
     }
 
     #[tokio::test]
     async fn dispatch_rejects_request_without_account() {
+        let server = KeyPair::new_account();
         let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
         let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: Some("t".into()),
-            account: None,
-            client_info: None,
-            connect_opts: None,
-        };
+        let req = encode_fixture_request(&server, |c| {
+            c.nats.connect_opts.user = None;
+            c.nats.client_info.user = String::new();
+        });
         assert!(d.dispatch(req).await.is_err());
     }
 
     #[tokio::test]
     async fn dispatch_infers_oidc_when_user_jwt_present() {
+        let server = KeyPair::new_account();
         let oidc: Arc<dyn OidcVerifier> = Arc::new(StubOidcVerifier { sub: "user-1" });
         let d = dispatcher_with(Some(oidc), None, None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: Some("t".into()),
-            account: Some("tenant-acme".into()),
-            client_info: None,
-            connect_opts: None,
-        };
+        let req = encode_fixture_request(&server, |_| {});
         assert!(d.dispatch(req).await.is_ok());
     }
 
     #[tokio::test]
-    async fn dispatch_mtls_when_cert_present_and_scheme_unset() {
+    async fn dispatch_mtls_when_cert_present() {
+        use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
+
         let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
         let d = dispatcher_with(None, Some(mtls), None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
+        let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
             user_nkey: None,
             user_jwt: None,
             account: Some("tenant-acme".into()),
-            client_info: Some(ClientInfo {
+            client_info: Some(BridgeClientInfo {
                 client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
             }),
             connect_opts: None,
-        };
+        })
+        .unwrap();
         assert!(d.dispatch(req).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn dispatch_rejects_when_no_credential() {
-        let d = dispatcher_with(None, None, None, &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: None,
-            account: Some("tenant-acme".into()),
-            client_info: None,
-            connect_opts: None,
-        };
-        assert!(d.dispatch(req).await.is_err());
     }
 
     #[tokio::test]
     async fn dispatch_api_key_happy_path() {
+        let server = KeyPair::new_account();
         let mut registry = ApiKeyRegistry::new(b"hmac-test-secret".to_vec());
         let key = ApiKey::new("k_live_demo").unwrap();
         registry.register(
@@ -406,24 +307,18 @@ pub(crate) mod tests {
                 external_subject: ExternalSubject::new("svc-demo").unwrap(),
             },
         );
-        #[allow(deprecated)]
         let verifier: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
         let d = dispatcher_with(None, None, Some(verifier), &["tenant-acme"]);
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: None,
-            account: Some("tenant-acme".into()),
-            client_info: None,
-            connect_opts: Some(ConnectOpts {
-                auth_scheme: Some(AuthScheme::ApiKey),
-                api_key: Some("k_live_demo".into()),
-            }),
-        };
+        let req = encode_fixture_request(&server, |c| {
+            c.nats.connect_opts.jwt = None;
+            c.nats.connect_opts.auth_token = Some("k_live_demo".into());
+        });
         assert!(d.dispatch(req).await.is_ok());
     }
 
     #[tokio::test]
     async fn dispatch_api_key_rejects_audience_mismatch() {
+        let server = KeyPair::new_account();
         let mut registry = ApiKeyRegistry::new(b"hmac-test-secret".to_vec());
         let key = ApiKey::new("k_live_demo").unwrap();
         registry.register(
@@ -434,7 +329,6 @@ pub(crate) mod tests {
                 external_subject: ExternalSubject::new("svc-demo").unwrap(),
             },
         );
-        #[allow(deprecated)]
         let verifier: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
         let d = dispatcher_with(
             None,
@@ -442,16 +336,10 @@ pub(crate) mod tests {
             Some(verifier),
             &["tenant-acme", "tenant-foo"],
         );
-        let req = AuthCalloutRequest {
-            user_nkey: None,
-            user_jwt: None,
-            account: Some("tenant-acme".into()),
-            client_info: None,
-            connect_opts: Some(ConnectOpts {
-                auth_scheme: Some(AuthScheme::ApiKey),
-                api_key: Some("k_live_demo".into()),
-            }),
-        };
+        let req = encode_fixture_request(&server, |c| {
+            c.nats.connect_opts.jwt = None;
+            c.nats.connect_opts.auth_token = Some("k_live_demo".into());
+        });
         assert!(d.dispatch(req).await.is_err());
     }
 }

@@ -102,6 +102,20 @@ impl SpiceDbPrincipal {
     }
 }
 
+/// HS256 User JWT minted for bridge/gateway consumption (inner `nats.jwt` on wire responses).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintedUserJwt(String);
+
+impl MintedUserJwt {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 pub struct SigningKey(pub(crate) EncodingKey);
 
 impl fmt::Debug for SigningKey {
@@ -178,7 +192,7 @@ impl UserJwtClaims {
         signing_key: &SigningKey,
         issued_at: SystemTime,
         ttl: Duration,
-    ) -> Result<String, JwtError> {
+    ) -> Result<MintedUserJwt, JwtError> {
         let iat_secs = secs_since_unix(issued_at)?;
         let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
         let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
@@ -206,11 +220,17 @@ impl UserJwtClaims {
             nbf: iat_secs,
         };
 
-        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0).map_err(JwtError::Encode)
+        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0)
+            .map(MintedUserJwt::new)
+            .map_err(JwtError::Encode)
     }
 
     #[cfg(test)]
-    fn mint_for_test_ttl(&self, signing_key: &SigningKey, ttl: Duration) -> Result<String, JwtError> {
+    fn mint_for_test_ttl(
+        &self,
+        signing_key: &SigningKey,
+        ttl: Duration,
+    ) -> Result<MintedUserJwt, JwtError> {
         self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
 }
@@ -298,7 +318,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let decoded = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"secret-for-hs256-test"),
             &validation,
         )
@@ -330,7 +350,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let err =
-            decode::<ParsedMinted>(&token, &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
+            decode::<ParsedMinted>(token.as_str(), &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
         assert!(
             matches!(err.kind(), jsonwebtoken::errors::ErrorKind::InvalidAlgorithm)
                 || err.to_string().to_lowercase().contains("algorithm"),
@@ -356,7 +376,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let wrong = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"signer-b------------------------"),
             &validation,
         );
