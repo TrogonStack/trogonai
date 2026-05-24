@@ -28,6 +28,16 @@ pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 /// NATS message header carrying the [`crate::ReqId`] across the request/reply boundary.
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
+/// Optional correlate external caller identity on gateway ingress (`a2a-gateway` records it on spans /
+/// audits). **`a2a-bridge`** should copy HTTP header [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when
+/// publishing to `{prefix}.gateway.>`.
+///
+/// Stable wire token (case-insensitive matching on ingress); prefer `GatewayCallerId` casing in observability prose.
+pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
+
+/// HTTP correlate for [`GATEWAY_CALLER_ID_HEADER`] on the bridge ingress path (`POST /`).
+pub const GATEWAY_CALLER_ID_HTTP: &str = "x-a2a-caller-id";
+
 /// Maximum attempts for terminal task push delivery over HTTPS, core NATS (`subject:` URLs), and JetStream (`jetstream:` URLs).
 ///
 /// HTTPS retries are status- and transport-aware in [`crate::push::HttpPushDispatcher`]. NATS targets use the same
@@ -84,6 +94,13 @@ mod tests {
     #[test]
     fn headers_use_x_prefix() {
         assert!(REQ_ID_HEADER.starts_with("X-"));
+        assert!(GATEWAY_CALLER_ID_HEADER.starts_with("X-"));
+        assert!(
+            GATEWAY_CALLER_ID_HTTP
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "HTTP header literals should be lowercase with digits/hyphen only for axum pairing"
+        );
     }
 
     #[test]

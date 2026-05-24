@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use axum::{
     Router,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderName, StatusCode},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -469,6 +469,37 @@ fn gateway_req_headers(correlation: ReqId) -> Result<async_nats::HeaderMap, Brid
     Ok(map)
 }
 
+/// Gateway publish headers propagate JSON-RPC correlation and optional ingress caller attribution.
+///
+/// Mirrors [`gateway_req_headers`], inserting [`a2a_nats::constants::GATEWAY_CALLER_ID_HEADER`] when HTTPS provided
+/// [`a2a_nats::constants::GATEWAY_CALLER_ID_HTTP`].
+pub fn gateway_publish_headers(
+    correlation: ReqId,
+    inbound_http_headers: Option<&HeaderMap>,
+) -> Result<async_nats::HeaderMap, BridgeError> {
+    let mut map = gateway_req_headers(correlation)?;
+    let Some(axum_headers) = inbound_http_headers else {
+        return Ok(map);
+    };
+    let caller_header = HeaderName::from_bytes(a2a_nats::constants::GATEWAY_CALLER_ID_HTTP.as_bytes()).map_err(
+        |_| BridgeError::NatsPublish("invalid gateway caller-id header name literal".into()),
+    )?;
+    let Some(header_value) = axum_headers.get(caller_header) else {
+        return Ok(map);
+    };
+    let Ok(token) = header_value.to_str() else {
+        return Ok(map);
+    };
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Ok(map);
+    }
+    let nats_name = async_nats::header::HeaderName::from_static("X-A2a-Caller-Id");
+    map.insert(nats_name, async_nats::header::HeaderValue::from(trimmed));
+
+    Ok(map)
+}
+
 fn caller_auth_from(headers: &HeaderMap) -> Result<CallerHttpsAuth, BridgeError> {
     let raw = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -588,7 +619,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let subject = build_gateway_subject(&state.prefix, agent_id.as_str(), method);
 
     if is_sse_jsonrpc_method(method) {
-        let nats_headers = gateway_req_headers(json_rpc_corr_id(&v))?;
+        let nats_headers = gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers))?;
         let unary_reply = state
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
@@ -608,7 +639,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
         .publish_unary_to_gateway(
             &subject,
             &jwt,
-            gateway_req_headers(json_rpc_corr_id(&v))?,
+            gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers))?,
             body.as_ref(),
         )
         .await?;

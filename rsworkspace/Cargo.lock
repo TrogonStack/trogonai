@@ -59,6 +59,7 @@ dependencies = [
  "a2a-redaction",
  "a2a-types",
  "async-nats",
+ "bytes",
  "clap",
  "futures",
  "serde_json",
@@ -68,6 +69,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]
