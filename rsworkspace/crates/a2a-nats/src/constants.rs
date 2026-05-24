@@ -58,6 +58,19 @@ pub const DEFAULT_PUSH_DLQ_CALLER_SEGMENT: &str = "_";
 
 pub const ENV_PUSH_DLQ_CALLER_SEGMENT: &str = "A2A_PUSH_DLQ_CALLER_SEGMENT";
 
+/// In-process LRU capacity for push DLQ publish dedupe (agent + gateway mirror).
+pub const ENV_PUSH_DLQ_DEDUP_LRU_SIZE: &str = "A2A_PUSH_DLQ_DEDUP_LRU_SIZE";
+
+pub const DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE: usize = 1024;
+
+/// JetStream duplicate suppression window for **`A2A_PUSH_DLQ`** publishes.
+pub const ENV_PUSH_DLQ_DEDUP_WINDOW_SECS: &str = "A2A_PUSH_DLQ_DEDUP_WINDOW_SECS";
+
+pub const DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS: u64 = 120;
+
+/// JetStream message dedupe header for push DLQ and mirror publishes.
+pub const NATS_MSG_ID_HEADER: &str = "Nats-Msg-Id";
+
 pub const ENV_MAX_CONCURRENT_CLIENT_TASKS: &str = "A2A_MAX_CONCURRENT_CLIENT_TASKS";
 
 #[cfg(test)]
@@ -92,6 +105,8 @@ mod tests {
             ENV_TASK_TIMEOUT_SECS,
             ENV_CONNECT_TIMEOUT_SECS,
             ENV_PUSH_DLQ_CALLER_SEGMENT,
+            ENV_PUSH_DLQ_DEDUP_LRU_SIZE,
+            ENV_PUSH_DLQ_DEDUP_WINDOW_SECS,
             ENV_MAX_CONCURRENT_CLIENT_TASKS,
             ENV_EVENTS_MAX_AGE_SECS,
         ] {

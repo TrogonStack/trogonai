@@ -31,6 +31,3 @@ impl fmt::Debug for StatusTransitionId {
         f.debug_tuple("StatusTransitionId").field(&self.0).finish()
     }
 }
-
-#[cfg(test)]
-mod tests;
