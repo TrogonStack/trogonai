@@ -29,7 +29,7 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 ## Remaining work
 
 ### 8. Integration test against a real `nats-server`
-- [ ] Testcontainer-backed `nats-server` (pinned to 2.10.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
+- [ ] Testcontainer-backed `nats-server` (pinned to 2.14.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
 - [ ] Mock OIDC issuer (inline JWKS endpoint).
 - [ ] Connect a NATS client with an OIDC bearer token; assert the server admits the connection, the minted User JWT carries the expected `aud`, `caller_id`, and `IssuedPermissions`, and the permissions block bounds publish/subscribe correctly.
 - [ ] Repeat for the mTLS and API-key credential paths.

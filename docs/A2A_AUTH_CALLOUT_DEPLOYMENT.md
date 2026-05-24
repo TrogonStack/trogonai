@@ -6,14 +6,14 @@ Operator runbook for the `a2a-auth-callout` service on NATS `$SYS.REQ.USER.AUTH`
 
 | Component | Version | Notes |
 |-----------|---------|--------|
-| **nats-server** | **2.10.x** (validated against **2.10.29** server source) | Auth callout extension ships from [v2.10.0](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_callout.md). |
+| **nats-server** | **2.14.x** (validated against **2.14.1** server source) | Auth callout extension ships from [v2.10.0](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_callout.md); pin to the latest 2.14 line for current JetStream + leafnode fixes. |
 | **nats-jwt-rs** | **0.1.1** | Authorization request/response JWT encode/decode. |
 | **nkeys** | **0.4.5** (`xkeys` feature) | NKey signing and XKey encrypt/decrypt for callout payloads. |
 
 Spec references:
 
 - [Auth callout configuration](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_callout.md)
-- [`nats-server` `server/auth_callout.go`](https://github.com/nats-io/nats-server/blob/v2.10.29/server/auth_callout.go) (request/reply encoding)
+- [`nats-server` `server/auth_callout.go`](https://github.com/nats-io/nats-server/blob/v2.14.1/server/auth_callout.go) (request/reply encoding)
 - [NKeys / JWT tutorials](https://docs.nats.io/using-nats/developer/tutorials/jwt)
 
 ## Wire format (server path)
