@@ -21,7 +21,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 2 — streaming & lifecycle
 
-- [ ] Richer Tier 3 skill matrix beyond preload-only redaction stubs. **Code shipped:** `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS` host the Wasmtime preload, and Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`) gates payloads. **Remaining:** broader skill catalog wired through the bundle layer.
+- [ ] Richer Tier 3 skill matrix beyond preload-only redaction stubs. **Code shipped:** manifest schema (`SkillManifest`), `SkillManifestRegistry`, `SkillSelectionPlan`, and reference skill stubs under `a2a-pack/skills/`; Wasmtime preload via `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS`. **Remaining:** WASM skill authoring (operator work) and gateway call-site consumption of the selection plan (sibling worktree).
 
 ## Phase 3 — push delivery & redaction
 

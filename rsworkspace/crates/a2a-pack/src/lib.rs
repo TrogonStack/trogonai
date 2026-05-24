@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod rate_limit;
 pub mod redaction;
 pub mod resource_tuples;
+pub mod skills;
 
 pub use agent_card_read::{
     AgentCardSchemaError, AgentCardSource, accept_agent_card_on_read, filter_agent_cards_on_read,

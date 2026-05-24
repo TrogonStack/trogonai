@@ -136,7 +136,7 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `--queue-group` / `A2A_GATEWAY_QUEUE_GROUP` | no | — | Optional NATS queue group for gateway subscribers; unset ⇒ ephemeral subscriber |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth via `NatsConfig::from_env` |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
-| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | no | — | Enables Wasmtime-hosted substrate Tier-3 redaction + Tier-2 policy seam on ingress |
+| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | no | — | Enables Wasmtime-hosted substrate Tier-3 redaction + Tier-2 policy seam on ingress; also the root for `<skill_id>.skill.toml` manifests (see [Tier-3 skills catalog](./A2A_TIER3_SKILLS_CATALOG.md)) |
 | `A2A_GATEWAY_TIER2_CEL_ENABLED` | no | off | Truthy loads `{bundle_dir}/tier2/*.cel` and runs the CEL evaluator; off keeps noop Tier-2 (see [Tier-2 CEL](./A2A_TIER2_CEL.md)) |
 | `A2A_GATEWAY_POLICY_SKILLS` | no | — | Comma-separated skill slugs; preload `{skill}.wasm` bundles from `A2A_GATEWAY_POLICY_BUNDLE_DIR` (missing files skipped) |
 | `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
