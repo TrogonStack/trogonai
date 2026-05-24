@@ -116,5 +116,20 @@ Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** 
 ## Operational notes
 
 - DLQ is **per-Account** — cross-tenant isolation matches other A2A JetStream assets.
-- **`a2a-gateway`** forwarder does **not** emit DLQ traffic; DLQ JSON is published from **`a2a-nats`** **`message/stream`** terminal push **`dispatch`** errors on the agent **`Bridge`**.
+- **`a2a-gateway`** forwarder does **not** emit agent-origin DLQ traffic; optional **`A2A_GATEWAY_PUSH_DLQ_MIRROR`** republishes agent envelopes to **`{prefix}.push.dlq.mirror.*`** for ops visibility (see **Gateway mirror mode** above). Terminal DLQ JSON is published from **`a2a-nats`** **`message/stream`** on the agent **`Bridge`**.
 - After remediation, ack processed DLQ messages so retention/discards do not hide new failures.
+
+---
+
+## Gateway mirror mode (optional)
+
+When **`A2A_GATEWAY_PUSH_DLQ_MIRROR=on`**, the **`a2a-gateway`** process runs a background JetStream pull consumer on **`{prefix}.push.dlq.>`** and republishes each agent-origin DLQ envelope onto **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** in the same **`A2A_PUSH_DLQ`** stream. Mirror copies carry header **`X-A2a-Dlq-Mirrored: true`**; the consumer skips subjects that already contain **`.mirror.`** or carry that header so the loop cannot recurse.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| **`A2A_GATEWAY_PUSH_DLQ_MIRROR`** | off | Set to **`on`**, **`true`**, **`1`**, or **`yes`** to enable the mirror task |
+| **`A2A_GATEWAY_PUSH_DLQ_DURABLE`** | **`a2a-gateway-push-dlq-mirror`** | Override the durable pull consumer name |
+
+The gateway User must have JetStream **read** on **`A2A_PUSH_DLQ`** (consumer + get) and **publish** on **`{prefix}.push.dlq.mirror.*.*`**. Existing streams provisioned before mirror support may need their subject filter extended with **`{prefix}.push.dlq.mirror.*.*`** (in-tree **`provision_streams`** includes both patterns).
+
+Mirror mode is for operator visibility alongside agent publishes — it does **not** replace agent-side terminal DLQ emission or provide exactly-once deduplication across agent + mirror paths.
