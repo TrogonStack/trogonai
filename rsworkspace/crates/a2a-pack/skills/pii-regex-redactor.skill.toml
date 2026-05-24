@@ -1,0 +1,6 @@
+skill_id = "pii-regex-redactor"
+wasm_path = "skills/pii_regex_redactor.wasm"
+applies_to_method = { kind = "OneOf", methods = ["message/send", "message/stream", "tasks/get"] }
+applies_to_paths = ["$.message.parts[*].text", "$.message.parts[*].content", "$.parts[*].text", "$.parts[*].content"]
+category = "Pii"
+version = "1.0.0"
