@@ -12,7 +12,7 @@ use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_cli::session::{NatsSessionFactory, SessionFactory, StreamEvent, TrogonSession};
-use trogon_cli::Session as _;
+use trogon_cli::{CrossRunnerSwitcher, Session as _};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -314,6 +314,139 @@ async fn compact_publishes_to_compactor_subject_with_session_id() {
         payload["sessionId"].as_str().unwrap(),
         expected_id,
         "compact payload must include the session_id"
+    );
+}
+
+// ── /model (CrossRunnerSwitcher integration) ──────────────────────────────────
+
+/// `CrossRunnerSwitcher::switch_model` — which backs the `/model` slash command —
+/// performs the full export→new_session→import sequence via real NATS
+/// request-reply and resolves the target prefix from the registry.
+///
+/// Uses lightweight NATS responders (no Docker containers) to exercise the
+/// complete routing path without spinning up real runner processes.
+#[tokio::test]
+async fn model_slash_command_cross_runner_switch_via_real_nats() {
+    let (_container, port) = start_nats().await;
+    let nats = connect(port).await;
+    let nats_bg = connect(port).await;
+
+    // ── Mock responders for the three migration subjects ──────────────────
+    // export from src runner
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.src.agent.ext.session/export")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    n.publish(reply, b"[]"[..].into()).await.ok();
+                }
+            }
+        });
+    }
+    // new_session on target (grok) runner
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.grok.agent.session.new")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    n.publish(reply, br#"{"sessionId":"grok-sess-1"}"#[..].into())
+                        .await
+                        .ok();
+                }
+            }
+        });
+    }
+    // session/import on target runner
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.grok.agent.ext.session/import")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    n.publish(reply, b"{}"[..].into()).await.ok();
+                }
+            }
+        });
+    }
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // ── Registry: grok-4 → acp.grok ──────────────────────────────────────
+    let registry = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+    let mut cap = trogon_registry::AgentCapability::new("xai", ["chat"], "acp.grok.agent.>");
+    cap.metadata =
+        serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.grok" });
+    registry.register(&cap).await.unwrap();
+
+    let base_config = acp_nats::Config::new(
+        acp_nats::AcpPrefix::new("acp.src").unwrap(),
+        trogon_nats::NatsConfig {
+            servers: vec![format!("127.0.0.1:{port}")],
+            auth: trogon_nats::NatsAuth::None,
+        },
+    );
+    let mut switcher = CrossRunnerSwitcher::new(nats, base_config, registry);
+
+    let (new_prefix, new_session_id) = switcher
+        .switch_model("acp.src", "old-session", "grok-4", "/workspace")
+        .await
+        .expect("switch_model must succeed via real NATS");
+
+    assert_eq!(
+        new_prefix, "acp.grok",
+        "/model must route to the grok runner prefix"
+    );
+    assert_eq!(
+        new_session_id, "grok-sess-1",
+        "/model must use the session_id returned by new_session"
+    );
+}
+
+/// `CrossRunnerSwitcher::switch_model` stays on the same runner when the model
+/// is already served there — no migration NATS traffic is generated.
+#[tokio::test]
+async fn model_slash_command_same_runner_returns_unchanged_session() {
+    let (_container, port) = start_nats().await;
+    let nats = connect(port).await;
+
+    let registry = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+    let mut cap =
+        trogon_registry::AgentCapability::new("claude", ["chat", "code_edit"], "acp.acp.agent.>");
+    cap.metadata = serde_json::json!({
+        "models": ["claude-opus-4-6"],
+        "acp_prefix": "acp.acp"
+    });
+    registry.register(&cap).await.unwrap();
+
+    let base_config = acp_nats::Config::new(
+        acp_nats::AcpPrefix::new("acp.acp").unwrap(),
+        trogon_nats::NatsConfig {
+            servers: vec![format!("127.0.0.1:{port}")],
+            auth: trogon_nats::NatsAuth::None,
+        },
+    );
+    let mut switcher = CrossRunnerSwitcher::new(nats, base_config, registry);
+
+    let (new_prefix, new_session_id) = switcher
+        .switch_model("acp.acp", "current-session", "claude-opus-4-6", "/workspace")
+        .await
+        .expect("same-runner switch_model must succeed");
+
+    assert_eq!(new_prefix, "acp.acp", "prefix must be unchanged for same runner");
+    assert_eq!(
+        new_session_id, "current-session",
+        "session_id must be unchanged for same runner"
     );
 }
 

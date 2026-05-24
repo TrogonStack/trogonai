@@ -557,3 +557,116 @@ async fn call_tool_timeout_includes_partial_output() {
     assert!(err.contains("timeout"), "must mention timeout: {err}");
     assert!(err.contains("partial output line"), "must include partial output: {err}");
 }
+
+// ── cwd forwarding ────────────────────────────────────────────────────────────
+
+/// The `sandbox_dir` passed to `WasmRuntimeBashTool::new` must be forwarded
+/// verbatim as the `cwd` field in the `CreateTerminalRequest` sent to the
+/// wasm-runtime. If this field is missing or wrong, the bash terminal starts
+/// in the wrong directory and relative path operations fail silently.
+#[tokio::test]
+async fn call_tool_sends_session_cwd_in_create_terminal_request() {
+    let (_container, port) = start_nats().await;
+    let tool_client = nats_client(port).await;
+    let mock_client = nats_client(port).await;
+
+    let specific_cwd = PathBuf::from("/projects/myapp");
+    let session = "s-cwd-check";
+    let prefix = "wp";
+    let tid = "cwd-term";
+
+    let (create_tx, mut create_rx) = tokio::sync::oneshot::channel::<Vec<u8>>();
+    let write_done = Arc::new(AtomicBool::new(false));
+
+    // terminal.create — capture payload then reply
+    {
+        let c = mock_client.clone();
+        let mut sub = mock_client
+            .subscribe(format!("{prefix}.session.{session}.client.terminal.create"))
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                let payload = msg.payload.to_vec();
+                if let Some(reply) = msg.reply {
+                    let resp = serde_json::json!({ "terminalId": tid });
+                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                        .await
+                        .ok();
+                }
+                create_tx.send(payload).ok();
+            }
+        });
+    }
+
+    // terminal.output — empty before write, exit marker after
+    {
+        let wd = write_done.clone();
+        let c = mock_client.clone();
+        let mut sub = mock_client
+            .subscribe(format!("{prefix}.session.{session}.client.terminal.output"))
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            while let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    let out = if wd.load(Ordering::Acquire) {
+                        "echo test\n__EXIT_0__\n".to_string()
+                    } else {
+                        String::new()
+                    };
+                    let resp = serde_json::json!({ "output": out });
+                    c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                        .await
+                        .ok();
+                }
+            }
+        });
+    }
+
+    // write_stdin — ack and mark write done
+    {
+        let wd = write_done.clone();
+        let c = mock_client.clone();
+        let mut sub = mock_client
+            .subscribe(format!("{prefix}.session.{session}.client.ext.terminal.write_stdin"))
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                wd.store(true, Ordering::Release);
+                if let Some(reply) = msg.reply {
+                    c.publish(reply, "ok".into()).await.ok();
+                }
+            }
+        });
+    }
+
+    tokio::task::yield_now().await;
+
+    let tool = WasmRuntimeBashTool::new(
+        tool_client,
+        prefix,
+        session,
+        specific_cwd,
+        Duration::from_secs(10),
+        MemorySessionStore::new(),
+    );
+
+    // Drive the tool to completion — create is the very first request, so
+    // create_rx will have been fulfilled by the time call_tool returns.
+    let _ = tool
+        .call_tool("bash", &serde_json::json!({ "command": "echo test" }))
+        .await;
+
+    let payload = create_rx
+        .try_recv()
+        .expect("CreateTerminalRequest payload must have been captured");
+
+    let json: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(
+        json["cwd"].as_str(),
+        Some("/projects/myapp"),
+        "CreateTerminalRequest must forward sandbox_dir as cwd; got: {json}"
+    );
+}
