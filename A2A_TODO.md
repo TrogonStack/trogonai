@@ -6,7 +6,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 Partial items state the in-tree code surface and what remains before the item is fully effective. They stay open until the remaining work lands.
 
-**Design supplements (not duplicate trackers):** [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](./docs/A2A_AUTH_CALLOUT_SKETCH.md), [`docs/A2A_BRIDGE_SKETCH.md`](./docs/A2A_BRIDGE_SKETCH.md), [`docs/A2A_DEVELOPMENT.md`](./docs/A2A_DEVELOPMENT.md), [`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md), [`docs/A2A_GATEWAY_ROADMAP.md`](./docs/A2A_GATEWAY_ROADMAP.md), [`docs/A2A_PUSH_DLQ_OPS.md`](./docs/A2A_PUSH_DLQ_OPS.md), [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md), [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md), [`docs/A2A_SUBJECT_ACL_QUICKREF.md`](./docs/A2A_SUBJECT_ACL_QUICKREF.md), [`docs/A2A_RUNTIME_ENV.md`](./docs/A2A_RUNTIME_ENV.md), [`docs/A2A_TIER2_CEL.md`](./docs/A2A_TIER2_CEL.md), [`docs/A2A_DOCS_INDEX.md`](./docs/A2A_DOCS_INDEX.md) (navigation hub).
+**Design supplements (not duplicate trackers):** [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](./docs/A2A_AUTH_CALLOUT_SKETCH.md), [`docs/A2A_BRIDGE_SKETCH.md`](./docs/A2A_BRIDGE_SKETCH.md), [`docs/A2A_DEVELOPMENT.md`](./docs/A2A_DEVELOPMENT.md), [`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md), [`docs/A2A_GATEWAY_ROADMAP.md`](./docs/A2A_GATEWAY_ROADMAP.md), [`docs/A2A_PUSH_DLQ_OPS.md`](./docs/A2A_PUSH_DLQ_OPS.md), [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md), [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md), [`docs/A2A_SUBJECT_ACL_QUICKREF.md`](./docs/A2A_SUBJECT_ACL_QUICKREF.md), [`docs/A2A_RUNTIME_ENV.md`](./docs/A2A_RUNTIME_ENV.md), [`docs/A2A_TIER2_CEL.md`](./docs/A2A_TIER2_CEL.md), [`docs/A2A_TIER3_REDACTION.md`](./docs/A2A_TIER3_REDACTION.md), [`docs/A2A_DOCS_INDEX.md`](./docs/A2A_DOCS_INDEX.md) (navigation hub).
 
 ## Phase 0 — perimeter & catalog
 
@@ -21,11 +21,10 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 2 — streaming & lifecycle
 
-- [ ] Richer Tier 3 skill matrix beyond preload-only redaction stubs. **Code shipped:** `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS` host the Wasmtime preload, and Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`) gates payloads. **Remaining:** broader skill catalog wired through the bundle layer.
+- [ ] Richer Tier 3 skill matrix beyond manifest + WASM stubs. **Code shipped:** `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS` preload WASM + `{skill}.manifest.json`; Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`) gates payloads; authoritative Tier-3 redaction call site (`A2A_GATEWAY_TIER3_REDACTION_ENABLED`) with refusal (`-32802`), closed-fail engine errors (`-32801`), audit `refusal_skill`, and structured telemetry. **Remaining:** broader production skill catalog and signed bundle distribution.
 
 ## Phase 3 — push delivery & redaction
 
-- [ ] Tier 3 authoritative redaction in the gateway beyond preload-only skill hosts — deterministic policies, refusal semantics, telemetry. **Code shipped:** engine, module loader, and skill-id dispatch in `a2a-redaction`; gateway invokes the substrate when bundles are configured. **Remaining:** authoritative call site, deterministic policy semantics, refusal codes, and telemetry on the redaction path.
 - [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`, agent `Bridge` / `message/stream` wiring, gateway-side DLQ mirror (env-gated). **Remaining:** deployed auth-callout mint + gateway `X-A2a-Spicedb-Principal` header forward so the populated caller_id surfaces in DLQ subjects (today's `_` fallback stays active without a principal).
 - [ ] Exactly-once dedup across agent + mirror DLQ paths ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)). **Code shipped:** `DeliverySemantics` JSON-RPC extension, `PushDeliverySemanticsRegistry`, `PushIdempotencyKey` + `IdempotencyKeyHeader`. **Remaining:** sketched dedup contract wired across both paths.
 
@@ -37,13 +36,12 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Cross-cutting
 
-- [ ] Gateway request path completeness. **Code shipped:** Tier-1 SpiceDB gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), Wasmtime-hosted Tier-3 preload, decision-site audit publish (`trace_id`, `rules_fired`, `rewrites`, `stream_consumer`, `zed_token_snapshot`), unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), caller tracing via NATS `X-A2a-Caller-Id` ↔ HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Remaining:** authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier, authoritative Tier-3 redaction call site.
+- [ ] Gateway request path completeness. **Code shipped:** Tier-1 SpiceDB gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), authoritative Tier-3 redaction (`A2A_GATEWAY_TIER3_REDACTION_ENABLED`), decision-site audit publish (`trace_id`, `rules_fired`, `rewrites`, `refusal_skill`, `stream_consumer`, `zed_token_snapshot`), unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), caller tracing via NATS `X-A2a-Caller-Id` ↔ HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Remaining:** authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier.
 
 ---
 
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines remain). Unblocks JWT-derived `caller_id` and live push DLQ subject population.
-2. Finish gateway policy depth — authoritative JWT-derived `caller_id` on audits, non-SpiceDB Tier-1 declarative bundle tables.
-3. Tier 3 authoritative redaction call site on the gateway request path.
-4. Operator-signed cross-Account export/import + cross-binding collaboration tests against a live stack, then flip `A2A_BRIDGE_TRANSPORT=nats` to production wiring.
+2. Finish gateway policy depth — authoritative JWT-derived `caller_id` on audits, non-SpiceDB Tier-1 declarative bundle tables, richer Tier-3 skill catalog beyond manifest stubs.
+3. Operator-signed cross-Account export/import + cross-binding collaboration tests against a live stack, then flip `A2A_BRIDGE_TRANSPORT=nats` to production wiring.
