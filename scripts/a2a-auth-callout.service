@@ -1,0 +1,25 @@
+[Unit]
+Description=A2A NATS auth callout ($SYS.REQ.USER.AUTH)
+Documentation=file:///opt/a2a/docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md
+After=network-online.target nats.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=a2a
+Group=a2a
+EnvironmentFile=-/etc/a2a/auth-callout.env
+ExecStart=/usr/local/bin/a2a-auth-callout
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/a2a
+PrivateTmp=true
+
+# Production signing-key custody (AUTH_CALLOUT_SIGNING_KEY_SOURCE=file).
+BindReadOnlyPaths=/etc/a2a/secrets/signing-key.current
+
+[Install]
+WantedBy=multi-user.target

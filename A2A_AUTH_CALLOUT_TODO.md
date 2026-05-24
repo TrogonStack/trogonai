@@ -45,9 +45,9 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 - [ ] Update `docs/A2A_RUNTIME_ENV.md` with the deployed `AUTH_CALLOUT_*` envs (server NKey/XKey, signing-key source, allowed accounts, user JWT TTL, OIDC, mTLS).
 
 ### 12. Operator artifacts
-- [ ] NSC operator/account JWT provisioning script (or extension of `scripts/a2a-nsc-bootstrap.sh`) covering the callout signing keys and the AUTH/APP/SYS layout.
-- [ ] Reference `nats-server` config snippet committed under `scripts/` showing the callout binding for a single tenant Account.
-- [ ] Deployment manifest matching the rest of the stack (k8s / systemd — match the in-tree pattern).
+- [x] NSC operator/account JWT provisioning script (or extension of `scripts/a2a-nsc-bootstrap.sh`) covering the callout signing keys and the AUTH/APP/SYS layout.
+- [x] Reference `nats-server` config snippet committed under `scripts/` showing the callout binding for a single tenant Account.
+- [x] Deployment manifest matching the rest of the stack (k8s / systemd — match the in-tree pattern).
 
 ## Suggested ordering
 
