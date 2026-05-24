@@ -12,6 +12,9 @@ pub use dispatcher::{
     CalloutDispatcherConfig,
 };
 pub use error::AuthCalloutError;
-pub use jwt::{AccountName, AudienceAccount, CallerId, SigningKey, SpiceDbPrincipal, SpiceDbSubject, UserJwtClaims};
+pub use jwt::{
+    caller_id_from_minted_jwt, AccountName, AudienceAccount, CallerId, SigningKey, SpiceDbPrincipal,
+    SpiceDbSubject, UserJwtClaims,
+};
 pub use permissions::{IssuedPermissions, SubjectPattern, SubjectPatternError};
 pub use subscriber::Subscriber;

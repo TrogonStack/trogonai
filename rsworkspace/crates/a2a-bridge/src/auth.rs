@@ -1,3 +1,5 @@
+mod callout_mint;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +7,10 @@ use async_trait::async_trait;
 use tokio::time::timeout;
 
 use a2a_auth_callout::{AuthCalloutRequest, AuthCalloutResponse};
+
+pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
+#[cfg(test)]
+pub(crate) use callout_mint::harness_callout_dispatcher;
 
 use crate::error::BridgeError;
 use crate::identity::{BridgeUserJwt, CallerHttpsAuth};
@@ -97,14 +103,25 @@ impl AuthMintWire for AsyncNatsAuthMintWire {
 pub struct AuthCalloutJsonMintClient<W: AuthMintWire> {
     wire: Arc<W>,
     mint_subject: Arc<str>,
+    tenant_account: Option<BridgeTenantAccount>,
 }
 
 impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
     #[must_use]
     pub fn new(wire: Arc<W>, mint_subject: impl Into<Arc<str>>) -> Self {
+        Self::with_tenant_account(wire, mint_subject, None)
+    }
+
+    #[must_use]
+    pub fn with_tenant_account(
+        wire: Arc<W>,
+        mint_subject: impl Into<Arc<str>>,
+        tenant_account: Option<BridgeTenantAccount>,
+    ) -> Self {
         Self {
             wire,
             mint_subject: mint_subject.into(),
+            tenant_account,
         }
     }
 
@@ -125,7 +142,7 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
         let envelope = AuthCalloutRequest {
             user_nkey: None,
             user_jwt: bearer_jwt,
-            account: None,
+            account: self.tenant_account.as_ref().map(|a| a.as_str().to_owned()),
             client_info: None,
             connect_opts: None,
         };

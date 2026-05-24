@@ -12,13 +12,19 @@ use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::constants::GATEWAY_CALLER_ID_HEADER;
 use a2a_nats::{A2aPrefix};
 
-use crate::auth::StubAuthCalloutMint;
+use crate::auth::{
+    AuthCalloutJsonMintClient, BridgeTenantAccount, InProcessCalloutDispatcherMintWire,
+    harness_callout_dispatcher,
+};
 use crate::error::BridgeError;
 use crate::identity::BridgeUserJwt;
 use crate::inbound::{
     AppState, GatewayInboundPublisher, GatewayUnaryPublish, ScriptedTaskJetstream, TaskJetStreamPort,
     default_a2a_prefix,
 };
+
+const HARNESS_CALLER_ID: &str = "bridge-harness-caller";
+const HARNESS_TENANT: &str = "tenant-harness";
 
 /// Gateway+agent stub for NATS transport integration tests.
 #[derive(Clone)]
@@ -114,12 +120,16 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
     }
 }
 
-/// Builds an [`AppState`] wired like `A2A_BRIDGE_TRANSPORT=nats` but backed by mocks.
+/// Builds an [`AppState`] wired like `A2A_BRIDGE_TRANSPORT=nats` with in-process auth-callout mint.
 #[must_use]
 pub fn build_nats_transport_app_state(
     nats: trogon_nats::AdvancedMockNatsClient,
     agent_id: &str,
-) -> (AppState, Arc<HarnessGatewayUnary>) {
+) -> (
+    AppState,
+    Arc<HarnessGatewayUnary>,
+    Arc<InProcessCalloutDispatcherMintWire>,
+) {
     let prefix = default_a2a_prefix();
     let agent = A2aAgentId::new(agent_id).expect("fixture agent id");
     let harness = Arc::new(HarnessGatewayUnary::new(nats, prefix.clone(), agent));
@@ -127,13 +137,18 @@ pub fn build_nats_transport_app_state(
     let jetstream: Arc<dyn TaskJetStreamPort> = Arc::new(ScriptedTaskJetstream::single_ok(
         json!({ "event": "task-status", "taskId": "task-sse-1" }).to_string(),
     ));
-    let state = AppState::new(
-        Arc::new(StubAuthCalloutMint::fixture()),
-        Arc::new(publisher),
-        jetstream,
-        prefix,
-    );
-    (state, harness)
+
+    let tenant = BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant");
+    let dispatcher = Arc::new(harness_callout_dispatcher(HARNESS_CALLER_ID));
+    let mint_wire = Arc::new(InProcessCalloutDispatcherMintWire::new(dispatcher, tenant));
+    let auth = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
+        mint_wire.clone(),
+        AuthCalloutJsonMintClient::<InProcessCalloutDispatcherMintWire>::default_mint_subject(),
+        Some(BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant")),
+    ));
+
+    let state = AppState::new(auth, Arc::new(publisher), jetstream, prefix);
+    (state, harness, mint_wire)
 }
 
 #[cfg(test)]
@@ -149,7 +164,7 @@ mod tests {
     use super::*;
     use crate::inbound::handle_jsonrpc;
 
-    fn caller_headers(agent_id: &str, caller_id: &str) -> HeaderMap {
+    fn caller_headers(agent_id: &str, caller_id: Option<&str>) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
             axum::http::header::AUTHORIZATION,
@@ -159,10 +174,12 @@ mod tests {
             axum::http::HeaderName::from_static("x-a2a-agent-id"),
             HeaderValue::from_str(agent_id).unwrap(),
         );
-        headers.insert(
-            axum::http::HeaderName::from_static(GATEWAY_CALLER_ID_HTTP),
-            HeaderValue::from_str(caller_id).unwrap(),
-        );
+        if let Some(caller_id) = caller_id {
+            headers.insert(
+                axum::http::HeaderName::from_static(GATEWAY_CALLER_ID_HTTP),
+                HeaderValue::from_str(caller_id).unwrap(),
+            );
+        }
         headers
     }
 
@@ -171,9 +188,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nats_transport_message_send_round_trips_caller_id_and_audit() {
+    async fn nats_transport_callout_mint_per_request_and_jwt_caller_id() {
         let nats = AdvancedMockNatsClient::new();
-        let (state, harness) = build_nats_transport_app_state(nats.clone(), "planner");
+        let (state, harness, mint_wire) = build_nats_transport_app_state(nats.clone(), "planner");
+        assert_eq!(mint_wire.mint_count(), 0);
+
         let body = Bytes::from(
             json!({
                 "jsonrpc": "2.0",
@@ -184,16 +203,39 @@ mod tests {
             .to_string(),
         );
 
-        let response = handle_jsonrpc(caller_headers("planner", "caller-abc"), body, &state)
+        let response = handle_jsonrpc(caller_headers("planner", None), body, &state)
             .await
             .expect("message/send should succeed");
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(mint_wire.mint_count(), 1);
+        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
+    }
+
+    #[tokio::test]
+    async fn nats_transport_message_send_round_trips_caller_id_and_audit() {
+        let nats = AdvancedMockNatsClient::new();
+        let (state, harness, mint_wire) = build_nats_transport_app_state(nats.clone(), "planner");
+        let body = Bytes::from(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "message/send",
+                "params": { "message": { "messageId": "m1", "role": 1, "parts": [] } }
+            })
+            .to_string(),
+        );
+
+        let response = handle_jsonrpc(caller_headers("planner", Some("caller-abc")), body, &state)
+            .await
+            .expect("message/send should succeed");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(mint_wire.mint_count(), 1);
 
         let payload = response_bytes(response).await;
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert!(parsed.get("result").is_some());
 
-        assert_eq!(harness.last_caller_id().as_deref(), Some("caller-abc"));
+        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
         assert_eq!(
             harness.last_subject().as_deref(),
             Some("a2a.gateway.planner.message.send")
@@ -209,7 +251,7 @@ mod tests {
     #[tokio::test]
     async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
         let nats = AdvancedMockNatsClient::new();
-        let (state, harness) = build_nats_transport_app_state(nats.clone(), "planner");
+        let (state, harness, mint_wire) = build_nats_transport_app_state(nats.clone(), "planner");
         let body = Bytes::from(
             json!({
                 "jsonrpc": "2.0",
@@ -220,16 +262,17 @@ mod tests {
             .to_string(),
         );
 
-        let response = handle_jsonrpc(caller_headers("planner", "caller-sse"), body, &state)
+        let response = handle_jsonrpc(caller_headers("planner", Some("caller-sse")), body, &state)
             .await
             .expect("tasks/resubscribe should succeed");
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(mint_wire.mint_count(), 1);
         assert_eq!(
             response.headers().get(axum::http::header::CONTENT_TYPE).unwrap(),
             "text/event-stream"
         );
 
-        assert_eq!(harness.last_caller_id().as_deref(), Some("caller-sse"));
+        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
         assert_eq!(
             harness.last_subject().as_deref(),
             Some("a2a.gateway.planner.tasks.resubscribe")
