@@ -1,22 +1,32 @@
-//! Gateway-side AgentCard surfacing.
-//!
-//! The gateway's discover surface materializes responses from stored
-//! AgentCard JSON. This module schema-validates the JSON via
-//! `a2a-pack::accept_agent_card_on_read` before it's served — drift between
-//! the stored payload and the AgentCard schema would otherwise be visible
-//! to clients as opaque, unstructured JSON.
-
 use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use serde_json::Value;
 
-/// Validates AgentCard JSON before gateway/discover surfaces materialize a
-/// response. Returns the same `Value` on accept (cloned so callers can take
-/// ownership) and `None` when the schema check rejects it — callers turn
-/// `None` into the appropriate "card unavailable" error for the surface.
+/// Validates AgentCard JSON before gateway/discover surfaces materialize a response.
 #[must_use]
 pub fn surface_agent_card_value(value: &Value) -> Option<Value> {
     accept_agent_card_on_read(value, AgentCardSource::GatewaySurface).then(|| value.clone())
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn surfaces_valid_agent_card_json() {
+        let card = json!({
+            "name": "gw-agent",
+            "supportedInterfaces": [{
+                "url": "https://example.com/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "0.2.0"
+            }]
+        });
+        assert_eq!(surface_agent_card_value(&card), Some(card));
+    }
+
+    #[test]
+    fn drops_invalid_agent_card_json() {
+        assert!(surface_agent_card_value(&json!({})).is_none());
+    }
+}

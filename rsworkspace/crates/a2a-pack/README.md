@@ -10,6 +10,19 @@ First-party policy bundle for A2A over NATS. Peer of the MCP gateway pack; consu
 
 `agent_card_schema` ships a minimal draft-07 JSON Schema (`schemas/agent-card.min.json`) aligned with **`a2a-types` AgentCard**: non-empty **`name`** plus at least one **`supportedInterfaces[]`** entry with non-empty **`protocolBinding`/`protocolVersion`** and an absolute **`http`/`https` `url`**. Use `validate_agent_card_value(&serde_json::Value)` or `AgentCardJsonSchema::bundled().validate(...)` at catalog write/read boundaries before trusting KV payloads.
 
+### Read-side enforcement (non-KV paths)
+
+`agent_card_read` adds `validate_agent_card_on_read(value, AgentCardSource)` for materializations that bypass `KvCatalogStore::get_card`. Wired call sites:
+
+| `AgentCardSource` | Crate / path |
+|-------------------|--------------|
+| `FederatedImport` | `a2a-nats::catalog::KvCatalogStore::list_cards_gated` (post SpiceDB allow) |
+| `DiscoverResponse` | `a2a-nats::catalog::DiscoverService` reply shaping |
+| `AgentHandler` | `a2a-nats::agent::agent_card` (`agent/getAuthenticatedExtendedCard`) |
+| `GatewaySurface` | `a2a-gateway::agent_card_surface` (discover/catalog shaping at gateway edge) |
+
+KV get/put remains validated in `KvCatalogStore`; read helpers drop invalid cards with `tracing::warn!` (batch responses omit bad entries).
+
 ## Intended contents
 
 | Module | Purpose |

@@ -32,10 +32,17 @@ impl AgentCardSource {
 pub type AgentCardSchemaError = AgentCardValidateError;
 
 /// Validates an AgentCard document on read, tagging the materialization source for callers.
-pub fn validate_agent_card_on_read(value: &Value, source: AgentCardSource) -> Result<(), AgentCardSchemaError> {
-    let source_label = source.as_str();
-    validate_agent_card_value(value).inspect_err(|error| {
-        warn!(source = source_label, %error, "AgentCard read validation failed; rejecting card");
+pub fn validate_agent_card_on_read(
+    value: &Value,
+    source: AgentCardSource,
+) -> Result<(), AgentCardSchemaError> {
+    validate_agent_card_value(value).map_err(|error| {
+        warn!(
+            source = source.as_str(),
+            error = %error,
+            "AgentCard read validation failed; rejecting card"
+        );
+        error
     })
 }
 
@@ -55,4 +62,48 @@ pub fn filter_agent_cards_on_read(values: Vec<Value>, source: AgentCardSource) -
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn minimal_valid() -> Value {
+        json!({
+            "name": "my-agent",
+            "supportedInterfaces": [{
+                "url": "https://example.com/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "0.2.0"
+            }]
+        })
+    }
+
+    #[test]
+    fn valid_card_passes_each_source() {
+        let card = minimal_valid();
+        for source in [
+            AgentCardSource::FederatedImport,
+            AgentCardSource::DiscoverResponse,
+            AgentCardSource::GatewaySurface,
+            AgentCardSource::AgentHandler,
+        ] {
+            assert!(accept_agent_card_on_read(&card, source));
+        }
+    }
+
+    #[test]
+    fn schema_violating_card_is_rejected() {
+        assert!(!accept_agent_card_on_read(&json!({}), AgentCardSource::DiscoverResponse));
+    }
+
+    #[test]
+    fn filter_drops_invalid_and_keeps_valid_batch() {
+        let good = minimal_valid();
+        let bad = json!({ "name": "" });
+        let filtered = filter_agent_cards_on_read(
+            vec![good.clone(), bad, good.clone()],
+            AgentCardSource::FederatedImport,
+        );
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0], good);
+    }
+}

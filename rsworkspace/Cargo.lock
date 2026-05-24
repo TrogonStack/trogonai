@@ -49,6 +49,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-nats",
 ]
 
 [[package]]
@@ -56,6 +57,7 @@ name = "a2a-gateway"
 version = "0.1.0"
 dependencies = [
  "a2a-nats",
+ "a2a-pack",
  "a2a-redaction",
  "a2a-types",
  "async-nats",
@@ -183,6 +185,7 @@ version = "0.0.0-skeleton"
 dependencies = [
  "jsonschema",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
