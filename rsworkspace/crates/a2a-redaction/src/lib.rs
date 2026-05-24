@@ -2,6 +2,7 @@ pub mod a2a_method;
 pub mod error;
 pub mod noop;
 pub mod redactor;
+pub mod signed_bundle;
 pub mod skill_id;
 pub mod skill_manifest;
 pub mod tier3_sentinel;
@@ -12,6 +13,7 @@ pub use a2a_method::A2aMethod;
 pub use error::RedactionError;
 pub use noop::NoopRedactor;
 pub use redactor::Redactor;
+pub use signed_bundle::{Ed25519PublicKey, SignatureVerificationError, SignedBundleManifest, verify_signed_bundle};
 pub use skill_id::SkillId;
 pub use skill_manifest::{
     JsonPathExpr, SkillCategory, SkillManifest, SkillManifestError, SkillManifestRegistry,

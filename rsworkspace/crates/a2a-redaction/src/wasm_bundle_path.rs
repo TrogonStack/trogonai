@@ -22,6 +22,10 @@ impl WasmBundlePath {
     pub fn join_skill_manifest(&self, skill: &SkillId) -> PathBuf {
         self.as_path().join(format!("{}.manifest.json", skill.as_str()))
     }
+
+    pub fn join_skill_sig(&self, skill: &SkillId) -> PathBuf {
+        self.as_path().join(format!("{}.sig", skill.as_str()))
+    }
 }
 
 impl fmt::Display for WasmBundlePath {
