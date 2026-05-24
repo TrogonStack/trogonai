@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use authzed::v1::permissions_service_client::PermissionsServiceClient;
-use authzed::v1::{CheckBulkPermissionsRequest, CheckBulkPermissionsResponse};
+use authzed::v1::{
+    CheckBulkPermissionsRequest, CheckBulkPermissionsResponse, WriteRelationshipsRequest,
+    WriteRelationshipsResponse,
+};
 use tonic::metadata::MetadataValue;
 use tonic::service::Interceptor;
 use tonic::transport::Channel;
@@ -14,6 +17,11 @@ pub trait BulkImportPermissionCheck: Send + Sync {
         &self,
         request: CheckBulkPermissionsRequest,
     ) -> Result<CheckBulkPermissionsResponse, Status>;
+
+    async fn write_relationships(
+        &self,
+        request: WriteRelationshipsRequest,
+    ) -> Result<WriteRelationshipsResponse, Status>;
 }
 
 #[derive(Clone)]
@@ -66,6 +74,17 @@ impl BulkImportPermissionCheck for LiveBulkImportPermissionClient {
         self.inner
             .clone()
             .check_bulk_permissions(request)
+            .await
+            .map(|response| response.into_inner())
+    }
+
+    async fn write_relationships(
+        &self,
+        request: WriteRelationshipsRequest,
+    ) -> Result<WriteRelationshipsResponse, Status> {
+        self.inner
+            .clone()
+            .write_relationships(request)
             .await
             .map(|response| response.into_inner())
     }
