@@ -117,7 +117,6 @@ mod tests {
         let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
         let account_xkey = XKey::new();
         let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
-        let account_xkey_pub = NkeyPublic::parse(account_xkey.public_key()).unwrap();
 
         let server_xkey = XKey::new();
         let server_xkey_pub = XkeyPublic::parse(server_xkey.public_key()).unwrap();
@@ -129,7 +128,6 @@ mod tests {
             .decode(&server_pub, Some(&account_seed), Some(&server_xkey_pub))
             .unwrap();
         assert_eq!(decoded.user_nkey().unwrap().as_str(), user.public_key());
-        let _ = account_xkey_pub;
     }
 
     #[test]
