@@ -7,11 +7,11 @@ smoke_test_programming10.py — Cross-runner workflows, set_mode, and tool I/O v
   S97.  codex set_mode        "default" → OK; unknown → -32602 error
   S98.  xai write_file+read   write a file via tool, read it back → content correct
   S99.  or str_replace        write + str_replace + read_file → edit verified in file
-  S100. acp write_file+glob   write *.s100.txt files, glob finds them; bad path rejected
+  S100. acp write_file+glob   session cwd used; glob finds *.s100.txt files in session dir
   S101. acp export tool blocks PortableBlocks with tool_call/tool_result types after tool turn
   S102. or → codex import     export from openrouter, import into codex; history grows
   S103. acp → xai import      export from acp, import into xai; last_response_id cleared
-  S104. codex MOCK_REQUIRE_MODEL  model passed in turn/start; wrong model → turn error
+  S104. codex MOCK_REQUIRE_MODEL  CODEX_DEFAULT_MODEL sent in turn/start; wrong model → error
   S105. xai write then list_dir   write files then list_dir shows them
   S106. or write_file + list_dir  combined file creation and directory listing
 
@@ -744,27 +744,26 @@ async def s100_acp_write_glob(nc):
     prefix = f"{BASE}.acp_s100"
     MockLLM.reset()
 
-    # ACP runner uses PROCESS cwd (rsworkspace) for file tools, not session cwd.
-    # Create files inside rsworkspace so glob can find them.
-    tmp_dir = tempfile.mkdtemp(dir=RSDIR, prefix="smoke10_s100_")
-    rel_name = os.path.basename(tmp_dir)
+    # File tools now use session cwd (bug fix). Create files in a regular tmpdir
+    # and pass it as session cwd so glob resolves paths correctly.
+    tmp_dir = tempfile.mkdtemp(prefix="smoke10_s100_")
     try:
-        # Create 3 .s100.txt files in the temp subdir of rsworkspace
+        # Create 3 .s100.txt files directly in the session cwd
         for i in range(3):
             with open(os.path.join(tmp_dir, f"file{i}.s100.txt"), "w") as f:
                 f.write(f"file {i} content s100")
 
         c1 = "acp-c1-s100"
-        # Turn 1: glob to find *.s100.txt files in the temp subdir
+        # Turn 1: glob to find *.s100.txt files (relative to session cwd = tmp_dir)
         MockLLM.acp_queue(acp_sse_tool(
-            c1, "glob", json.dumps({"pattern": "*.s100.txt", "path": rel_name})
+            c1, "glob", json.dumps({"pattern": "*.s100.txt"})
         ))
         # Final text
         MockLLM.acp_queue(acp_sse("found all files s100"))
 
         start_runner("s100", BIN_ACP, acp_env(prefix))
         try:
-            sid = await wait_runner(nc, prefix, cwd=RSDIR)
+            sid = await wait_runner(nc, prefix, cwd=tmp_dir)
             if not sid:
                 fail("S100: session.new timed out"); return
 
@@ -825,30 +824,29 @@ async def s101_acp_export_tool_blocks(nc):
     prefix = f"{BASE}.acp_s101"
     MockLLM.reset()
 
-    # ACP runner uses PROCESS cwd (rsworkspace) for file tools, not session cwd.
-    # Create the test file inside rsworkspace so read_file can find it.
-    tmp_dir = tempfile.mkdtemp(dir=RSDIR, prefix="smoke10_s101_")
-    rel_name = os.path.basename(tmp_dir)
+    # File tools now use session cwd (bug fix). Create the test file in a
+    # regular tmpdir and pass it as session cwd.
+    tmp_dir = tempfile.mkdtemp(prefix="smoke10_s101_")
     try:
         with open(os.path.join(tmp_dir, "target_s101.txt"), "w") as f:
             f.write("target file content s101")
 
         c1 = "acp-tc-s101"
         MockLLM.acp_queue(acp_sse_tool(
-            c1, "read_file", json.dumps({"path": f"{rel_name}/target_s101.txt"})
+            c1, "read_file", json.dumps({"path": "target_s101.txt"})
         ))
         MockLLM.acp_queue(acp_sse("file read for export test s101"))
 
         start_runner("s101", BIN_ACP, acp_env(prefix))
         try:
-            sid = await wait_runner(nc, prefix, cwd=RSDIR)
+            sid = await wait_runner(nc, prefix, cwd=tmp_dir)
             if not sid:
                 fail("S101: session.new timed out"); return
 
             # ACP runner requires interactive permission for file tools; bypass for tests
             await send_set_mode(nc, prefix, sid, "bypassPermissions")
 
-            resp = await send_prompt(nc, prefix, sid, f"read {rel_name}/target_s101.txt")
+            resp = await send_prompt(nc, prefix, sid, "read target_s101.txt")
             if prompt_err(resp):
                 fail("S101: prompt failed", str(resp)[:80]); return
             ok("S101: prompt completed with tool turn")
@@ -1085,16 +1083,14 @@ async def s104_codex_require_model(nc):
         if not sid_ok:
             fail("S104: ok session.new timed out"); return
 
-        # Must call set_model so the model is sent in turn/start params
-        # (codex only sends model in turn/start when session.model is explicitly set)
-        await send_set_model(nc, prefix + ".ok", sid_ok, "o4-mini")
-
+        # Default model (CODEX_DEFAULT_MODEL=o4-mini) is now sent in turn/start
+        # even for fresh sessions — no explicit set_model needed.
         resp_ok = await send_prompt(nc, prefix + ".ok", sid_ok,
                                     "prompt with correct model s104")
         if prompt_err(resp_ok):
             fail("S104: prompt with correct model failed", str(resp_ok)[:80])
         else:
-            ok("S104: prompt with MOCK_REQUIRE_MODEL=o4-mini and model=o4-mini → success")
+            ok("S104: prompt with CODEX_DEFAULT_MODEL=o4-mini and MOCK_REQUIRE_MODEL=o4-mini → success")
 
     finally:
         stop_runner("s104_ok")
@@ -1108,9 +1104,7 @@ async def s104_codex_require_model(nc):
         if not sid_bad:
             fail("S104: bad session.new timed out"); return
 
-        # Set model to o4-mini so it IS sent in turn/start; mock requires o3 → mismatch
-        await send_set_model(nc, prefix + ".bad", sid_bad, "o4-mini")
-
+        # Default model (CODEX_DEFAULT_MODEL=o4-mini) is sent automatically; mock requires o3 → mismatch.
         resp_bad = await send_prompt(nc, prefix + ".bad", sid_bad,
                                      "prompt with wrong model s104")
         # The prompt should complete (runner handles turn error gracefully) but
