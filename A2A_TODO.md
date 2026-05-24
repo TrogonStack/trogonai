@@ -18,7 +18,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 - [ ] Tier 1 declarative policies wired into the gateway request path.
 - [ ] SpiceDB integration — gateway client to org-standard cluster; `BulkCheckPermission` for catalog shaping; per-method resource tuples; owner tuples on task lifecycle; ZedToken cache per session.
 - [ ] Real `SpiceDbImportGate` implementation to replace `AllowAllImportGate` default in `a2a-nats::catalog::import_gate`.
-- [ ] Populate remaining gateway decision-site `AuditEnvelope` fields — `rewrites`, `stream_consumer`, and an authoritative JWT-derived `caller_id` once Tier 1 + auth callout land (`trace_id` and `rules_fired` are populated for Tier-2 decision sites today; fields stay optional on `AuditEnvelopeFields`).
+- [ ] Populate remaining gateway decision-site `AuditEnvelope` fields — an authoritative JWT-derived `caller_id` once Tier 1 + auth callout land (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` are populated for gateway decision sites today; fields stay optional on `AuditEnvelopeFields`).
 
 ## Phase 2 — streaming & lifecycle
 
@@ -40,14 +40,14 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 ## Cross-cutting
 
-- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 predicate seam, decision-site audit publish with `trace_id` + `rules_fired`, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, `rewrites` + `stream_consumer` audit fields, end-to-end auth-callout verifier in the gateway tier.
+- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 predicate seam, decision-site audit publish with `trace_id`, `rules_fired`, `rewrites`, and `stream_consumer`, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier.
 
 ---
 
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines).
-2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits (`rules_fired`, `rewrites`, stable `trace_id`) atop the Wasmtime preload + unary deadline scaffolding now in-tree.
+2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits atop the Wasmtime preload + unary deadline scaffolding now in-tree (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` ship today).
 3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping, real `SpiceDbImportGate` impl.
 4. Streaming back-pressure (gateway pull consumer + `A2A_EVENTS` policy); unary deadline knobs already wired via env.
 5. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
