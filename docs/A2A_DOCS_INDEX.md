@@ -28,7 +28,7 @@ Central navigation for the A2A-over-NATS binding: architecture, operator runbook
 |----------|---------|
 | [`./A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) | `a2a-gateway` engineering checklist — ingress policy, audit, and phased delivery |
 | [`./A2A_TIER3_SKILLS_CATALOG.md`](./A2A_TIER3_SKILLS_CATALOG.md) | Tier-3 WASM skill manifest schema, registry, and reference stubs |
-| [`./A2A_AUTH_CALLOUT_SKETCH.md`](./A2A_AUTH_CALLOUT_SKETCH.md) | Auth callout design (verifiers shipped in `a2a-auth-callout`; deployed subscriber on `$SYS.REQ.USER.AUTH` is operator work) |
+| [`./A2A_AUTH_CALLOUT_DESIGN.md`](./A2A_AUTH_CALLOUT_DESIGN.md) | Auth callout design reference (wire format + mint contract; operator deployment in [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md)) |
 | [`./A2A_BRIDGE_SKETCH.md`](./A2A_BRIDGE_SKETCH.md) | `a2a-bridge` HTTPS sidecar — perimeter placement, auth re-mint, SSE↔JetStream mapping (runtime landed; production-mode wiring future) |
 | [`./A2A_FEDERATED_DISCOVERY_SKETCH.md`](./A2A_FEDERATED_DISCOVERY_SKETCH.md) | Phase 4 cross-Account discovery — operator export/import of `{prefix}.discover.>`, trust boundaries, SpiceDB at federation boundary |
 
