@@ -17,8 +17,9 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 - [ ] Tier 1 declarative policies wired into the gateway request path.
 - [ ] SpiceDB integration — gateway client to org-standard cluster; `BulkCheckPermission` for catalog shaping; per-method resource tuples; owner tuples on task lifecycle; ZedToken cache per session.
-- [ ] Real `SpiceDbImportGate` implementation to replace `AllowAllImportGate` default in `a2a-nats::catalog::import_gate`.
 - [ ] Populate remaining gateway decision-site `AuditEnvelope` fields — an authoritative JWT-derived `caller_id` once Tier 1 + auth callout land (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` are populated for gateway decision sites today; fields stay optional on `AuditEnvelopeFields`).
+
+**Shipped (Phase 1):** Federated `SpiceDbImportGate` — real `BulkCheckPermission` gate landed in `a2a-nats::catalog::import_gate` with ZedToken cache and env-gated construction (`A2A_SPICEDB_ENDPOINT` / `A2A_SPICEDB_TOKEN`); deny-only when unset. Tier 1 request-path SpiceDB still future.
 
 ## Phase 2 — streaming & lifecycle
 
@@ -36,7 +37,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 ## Phase 4 — interop & federation
 
 - [ ] **`A2A_BRIDGE_TRANSPORT=nats`** path exercised end-to-end against a deployed auth-callout mint (HTTPS surface, unary gateway, SSE ↔ JetStream already wired; **`stub` remains default** for unit/integration without live NATS).
-- [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation — gated through `SpiceDbImportGate` at the import boundary (**stub still returns deny until SpiceDB-backed checks land; use `AllowAllImportGate` for labs — see crates/docs**).
+- [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation — gated through `SpiceDbImportGate` at the import boundary (**deny-only until `A2A_SPICEDB_*` env is set; use `AllowAllImportGate` for labs — see crates/docs**).
 - [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge (depends on validating **`A2A_BRIDGE_TRANSPORT=nats`** + Tier 1 + deployed auth-callout mint).
 
 ## Cross-cutting
@@ -49,7 +50,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines).
 2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits atop the Wasmtime preload + unary deadline scaffolding now in-tree (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` ship today).
-3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping, real `SpiceDbImportGate` impl.
+3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping on the gateway request path (federated **`SpiceDbImportGate`** landed in `a2a-nats::catalog::import_gate`).
 4. Streaming back-pressure (gateway pull consumer + `A2A_EVENTS` policy); unary deadline knobs already wired via env.
 5. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
 6. Hardened push residuals — optional gateway-side DLQ mirroring, end-to-end principal propagation once auth-callout deployed.

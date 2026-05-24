@@ -98,6 +98,11 @@ rsa = "=0.9.9"
 rand = "=0.8.5"
 wiremock = "=0.6.3"
 
+# SpiceDB / Authzed gRPC (org-standard `authzed` crate name; generated API from buf.build/authzed/api)
+authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
+tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen"] }
+moka = { version = "=0.12.10", features = ["future"] }
+
 [profile.release]
 lto = "thin"
 strip = "symbols"

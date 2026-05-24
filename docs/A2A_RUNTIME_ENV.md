@@ -116,8 +116,11 @@ Agent catalog discovery and registrar over NATS KV. Configuration is via **clap 
 | `--prefix` / `A2A_PREFIX` | no | `a2a` | Subject prefix for `{prefix}.discover.*` |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth via `NatsConfig::from_env` |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` (not exposed as CLI flag) |
+| `A2A_SPICEDB_ENDPOINT` | no | — | Authzed/SpiceDB gRPC endpoint for federated import gate (`SpiceDbImportGate`); unset ⇒ deny-only |
+| `A2A_SPICEDB_TOKEN` | no | — | Bearer token for Authzed API; required when `A2A_SPICEDB_ENDPOINT` is set |
+| `A2A_SPICEDB_ZEDTOKEN_TTL_SECS` | no | 30 | ZedToken cache TTL for import-gate bulk checks |
 
-Source: [`a2a-nats-discovery/src/config.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs).
+Source: [`a2a-nats-discovery/src/config.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs), [`a2a-nats/src/catalog/import_gate/spicedb/`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/).
 
 ---
 
