@@ -18,14 +18,13 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 - [ ] Tier 1 declarative policies wired into the gateway request path.
 - [ ] SpiceDB integration — gateway client to org-standard cluster; `BulkCheckPermission` for catalog shaping; per-method resource tuples; owner tuples on task lifecycle; ZedToken cache per session.
 - [ ] Real `SpiceDbImportGate` implementation to replace `AllowAllImportGate` default in `a2a-nats::catalog::import_gate`.
-- [ ] Populate gateway decision-site `AuditEnvelope` fields (`trace_id`, `rules_fired`, `rewrites`, `stream_consumer`) once auth callout + Tier 1 land — fields already optional on `AuditEnvelopeFields`.
+- [ ] Populate remaining gateway decision-site `AuditEnvelope` fields — `rewrites`, `stream_consumer`, and an authoritative JWT-derived `caller_id` once Tier 1 + auth callout land (`trace_id` and `rules_fired` are populated for Tier-2 decision sites today; fields stay optional on `AuditEnvelopeFields`).
 
 ## Phase 2 — streaming & lifecycle
 
 - [ ] CEL → WASM compile path + real `Tier2CelEvaluator` impl to replace `NoopTier2Evaluator` in `a2a-gateway/src/policy/tier2.rs`.
 - [ ] Extend gateway policy stack — authoritative Tier 2 CEL + richer Tier 3 skill matrix beyond preload-only redaction stubs (`A2A_GATEWAY_POLICY_BUNDLE_DIR` / `_SKILLS` already host Wasmtime preload today).
 - [ ] Streaming back-pressure — gateway pull consumer with flow control; `A2A_EVENTS` policy `retention=interest, discard=old`. Ops/design: [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
-- [ ] **`message/send` gateway deadline knobs** (`A2A_GATEWAY_UNARY_DEADLINE_SECS`, inherits [`DEFAULT_OPERATION_TIMEOUT`](./rsworkspace/crates/a2a-nats/src/constants.rs) by default); longer work still expected to migrate to `message/stream`.
 
 ## Phase 3 — push delivery & redaction
 
@@ -41,7 +40,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 ## Cross-cutting
 
-- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 seam, optional decision-site audit publish, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, richer audit (`rules_fired`, `rewrites`), end-to-end auth-callout verifier in the gateway tier.
+- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 predicate seam, decision-site audit publish with `trace_id` + `rules_fired`, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, `rewrites` + `stream_consumer` audit fields, end-to-end auth-callout verifier in the gateway tier.
 
 ---
 
