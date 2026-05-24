@@ -16,12 +16,12 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 1 — policy & audit
 
-- [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), federated `SpiceDbImportGate`, and declarative Tier-1 evaluator (`A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED`, default off). **Remaining:** operator bundle authoring and production rollout.
+- [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), federated `SpiceDbImportGate`, declarative Tier-1 evaluator (`A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED`, default off), and reference bundles under `a2a-pack/policies/` (per-method allowlist, per-agent allowlist, time-of-day approximation). **Remaining:** production rollout (operator-signed bundle distribution per the Tier-3 contract once that's deployed; bundle authoring extensions for true time-of-day predicates).
 - [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired:** `resolve_gateway_caller_identity` reads **`X-A2a-Spicedb-Principal`** (JWT `data` claim) with deprecated **`X-A2a-Caller-Id`** fallback; audits populate `caller_id`, `caller_source`. **Pending deployed auth-callout** for production header population on live ingress.
 
 ## Phase 2 — streaming & lifecycle
 
-- [ ] Richer Tier 3 skill matrix beyond manifest + WASM stubs. **Code shipped:** manifest schema (`SkillManifest`), `SkillManifestRegistry`, `SkillSelectionPlan`, and reference skill stubs under `a2a-pack/skills/`; Wasmtime preload via `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS` + `{skill}.manifest.json`; authoritative Tier-3 redaction call site (`A2A_GATEWAY_TIER3_REDACTION_ENABLED`) with refusal (`-32802`), closed-fail engine errors (`-32801`), audit `refusal_skill`, and structured telemetry. **Remaining:** broader production skill catalog and signed bundle distribution.
+- [ ] Tier 3 signed-bundle deployment. **Code shipped:** manifest schema (`SkillManifest`), `SkillManifestRegistry`, `SkillSelectionPlan`, reference skill catalog under `a2a-pack/skills/` (`pii-regex-redactor`, `secrets-redactor`, `json-path-sanitizer`); Wasmtime preload via `A2A_GATEWAY_POLICY_BUNDLE_DIR` / `A2A_GATEWAY_POLICY_SKILLS` + `{skill}.manifest.json`; authoritative Tier-3 redaction call site (`A2A_GATEWAY_TIER3_REDACTION_ENABLED`) with refusal (`-32802`), closed-fail engine errors (`-32801`), audit `refusal_skill`, structured telemetry; signed-bundle preload verification (`a2a-redaction::signed_bundle`, `A2A_GATEWAY_TIER3_SIGNING_PUBKEY`) + `a2a-sign-bundle` operator CLI. **Remaining:** signing-key custody + signed-bundle distribution pipeline in production environments.
 
 ## Phase 3 — push delivery & redaction
 
@@ -31,7 +31,7 @@ Partial items state the in-tree code surface and what remains before the item is
 ## Phase 4 — interop & federation
 
 - [ ] `A2A_BRIDGE_TRANSPORT=nats` production wiring. **Code shipped:** integration harness in `a2a-bridge::nats_transport_harness` (in-process mocks + optional `#[ignore]` live NATS smoke); `stub` remains default for unit tests. **Remaining:** deployed auth-callout mint for production traffic.
-- [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation. **Code shipped:** `SpiceDbImportGate` at the import boundary (deny-only until `A2A_SPICEDB_*` env is set; `AllowAllImportGate` for labs). **Remaining:** operator-signed export/import contract + deployment.
+- [ ] Operator-signed Account export/import deployment for `a2a.discover.>` cross-Account federation. **Code shipped:** `SpiceDbImportGate` at the SpiceDB-tier import boundary; `SignedDiscoveryExport` envelope + `RealOperatorSignatureGate` keyed by `A2A_DISCOVERY_OPERATOR_KEYS` (with `A2A_DISCOVERY_SIGNATURE_MAX_AGE_SECS` staleness window) running ahead of SpiceDB; `AllowAllOperatorSignatureGate` for labs; reference signer helper. **Remaining:** operator key custody + signed-export distribution pipeline across Accounts.
 - [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge. **Remaining:** depends on validating `A2A_BRIDGE_TRANSPORT=nats` + Tier 1 + deployed auth-callout mint.
 
 ## Cross-cutting
@@ -42,6 +42,6 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Suggested ordering
 
-1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines remain). Unblocks JWT-derived `caller_id` and live push DLQ subject population.
-2. Finish gateway policy depth — authoritative JWT-derived `caller_id` on audits, operator Tier-1 declarative bundle rollout, richer Tier-3 skill catalog beyond manifest stubs.
-3. Operator-signed cross-Account export/import + cross-binding collaboration tests against a live stack, then flip `A2A_BRIDGE_TRANSPORT=nats` to production wiring.
+1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines remain). Unblocks live JWT-derived `caller_id` population on gateway audits and push DLQ subjects.
+2. Stand up signing-key custody and signed-bundle distribution — drives the Tier-3 WASM bundle pipeline and the Tier-1 declarative bundle rollout off the same key material.
+3. Stand up operator key custody for `a2a.discover.>` signed exports and run cross-binding collaboration tests against a live NATS + gateway + bridge, then flip `A2A_BRIDGE_TRANSPORT=nats` to production wiring.
