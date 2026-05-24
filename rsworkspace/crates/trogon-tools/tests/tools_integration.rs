@@ -297,3 +297,62 @@ async fn git_diff_truncates_large_output_via_dispatch() {
         "large git diff must be truncated at 4KB; got: {result}"
     );
 }
+
+// ── write_file ────────────────────────────────────────────────────────────────
+
+/// `write_file` dispatched via `dispatch_tool` creates the file on disk and
+/// returns "OK".
+#[tokio::test]
+async fn write_file_creates_file_and_returns_ok_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+
+    let result = dispatch_tool(
+        &ctx(&dir),
+        "write_file",
+        &json!({"path": "output.rs", "content": "fn main() {}\n"}),
+    )
+    .await;
+
+    assert_eq!(result, "OK", "write_file must return 'OK'; got: {result}");
+
+    let on_disk = tokio::fs::read_to_string(dir.path().join("output.rs"))
+        .await
+        .unwrap();
+    assert_eq!(on_disk, "fn main() {}\n", "file content must match what was written");
+}
+
+// ── str_replace (happy path) ──────────────────────────────────────────────────
+
+/// `str_replace` dispatched via `dispatch_tool` must apply the edit when
+/// `old_str` appears exactly once and return a diff-style context.
+#[tokio::test]
+async fn str_replace_applies_edit_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("src.rs"), "fn old_name() {}\n")
+        .await
+        .unwrap();
+
+    let result = dispatch_tool(
+        &ctx(&dir),
+        "str_replace",
+        &json!({"path": "src.rs", "old_str": "fn old_name()", "new_str": "fn new_name()"}),
+    )
+    .await;
+
+    assert!(
+        !result.starts_with("Error"),
+        "str_replace must succeed; got: {result}"
+    );
+
+    let on_disk = tokio::fs::read_to_string(dir.path().join("src.rs"))
+        .await
+        .unwrap();
+    assert!(
+        on_disk.contains("fn new_name()"),
+        "file must contain the replacement; got: {on_disk}"
+    );
+    assert!(
+        !on_disk.contains("fn old_name()"),
+        "file must not contain old text; got: {on_disk}"
+    );
+}
