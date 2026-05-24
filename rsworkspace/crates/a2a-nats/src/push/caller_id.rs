@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use a2a_auth_callout::{SpiceDbPrincipal, UserJwtClaims};
-use serde_json::Value;
+use tracing::warn;
 
 use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
 
@@ -28,8 +28,10 @@ pub(crate) fn sanitize_subject_token(raw: &str) -> Cow<'_, str> {
 
 impl CallerId {
     pub fn from_principal(principal: &SpiceDbPrincipal) -> Self {
-        let raw = principal.0.get("spicedb_subject").and_then(Value::as_str).unwrap_or("");
-        Self(sanitize_subject_token(raw).into_owned())
+        match principal.spicedb_subject() {
+            Some(subject) => Self(sanitize_subject_token(subject.as_str()).into_owned()),
+            None => Self(DEFAULT_PUSH_DLQ_CALLER_SEGMENT.to_string()),
+        }
     }
 
     pub fn from_user_jwt_claims(claims: &UserJwtClaims) -> Self {
@@ -38,6 +40,23 @@ impl CallerId {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+/// Resolves the push DLQ `{caller_id}` segment from an optional gateway principal.
+pub fn resolve_push_dlq_caller_id(principal: Option<&SpiceDbPrincipal>, fallback: &CallerId) -> CallerId {
+    match principal {
+        None => fallback.clone(),
+        Some(p) => match p.spicedb_subject() {
+            Some(_) => CallerId::from_principal(p),
+            None => {
+                warn!(
+                    fallback = %fallback.as_str(),
+                    "push DLQ caller_id: principal present but spicedb_subject absent; using fallback segment"
+                );
+                fallback.clone()
+            }
+        },
     }
 }
 
@@ -109,5 +128,32 @@ mod tests {
     #[test]
     fn default_matches_env_placeholder_literal() {
         assert_eq!(CallerId::default().as_str(), DEFAULT_PUSH_DLQ_CALLER_SEGMENT);
+    }
+
+    #[test]
+    fn resolve_push_dlq_caller_id_absent_principal_uses_fallback() {
+        let fallback = CallerId::from("env-seg");
+        assert_eq!(
+            resolve_push_dlq_caller_id(None, &fallback).as_str(),
+            "env-seg"
+        );
+    }
+
+    #[test]
+    fn resolve_push_dlq_caller_id_with_subject_uses_sanitized_segment() {
+        let p = SpiceDbPrincipal(json!({"spicedb_subject": "p.q"}));
+        assert_eq!(
+            resolve_push_dlq_caller_id(Some(&p), &CallerId::default()).as_str(),
+            "p_q"
+        );
+    }
+
+    #[test]
+    fn resolve_push_dlq_caller_id_without_subject_uses_fallback() {
+        let p = SpiceDbPrincipal(json!({}));
+        assert_eq!(
+            resolve_push_dlq_caller_id(Some(&p), &CallerId::default()).as_str(),
+            DEFAULT_PUSH_DLQ_CALLER_SEGMENT
+        );
     }
 }

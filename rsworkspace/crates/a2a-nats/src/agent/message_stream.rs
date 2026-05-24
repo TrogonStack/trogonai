@@ -8,6 +8,7 @@ use tracing::{instrument, warn};
 
 use crate::agent::handler::{A2aError, A2aHandler};
 use crate::agent::wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+use crate::agent::PrincipalCarrier;
 use crate::agent_id::A2aAgentId;
 use crate::audit::emitter::AuditEmitter;
 use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
@@ -46,7 +47,7 @@ use crate::task_id::A2aTaskId;
         cancel,
         audit_emitter,
         push_delivery_semantics,
-        push_dlq_caller_id
+        principal_carrier
     )
 )]
 pub async fn handle<H, N, J, D>(
@@ -61,7 +62,7 @@ pub async fn handle<H, N, J, D>(
     dispatcher: Arc<D>,
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     cancel: CancellationToken,
-    push_dlq_caller_id: CallerId,
+    principal_carrier: PrincipalCarrier,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
     H: A2aHandler,
@@ -140,7 +141,7 @@ where
     let audit_emitter_clone = audit_emitter.clone();
     let prefix_clone = prefix.clone();
     let agent_id_clone = agent_id.clone();
-    let dlq_caller = push_dlq_caller_id;
+    let dlq_caller = principal_carrier.push_dlq_caller_id();
 
     let push_delivery_clone = Arc::clone(&push_delivery_semantics);
 
@@ -615,7 +616,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
 
@@ -644,7 +645,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
         assert!(result.is_none());
@@ -673,7 +674,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
         assert!(result.is_none());
@@ -703,7 +704,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             cancel.clone(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
 
@@ -738,7 +739,7 @@ mod tests {
             mock_dispatcher(),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
 
@@ -789,7 +790,7 @@ mod tests {
             Arc::clone(&dispatcher),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
 
@@ -846,7 +847,7 @@ mod tests {
             Arc::clone(&dispatcher),
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
-            CallerId::default(),
+            PrincipalCarrier::absent(CallerId::default()),
         )
         .await;
 
@@ -906,7 +907,10 @@ mod tests {
             push_configs: vec![push_cfg],
         });
 
-        let caller = CallerId::from_principal(&SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "p.q"})));
+        let caller = PrincipalCarrier::with_principal(
+            SpiceDbPrincipal(serde_json::json!({"spicedb_subject": "p.q"})),
+            CallerId::default(),
+        );
 
         let result = handle(
             handler,
@@ -934,6 +938,131 @@ mod tests {
             .unwrap_or_else(|| panic!("missing DLQ publish; got {subjects:?}"));
         let _: serde_json::Value = serde_json::from_slice(&js.published_payloads()[dlq_idx]).expect("DLQ payload JSON");
         assert_eq!(dispatcher.recorded_calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn terminal_push_dlq_subject_from_nats_principal_header() {
+        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+        use crate::agent::principal_carrier::principal_header_fixture;
+
+        let nats = AdvancedMockNatsClient::new();
+        let js = mock_js();
+
+        let terminal_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "dlq-task".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Completed as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let push_cfg = TaskPushNotificationConfig {
+            id: "pcfg-1".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            ..Default::default()
+        };
+
+        let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
+        let handler = Arc::new(StreamingHandler {
+            task: make_task("dlq-task"),
+            events: vec![terminal_event],
+            push_configs: vec![push_cfg],
+        });
+
+        let headers = principal_header_fixture("hdr.caller");
+        let carrier = PrincipalCarrier::from_nats_headers(Some(&headers), CallerId::default());
+
+        let result = handle(
+            handler,
+            &rpc_payload("message/stream", 64),
+            Some("reply".into()),
+            &nats,
+            &js,
+            &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
+            Arc::clone(&dispatcher),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            CancellationToken::new(),
+            carrier,
+        )
+        .await;
+
+        let (_task_id, pump) = result.unwrap();
+        pump.await.unwrap();
+
+        let subjects = js.published_subjects();
+        assert!(
+            subjects.iter().any(|s| s == "a2a.push.dlq.hdr_caller.dlq-task"),
+            "expected header-derived DLQ subject; got {subjects:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_push_dlq_falls_back_when_principal_lacks_spicedb_subject() {
+        use a2a_auth_callout::SpiceDbPrincipal;
+        use a2a_types::{TaskPushNotificationConfig, TaskState, TaskStatus};
+
+        let nats = AdvancedMockNatsClient::new();
+        let js = mock_js();
+
+        let terminal_event = a2a_types::StreamResponse {
+            payload: Some(a2a_types::stream_response::Payload::StatusUpdate(
+                a2a_types::TaskStatusUpdateEvent {
+                    task_id: "dlq-task".to_string(),
+                    status: Some(TaskStatus {
+                        state: TaskState::Completed as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+        };
+
+        let push_cfg = TaskPushNotificationConfig {
+            id: "pcfg-1".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            ..Default::default()
+        };
+
+        let dispatcher = Arc::new(MockPushDispatcher::fail_with("boom"));
+        let handler = Arc::new(StreamingHandler {
+            task: make_task("dlq-task"),
+            events: vec![terminal_event],
+            push_configs: vec![push_cfg],
+        });
+
+        let carrier = PrincipalCarrier::with_principal(SpiceDbPrincipal(serde_json::json!({})), CallerId::default());
+
+        let result = handle(
+            handler,
+            &rpc_payload("message/stream", 63),
+            Some("reply".into()),
+            &nats,
+            &js,
+            &prefix(),
+            noop_audit_emitter(),
+            stream_test_agent(),
+            Arc::clone(&dispatcher),
+            Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
+            CancellationToken::new(),
+            carrier,
+        )
+        .await;
+
+        let (_task_id, pump) = result.unwrap();
+        pump.await.unwrap();
+
+        let subjects = js.published_subjects();
+        assert!(
+            subjects.iter().any(|s| s == "a2a.push.dlq._.dlq-task"),
+            "expected fallback DLQ subject; got {subjects:?}"
+        );
     }
 
     #[test]
