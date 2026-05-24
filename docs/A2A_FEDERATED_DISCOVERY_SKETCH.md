@@ -179,7 +179,7 @@ SpiceDB gates the **import side** — only authorized callers see imported Agent
 | **Gateway invoke** | Standard method tuples — federated agent invoke requires explicit `invoke` grant even if `view` passed | JSON-RPC authz error + ingress audit |
 | **Direct NATS import abuse** | Subject ACL prevents callers from subscribing to imported discover without going through gateway for shaped list; raw import is service-level wiring | NATS layer denies unauthorized Accounts |
 
-Cross-Account **SpiceDB principals carry Account identity** in JWT `data` (auth callout sketch) so federation checks can attribute which consumer org the caller belongs to when evaluating cross-org `view` grants.
+Cross-Account **SpiceDB principals carry Account identity** in JWT `data` (auth callout design) so federation checks can attribute which consumer org the caller belongs to when evaluating cross-org `view` grants.
 
 Audit: federated discover allow/deny uses the same ingress `AuditEnvelope` shape as local discover once gateway decision sites land — include `rules_fired` for federation policy ids and the federated resource id.
 

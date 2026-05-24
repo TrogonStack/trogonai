@@ -2,7 +2,7 @@
 
 Remaining work to deploy `a2a-auth-callout` as a production callout service on `$SYS.REQ.USER.AUTH`.
 
-Design context: [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](./docs/A2A_AUTH_CALLOUT_SKETCH.md). Operator runbook: [`docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md). High-level slot: [`A2A_TODO.md`](./A2A_TODO.md) Phase 0 — perimeter & catalog.
+Design context: [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](./docs/A2A_AUTH_CALLOUT_DESIGN.md). Operator runbook: [`docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md). High-level slot: [`A2A_TODO.md`](./A2A_TODO.md) Phase 0 — perimeter & catalog.
 
 ## Why
 
@@ -41,8 +41,8 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 - [x] Update `resolve_gateway_caller_identity` tests for both paths.
 
 ### 11. Docs
-- [ ] Promote `docs/A2A_AUTH_CALLOUT_SKETCH.md` from "sketch" to "design" now that the wire format is pinned; rename if appropriate.
-- [ ] Update `docs/A2A_RUNTIME_ENV.md` with the deployed `AUTH_CALLOUT_*` envs (server NKey/XKey, signing-key source, allowed accounts, user JWT TTL, OIDC, mTLS).
+- [x] Promote auth callout sketch to [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](./docs/A2A_AUTH_CALLOUT_DESIGN.md) now that the wire format is pinned.
+- [x] Update `docs/A2A_RUNTIME_ENV.md` with the deployed `AUTH_CALLOUT_*` envs (server NKey/XKey, signing-key source, allowed accounts, user JWT TTL, OIDC, mTLS).
 
 ### 12. Operator artifacts
 - [ ] NSC operator/account JWT provisioning script (or extension of `scripts/a2a-nsc-bootstrap.sh`) covering the callout signing keys and the AUTH/APP/SYS layout.

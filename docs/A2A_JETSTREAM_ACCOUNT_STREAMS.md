@@ -10,7 +10,7 @@ Operator reference for the JetStream streams and KV bucket the A2A-over-NATS bin
 | [A2A pending decisions](../A2A_PENDING_DECISION.md) | Landed decisions: stream topology, retention, push DLQ |
 | [A2A NSC account bootstrap](A2A_NSC_ACCOUNT_BOOTSTRAP.md) | Full operator runbook: NSC hierarchy, User ACL templates, bootstrap order |
 | [Push DLQ ops](A2A_PUSH_DLQ_OPS.md) | Stream verification, consumption, envelope schema |
-| [Auth callout sketch](A2A_AUTH_CALLOUT_SKETCH.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
+| [Auth callout design](A2A_AUTH_CALLOUT_DESIGN.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
 | [Gateway roadmap](A2A_GATEWAY_ROADMAP.md) | Ingress futures; not a JetStream asset owner |
 | [Subject ACL quick ref](A2A_SUBJECT_ACL_QUICKREF.md) | Caller / Gateway / Registrar publish-subscribe one-pager |
 | [Documentation index](A2A_DOCS_INDEX.md) | Hub linking operator and design docs |

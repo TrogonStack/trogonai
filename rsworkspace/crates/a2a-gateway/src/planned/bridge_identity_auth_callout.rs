@@ -4,7 +4,7 @@
 //! callout mints Account-scoped User JWTs, and downstream NATS traffic carries stable caller
 //! attribution. See:
 //!
-//! - [`A2A_AUTH_CALLOUT_SKETCH.md`](../../../../docs/A2A_AUTH_CALLOUT_SKETCH.md) — minted User JWT contract
+//! - [`A2A_AUTH_CALLOUT_DESIGN.md`](../../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) — minted User JWT contract
 //! - [`A2A_BRIDGE_SKETCH.md`](../../../../docs/A2A_BRIDGE_SKETCH.md) — `a2a-bridge` HTTPS sidecar placement
 
 /// Perimeter context after HTTPS ingress auth and auth-callout minting for a bridge session.

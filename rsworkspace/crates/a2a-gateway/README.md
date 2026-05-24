@@ -2,7 +2,7 @@
 
 Pass-through ingress seam for future A2A gateway authz and policy. **Forwarding only** — opaque request/reply relay on `{prefix}.gateway.>`; **no push delivery and no DLQ**. Terminal push DLQ publishes live on the agent **`Bridge`** in `a2a-nats`, not on this gateway.
 
-**Related:** [Gateway roadmap](../../../docs/A2A_GATEWAY_ROADMAP.md) · [Auth callout sketch](../../../docs/A2A_AUTH_CALLOUT_SKETCH.md) · [`planned`](./src/planned/mod.rs) roadmap seams · [A2A TODO](../../../A2A_TODO.md) · [A2A_PLAN.md](../../../A2A_PLAN.md)
+**Related:** [Gateway roadmap](../../../docs/A2A_GATEWAY_ROADMAP.md) · [Auth callout design](../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) · [`planned`](./src/planned/mod.rs) roadmap seams · [A2A TODO](../../../A2A_TODO.md) · [A2A_PLAN.md](../../../A2A_PLAN.md)
 
 ## Role
 

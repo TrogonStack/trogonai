@@ -8,7 +8,7 @@
 //! Credential preference order: **OIDC** (primary) → **mTLS** (service-to-service) → **API keys**
 //! (transitional only).
 //!
-//! **Related:** [`A2A_AUTH_CALLOUT_SKETCH.md`](../../../../docs/A2A_AUTH_CALLOUT_SKETCH.md) ·
+//! **Related:** [`A2A_AUTH_CALLOUT_DESIGN.md`](../../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) ·
 //! [`A2A_TODO.md`](../../../../A2A_TODO.md) · [`nats_auth_callout_sys`](../nats_auth_callout_sys.rs)
 
 /// NATS system subject the server publishes auth decisions to when Authorization Callout is enabled.
@@ -36,7 +36,7 @@ pub struct MintedJwtClaimsSkeleton {
 impl MintedJwtClaimsSkeleton {
     /// Returns the compile-time placeholder skeleton used until real claim builders land.
     pub const PLACEHOLDER: Self = Self {
-        sub_aud_note: "aud=Account, sub=external identity (see A2A_AUTH_CALLOUT_SKETCH §3)",
+        sub_aud_note: "aud=Account, sub=external identity (see A2A_AUTH_CALLOUT_DESIGN §3)",
     };
 }
 
