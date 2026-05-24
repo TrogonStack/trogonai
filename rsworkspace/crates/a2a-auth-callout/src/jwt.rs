@@ -104,6 +104,23 @@ impl SpiceDbPrincipal {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintedUserJwt(String);
+
+impl MintedUserJwt {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
 #[derive(Clone)]
 pub struct SigningKey(Vec<u8>);
 
@@ -192,7 +209,7 @@ impl UserJwtClaims {
         handle: &SigningKeyHandle,
         issued_at: SystemTime,
         ttl: Duration,
-    ) -> Result<String, JwtError> {
+    ) -> Result<MintedUserJwt, JwtError> {
         let iat_secs = secs_since_unix(issued_at)?;
         let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
         let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
@@ -230,6 +247,7 @@ impl UserJwtClaims {
             &claims,
             &handle.signing_key().encoding_key(),
         )
+        .map(MintedUserJwt::new)
         .map_err(JwtError::Encode)
     }
 
@@ -274,14 +292,11 @@ impl UserJwtClaims {
     }
 
     #[cfg(test)]
-    fn mint_for_test_ttl(&self, handle: &SigningKeyHandle, ttl: Duration) -> Result<String, JwtError> {
+    fn mint_for_test_ttl(&self, handle: &SigningKeyHandle, ttl: Duration) -> Result<MintedUserJwt, JwtError> {
         self.mint(handle, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
 }
 
-/// Reads `caller_id` from a freshly minted User JWT without signature verification.
-///
-/// The bridge uses this only on tokens it just received from the auth callout mint path.
 pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
     #[derive(Deserialize)]
     struct Payload {
@@ -380,7 +395,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let decoded = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"secret-for-hs256-test"),
             &validation,
         )
@@ -415,7 +430,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let err =
-            decode::<ParsedMinted>(&token, &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
+            decode::<ParsedMinted>(token.as_str(), &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
         assert!(
             matches!(err.kind(), jsonwebtoken::errors::ErrorKind::InvalidAlgorithm)
                 || err.to_string().to_lowercase().contains("algorithm"),
@@ -447,7 +462,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let wrong = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"signer-b------------------------"),
             &validation,
         );

@@ -12,11 +12,9 @@ use a2a_auth_callout::signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, SigningKeySource,
 };
 use a2a_auth_callout::{
-    AccountResolver, CalloutIssuer, DenialPublisherConfig, SigningKey, StaticAccountResolver,
-    Subscriber,
+    AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver,
+    Subscriber, XkeyPublic,
 };
-
-const DEFAULT_CALLOUT_ISSUER: &str = "AUTH_CALLOUT_DEV_ISSUER";
 
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
@@ -31,6 +29,20 @@ fn split_env_list(name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn env_required(name: &str) -> Result<String, String> {
+    std::env::var(name).map_err(|_| format!("{name} is required"))
+}
+
+fn load_nkey_seed_env(name: &str) -> Result<NkeySeed, String> {
+    let raw = env_required(name)?;
+    NkeySeed::parse(raw).map_err(|e| e.to_string())
+}
+
+fn load_nkey_public_env(name: &str) -> Result<NkeyPublic, String> {
+    let raw = env_required(name)?;
+    NkeyPublic::parse(raw).map_err(|e| e.to_string())
 }
 
 fn load_signing_key_source() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
@@ -125,17 +137,6 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let signing_key_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
-        .unwrap_or_else(|_| "dev-secret-not-for-production".into());
-    let callout_issuer_raw = std::env::var("AUTH_CALLOUT_ISSUER")
-        .unwrap_or_else(|_| DEFAULT_CALLOUT_ISSUER.into());
-    let callout_issuer = match CalloutIssuer::new(callout_issuer_raw) {
-        Ok(i) => i,
-        Err(e) => {
-            tracing::error!(error = %e, "AUTH_CALLOUT_ISSUER is invalid");
-            std::process::exit(1);
-        }
-    };
     let allowed_accounts = split_env_list("AUTH_CALLOUT_ALLOWED_ACCOUNTS");
     if allowed_accounts.is_empty() {
         tracing::error!(
@@ -148,6 +149,59 @@ async fn main() {
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or_else(|| Duration::from_secs(DEFAULT_USER_JWT_TTL_SECS));
+
+    let server_issuer = match load_nkey_public_env("AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid server NKey configuration");
+            std::process::exit(1);
+        }
+    };
+    let callout_issuer_seed = match load_nkey_seed_env("AUTH_CALLOUT_ISSUER_NKEY_SEED") {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid callout issuer NKey seed");
+            std::process::exit(1);
+        }
+    };
+    let account_xkey_seed = std::env::var("AUTH_CALLOUT_XKEY_SEED")
+        .ok()
+        .map(NkeySeed::parse)
+        .transpose()
+        .map_err(|e| e.to_string());
+    let account_xkey_seed = match account_xkey_seed {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid AUTH_CALLOUT_XKEY_SEED");
+            std::process::exit(1);
+        }
+    };
+
+    let server_xkey_public = std::env::var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
+        .ok()
+        .map(XkeyPublic::parse)
+        .transpose()
+        .map_err(|e| e.to_string());
+    let server_xkey_public = match server_xkey_public {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid AUTH_CALLOUT_SERVER_XKEY_PUBLIC");
+            std::process::exit(1);
+        }
+    };
+
+    let wire = match AuthCalloutWireCodec::new(
+        server_issuer,
+        callout_issuer_seed,
+        account_xkey_seed,
+        server_xkey_public,
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to build auth callout wire codec");
+            std::process::exit(1);
+        }
+    };
 
     let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(allowed_accounts.clone()));
     let oidc = build_oidc_verifier().await;
@@ -174,11 +228,7 @@ async fn main() {
         mtls,
         api_key: None,
     });
-    let denial = DenialPublisherConfig::new(
-        SigningKey::from_secret(signing_key_secret.as_bytes()),
-        callout_issuer,
-    );
-    let subscriber = Subscriber::new(client, dispatcher, denial);
+    let subscriber = Subscriber::new(client, dispatcher, wire);
 
     info!("auth callout subscriber running");
 
