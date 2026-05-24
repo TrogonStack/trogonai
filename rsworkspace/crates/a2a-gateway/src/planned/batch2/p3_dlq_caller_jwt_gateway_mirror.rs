@@ -8,7 +8,7 @@
 //! onto the same subject shape for operator visibility.
 //!
 //! **Related:** [`p0_auth_callout_service`](super::p0_auth_callout_service) ·
-//! [`A2A_AUTH_CALLOUT_SKETCH.md`](../../../../docs/A2A_AUTH_CALLOUT_SKETCH.md) ·
+//! [`A2A_AUTH_CALLOUT_DESIGN.md`](../../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) ·
 //! [`A2A_TODO.md`](../../../../A2A_TODO.md)
 
 /// Fallback DLQ `{caller_id}` segment when no JWT-derived identity is available.

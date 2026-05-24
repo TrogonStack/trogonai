@@ -4,7 +4,7 @@
 //! callout principal) access so it can subscribe to the system auth subject and reply with minted User
 //! JWTs for tenant Accounts.
 //!
-//! **Related:** [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](../../../../docs/A2A_AUTH_CALLOUT_SKETCH.md) ·
+//! **Related:** [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](../../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) ·
 //! [`A2A_PLAN.md`](../../../../A2A_PLAN.md) · [`A2A_TODO.md`](../../../../A2A_TODO.md)
 
 /// NATS system subject the server publishes auth decisions to when Authorization Callout is enabled.

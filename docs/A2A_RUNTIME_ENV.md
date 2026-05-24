@@ -180,6 +180,10 @@ NATS auth callout subscriber on `$SYS.REQ.USER.AUTH`; mints short-lived User JWT
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
 | `NATS_URL` | no | `nats://localhost:4222` | NATS servers |
+| `AUTH_CALLOUT_SERVER_NKEY_PUBLIC` | **yes** | — | Public NKey of `authorization.auth_callout.issuer` — verify server-signed authorization **request** JWTs |
+| `AUTH_CALLOUT_ISSUER_NKEY_SEED` | **yes** | — | Seed for the callout account signing NKey — sign authorization **response** JWTs |
+| `AUTH_CALLOUT_XKEY_SEED` | no | — | Account XKey seed when `auth_callout.xkey` is set on the server (decrypt requests / encrypt responses) |
+| `AUTH_CALLOUT_SERVER_XKEY_PUBLIC` | when encryption enabled | — | Server **persistent** XKey public key (`nats-server` seals requests with this keypair) |
 | `AUTH_CALLOUT_ALLOWED_ACCOUNTS` | **yes** | — | Comma-separated tenant Account names the resolver may bind |
 | `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | `env` \| `file` \| `vault` (vault not implemented) |
 | `AUTH_CALLOUT_SIGNING_SECRET` | env source | `dev-secret-not-for-production` if unset | Current HS256 secret (dev-only custody) |
