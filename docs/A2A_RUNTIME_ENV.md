@@ -147,6 +147,10 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_EVENTS_FETCH_BATCH` | no | `1` | Pull fetch batch size (flow-control boundary) |
 | `A2A_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS` | no | `5` | Pull fetch heartbeat interval |
 | `A2A_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER` | no | `32` | Max concurrent in-flight forwards per **`req_id`** (caller fan-out cap) |
+| `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` | no | off | Truthy (`on`) enables Tier-1 SpiceDB `BulkCheckPermission` on ingress before Tier-2 |
+| `A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT` | when Tier-1 on | — | Authzed/SpiceDB gRPC endpoint for gateway Tier-1 gate |
+| `A2A_GATEWAY_TIER1_SPICEDB_TOKEN` | when Tier-1 on | — | Bearer token for gateway Tier-1 Authzed client |
+| `A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS` | no | `60` | Session ZedToken cache TTL for Tier-1 bulk checks (keyed by JWT `sub` + Account) |
 
 Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 

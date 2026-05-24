@@ -22,6 +22,11 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_pull_backpressure;
+use crate::policy::spicedb_tier1::{
+    OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
+    a2a_method_from_dots, derive_tuple, owner_tuple_for_message_send, tier1_principal_from_caller,
+    tier1_session_from_principal,
+};
 use crate::policy::tier2::{CelProgramRef, PolicyEnvelopeBlob};
 use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
 
@@ -30,6 +35,7 @@ pub enum RuntimeError {
     Config(ConfigError),
     NatsConnect(trogon_nats::ConnectError),
     Subscribe(String),
+    Tier1Config(Tier1SpiceDbBuildError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -38,6 +44,7 @@ impl fmt::Display for RuntimeError {
             Self::Config(error) => write!(f, "{error}"),
             Self::NatsConnect(error) => write!(f, "NATS connection failed: {error}"),
             Self::Subscribe(msg) => write!(f, "gateway subscribe failed: {msg}"),
+            Self::Tier1Config(error) => write!(f, "{error}"),
         }
     }
 }
@@ -48,7 +55,14 @@ impl std::error::Error for RuntimeError {
             Self::Config(error) => Some(error),
             Self::NatsConnect(error) => Some(error),
             Self::Subscribe(_) => None,
+            Self::Tier1Config(_) => None,
         }
+    }
+}
+
+impl From<Tier1SpiceDbBuildError> for RuntimeError {
+    fn from(error: Tier1SpiceDbBuildError) -> Self {
+        Self::Tier1Config(error)
     }
 }
 
@@ -75,6 +89,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         .map_err(RuntimeError::NatsConnect)?;
 
     let policy_layer = wasm_policy_layer_from_env(env);
+    let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
 
     let gateway_subject_string = config.gateway_subscribe_subject();
     let gateway_subject = async_nats::Subject::from(gateway_subject_string.as_str());
@@ -150,7 +165,16 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
             incoming = ingress.next() => {
                 match incoming {
                     Some(msg) => {
-                        dispatch_gateway_ingress(&client, &config, policy_layer.as_ref(), env, msg).await;
+                        dispatch_gateway_ingress(
+                            &client,
+                            &config,
+                            tier1_layer.gate.as_ref(),
+                            tier1_layer.owner_emitter.as_ref(),
+                            policy_layer.as_ref(),
+                            env,
+                            msg,
+                        )
+                        .await;
                     }
                     None => {
                         warn!("gateway ingress NATS subscription closed");
@@ -170,6 +194,8 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
 async fn dispatch_gateway_ingress<E: ReadEnv>(
     client: &async_nats::Client,
     config: &Config,
+    tier1: &dyn SpiceDbTier1Gate,
+    tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     policy: Option<&Arc<WasmtimeSubstrate>>,
     env: &E,
     msg: async_nats::Message,
@@ -227,6 +253,139 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 let trace_id = Uuid::new_v4().to_string();
                 let audit_enabled = gateway_audit_publish_enabled(env);
                 let method_slashes = method_dots.replace('.', "/");
+                let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
+
+                let mut tier1_zed_token: Option<String> = None;
+                if tier1.is_enabled() {
+                    let account = config.a2a_prefix.as_str();
+                    let caller_slug = caller_slug.as_deref().unwrap_or("_");
+                    let principal = tier1_principal_from_caller(caller_slug, account);
+                    let Some(session) = tier1_session_from_principal(&principal, account) else {
+                        tracing::Span::current().record("routing_outcome", "tier1_denied");
+                        deny_tier1(
+                            client,
+                            reply,
+                            tier1_denial_ctx(
+                                config,
+                                &agent_id,
+                                &method_slashes,
+                                &payload,
+                                &trace_id,
+                                audit_enabled,
+                                started_wall_ms,
+                                started_mono,
+                            ),
+                            "tier-1 principal lacks session identity",
+                        )
+                        .await;
+                        return;
+                    };
+
+                    let params = json_rpc_params(payload.as_ref());
+                    let Some(method) = a2a_method_from_dots(method_dots.as_str()) else {
+                        tracing::Span::current().record("routing_outcome", "tier1_denied");
+                        deny_tier1(
+                            client,
+                            reply,
+                            tier1_denial_ctx(
+                                config,
+                                &agent_id,
+                                &method_slashes,
+                                &payload,
+                                &trace_id,
+                                audit_enabled,
+                                started_wall_ms,
+                                started_mono,
+                            ),
+                            "tier-1 unknown method suffix",
+                        )
+                        .await;
+                        return;
+                    };
+
+                    let tuple = match derive_tuple(&method, &agent_id, session.account(), &params) {
+                        Ok(tuple) => tuple,
+                        Err(_derive_err) => {
+                            tracing::Span::current().record("routing_outcome", "tier1_denied");
+                            deny_tier1(
+                                client,
+                                reply,
+                                tier1_denial_ctx(
+                                    config,
+                                    &agent_id,
+                                    &method_slashes,
+                                    &payload,
+                                    &trace_id,
+                                    audit_enabled,
+                                    started_wall_ms,
+                                    started_mono,
+                                ),
+                                "tier-1 resource tuple derivation failed",
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+
+                    match tier1.authorize(&session, &principal, &tuple).await {
+                        Tier1AuthorizeOutcome::Allowed { zed_token } => {
+                            tier1_zed_token = zed_token;
+                            if method_dots == "message.send"
+                                && let Some(owner_emitter) = tier1_owner
+                                && let Some(owner) =
+                                    owner_tuple_for_message_send(&agent_id, &params, &principal)
+                                && let Err(error) = owner_emitter.emit_owner(&owner).await
+                            {
+                                warn!(
+                                    ingress.subject = %msg.subject,
+                                    agent_subject = %agent_subject,
+                                    error = %error,
+                                    "gateway tier-1 owner tuple write failed — dispatch continues",
+                                );
+                            }
+                        }
+                        Tier1AuthorizeOutcome::Denied | Tier1AuthorizeOutcome::TransportError => {
+                            tracing::Span::current().record("routing_outcome", "tier1_denied");
+                            deny_tier1(
+                                client,
+                                reply,
+                                tier1_denial_ctx(
+                                    config,
+                                    &agent_id,
+                                    &method_slashes,
+                                    &payload,
+                                    &trace_id,
+                                    audit_enabled,
+                                    started_wall_ms,
+                                    started_mono,
+                                ),
+                                "tier-1 SpiceDB denied ingress",
+                            )
+                            .await;
+                            return;
+                        }
+                        Tier1AuthorizeOutcome::DeriveFailed => {
+                            tracing::Span::current().record("routing_outcome", "tier1_denied");
+                            deny_tier1(
+                                client,
+                                reply,
+                                tier1_denial_ctx(
+                                    config,
+                                    &agent_id,
+                                    &method_slashes,
+                                    &payload,
+                                    &trace_id,
+                                    audit_enabled,
+                                    started_wall_ms,
+                                    started_mono,
+                                ),
+                                "tier-1 resource tuple derivation failed",
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                }
 
                 if let Some(sub) = policy {
                     match sub.tier2.predicate_holds(
@@ -365,6 +524,11 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 };
 
                 let mut rules_fired: Vec<String> = Vec::new();
+                if tier1.is_enabled() {
+                    rules_fired.push("gateway.tier1.spicedb_allowed".into());
+                } else {
+                    rules_fired.push("gateway.tier1.layer_disabled".into());
+                }
                 if policy.is_some() {
                     rules_fired.push("gateway.tier2.no_op_evaluated_true".into());
                 } else {
@@ -394,6 +558,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rules_fired: Some(rules_fired),
                                     rewrites,
                                     stream_consumer,
+                                    zed_token_snapshot: tier1_zed_token.clone(),
                                 },
                             ),
                         );
@@ -429,6 +594,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rules_fired: Some(rules_fired),
                                     rewrites,
                                     stream_consumer,
+                                    zed_token_snapshot: tier1_zed_token.clone(),
                                 },
                             ),
                         );
@@ -470,6 +636,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rules_fired: Some(rules_fired),
                                     rewrites,
                                     stream_consumer,
+                                    zed_token_snapshot: tier1_zed_token.clone(),
                                 },
                             ),
                         );
@@ -515,6 +682,91 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     }
     .instrument(span)
     .await
+}
+
+struct Tier1DenialCtx<'a> {
+    config: &'a Config,
+    agent_id: &'a a2a_nats::A2aAgentId,
+    method_slashes: &'a str,
+    payload: &'a Bytes,
+    trace_id: &'a str,
+    audit_enabled: bool,
+    started_wall_ms: u64,
+    started_mono: Instant,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tier1_denial_ctx<'a>(
+    config: &'a Config,
+    agent_id: &'a a2a_nats::A2aAgentId,
+    method_slashes: &'a str,
+    payload: &'a Bytes,
+    trace_id: &'a str,
+    audit_enabled: bool,
+    started_wall_ms: u64,
+    started_mono: Instant,
+) -> Tier1DenialCtx<'a> {
+    Tier1DenialCtx {
+        config,
+        agent_id,
+        method_slashes,
+        payload,
+        trace_id,
+        audit_enabled,
+        started_wall_ms,
+        started_mono,
+    }
+}
+
+async fn deny_tier1(
+    client: &async_nats::Client,
+    reply: async_nats::Subject,
+    ctx: Tier1DenialCtx<'_>,
+    message: &str,
+) {
+    warn!(
+        agent_id = %ctx.agent_id,
+        method = %ctx.method_slashes,
+        routing_outcome = "tier1_denied",
+        "gateway tier-1 SpiceDB denied ingress",
+    );
+    let Ok(body) = ingress_gateway_policy_denied_response_bytes(ctx.payload.as_ref(), message) else {
+        return;
+    };
+    reply_error(client, reply, HeaderMap::new(), body).await;
+    spawn_gateway_audit_publish(
+        ctx.audit_enabled,
+        client.clone(),
+        ctx.config.a2a_prefix.clone(),
+        ctx.agent_id.clone(),
+        AuditEnvelope::new(
+            ctx.agent_id,
+            ctx.method_slashes,
+            json_rpc_audit_req_id(ctx.payload.as_ref()),
+            ctx.started_wall_ms,
+            ctx.started_mono
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+            AuditOutcome::Err {
+                code: -32_801,
+                message: message.into(),
+            },
+            Some(ctx.payload.as_ref()),
+            AuditEnvelopeFields {
+                trace_id: Some(ctx.trace_id.to_owned()),
+                rules_fired: Some(vec!["gateway.tier1.spicedb_denied".into()]),
+                ..Default::default()
+            },
+        ),
+    );
+}
+
+fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| value.get("params").cloned())
+        .unwrap_or(serde_json::Value::Object(Default::default()))
 }
 
 fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstrate>> {
@@ -659,6 +911,7 @@ mod gateway_dispatch_tests {
             rules_fired: Some(vec!["gateway.tier2.layer_disabled".into()]),
             rewrites,
             stream_consumer,
+            zed_token_snapshot: None,
         }
     }
 

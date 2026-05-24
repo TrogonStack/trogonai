@@ -15,4 +15,5 @@ pub(crate) mod wire;
 pub(crate) mod test_support;
 
 pub use bridge::{Bridge, BridgeError};
+pub use dispatch::A2aMethod;
 pub use handler::{A2aError, A2aHandler, TaskEventStream};
