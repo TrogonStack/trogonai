@@ -397,6 +397,9 @@ pub mod mock {
         model: Mutex<Option<String>>,
         set_model_error: Mutex<Option<String>>,
         compact_error: Mutex<Option<String>>,
+        /// Last prompt text passed to `prompt()`. Used in tests to verify the
+        /// content of prompts sent to the session (e.g., language detection in /init).
+        pub last_prompt_text: Mutex<Option<String>>,
     }
 
     impl MockSession {
@@ -410,7 +413,12 @@ pub mod mock {
                 model: Mutex::new(None),
                 set_model_error: Mutex::new(None),
                 compact_error: Mutex::new(None),
+                last_prompt_text: Mutex::new(None),
             }
+        }
+
+        pub fn last_prompt(&self) -> Option<String> {
+            self.last_prompt_text.lock().unwrap().clone()
         }
 
         pub fn queue_turn(&self, events: Vec<StreamEvent>) {
@@ -449,9 +457,10 @@ pub mod mock {
 
         fn prompt(
             &self,
-            _text: &str,
+            text: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
         {
+            *self.last_prompt_text.lock().unwrap() = Some(text.to_string());
             let events = self
                 .turns
                 .lock()

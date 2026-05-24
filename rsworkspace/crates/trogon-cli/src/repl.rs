@@ -1504,6 +1504,60 @@ mod tests {
         assert!(fs.read_to_string(&dest).is_ok(), "file must be created even with empty content");
     }
 
+    /// `do_init` must include the detected language in the prompt passed to the
+    /// session. Language detection reads real indicator files from the filesystem
+    /// (not via the `Fs` trait), so this test uses a real `TempDir`.
+    #[tokio::test]
+    async fn do_init_prompt_includes_detected_language_from_real_fs() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        // Create Cargo.toml so detect_languages() reports "Rust"
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
+
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Text("# Project\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let fs = MockFs::new();
+
+        do_init(&*session, dir.path(), &fs).await.unwrap();
+
+        let prompt = session.last_prompt().expect("prompt must have been called");
+        assert!(
+            prompt.contains("Rust"),
+            "prompt must mention Rust (detected from Cargo.toml); got: {prompt}"
+        );
+    }
+
+    /// `do_init` must include the README content in the prompt when a README.md
+    /// exists. The README is read via the `Fs` trait, so MockFs is sufficient.
+    #[tokio::test]
+    async fn do_init_includes_readme_in_prompt() {
+        use crate::session::mock::MockSession;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(MockSession::new("sess-1"));
+        session.queue_turn(vec![
+            StreamEvent::Text("# Project\n".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        let fs = MockFs::new();
+        let readme_path = dir.path().join("README.md");
+        fs.add_file(&readme_path, "This is the project description.");
+
+        do_init(&*session, dir.path(), &fs).await.unwrap();
+
+        let prompt = session.last_prompt().expect("prompt must have been called");
+        assert!(
+            prompt.contains("This is the project description."),
+            "README content must appear in the prompt; got: {prompt}"
+        );
+    }
+
     // ── StreamEvent handling (prompt loop) ────────────────────────────────────
 
     #[tokio::test]
