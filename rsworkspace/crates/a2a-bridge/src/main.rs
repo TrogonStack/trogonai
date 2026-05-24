@@ -2,8 +2,9 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use a2a_bridge::{
     AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-    AuthCalloutJsonMintClient, BridgeError, GatewayInboundPublisher, StubAuthCalloutClient,
-    StubInboundGatewayPublish, StubTaskJetStreamPort, default_a2a_prefix, gateway_router,
+    AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher,
+    StubAuthCalloutClient, StubInboundGatewayPublish, StubTaskJetStreamPort, default_a2a_prefix,
+    gateway_router,
 };
 
 #[tokio::main]
@@ -130,7 +131,16 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
             Arc::from(AuthCalloutJsonMintClient::<AsyncNatsAuthMintWire>::default_mint_subject())
         });
 
-    let auth_client = Arc::new(AuthCalloutJsonMintClient::new(Arc::new(wire), mint_subject));
+    let tenant_account = match env::var("BRIDGE_TENANT_ACCOUNT") {
+        Ok(raw) if !raw.trim().is_empty() => Some(BridgeTenantAccount::new(raw)?),
+        _ => None,
+    };
+
+    let auth_client = Arc::new(AuthCalloutJsonMintClient::with_tenant_account(
+        Arc::new(wire),
+        mint_subject,
+        tenant_account,
+    ));
 
     let unary = GatewayInboundPublisher::new(Arc::new(AsyncNatsTokenGatewayUnary::new(
         servers.clone(),

@@ -7,11 +7,11 @@ mod nats_transport_harness;
 pub mod outbound;
 
 pub use auth::{
-    AsyncNatsAuthMintWire, AuthCalloutClient, AuthCalloutJsonMintClient, StubAuthCalloutClient,
-    StubAuthCalloutMint,
+    AsyncNatsAuthMintWire, AuthCalloutClient, AuthCalloutJsonMintClient, BridgeTenantAccount,
+    InProcessCalloutDispatcherMintWire, StubAuthCalloutClient, StubAuthCalloutMint,
 };
 pub use error::BridgeError;
-pub use identity::{BridgeUserJwt, CallerHttpsAuth};
+pub use identity::{BridgeUserJwt, CallerHttpsAuth, MintedCallerId};
 pub use inbound::{
     AppState, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream, GatewayInboundPublisher,
     InboundGatewayPublish, RecordingInboundPublisher, StubInboundGatewayPublish,

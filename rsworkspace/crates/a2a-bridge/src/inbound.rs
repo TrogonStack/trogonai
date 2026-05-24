@@ -26,9 +26,11 @@ use a2a_nats::jetstream::consumers::{resubscribe_consumer, stream_events_consume
 use a2a_nats::jetstream::streams::events_stream_name;
 use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 
+use a2a_auth_callout::caller_id_from_minted_jwt;
+
 use crate::auth::AuthCalloutClient;
 use crate::error::BridgeError;
-use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
+use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth, MintedCallerId};
 
 const AGENT_ID_HEADER: &str = "x-a2a-agent-id";
 
@@ -476,8 +478,17 @@ fn gateway_req_headers(correlation: ReqId) -> Result<async_nats::HeaderMap, Brid
 pub fn gateway_publish_headers(
     correlation: ReqId,
     inbound_http_headers: Option<&HeaderMap>,
+    minted_caller_id: Option<MintedCallerId>,
 ) -> Result<async_nats::HeaderMap, BridgeError> {
     let mut map = gateway_req_headers(correlation)?;
+    if let Some(caller) = minted_caller_id {
+        let nats_name = async_nats::header::HeaderName::from_static("X-A2a-Caller-Id");
+        map.insert(
+            nats_name,
+            async_nats::header::HeaderValue::from(caller.as_str()),
+        );
+        return Ok(map);
+    }
     let Some(axum_headers) = inbound_http_headers else {
         return Ok(map);
     };
@@ -611,6 +622,9 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let caller_auth = caller_auth_from(&headers)?;
     let agent_id = agent_header_parse(&headers)?;
     let jwt = state.auth.mint(&caller_auth).await?;
+    let minted_caller_id = caller_id_from_minted_jwt(jwt.as_str())
+        .ok()
+        .map(MintedCallerId::from_caller_id);
     let v: Value =
         serde_json::from_slice(&body).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
     let Some(method) = v.get("method").and_then(Value::as_str) else {
@@ -619,7 +633,8 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let subject = build_gateway_subject(&state.prefix, agent_id.as_str(), method);
 
     if is_sse_jsonrpc_method(method) {
-        let nats_headers = gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers))?;
+        let nats_headers =
+            gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers), minted_caller_id.clone())?;
         let unary_reply = state
             .publisher
             .publish_unary_to_gateway(&subject, &jwt, nats_headers, body.as_ref())
@@ -639,7 +654,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
         .publish_unary_to_gateway(
             &subject,
             &jwt,
-            gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers))?,
+            gateway_publish_headers(json_rpc_corr_id(&v), Some(&headers), minted_caller_id)?,
             body.as_ref(),
         )
         .await?;
