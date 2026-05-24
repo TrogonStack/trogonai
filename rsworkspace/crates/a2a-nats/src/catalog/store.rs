@@ -3,6 +3,7 @@ use std::fmt;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use serde_json::Value;
+use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys,
 };
@@ -131,7 +132,10 @@ where
                         .await
                         .map_err(CatalogStoreError::ImportGate)?
                     {
-                        gated.push(card);
+                        let value = serde_json::to_value(&card).map_err(CatalogStoreError::Serialize)?;
+                        if accept_agent_card_on_read(&value, AgentCardSource::FederatedImport) {
+                            gated.push(card);
+                        }
                     }
                 }
             }

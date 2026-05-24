@@ -11,3 +11,4 @@ workspace = true
 [dependencies]
 jsonschema = { workspace = true, default-features = false }
 serde_json = { workspace = true }
+tracing = { workspace = true }

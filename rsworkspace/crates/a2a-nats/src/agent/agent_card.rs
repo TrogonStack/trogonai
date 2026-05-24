@@ -1,3 +1,4 @@
+use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tracing::{instrument, warn};
 
 use crate::agent::handler::{A2aError, A2aHandler};
@@ -16,6 +17,28 @@ where
     };
 
     let (id, result) = parse_and_call(handler, payload).await;
+    let result = match result {
+        Ok(card) => {
+            let value = match serde_json::to_value(&card) {
+                Ok(v) => v,
+                Err(_) => {
+                    return publish_error(
+                        id,
+                        reply,
+                        nats,
+                        A2aError::internal("failed to serialize agent card for validation"),
+                    )
+                    .await;
+                }
+            };
+            if accept_agent_card_on_read(&value, AgentCardSource::AgentHandler) {
+                Ok(card)
+            } else {
+                Err(A2aError::internal("AgentCard failed read validation"))
+            }
+        }
+        Err(e) => Err(e),
+    };
     let bytes = match result {
         Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),
         Err(e) => JsonRpcErrorResponse::new(id, e.code, e.message).to_bytes(),
@@ -47,20 +70,54 @@ async fn parse_and_call<H: A2aHandler>(
     (id, handler.agent_card(params).await)
 }
 
+async fn publish_error<N>(
+    id: Option<JsonRpcId>,
+    reply: String,
+    nats: &N,
+    error: A2aError,
+) where
+    N: trogon_nats::PublishClient,
+{
+    let bytes = match JsonRpcErrorResponse::new(id, error.code, error.message).to_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(error = %e, "failed to serialize agent_card error response");
+            return;
+        }
+    };
+    let headers = async_nats::HeaderMap::new();
+    if let Err(e) = nats
+        .publish_with_headers(async_nats::Subject::from(reply.as_str()), headers, bytes)
+        .await
+    {
+        warn!(error = %e, "failed to publish agent_card error reply");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::test_support::{parse_response, rpc_payload, stub};
     use trogon_nats::AdvancedMockNatsClient;
 
+    fn minimal_valid_card(name: &str) -> a2a_types::AgentCard {
+        a2a_types::AgentCard {
+            name: name.to_string(),
+            supported_interfaces: vec![a2a_types::AgentInterface {
+                url: "https://example.com/a2a".to_string(),
+                protocol_binding: "JSONRPC".to_string(),
+                protocol_version: "0.2.0".to_string(),
+                tenant: String::new(),
+            }],
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn success_publishes_agent_card() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handler.lock().unwrap().agent_card_result = Some(Ok(a2a_types::AgentCard {
-            name: "my-agent".into(),
-            ..Default::default()
-        }));
+        handler.lock().unwrap().agent_card_result = Some(Ok(minimal_valid_card("my-agent")));
         handle(
             &handler,
             &rpc_payload("agent/getAuthenticatedExtendedCard", 1),
@@ -103,10 +160,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_card_publishes_validation_error() {
+        let nats = AdvancedMockNatsClient::new();
+        let handler = stub();
+        handler.lock().unwrap().agent_card_result = Some(Ok(a2a_types::AgentCard {
+            name: String::new(),
+            ..Default::default()
+        }));
+        handle(
+            &handler,
+            &rpc_payload("agent/getAuthenticatedExtendedCard", 9),
+            Some("r".into()),
+            &nats,
+        )
+        .await;
+        let body = parse_response(&nats.published_payloads()[0]);
+        assert!(body.get("error").is_some());
+    }
+
+    #[tokio::test]
     async fn request_without_params_still_calls_handler() {
         let nats = AdvancedMockNatsClient::new();
         let handler = stub();
-        handler.lock().unwrap().agent_card_result = Some(Ok(a2a_types::AgentCard::default()));
+        handler.lock().unwrap().agent_card_result = Some(Ok(minimal_valid_card("default-agent")));
         let payload = serde_json::to_vec(
             &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"agent/getAuthenticatedExtendedCard"}),
         )
