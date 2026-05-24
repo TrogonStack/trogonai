@@ -49,14 +49,9 @@ pub struct IssuedPermissions {
 }
 
 impl IssuedPermissions {
-    /// Phase 0 ACL template: caller can publish into the gateway namespace,
-    /// receive replies on its own `_INBOX`, and read push deliveries on its
-    /// own caller-scoped push subject.
-    ///
-    /// The exact JSON layout the NATS server expects is pinned by the
-    /// auth-callout wire format (Round 3 of the build TODO); this value object
-    /// captures the *intent* and is serialized into the JWT today as
-    /// `nats_permissions` while the wire format is illustrative.
+    /// Caller subject ACL: publish into the gateway namespace, receive replies
+    /// on its own `_INBOX`, and read push deliveries on its own caller-scoped
+    /// push subject. Mirrors `scripts/acl-templates/caller.acl`.
     pub fn default_for_caller(caller_id: &CallerId) -> Self {
         let inbox = format!("_INBOX.{}.>", caller_id.as_str());
         let push = format!("a2a.push.{}.>", caller_id.as_str());
