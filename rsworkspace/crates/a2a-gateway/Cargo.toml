@@ -11,6 +11,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 a2a-pack = { workspace = true }
 a2a-redaction = { workspace = true }
@@ -23,7 +24,9 @@ cel-interpreter = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
 moka = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+toml = "=0.8.23"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
