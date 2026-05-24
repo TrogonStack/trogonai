@@ -37,7 +37,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 ## Phase 4 — interop & federation
 
-- [ ] **`A2A_BRIDGE_TRANSPORT=nats`** path exercised end-to-end against a deployed auth-callout mint (HTTPS surface, unary gateway, SSE ↔ JetStream already wired; **`stub` remains default** for unit/integration without live NATS).
+- [ ] **`A2A_BRIDGE_TRANSPORT=nats`** integration harness landed in `a2a-bridge::nats_transport_harness` (in-process mocks + optional `#[ignore]` live NATS smoke); **still requires deployed auth-callout mint for production** (`stub` remains default).
 - [ ] Operator-signed Account export/import contract for `a2a.discover.>` cross-Account federation — gated through `SpiceDbImportGate` at the import boundary (**deny-only until `A2A_SPICEDB_*` env is set; use `AllowAllImportGate` for labs — see crates/docs**).
 - [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge (depends on validating **`A2A_BRIDGE_TRANSPORT=nats`** + Tier 1 + deployed auth-callout mint).
 

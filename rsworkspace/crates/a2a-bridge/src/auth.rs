@@ -27,6 +27,33 @@ impl AuthCalloutClient for StubAuthCalloutClient {
     }
 }
 
+/// Test/dev mint that returns a fixed Account User JWT without a live auth-callout deployment.
+#[derive(Clone, Debug)]
+pub struct StubAuthCalloutMint {
+    jwt: BridgeUserJwt,
+}
+
+impl StubAuthCalloutMint {
+    #[must_use]
+    pub fn new(jwt: impl Into<String>) -> Self {
+        Self {
+            jwt: BridgeUserJwt::new(jwt.into()),
+        }
+    }
+
+    #[must_use]
+    pub fn fixture() -> Self {
+        Self::new("fixture-bridge-user-jwt")
+    }
+}
+
+#[async_trait]
+impl AuthCalloutClient for StubAuthCalloutMint {
+    async fn mint(&self, _caller_auth: &CallerHttpsAuth) -> Result<BridgeUserJwt, BridgeError> {
+        Ok(self.jwt.clone())
+    }
+}
+
 #[async_trait]
 pub trait AuthMintWire: Send + Sync {
     async fn roundtrip_message(&self, subject: String, payload: BytesPayload) -> Result<Vec<u8>, BridgeError>;

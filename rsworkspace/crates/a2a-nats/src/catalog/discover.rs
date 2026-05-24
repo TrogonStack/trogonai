@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::StreamExt as _;
+use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -33,6 +34,10 @@ impl std::fmt::Display for DiscoverSubject {
 }
 
 fn success_reply(card: &a2a_types::AgentCard) -> Option<Bytes> {
+    let value = serde_json::to_value(card).ok()?;
+    if !accept_agent_card_on_read(&value, AgentCardSource::DiscoverResponse) {
+        return None;
+    }
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": null,
@@ -122,14 +127,29 @@ where
 
                             match self.store.get_card(&agent_id).await {
                                 Ok(Some(card)) => {
-                                    if let Some(b) = success_reply(&card)
-                                        && let Err(e) = self.nats.publish_with_headers(
+                                    if let Some(b) = success_reply(&card) {
+                                        if let Err(e) = self.nats.publish_with_headers(
                                             async_nats::Subject::from(reply.as_str()),
                                             async_nats::HeaderMap::new(),
                                             b,
-                                        ).await
-                                    {
-                                        warn!(error = %e, "failed to publish discover reply");
+                                        ).await {
+                                            warn!(error = %e, "failed to publish discover reply");
+                                        }
+                                    } else {
+                                        warn!(
+                                            agent_id = %agent_id,
+                                            source = AgentCardSource::DiscoverResponse.as_str(),
+                                            "discover response dropped invalid AgentCard"
+                                        );
+                                        if let Some(b) = error_reply(-32603, "AgentCard failed read validation")
+                                            && let Err(e) = self.nats.publish_with_headers(
+                                                async_nats::Subject::from(reply.as_str()),
+                                                async_nats::HeaderMap::new(),
+                                                b,
+                                            ).await
+                                        {
+                                            warn!(error = %e, "failed to publish discover validation error reply");
+                                        }
                                     }
                                 }
                                 Ok(None) => {
@@ -225,16 +245,35 @@ mod tests {
         assert!(e.to_string().contains("x"));
     }
 
+    fn minimal_valid_card(name: &str) -> a2a_types::AgentCard {
+        a2a_types::AgentCard {
+            name: name.to_string(),
+            supported_interfaces: vec![a2a_types::AgentInterface {
+                url: "https://example.com/a2a".to_string(),
+                protocol_binding: "JSONRPC".to_string(),
+                protocol_version: "0.2.0".to_string(),
+                tenant: String::new(),
+            }],
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn success_reply_serializes_card() {
-        let card = a2a_types::AgentCard {
-            name: "bot".into(),
-            ..Default::default()
-        };
+        let card = minimal_valid_card("bot");
         let bytes = success_reply(&card).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["jsonrpc"], "2.0");
         assert_eq!(v["result"]["name"], "bot");
+    }
+
+    #[test]
+    fn success_reply_none_when_card_fails_read_validation() {
+        let card = a2a_types::AgentCard {
+            name: String::new(),
+            ..Default::default()
+        };
+        assert!(success_reply(&card).is_none());
     }
 
     #[test]
