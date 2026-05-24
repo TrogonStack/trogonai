@@ -179,6 +179,84 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
         .await;
 }
 
+/// `CrossRunnerSwitcher::switch_model` migrates a session to a runner registered
+/// with "codex" agent type and `code_edit` capability.
+///
+/// Verifies that the registry's `code_edit` capability tag and `acp_prefix`
+/// routing work end-to-end: the switcher resolves the model "o4-mini" to the
+/// codex-prefixed runner and migrates the session history correctly.
+#[tokio::test]
+async fn switch_model_migrates_session_to_codex_runner_prefix() {
+    let (_c, port) = start_nats_js().await;
+    let (nats, js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Seed source session ────────────────────────────────────────
+            let store = NatsSessionStore::open(&js).await.unwrap();
+
+            let src_state = SessionState {
+                messages: vec![
+                    AgentMessage::user_text("ask codex"),
+                    AgentMessage::assistant(vec![AgentContentBlock::Text {
+                        text: "acp answer".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("codex-src-1", &src_state).await.unwrap();
+
+            // ── 2. Start source agent and a mock "codex" agent ───────────────
+            attach_agent(make_agent(store.clone(), "acp.src"), nats.clone(), "acp.src");
+            attach_agent(
+                make_agent(store.clone(), "acp.codex"),
+                nats.clone(),
+                "acp.codex",
+            );
+            tokio::time::sleep(Duration::from_millis(60)).await;
+
+            // ── 3. Register "acp.codex" as a codex runner ────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut codex_cap =
+                AgentCapability::new("codex", ["chat", "code_edit"], "acp.codex.agent.>");
+            codex_cap.metadata = serde_json::json!({
+                "models": ["o4-mini", "o3"],
+                "acp_prefix": "acp.codex"
+            });
+            registry.register(&codex_cap).await.unwrap();
+
+            // ── 4. Migrate via CrossRunnerSwitcher ────────────────────────────
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let (new_prefix, new_session_id) = switcher
+                .switch_model("acp.src", "codex-src-1", "o4-mini", "/tmp")
+                .await
+                .expect("switch_model to codex runner must succeed");
+
+            assert_eq!(new_prefix, "acp.codex");
+            assert!(!new_session_id.is_empty());
+
+            // ── 5. Verify migrated messages ───────────────────────────────────
+            let dst_state = store.load(&new_session_id).await.unwrap();
+            assert_eq!(
+                dst_state.messages.len(),
+                2,
+                "migrated codex session must have 2 messages"
+            );
+            assert_eq!(dst_state.messages[0].role, "user");
+            assert_eq!(dst_state.messages[1].role, "assistant");
+            assert!(
+                matches!(
+                    &dst_state.messages[0].content[0],
+                    AgentContentBlock::Text { text } if text == "ask codex"
+                ),
+                "user message must survive migration to codex runner"
+            );
+        })
+        .await;
+}
+
 /// `CrossRunnerSwitcher::switch_model` migrates a session from a live XaiAgent to a live
 /// OpenRouterAgent over real NATS — exercises the full cross-runner export→new_session→import
 /// chain between two different runner implementations.
