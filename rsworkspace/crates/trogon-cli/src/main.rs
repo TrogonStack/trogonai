@@ -95,6 +95,7 @@ fn run_dev_stack() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    trogon_cli::env_local::load_env_local();
     let args = Args::parse();
 
     if matches!(args.command, Some(Command::Dev)) {

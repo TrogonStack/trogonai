@@ -108,7 +108,7 @@ impl Runtime for CountingRuntime {
         Ok(ReadTextFileResponse::new(String::new()))
     }
 
-    fn handle_request_permission(
+    async fn handle_request_permission(
         &self,
         _req: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {

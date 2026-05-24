@@ -431,6 +431,7 @@ async fn auto_allow_selects_first_option() {
     );
     let resp = runtime
         .handle_request_permission(req)
+        .await
         .expect("permission should succeed");
 
     assert!(matches!(
@@ -455,6 +456,7 @@ async fn auto_deny_when_no_options() {
     );
     let resp = runtime
         .handle_request_permission(req)
+        .await
         .expect("permission should succeed");
     assert!(matches!(resp.outcome, RequestPermissionOutcome::Cancelled));
 }

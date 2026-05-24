@@ -1,6 +1,9 @@
 //! Static permission rules loaded from `TROGON.md` and `/config`.
 //!
-//! Rules are defined in a `## Permissions` section using key-value syntax:
+//! Rules use key-value syntax (`allow_paths:`, `deny_paths:`, `allow_commands:`,
+//! `deny_commands:`). They may appear in a `## Permissions` section, as bare
+//! lines at the top of the file, or inside markdown code fences (e.g. yaml
+//! examples). Every matching line in the document is collected.
 //!
 //! ```markdown
 //! ## Permissions
@@ -20,15 +23,51 @@
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
 
-/// Tools whose `path` input field is matched against path rules.
+/// Tools whose path input field is matched against path rules (canonical names).
 const FILE_TOOLS: &[&str] = &[
     "read_file",
     "write_file",
     "str_replace",
     "glob",
+    "grep",
+    "search",
     "list_dir",
     "notebook_edit",
+    "change_directory",
 ];
+
+/// Normalize tool names from ACP/agent conventions to canonical names used in rules.
+pub fn normalize_tool_name(tool_name: &str) -> &str {
+    match tool_name {
+        "bash" | "Bash" => "bash",
+        "read_file" | "Read" => "read_file",
+        "write_file" | "Write" => "write_file",
+        "str_replace" | "Edit" => "str_replace",
+        "glob" | "Glob" => "glob",
+        "grep" | "Grep" | "search" | "search_files" => "grep",
+        "list_dir" | "LS" => "list_dir",
+        "notebook_edit" | "NotebookEdit" => "notebook_edit",
+        "todo_read" => "todo_read",
+        "todo_write" => "todo_write",
+        "git_status" => "git_status",
+        "git_diff" => "git_diff",
+        "git_log" => "git_log",
+        "git_commit" => "git_commit",
+        "change_directory" => "change_directory",
+        other => other,
+    }
+}
+
+/// Extract a filesystem path from tool input (`path`, `file_path`, or `notebook_path`).
+pub fn extract_path_from_input(tool_input: &Value) -> Option<&str> {
+    ["path", "file_path", "notebook_path"]
+        .iter()
+        .find_map(|key| tool_input.get(*key).and_then(|v| v.as_str()))
+}
+
+fn extract_command_from_input(tool_input: &Value) -> Option<&str> {
+    tool_input.get("command").and_then(|v| v.as_str())
+}
 
 /// Result of evaluating the static rules against a single tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,45 +89,41 @@ pub struct PermissionRules {
     deny_commands: Vec<String>,
 }
 
+fn parse_rule_line(line: &str, rules: &mut PermissionRules) {
+    let trimmed = line.trim();
+    if trimmed.starts_with("```") {
+        return;
+    }
+
+    let Some((key, values)) = trimmed.split_once(':') else {
+        return;
+    };
+
+    let items: Vec<String> = values
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    match key.trim() {
+        "allow_paths" => rules.allow_paths.extend(items),
+        "deny_paths" => rules.deny_paths.extend(items),
+        "allow_commands" => rules.allow_commands.extend(items),
+        "deny_commands" => rules.deny_commands.extend(items),
+        _ => {}
+    }
+}
+
 impl PermissionRules {
     /// Parse rules from the concatenated TROGON.md text.
     ///
-    /// Looks for a `## Permissions` section and reads `key: value1, value2`
-    /// lines within it. Stops at the next `##` heading or end of file.
+    /// Reads `key: value1, value2` lines anywhere in the document (including
+    /// inside markdown code fences and bare lines before any heading).
     pub fn parse(text: &str) -> Self {
         let mut rules = Self::default();
-        let mut in_section = false;
-
         for line in text.lines() {
-            let trimmed = line.trim();
-
-            if trimmed.starts_with("## ") {
-                in_section = trimmed.eq_ignore_ascii_case("## permissions")
-                    || trimmed.eq_ignore_ascii_case("## Permissions");
-                continue;
-            }
-
-            if !in_section {
-                continue;
-            }
-
-            // Parse `key: v1, v2, v3` lines.
-            if let Some((key, values)) = trimmed.split_once(':') {
-                let items: Vec<String> = values
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                match key.trim() {
-                    "allow_paths" => rules.allow_paths.extend(items),
-                    "deny_paths" => rules.deny_paths.extend(items),
-                    "allow_commands" => rules.allow_commands.extend(items),
-                    "deny_commands" => rules.deny_commands.extend(items),
-                    _ => {}
-                }
-            }
+            parse_rule_line(line, &mut rules);
         }
-
         rules
     }
 
@@ -102,14 +137,16 @@ impl PermissionRules {
 
     /// Evaluate rules for a single tool call.
     pub fn check(&self, tool_name: &str, tool_input: &Value) -> RuleDecision {
-        if FILE_TOOLS.contains(&tool_name)
-            && let Some(path) = tool_input["path"].as_str()
+        let normalized = normalize_tool_name(tool_name);
+
+        if FILE_TOOLS.contains(&normalized)
+            && let Some(path) = extract_path_from_input(tool_input)
         {
             return self.check_path(path);
         }
 
-        if tool_name == "bash"
-            && let Some(cmd) = tool_input["command"].as_str()
+        if normalized == "bash"
+            && let Some(cmd) = extract_command_from_input(tool_input)
         {
             return self.check_command(cmd);
         }
@@ -152,6 +189,9 @@ fn matches_any_glob(path: &str, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return false;
     }
+    if patterns.iter().any(|p| p == "*" || p == "**") {
+        return true;
+    }
     let mut builder = GlobSetBuilder::new();
     for pat in patterns {
         if let Ok(g) = Glob::new(pat) {
@@ -165,11 +205,17 @@ fn matches_any_glob(path: &str, patterns: &[String]) -> bool {
 }
 
 /// Match `command` against any of the prefix patterns (case-sensitive).
+/// A lone `*` pattern matches any command.
 fn matches_any_prefix(command: &str, patterns: &[String]) -> bool {
     let trimmed = command.trim();
-    patterns
-        .iter()
-        .any(|p| trimmed == p.as_str() || trimmed.starts_with(&format!("{p} ")) || trimmed.starts_with(&format!("{p}\n")))
+    patterns.iter().any(|p| {
+        if p == "*" {
+            return true;
+        }
+        trimmed == p.as_str()
+            || trimmed.starts_with(&format!("{p} "))
+            || trimmed.starts_with(&format!("{p}\n"))
+    })
 }
 
 #[cfg(test)]
@@ -207,14 +253,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_stops_at_next_heading() {
-        let md = "## Permissions\nallow_paths: src/**\n## Other\nallow_paths: should_not_appear\n";
+    fn parse_rules_after_other_headings() {
+        let md = "## Permissions\nallow_paths: src/**\n## Other\nallow_paths: also_parsed\n";
         let r = PermissionRules::parse(md);
-        assert_eq!(r.allow_paths, vec!["src/**"]);
+        assert_eq!(r.allow_paths, vec!["src/**", "also_parsed"]);
     }
 
     #[test]
-    fn parse_no_section_returns_empty() {
+    fn parse_bare_lines_without_section() {
+        let md = "allow_paths: **\nallow_commands: *\n# Just some text\n";
+        let r = PermissionRules::parse(md);
+        assert_eq!(r.allow_paths, vec!["**"]);
+        assert_eq!(r.allow_commands, vec!["*"]);
+    }
+
+    #[test]
+    fn parse_rules_inside_yaml_fence() {
+        let md = "```yaml\nallow_paths: src/**\nallow_commands: cargo test\n```\n";
+        let r = PermissionRules::parse(md);
+        assert_eq!(r.allow_paths, vec!["src/**"]);
+        assert_eq!(r.allow_commands, vec!["cargo test"]);
+    }
+
+    #[test]
+    fn parse_no_permission_lines_returns_empty() {
         let r = PermissionRules::parse("# Just some text\nno permissions here");
         assert!(r.is_empty());
     }
@@ -340,6 +402,19 @@ deny_commands: rm -rf, sudo
         );
     }
 
+    #[test]
+    fn allow_commands_wildcard_matches_any_command() {
+        let r = PermissionRules::parse("allow_commands: *\n");
+        assert_eq!(
+            r.check("bash", &serde_json::json!({"command": "bash"})),
+            RuleDecision::Allow
+        );
+        assert_eq!(
+            r.check("bash", &serde_json::json!({"command": "pwd"})),
+            RuleDecision::Allow
+        );
+    }
+
     // ── check — no path/command field returns Ask ─────────────────────────────
 
     #[test]
@@ -375,5 +450,44 @@ deny_commands: rm -rf, sudo
         a.merge(b);
         assert_eq!(a.allow_paths, vec!["src/**"]);
         assert_eq!(a.deny_commands, vec!["rm -rf"]);
+    }
+
+    #[test]
+    fn read_with_file_path_matches_allow_paths_wildcard() {
+        let r = PermissionRules::parse("allow_paths: **\n");
+        assert_eq!(
+            r.check("Read", &serde_json::json!({"file_path": "/home/user/file.txt"})),
+            RuleDecision::Allow
+        );
+    }
+
+    #[test]
+    fn bash_with_allow_commands_wildcard() {
+        let r = PermissionRules::parse("allow_commands: *\n");
+        assert_eq!(
+            r.check("Bash", &serde_json::json!({"command": "pwd"})),
+            RuleDecision::Allow
+        );
+    }
+
+    #[test]
+    fn edit_with_file_path_matches_deny_paths() {
+        let r = PermissionRules::parse("deny_paths: .env\n");
+        assert_eq!(
+            r.check("Edit", &serde_json::json!({"file_path": ".env"})),
+            RuleDecision::Deny
+        );
+    }
+
+    #[test]
+    fn notebook_edit_with_notebook_path() {
+        let r = PermissionRules::parse("allow_paths: notebooks/**\n");
+        assert_eq!(
+            r.check(
+                "NotebookEdit",
+                &serde_json::json!({"notebook_path": "notebooks/test.ipynb"}),
+            ),
+            RuleDecision::Allow
+        );
     }
 }

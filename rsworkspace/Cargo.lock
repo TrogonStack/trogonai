@@ -5411,6 +5411,7 @@ dependencies = [
  "trogon-registry",
  "trogon-runner-tools",
  "trogon-std",
+ "trogon-tools",
  "uuid",
 ]
 

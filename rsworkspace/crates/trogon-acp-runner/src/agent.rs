@@ -212,6 +212,10 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 ///
 /// Returns the original messages unchanged if the compactor is not running or
 /// returns an error — compaction is always opt-in and never blocks the prompt.
+///
+/// Times out after 25 s (well under the registry TTL of 30 s) so that a slow or
+/// absent compactor never holds the session semaphore long enough to cause the
+/// registry entry to expire or the CLI to time out.
 #[cfg_attr(coverage, coverage(off))]
 async fn compact_messages(
     nats: &async_nats::Client,
@@ -237,13 +241,19 @@ async fn compact_messages(
         return messages;
     };
 
-    let reply = match nats
-        .request("trogon.compactor.compact", payload.into())
-        .await
+    let reply = match tokio::time::timeout(
+        std::time::Duration::from_secs(25),
+        nats.request("trogon.compactor.compact", payload.into()),
+    )
+    .await
     {
-        Ok(r) => r,
-        Err(e) => {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => {
             warn!(session_id, error = %e, "compactor unavailable — skipping compaction");
+            return messages;
+        }
+        Err(_elapsed) => {
+            warn!(session_id, "compactor did not respond within 25 s — skipping compaction");
             return messages;
         }
     };
@@ -660,10 +670,25 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                     PromptEvent::ToolCallStarted { id, name, input, parent_tool_use_id }
                                 }
                                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
-                                    let is_enter_plan = tool_name_by_id
-                                        .get(&id)
+                                    let tool_name = tool_name_by_id.get(&id).cloned();
+                                    let is_enter_plan = tool_name
+                                        .as_deref()
                                         .map(|n| n == "EnterPlanMode")
                                         .unwrap_or(false);
+                                    let is_cd = tool_name
+                                        .as_deref()
+                                        .map(|n| n == "change_directory")
+                                        .unwrap_or(false);
+
+                                    // Persist the new cwd so subsequent turns use it.
+                                    const CD_PREFIX: &str = "Working directory is now ";
+                                    if is_cd {
+                                        if let Some(new_path) = output.strip_prefix(CD_PREFIX) {
+                                            state.cwd = new_path.to_string();
+                                            state.terminal_cwd = None;
+                                        }
+                                    }
+
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
                                     publish_via_converter(prompt_client, &mut converter, finished).await;
                                     if is_enter_plan {
@@ -901,11 +926,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
         let mut state = self.store.load(&session_id).await.unwrap_or_default();
+        let mut needs_save = false;
+        let new_cwd = req.cwd.to_string_lossy().into_owned();
+        if !new_cwd.is_empty() && state.cwd != new_cwd {
+            state.cwd = new_cwd;
+            state.terminal_id = None;
+            state.terminal_cwd = None;
+            state.updated_at = now_iso8601();
+            needs_save = true;
+        }
         if !req.mcp_servers.is_empty() {
             state.mcp_servers = convert_mcp_servers(&req.mcp_servers);
             state.updated_at = now_iso8601();
+            needs_save = true;
+        }
+        if needs_save {
             if let Err(e) = self.store.save(&session_id, &state).await {
-                warn!(session_id, error = %e, "agent: failed to refresh MCP servers on load");
+                warn!(session_id, error = %e, "agent: failed to persist session on load");
             }
         }
         let response = LoadSessionResponse::new()

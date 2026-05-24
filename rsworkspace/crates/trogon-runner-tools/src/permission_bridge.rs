@@ -36,7 +36,7 @@ pub async fn handle_permission_request_nats<S, N>(
         }
     };
 
-    let proxy = NatsClientProxy::new(nats, session_id, prefix, Duration::from_secs(30));
+    let proxy = NatsClientProxy::new(nats, session_id, prefix, Duration::from_secs(60));
 
     let options = vec![
         PermissionOption::new(

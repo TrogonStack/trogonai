@@ -129,6 +129,9 @@ pub struct SessionSummary {
 pub trait Session: Send + Sync + 'static {
     fn session_id(&self) -> &str;
 
+    /// Model id last reported by the runner for this session.
+    fn current_model(&self) -> String;
+
     fn prompt(
         &self,
         text: &str,
@@ -150,9 +153,20 @@ pub trait Session: Send + Sync + 'static {
         mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
+    /// Update the runner session working directory (e.g. after `/cd`).
+    fn set_cwd(
+        &self,
+        cwd: &Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
     fn list_sessions(
         &self,
     ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_;
+
+    /// Runner-reported cwd for this session (may differ from the REPL shell until synced).
+    fn session_cwd(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_;
 
     fn set_mode(
         &self,
@@ -210,10 +224,31 @@ impl<N: NatsClient + Clone> SessionFactory for NatsSessionFactory<N> {
 
 // ── TrogonSession ─────────────────────────────────────────────────────────────
 
+/// Default model id when the runner response omits `models.currentModelId`.
+pub fn default_model_for_prefix(prefix: &str) -> String {
+    match prefix {
+        "acp.grok" => std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-4".into()),
+        "acp.openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
+            .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        "acp.codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
+        _ => "claude-sonnet-4-6".into(),
+    }
+}
+
+/// Read `models.currentModelId` from an ACP session.new / session.load response.
+pub fn parse_current_model_id(resp: &Value, prefix: &str) -> String {
+    resp.get("models")
+        .and_then(|m| m.get("currentModelId"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| default_model_for_prefix(prefix))
+}
+
 pub struct TrogonSession<N: NatsClient> {
     nats: N,
     session_id: String,
     prefix: String,
+    model: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl<N: NatsClient> std::fmt::Debug for TrogonSession<N> {
@@ -227,7 +262,12 @@ impl<N: NatsClient> std::fmt::Debug for TrogonSession<N> {
 
 impl<N: NatsClient> TrogonSession<N> {
     pub fn from_existing(nats: N, prefix: &str, session_id: String) -> Self {
-        Self { nats, session_id, prefix: prefix.to_string() }
+        Self {
+            nats,
+            session_id,
+            prefix: prefix.to_string(),
+            model: std::sync::Arc::new(std::sync::Mutex::new(default_model_for_prefix(prefix))),
+        }
     }
 
     pub async fn new(
@@ -260,8 +300,14 @@ impl<N: NatsClient> TrogonSession<N> {
             .ok_or_else(|| anyhow::anyhow!("session response missing sessionId: {resp}"))?
             .to_string();
 
-        let session = Self { nats, session_id, prefix: prefix.to_string() };
-        let mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "acceptEdits".into());
+        let model = parse_current_model_id(&resp, prefix);
+        let session = Self {
+            nats,
+            session_id,
+            prefix: prefix.to_string(),
+            model: std::sync::Arc::new(std::sync::Mutex::new(model)),
+        };
+        let mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
         if let Err(e) = session.set_mode(&mode).await {
             tracing::warn!(error = %e, mode = %mode, "failed to set session mode");
         }
@@ -272,6 +318,10 @@ impl<N: NatsClient> TrogonSession<N> {
 impl<N: NatsClient> Session for TrogonSession<N> {
     fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    fn current_model(&self) -> String {
+        self.model.lock().unwrap().clone()
     }
 
     fn prompt(
@@ -315,10 +365,32 @@ impl<N: NatsClient> Session for TrogonSession<N> {
 
             let (tx, rx) = mpsc::channel(64);
 
+            // Runner-down guard: if the runner deregisters during compaction
+            // (registry TTL 30s vs compaction up to 120s), the prompt publish
+            // succeeds but nobody reads it. Cap the wait so the UI unblocks.
+            const PROMPT_TIMEOUT: Duration = Duration::from_secs(180);
             tokio::spawn(async move {
+                let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
                 loop {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        let _ = tx
+                            .send(StreamEvent::Error(
+                                "runner did not respond within 180 s — check that trogon-dev.sh is still running".to_string(),
+                            ))
+                            .await;
+                        break;
+                    }
                     tokio::select! {
                         biased;
+                        _ = tokio::time::sleep(remaining) => {
+                            let _ = tx
+                                .send(StreamEvent::Error(
+                                    "runner did not respond within 180 s — check that trogon-dev.sh is still running".to_string(),
+                                ))
+                                .await;
+                            break;
+                        }
                         bytes = resp_rx.recv() => {
                             let Some(bytes) = bytes else { break };
                             if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
@@ -415,6 +487,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let prefix = self.prefix.clone();
         let session_id = self.session_id.clone();
         let nats = &self.nats;
+        let model = std::sync::Arc::clone(&self.model);
         async move {
             let req_id = Uuid::now_v7().to_string();
             let subject = format!("{prefix}.session.{session_id}.agent.set_model");
@@ -437,6 +510,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
                 .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?;
+            *model.lock().unwrap() = model_id;
             Ok(())
         }
     }
@@ -558,6 +632,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let cwd = cwd.to_path_buf();
         let prefix = self.prefix.clone();
         let nats = &self.nats;
+        let model = std::sync::Arc::clone(&self.model);
         async move {
             if session_id.contains('.') {
                 return Err(anyhow::anyhow!("invalid session id: {session_id}"));
@@ -574,17 +649,25 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             .map_err(|_| anyhow::anyhow!("timed out waiting for session load"))?
             .map_err(|e| anyhow::anyhow!("NATS error loading session: {e}"))?;
 
-            if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-                if v.get("code").is_some() {
-                    let msg = v
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("unknown runner error");
-                    return Err(anyhow::anyhow!("load session failed: {msg}"));
-                }
+            let v: Value = serde_json::from_slice(&bytes)
+                .map_err(|e| anyhow::anyhow!("invalid load session response: {e}"))?;
+            if v.get("code").is_some() {
+                let msg = v
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown runner error");
+                return Err(anyhow::anyhow!("load session failed: {msg}"));
             }
+            *model.lock().unwrap() = parse_current_model_id(&v, &prefix);
             Ok(())
         }
+    }
+
+    fn set_cwd(
+        &self,
+        cwd: &Path,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+        self.load_session(self.session_id(), cwd, vec![])
     }
 
     fn list_sessions(
@@ -618,6 +701,19 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                     updated_at: info.updated_at,
                 })
                 .collect())
+        }
+    }
+
+    fn session_cwd(
+        &self,
+    ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+        let session_id = self.session_id.clone();
+        async move {
+            let sessions = self.list_sessions().await?;
+            Ok(sessions
+                .into_iter()
+                .find(|s| s.session_id == session_id)
+                .map(|s| PathBuf::from(s.cwd)))
         }
     }
 
@@ -771,6 +867,7 @@ pub mod mock {
         model: Mutex<Option<String>>,
         set_model_error: Mutex<Option<String>>,
         compact_error: Mutex<Option<String>>,
+        last_cwd: Mutex<Option<PathBuf>>,
     }
 
     impl MockSession {
@@ -784,6 +881,7 @@ pub mod mock {
                 model: Mutex::new(None),
                 set_model_error: Mutex::new(None),
                 compact_error: Mutex::new(None),
+                last_cwd: Mutex::new(None),
             }
         }
 
@@ -814,11 +912,23 @@ pub mod mock {
         pub fn fail_compact(&self, error: impl Into<String>) {
             *self.compact_error.lock().unwrap() = Some(error.into());
         }
+
+        pub fn last_cwd(&self) -> Option<PathBuf> {
+            self.last_cwd.lock().unwrap().clone()
+        }
     }
 
     impl Session for MockSession {
         fn session_id(&self) -> &str {
             &self.session_id
+        }
+
+        fn current_model(&self) -> String {
+            self.model
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "claude-sonnet-4-6".into())
         }
 
         fn prompt(
@@ -880,16 +990,34 @@ pub mod mock {
         fn load_session(
             &self,
             _session_id: &str,
-            _cwd: &Path,
+            cwd: &Path,
             _mcp_servers: Vec<McpServer>,
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
-            async move { Ok(()) }
+            let cwd = cwd.to_path_buf();
+            async move {
+                *self.last_cwd.lock().unwrap() = Some(cwd);
+                Ok(())
+            }
+        }
+
+        fn set_cwd(
+            &self,
+            cwd: &Path,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            self.load_session(self.session_id(), cwd, vec![])
         }
 
         fn list_sessions(
             &self,
         ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
             async move { Ok(vec![]) }
+        }
+
+        fn session_cwd(
+            &self,
+        ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+            let cwd = self.last_cwd.lock().unwrap().clone();
+            async move { Ok(cwd) }
         }
 
         fn set_mode(
@@ -910,6 +1038,10 @@ pub mod mock {
     impl Session for std::sync::Arc<MockSession> {
         fn session_id(&self) -> &str {
             (**self).session_id()
+        }
+
+        fn current_model(&self) -> String {
+            (**self).current_model()
         }
 
         fn prompt(
@@ -945,10 +1077,23 @@ pub mod mock {
             (**self).load_session(session_id, cwd, mcp_servers)
         }
 
+        fn set_cwd(
+            &self,
+            cwd: &Path,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            (**self).set_cwd(cwd)
+        }
+
         fn list_sessions(
             &self,
         ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
             (**self).list_sessions()
+        }
+
+        fn session_cwd(
+            &self,
+        ) -> impl std::future::Future<Output = anyhow::Result<Option<PathBuf>>> + Send + '_ {
+            (**self).session_cwd()
         }
 
         fn set_mode(
@@ -1158,6 +1303,21 @@ mod tests {
 
     // ── TrogonSession::new via MockNatsClient ─────────────────────────────────
 
+    #[test]
+    fn parse_current_model_id_reads_runner_response() {
+        let resp = json!({"sessionId": "s", "models": {"currentModelId": "grok-4"}});
+        assert_eq!(parse_current_model_id(&resp, "acp.grok"), "grok-4");
+    }
+
+    #[test]
+    fn parse_current_model_id_uses_prefix_default_when_missing() {
+        let resp = json!({"sessionId": "s"});
+        assert_eq!(
+            parse_current_model_id(&resp, "acp.grok"),
+            default_model_for_prefix("acp.grok")
+        );
+    }
+
     // ── TrogonSession::set_model ──────────────────────────────────────────────
 
     #[tokio::test]
@@ -1172,6 +1332,7 @@ mod tests {
         tx.send(Bytes::from(b"{}".as_ref())).await.unwrap();
         let result = session.set_model("claude-opus-4-7").await;
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
+        assert_eq!(session.current_model(), "claude-opus-4-7");
     }
 
     #[tokio::test]
@@ -1315,6 +1476,20 @@ mod tests {
         let mut rx = session.prompt("anything").await.unwrap();
         let ev = rx.recv().await.unwrap();
         assert!(matches!(ev, StreamEvent::Done(_)));
+    }
+
+    #[tokio::test]
+    async fn mock_session_set_cwd_updates_last_cwd() {
+        use mock::MockSession;
+        let session = MockSession::new("s");
+        session
+            .set_cwd(std::path::Path::new("/new/project"))
+            .await
+            .unwrap();
+        assert_eq!(
+            session.last_cwd().as_deref(),
+            Some(std::path::Path::new("/new/project"))
+        );
     }
 
     // ── MockSession::compact ──────────────────────────────────────────────────

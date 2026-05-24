@@ -280,6 +280,12 @@ async fn check_session_smoke(nats: &async_nats::Client) -> DoctorCheck {
 }
 
 async fn check_compactor(nats: &async_nats::Client) -> DoctorCheck {
+    if !env_var_nonempty("ANTHROPIC_TOKEN") {
+        return DoctorCheck::skip(
+            "Compactor",
+            "ANTHROPIC_TOKEN not set (optional for Grok-only dev)",
+        );
+    }
     let payload = serde_json::to_vec(&json!({ "messages": [] })).unwrap();
     match tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into())).await
     {

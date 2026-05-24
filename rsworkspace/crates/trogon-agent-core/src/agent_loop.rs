@@ -884,6 +884,9 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
 
         if self.permission_checker.is_some() {
             // Serial path: permission checks must not overlap (interactive).
+            // We also maintain a local tool_context so that a change_directory
+            // call updates the cwd for all subsequent tools in the same turn.
+            let mut current_ctx = Arc::clone(&self.tool_context);
             let mut results = Vec::new();
             for (id, name, input, parent_tool_use_id) in tool_uses {
                 debug!(tool = %name, "Executing tool (streaming, serial)");
@@ -921,9 +924,22 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                             Err(e) => format!("Tool error: {e}"),
                         }
                     } else {
-                        dispatch_tool(&self.tool_context, &name, &input).await
+                        dispatch_tool(&current_ctx, &name, &input).await
                     }
                 };
+
+                // If change_directory succeeded, update the local context so
+                // subsequent tools in this turn see the new working directory.
+                const CD_PREFIX: &str = "Working directory is now ";
+                if name == "change_directory" {
+                    if let Some(new_path) = output.strip_prefix(CD_PREFIX) {
+                        current_ctx = Arc::new(ToolContext {
+                            proxy_url: current_ctx.proxy_url.clone(),
+                            cwd: new_path.to_string(),
+                            http_client: current_ctx.http_client.clone(),
+                        });
+                    }
+                }
 
                 let _ = event_tx
                     .send(AgentEvent::ToolCallFinished {

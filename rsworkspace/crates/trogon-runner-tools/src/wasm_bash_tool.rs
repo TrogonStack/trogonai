@@ -105,6 +105,14 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             // ── Obtain or create the persistent terminal ──────────────────────
             let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
 
+            let cwd_str = sandbox_dir.to_string_lossy().into_owned();
+            if state.terminal_id.is_some()
+                && state.terminal_cwd.as_deref() != Some(cwd_str.as_str())
+            {
+                state.terminal_id = None;
+                state.terminal_cwd = None;
+            }
+
             let terminal_id: String = if let Some(tid) = &state.terminal_id {
                 tid.clone()
             } else {
@@ -120,11 +128,15 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
                 let tid = resp.terminal_id.0.to_string();
                 state.terminal_id = Some(tid.clone());
+                state.terminal_cwd = Some(cwd_str);
                 store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
                 tid
             };
 
             // ── Snapshot baseline output length ───────────────────────────────
+            // baseline_len is a *byte* offset into the raw UTF-8 string that the
+            // wasm-runtime returns. We must only slice at char boundaries, so we
+            // record the byte length of the string as-is (always a valid boundary).
             let baseline_len = {
                 let req = TerminalOutputRequest::new(
                     session_id.clone(),
@@ -137,7 +149,11 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     .map_err(|e| e.to_string())?;
                 let resp: serde_json::Value =
                     serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-                resp["output"].as_str().unwrap_or("").len()
+                // Use lossy conversion to guarantee valid UTF-8, then take byte length.
+                // The byte length of a valid UTF-8 string is always a char boundary.
+                String::from_utf8_lossy(
+                    resp["output"].as_str().unwrap_or("").as_bytes()
+                ).len()
             };
 
             // ── Write command with demarcation marker ─────────────────────────
@@ -174,7 +190,9 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                 let full_output = resp["output"].as_str().unwrap_or("").to_string();
 
                 if full_output.len() > baseline_len {
-                    let new_output = &full_output[baseline_len..];
+                    // floor_char_boundary ensures we never split a multi-byte character.
+                    let safe_start = full_output.floor_char_boundary(baseline_len);
+                    let new_output = &full_output[safe_start..];
                     if let Some(output) = extract_before_marker(new_output) {
                         return Ok(output);
                     }
@@ -182,7 +200,8 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
 
                 if tokio::time::Instant::now() >= deadline {
                     let new_output = if full_output.len() > baseline_len {
-                        full_output[baseline_len..].to_string()
+                        let safe_start = full_output.floor_char_boundary(baseline_len);
+                        full_output[safe_start..].to_string()
                     } else {
                         String::new()
                     };

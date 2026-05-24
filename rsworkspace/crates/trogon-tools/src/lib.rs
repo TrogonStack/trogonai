@@ -80,6 +80,17 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "change_directory",
+            "Change the session working directory. Use this instead of `cd` in bash when navigating the user's machine. Requires user approval in default permission mode.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Directory path (absolute, relative to cwd, or ~)" }
+                },
+                "required": ["path"]
+            }),
+        ),
+        tool_def(
             "glob",
             "Find files matching a glob pattern. Respects .gitignore. Returns paths relative to the working directory.",
             json!({
@@ -222,21 +233,28 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
 
 pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
     match name {
-        "read_file"     => fs::read_file(ctx, input).await,
-        "write_file"    => fs::write_file(ctx, input).await,
-        "list_dir"      => fs::list_dir(ctx, input).await,
-        "glob"          => fs::glob_files(ctx, input).await,
-        "str_replace"   => editor::str_replace(ctx, input).await,
-        "git_status"    => git::status(ctx, input).await,
-        "git_diff"      => git::diff(ctx, input).await,
-        "git_log"       => git::log(ctx, input).await,
-        "git_commit"    => git::commit(ctx, input).await,
-        "fetch_url"     => web::fetch_url(ctx, input).await,
-        "notebook_edit" => fs::notebook_edit(ctx, input).await,
-        "search_files"  => search::search_files(ctx, input).await,
-        "todo_write"    => todo::todo_write(ctx, input).await,
-        "todo_read"     => todo::todo_read(ctx, input).await,
-        _               => format!("Unknown tool: {name}"),
+        "read_file"        => fs::read_file(ctx, input).await,
+        "write_file"       => fs::write_file(ctx, input).await,
+        "list_dir"         => fs::list_dir(ctx, input).await,
+        "glob"             => fs::glob_files(ctx, input).await,
+        "str_replace"      => editor::str_replace(ctx, input).await,
+        "git_status"       => git::status(ctx, input).await,
+        "git_diff"         => git::diff(ctx, input).await,
+        "git_log"          => git::log(ctx, input).await,
+        "git_commit"       => git::commit(ctx, input).await,
+        "fetch_url"        => web::fetch_url(ctx, input).await,
+        "notebook_edit"    => fs::notebook_edit(ctx, input).await,
+        "search_files"     => search::search_files(ctx, input).await,
+        "todo_write"       => todo::todo_write(ctx, input).await,
+        "todo_read"        => todo::todo_read(ctx, input).await,
+        "change_directory" => {
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            match fs::resolve_directory_target(&ctx.cwd, path) {
+                Ok(resolved) => format!("Working directory is now {}", resolved.display()),
+                Err(e) => e,
+            }
+        }
+        _ => format!("Unknown tool: {name}"),
     }
 }
 

@@ -2,37 +2,89 @@ use serde_json::Value;
 
 use crate::ToolContext;
 
+/// Resolve a directory path from the session cwd (supports `~`, relative, and absolute).
+pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathBuf, String> {
+    use std::path::{Path, PathBuf};
+
+    let raw = raw.trim();
+    let target = if raw.is_empty() {
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .map_err(|_| "HOME is not set".to_string())?
+    } else if raw.starts_with('~') {
+        let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+        PathBuf::from(home).join(raw.trim_start_matches('~').trim_start_matches('/'))
+    } else if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        Path::new(cwd).join(raw)
+    };
+
+    let attempted = target.clone();
+    target
+        .canonicalize()
+        .map_err(|e| format!("cd: {} ({e})", attempted.display()))
+        .and_then(|p| {
+            if p.is_dir() {
+                Ok(p)
+            } else {
+                Err(format!("not a directory: {}", attempted.display()))
+            }
+        })
+}
+
 pub(crate) fn resolve_path(
     cwd: &str,
     path: &str,
 ) -> Result<std::path::PathBuf, String> {
-    use std::path::{Component, PathBuf};
+    use std::path::{Component, Path, PathBuf};
 
-    let joined = std::path::Path::new(cwd).join(path);
-    let mut normalized = PathBuf::new();
-
-    for component in joined.components() {
-        match component {
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    return Err("path is outside the working directory".to_string());
-                }
-            }
-            Component::CurDir => {}
-            c => normalized.push(c),
-        }
-    }
-
-    let cwd_norm: PathBuf = std::path::Path::new(cwd)
+    let cwd_norm: PathBuf = Path::new(cwd)
         .components()
         .filter(|c| !matches!(c, Component::CurDir))
         .collect();
+
+    let path_obj = Path::new(path);
+    let normalized = if path_obj.is_absolute() {
+        normalize_components(path_obj)
+    } else {
+        let joined = Path::new(cwd).join(path);
+        normalize_components(&joined)
+    };
 
     if !normalized.starts_with(&cwd_norm) {
         return Err("path is outside the working directory".to_string());
     }
 
+    // Resolve symlinks for parts that exist so a symlink pointing outside cwd
+    // is caught. For paths that don't exist yet (new files), fall back to the
+    // lexically-normalized result which already passed the starts_with check.
+    if let Ok(canonical) = std::fs::canonicalize(&normalized) {
+        let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
+        if !canonical.starts_with(&cwd_canonical) {
+            return Err("path is outside the working directory".to_string());
+        }
+        return Ok(canonical);
+    }
+
     Ok(normalized)
+}
+
+fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(p) => out.push(p.as_os_str()),
+            Component::RootDir => out.push("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(name) => out.push(name),
+        }
+    }
+    out
 }
 
 pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
@@ -346,6 +398,53 @@ mod tests {
         let cwd = dir.path().to_string_lossy().into_owned();
         let err = resolve_path(&cwd, "/etc/passwd").unwrap_err();
         assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_directory_target_empty_goes_home() {
+        let dir = TempDir::new().unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let home = std::env::var("HOME").expect("HOME must be set for test");
+        let resolved = resolve_directory_target(&cwd, "").unwrap();
+        assert_eq!(resolved, std::path::PathBuf::from(home));
+    }
+
+    #[test]
+    fn resolve_directory_target_relative() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let resolved = resolve_directory_target(&cwd, "sub").unwrap();
+        assert_eq!(resolved, sub.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn resolve_directory_target_tilde() {
+        let dir = TempDir::new().unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let home = std::env::var("HOME").expect("HOME must be set for test");
+        let resolved = resolve_directory_target(&cwd, "~").unwrap();
+        assert_eq!(resolved, std::path::PathBuf::from(home));
+    }
+
+    #[test]
+    fn resolve_directory_target_not_a_directory() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, "").unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let err = resolve_directory_target(&cwd, "file.txt").unwrap_err();
+        assert!(err.contains("not a directory"), "got: {err}");
+    }
+
+    #[test]
+    fn resolve_directory_target_absolute() {
+        let dir = TempDir::new().unwrap();
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let abs = dir.path().canonicalize().unwrap();
+        let resolved = resolve_directory_target(&cwd, abs.to_str().unwrap()).unwrap();
+        assert_eq!(resolved, abs);
     }
 
     #[tokio::test]

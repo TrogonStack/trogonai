@@ -30,6 +30,7 @@ tracing                = { workspace = true }
 trogon-nats            = { workspace = true }
 trogon-registry        = { workspace = true }
 trogon-runner-tools    = { path = "../trogon-runner-tools" }
+trogon-tools           = { path = "../trogon-tools" }
 trogon-std             = { workspace = true }
 uuid                   = { workspace = true }
 

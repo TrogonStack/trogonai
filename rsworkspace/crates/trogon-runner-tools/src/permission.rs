@@ -11,7 +11,9 @@ use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use trogon_tools::PermissionChecker;
 
-use crate::permission_rules::{PermissionRules, RuleDecision};
+use crate::permission_rules::{
+    extract_path_from_input, normalize_tool_name, PermissionRules, RuleDecision,
+};
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
 /// A single permission check request sent from the Runner to the ACP connection handler.
@@ -31,10 +33,10 @@ pub type PermissionTx = mpsc::Sender<PermissionReq>;
 pub type AuditBuf = Arc<Mutex<Vec<AuditEntry>>>;
 
 fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
-    if let Some(path) = tool_input.get("path").and_then(|v| v.as_str()) {
+    if let Some(path) = extract_path_from_input(tool_input) {
         return path.to_string();
     }
-    if (tool_name == "bash" || tool_name == "Bash")
+    if normalize_tool_name(tool_name) == "bash"
         && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
     {
         let prefix: String = cmd.chars().take(60).collect();
@@ -125,11 +127,12 @@ fn eval_tool_policies(
     tool_name: &str,
     tool_input: &Value,
 ) -> Option<PolicyAction> {
-    let path = tool_input["path"].as_str().unwrap_or("");
+    let path = extract_path_from_input(tool_input).unwrap_or("");
+    let normalized = normalize_tool_name(tool_name);
 
     let matching: Vec<&PolicyAction> = policies
         .iter()
-        .filter(|p| p.tool == tool_name)
+        .filter(|p| p.tool == tool_name || p.tool == normalized)
         .filter(|p| {
             globset::Glob::new(&p.path_pattern)
                 .ok()
@@ -198,15 +201,20 @@ impl PermissionChecker for RulesPermissionChecker {
     }
 }
 
-/// Tools auto-allowed in `acceptEdits` mode without prompting.
-const ACCEPT_EDITS_TOOLS: &[&str] = &[
-    "write_file",
-    "str_replace",
-    "notebook_edit",
-    "Edit",
-    "Write",
-    "MultiEdit",
+/// Read-only tools auto-allowed in `default` mode (Claude Code parity — no prompt for reads).
+const READ_ONLY_TOOLS: &[&str] = &[
+    "read_file",
+    "glob",
+    "list_dir",
+    "grep",
+    "todo_read",
+    "git_status",
+    "git_diff",
+    "git_log",
 ];
+
+/// File-edit tools auto-allowed in `acceptEdits` mode; bash and MCP still prompt.
+const ACCEPT_EDITS_TOOLS: &[&str] = &["write_file", "str_replace", "notebook_edit"];
 
 /// Tools denied in `plan` mode until the ExitPlanMode permission flow completes.
 const PLAN_DENIED_TOOLS: &[&str] = &[
@@ -214,26 +222,62 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "str_replace",
     "notebook_edit",
     "bash",
-    "Bash",
-    "Edit",
-    "Write",
-    "MultiEdit",
+    "todo_write",
+    "git_commit",
+    "fetch_url",
 ];
 
+fn is_read_only_tool(tool_name: &str) -> bool {
+    READ_ONLY_TOOLS.contains(&normalize_tool_name(tool_name))
+}
+
+/// Bash commands that only read or inspect the filesystem (no writes, no exec).
+fn is_read_only_bash_command(tool_input: &Value) -> bool {
+    let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return false;
+    }
+    let lowered = cmd.to_ascii_lowercase();
+    if lowered.contains("rm -rf")
+        || lowered.contains("-exec")
+        || lowered.contains("-delete")
+        || lowered.contains("sudo ")
+        || lowered.contains("chmod ")
+        || lowered.contains("chown ")
+    {
+        return false;
+    }
+    let base = cmd
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('(');
+    matches!(
+        base,
+        "pwd" | "ls" | "ll" | "dir" | "find" | "echo" | "cat" | "head" | "tail" | "wc"
+            | "which" | "file" | "stat" | "du" | "df" | "test" | "rg" | "grep" | "tree"
+    )
+}
+
 fn is_edit_tool(tool_name: &str) -> bool {
-    ACCEPT_EDITS_TOOLS.contains(&tool_name)
+    ACCEPT_EDITS_TOOLS.contains(&normalize_tool_name(tool_name))
 }
 
 fn is_plan_denied_tool(tool_name: &str) -> bool {
-    PLAN_DENIED_TOOLS.contains(&tool_name)
+    let n = normalize_tool_name(tool_name);
+    PLAN_DENIED_TOOLS.contains(&n)
+        || matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Bash")
 }
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
 ///
 /// | Mode | Behavior |
 /// |------|----------|
-/// | `default` | Delegate to rules + interactive channel |
-/// | `acceptEdits` | Auto-allow edit tools; prompt bash/MCP |
+/// | `default` | Auto-allow read-only tools; TROGON.md rules + prompt for bash, edits, MCP |
+/// | `acceptEdits` | Auto-allow file edits; prompt bash, MCP, and other tools |
 /// | `dontAsk` | Auto-allow all (audit only) |
 /// | `plan` | Deny write/bash tools |
 /// | `bypassPermissions` | Not installed — caller skips checker entirely |
@@ -252,6 +296,16 @@ impl PermissionChecker for ModePermissionChecker {
         let audit_buf = self.inner.inner.audit_buf.clone();
         match self.mode.as_str() {
             "dontAsk" => {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                Box::pin(async move { true })
+            }
+            "default" if is_read_only_tool(tool_name) => {
+                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                Box::pin(async move { true })
+            }
+            "default"
+                if normalize_tool_name(tool_name) == "bash" && is_read_only_bash_command(tool_input) =>
+            {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
@@ -487,6 +541,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mode_checker_default_auto_allows_read_file_without_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "default".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check(
+                    "tc-dr",
+                    "Read",
+                    &serde_json::json!({"file_path": "src/main.rs"}),
+                )
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_default_prompts_bash_via_channel() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "default".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(true);
+            }
+        });
+        assert!(
+            checker
+                .check("tc-db", "Bash", &serde_json::json!({"command": "pwd"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
     async fn mode_checker_accept_edits_auto_allows_write_file() {
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
@@ -510,12 +602,35 @@ mod tests {
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
-                let _ = req.response_tx.send(false);
+                let _ = req.response_tx.send(true);
             }
         });
         assert!(
-            !checker
-                .check("tc-ab", "bash", &serde_json::json!({"command": "ls"}))
+            checker
+                .check("tc-ab", "bash", &serde_json::json!({"command": "pwd"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_prompts_read_without_rules() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        tokio::spawn(async move {
+            if let Some(req) = rx.recv().await {
+                let _ = req.response_tx.send(true);
+            }
+        });
+        assert!(
+            checker
+                .check(
+                    "tc-ar",
+                    "read_file",
+                    &serde_json::json!({"path": "src/main.rs"}),
+                )
                 .await
         );
     }
@@ -648,6 +763,12 @@ mod tests {
     }
 
     // ── extract_input_summary ────────────────────────────────────────────────────
+
+    #[test]
+    fn input_summary_uses_file_path_field() {
+        let input = serde_json::json!({"file_path": "/home/user/file.txt"});
+        assert_eq!(extract_input_summary("Read", &input), "/home/user/file.txt");
+    }
 
     #[test]
     fn input_summary_uses_path_field() {
