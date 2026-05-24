@@ -16,7 +16,7 @@ Engineering checklist for [`a2a-gateway`](../rsworkspace/crates/a2a-gateway/) be
 
 ## Shipped today
 
-Opaque request/reply forward only — no auth, policy, or ingress audit.
+Opaque request/reply forward; Wasmtime policy substrate scaffolded but not yet wired into the request path.
 
 - [x] **Queue group** — optional `A2A_GATEWAY_QUEUE_GROUP` (CLI `--queue-group`) on `{prefix}.gateway.>`; unset = ephemeral subscriber.
 - [x] **Ingress → agent subject map** — `a2a_nats::gateway_ingress` resolves `{prefix}.gateway.{agent_id}.{method…}` → `{prefix}.agent.{agent_id}.{method…}`; invalid shapes get JSON-RPC `-32600` on the caller reply inbox when present.
@@ -27,6 +27,7 @@ Opaque request/reply forward only — no auth, policy, or ingress audit.
   - `caller_id` — reserved (`tracing::field::Empty` until JWT extraction)
   - `agent_subject` — mapped target (success paths)
   - `routing_outcome` — `forwarded` \| `ingress_error` \| `ignored_no_reply` \| `forward_failed`
+- [x] **Wasmtime policy substrate scaffold** — `src/policy/{mod,wasmtime_substrate,tier2,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator` trait + `NoopTier2Evaluator`) with Tier 3 (re-uses `a2a_redaction::wasm::WasmRedactorHost`). Not yet called from the ingress path.
 
 Run: `cargo run -p a2a-gateway` from `rsworkspace/` (`NATS_URL`, `A2A_PREFIX`, optional queue group).
 
@@ -75,8 +76,8 @@ These are owned elsewhere; do not expand gateway scope to cover them unless the 
 | **Push delivery & DLQ** | Agent `Bridge` / `a2a-nats::push::dlq` | Terminal push failures JetStream-publish to `{prefix}.push.dlq.{caller_id}.{task_id}` from the streaming pump — not from gateway ingress. |
 | **AgentCard validation at gateway** | `a2a-nats-discovery` / KV catalog | Schema validation on registrar write and KV read defense-in-depth today. Gateway re-validation only if an **edge path materializes AgentCards outside NATS KV** ([`../A2A_TODO.md`](../A2A_TODO.md) Phase 0). |
 | **JetStream provisioning** | `a2a-nats` provision / discovery processes | Gateway does not provision streams or manage streaming back-pressure yet (Phase 2). See [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md). |
-| **Tier 2 CEL / Tier 3 WASM** | Future gateway Wasmtime substrate | After Tier 1 + auth-callout; see plan Phase 2–3. |
-| **HTTPS termination** | Future `a2a-bridge` sidecar | Terminates HTTPS auth, calls auth-callout, publishes on `{prefix}.gateway.…`. |
+| **Tier 2 CEL / Tier 3 WASM** | Gateway Wasmtime substrate (scaffolded) | Substrate type lives in `src/policy/`; CEL→WASM compile path and request-path call sites still future. Tier 3 redaction engine ships in `a2a-redaction`. |
+| **HTTPS termination** | `a2a-bridge` sidecar (runtime landed) | Crate ships axum HTTPS, auth-callout client, NATS publish/consume, SSE↔JetStream framing. Production-mode wiring against a deployed auth-callout still future. |
 
 ---
 
