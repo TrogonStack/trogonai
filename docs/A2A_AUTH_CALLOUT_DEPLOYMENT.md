@@ -45,6 +45,8 @@ The HTTPS bridge does **not** speak the server JWT envelope. It request/replies 
 
 ## Sample `nats-server` config (centralized)
 
+Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../scripts/a2a-auth-callout-bootstrap.sh). Deployment units: [`scripts/a2a-auth-callout.service`](../scripts/a2a-auth-callout.service), [`scripts/a2a-auth-callout-compose.yaml`](../scripts/a2a-auth-callout-compose.yaml).
+
 ```hcl
 accounts {
   AUTH: {
