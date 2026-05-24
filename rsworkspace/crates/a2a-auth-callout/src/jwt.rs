@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 
 use crate::error::AuthCalloutError;
+use crate::permissions::IssuedPermissions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountName(String);
@@ -160,6 +161,15 @@ pub struct UserJwtClaims {
     pub aud: AccountName,
     pub data: SpiceDbPrincipal,
     pub caller_id: CallerId,
+    #[serde(default = "default_permissions_for_serde_back_compat")]
+    pub nats_permissions: IssuedPermissions,
+}
+
+fn default_permissions_for_serde_back_compat() -> IssuedPermissions {
+    IssuedPermissions {
+        publish_allow: Vec::new(),
+        subscribe_allow: Vec::new(),
+    }
 }
 
 impl UserJwtClaims {
@@ -179,6 +189,7 @@ impl UserJwtClaims {
             aud: &'a str,
             caller_id: &'a str,
             data: &'a Value,
+            nats_permissions: &'a IssuedPermissions,
             exp: i64,
             iat: i64,
             nbf: i64,
@@ -189,6 +200,7 @@ impl UserJwtClaims {
             aud: self.aud.as_str(),
             caller_id: self.caller_id.as_str(),
             data: &self.data.0,
+            nats_permissions: &self.nats_permissions,
             exp: exp_secs,
             iat: iat_secs,
             nbf: iat_secs,
@@ -253,11 +265,13 @@ mod tests {
     #[test]
     fn mint_decodes_expected_claims() {
         let signing_key = SigningKey::from_secret(b"secret-for-hs256-test");
+        let caller_id = CallerId::new("caller1").unwrap();
         let claims = UserJwtClaims {
             sub: ExternalSubject::new("alice").unwrap(),
             aud: AccountName::new("tenant-acme"),
             data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
-            caller_id: CallerId::new("caller1").unwrap(),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
         };
         let token = claims
             .mint_for_test_ttl(&signing_key, Duration::from_secs(60))
@@ -283,11 +297,13 @@ mod tests {
     #[test]
     fn mint_wrong_alg_fails_decode() {
         let signing_key = SigningKey::from_secret(b"a");
+        let caller_id = CallerId::new("cid").unwrap();
         let claims = UserJwtClaims {
             sub: ExternalSubject::new("alice").unwrap(),
             aud: AccountName::new("tenant-acme"),
             data: SpiceDbPrincipal(json!({})),
-            caller_id: CallerId::new("cid").unwrap(),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
         };
         let token = claims
             .mint_for_test_ttl(&signing_key, Duration::from_secs(10))
@@ -307,11 +323,13 @@ mod tests {
     #[test]
     fn mint_rejects_wrong_verification_key() {
         let signing_key = SigningKey::from_secret(b"signer-a------------------------");
+        let caller_id = CallerId::new("cid").unwrap();
         let claims = UserJwtClaims {
             sub: ExternalSubject::new("s").unwrap(),
             aud: AudienceAccount::new("a"),
             data: SpiceDbPrincipal(json!({})),
-            caller_id: CallerId::new("cid").unwrap(),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
         };
         let token = claims
             .mint_for_test_ttl(&signing_key, Duration::from_secs(60))

@@ -120,11 +120,13 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
             .ok_or_else(|| AuthCalloutError::CredentialVerification("unknown API key".into()))?;
         let caller_id = derive_caller_id(entry.external_subject.as_str(), &entry.audience)
             .map_err(|e| AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}")))?;
+        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             sub: entry.external_subject.clone(),
             aud: entry.audience.clone(),
             data: entry.spicedb_principal.clone(),
             caller_id,
+            nats_permissions,
         })
     }
 }
