@@ -6,7 +6,7 @@ mod config;
 mod tests;
 
 pub use cache::{ImportGateCacheKey, ZedTokenCache, ZedTokenSnapshot};
-pub use client::BulkImportPermissionCheck;
+pub use client::{BulkImportPermissionCheck, LiveBulkImportPermissionClient};
 pub use config::{
     ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint, SpiceDbImportGateBuildError,
     SpiceDbToken, ZedTokenTtl,
@@ -29,7 +29,6 @@ use super::error::ImportGateError;
 use super::gate::ImportGate;
 use super::principal::{ImportedAccountName, SpiceDbPrincipal};
 
-use client::LiveBulkImportPermissionClient;
 use config::{optional_spicedb_credentials, zed_token_ttl_from_env};
 
 const FEDERATED_AGENT_CARD_RESOURCE_TYPE: &str = "agent_card";
@@ -82,7 +81,7 @@ impl SpiceDbImportGate {
             return Ok(false);
         };
 
-        let Some((subject_type, subject_id)) = import_subject(principal) else {
+        let Some((subject_type, subject_id)) = spicedb_subject_from_principal(principal) else {
             tracing::warn!(
                 imported_from = %imported_from,
                 agent_id = %agent_id,
@@ -171,7 +170,7 @@ impl ImportGate for SpiceDbImportGate {
     }
 }
 
-fn import_subject(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
+pub fn spicedb_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
     if let Some(account) = principal
         .0
         .get("account")

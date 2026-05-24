@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
 use authzed::v1::{
-    CheckBulkPermissionsRequest, CheckBulkPermissionsResponse, CheckBulkPermissionsResponseItem, ZedToken,
+    CheckBulkPermissionsRequest, CheckBulkPermissionsResponse, CheckBulkPermissionsResponseItem,
+    WriteRelationshipsRequest, WriteRelationshipsResponse, ZedToken,
 };
 use tonic::Status;
 use trogon_std::env::InMemoryEnv;
@@ -21,14 +22,18 @@ use super::SpiceDbImportGate;
 
 struct MockBulkImportClient {
     responses: Mutex<Vec<Result<CheckBulkPermissionsResponse, Status>>>,
+    write_responses: Mutex<Vec<Result<WriteRelationshipsResponse, Status>>>,
     requests: Mutex<Vec<CheckBulkPermissionsRequest>>,
+    write_requests: Mutex<Vec<WriteRelationshipsRequest>>,
 }
 
 impl MockBulkImportClient {
     fn new(responses: Vec<Result<CheckBulkPermissionsResponse, Status>>) -> Self {
         Self {
             responses: Mutex::new(responses),
+            write_responses: Mutex::new(Vec::new()),
             requests: Mutex::new(Vec::new()),
+            write_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -49,6 +54,18 @@ impl BulkImportPermissionCheck for MockBulkImportClient {
             .unwrap()
             .pop()
             .unwrap_or_else(|| Err(Status::unavailable("no mock response queued")))
+    }
+
+    async fn write_relationships(
+        &self,
+        request: WriteRelationshipsRequest,
+    ) -> Result<WriteRelationshipsResponse, Status> {
+        self.write_requests.lock().unwrap().push(request);
+        self.write_responses
+            .lock()
+            .unwrap()
+            .pop()
+            .unwrap_or_else(|| Ok(WriteRelationshipsResponse { written_at: None }))
     }
 }
 

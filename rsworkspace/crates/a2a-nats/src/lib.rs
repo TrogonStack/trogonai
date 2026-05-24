@@ -27,6 +27,7 @@ pub mod req_id;
 pub mod task_id;
 
 pub use a2a_prefix::{A2aPrefix, A2aPrefixError};
+pub use agent::A2aMethod;
 pub use agent_id::{A2aAgentId, AgentIdError};
 pub use config::{Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use constants::{

@@ -70,6 +70,8 @@ pub struct AuditEnvelopeFields {
     pub rewrites: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_consumer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zed_token_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
