@@ -1,6 +1,6 @@
 # A2A federated discovery — Phase 4 sketch
 
-Engineering sketch for **cross-Account AgentCard discovery** (Phase 4). Federation is **off by default**; operators opt in by signing NATS Account exports of `{prefix}.discover.>` and matching imports. The gateway applies **SpiceDB catalog shaping** at the import boundary so callers only see federated AgentCards they are authorized to view. Not implemented in-tree yet — shape is decided in [`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) §8 and tracked in [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 4.
+Engineering sketch for **cross-Account AgentCard discovery** (Phase 4). Federation is **off by default**; operators opt in by signing NATS Account exports of `{prefix}.discover.>` and matching imports. **`a2a-nats::catalog::import_gate::SpiceDbImportGate`** applies **Authzed `CheckBulkPermissions`** at the federated catalog import boundary (`KvCatalogStore::list_cards_gated`); gateway Tier 1 request-path SpiceDB remains future. Not fully implemented in-tree yet — operator export contract and gateway merge are tracked in [`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) §8 and [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 4.
 
 ## Related links
 
@@ -143,17 +143,20 @@ Local `DiscoverService` in `a2a-nats-discovery` remains a thin KV read for **non
 
 ## SpiceDB at the federation boundary
 
-SpiceDB gates the **import side** — only authorized callers see imported AgentCards ([`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) §8). The gateway holds the org-standard SpiceDB client ([`../A2A_PLAN.md`](../A2A_PLAN.md) §SpiceDB, [`./A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) §Coordination with SpiceDB Tier 1).
+SpiceDB gates the **import side** — only authorized callers see imported AgentCards ([`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) §8). **`SpiceDbImportGate`** in `a2a-nats::catalog::import_gate` (Authzed gRPC client, env-gated) evaluates federated imports at `list_cards_gated`; the gateway holds a separate org-standard client for Tier 1 ingress ([`../A2A_PLAN.md`](../A2A_PLAN.md) §SpiceDB, [`./A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) §Coordination with SpiceDB Tier 1).
+
+**Runtime env** (see [`./A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md)): `A2A_SPICEDB_ENDPOINT`, `A2A_SPICEDB_TOKEN`, optional `A2A_SPICEDB_ZEDTOKEN_TTL_SECS` (default 30). When unset, the gate is **deny-only** (safe default); labs may inject [`AllowAllImportGate`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/allow_all.rs).
 
 ### Tuple model (sketch)
 
 | Scenario | Subject | Permission | Resource |
 |----------|---------|------------|----------|
 | Local discover / list | `user:{sub}` | `view` | `agent:{agent_id}` |
-| Federated discover | `user:{sub}` | `view` | `agent:{publisher_account}:{agent_id}` (bundle-defined) |
+| Federated import gate (`SpiceDbImportGate`) | `account:{consumer}` (from JWT `data.account` / `aud`, else `spicedb_subject`) | `view` | `agent_card:{publisher_account}:{agent_id}` |
+| Federated discover (gateway merge, future) | `user:{sub}` | `view` | `agent:{publisher_account}:{agent_id}` (bundle-defined) |
 | Invoke federated agent (separate from discover) | `user:{sub}` | `invoke` / `invoke_stream` | Same federated resource — discover visibility ≠ invoke permission |
 
-**BulkCheckPermission** reuses the Phase 1 catalog-shaping path: federation adds federated resource ids to the bulk check set; ZedToken cache remains per-session.
+**CheckBulkPermissions** on the import gate caches **ZedToken** per `(ImportedAccountName, A2aAgentId)` (bounded LRU, TTL from env) for consistent follow-up checks. Gateway catalog shaping reuses the same Authzed API once Tier 1 lands.
 
 ### Boundary behavior
 

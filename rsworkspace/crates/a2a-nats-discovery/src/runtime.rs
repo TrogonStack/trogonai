@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use a2a_nats::catalog::{
     CatalogRegistrarService, CatalogRegistrarServiceError, DiscoverService, DiscoverServiceError, KvCatalogStore,
@@ -103,6 +104,13 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
 
     let kv_store = provision_catalog_bucket(&js_client).await?;
     let catalog = KvCatalogStore::new(kv_store);
+    let import_gate = Arc::new(a2a_nats::catalog::resolve_import_gate(env).await);
+    if import_gate.is_configured() {
+        info!("SpiceDB federated import gate configured for cross-Account discover imports");
+    } else {
+        info!("SpiceDB federated import gate deny-only (set A2A_SPICEDB_ENDPOINT + A2A_SPICEDB_TOKEN to enable)");
+    }
+    let _import_gate = import_gate;
 
     let shutdown = CancellationToken::new();
     let shutdown_for_task = shutdown.clone();

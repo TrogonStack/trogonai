@@ -10,7 +10,9 @@ pub mod store;
 
 pub use discover::{DiscoverService, DiscoverServiceError, DiscoverSubject};
 pub use import_gate::{
-    AllowAllImportGate, ImportGate, ImportGateError, ImportedAccountName, SpiceDbImportGate, SpiceDbPrincipal,
+    AllowAllImportGate, ImportGate, ImportGateError, ImportedAccountName, SpiceDbImportGate,
+    SpiceDbImportGateBuildError, SpiceDbPrincipal, ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN,
+    ENV_SPICEDB_ZEDTOKEN_TTL_SECS, resolve_import_gate,
 };
 pub use nats_kv::{A2A_AGENT_CARDS, catalog_bucket_config};
 pub use registrar::{CatalogRegistrarService, CatalogRegistrarServiceError, RegistrarSubject};
