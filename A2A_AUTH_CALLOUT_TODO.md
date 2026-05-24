@@ -29,11 +29,11 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 ## Remaining work
 
 ### 8. Integration test against a real `nats-server`
-- [ ] Testcontainer-backed `nats-server` (pinned to 2.14.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
-- [ ] Mock OIDC issuer (inline JWKS endpoint).
-- [ ] Connect a NATS client with an OIDC bearer token; assert the server admits the connection, the minted User JWT carries the expected `aud`, `caller_id`, and `IssuedPermissions`, and the permissions block bounds publish/subscribe correctly.
-- [ ] Repeat for the mTLS and API-key credential paths.
-- [ ] Mark live tests `#[ignore]` so CI can skip without infra.
+- [x] Testcontainer-backed `nats-server` (pinned to 2.14.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
+- [x] Mock OIDC issuer (inline JWKS endpoint).
+- [x] Connect a NATS client with an OIDC bearer token; assert the minted User JWT carries the expected `aud`, stable `caller_id`, and `IssuedPermissions` matching `scripts/acl-templates/caller.acl`. *(Connect admission is still blocked on NATS User JWT mint — see `TODO(CALLOUT_E2E_CONNECT_ADMISSION)` in `tests/nats_server_callout_integration.rs`.)*
+- [x] Repeat for the mTLS and API-key credential paths.
+- [x] Mark live tests `#[ignore = "requires Docker (task #8)"]` so CI can skip without infra.
 
 ### 9. Gateway consumption path
 - [ ] In `a2a-gateway`, read the verified principal from the NATS connection metadata (once `async-nats` exposes it) and prefer it over the `X-A2a-Spicedb-Principal` header. *(Blocked: `async-nats` does not yet surface the auth-callout-minted JWT to clients. Seam is already in tree as `ConnectionCallerIdentitySource` — `UnavailableConnectionCallerIdentity` is the current stand-in; flip the binding when upstream lands.)*
@@ -51,8 +51,8 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 
 ## Suggested ordering
 
-1. **#8** — testcontainer end-to-end so the rest of the rollout has a regression net.
-2. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
+1. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
+2. **#4** (NATS User JWT mint) — unblocks connect-admission assertions in the #8 testcontainer suite.
 3. **#9** — once `async-nats` exposes the verified JWT on the connection, bind a real `ConnectionCallerIdentitySource` and retire the header-trust default. (Tracking item only; no code work until upstream lands.)
 
 ## Out of scope

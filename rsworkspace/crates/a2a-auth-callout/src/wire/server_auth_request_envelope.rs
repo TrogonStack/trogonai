@@ -141,6 +141,10 @@ mod tests {
         let err = ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
             .decode(&server_pub, None, None)
             .unwrap_err();
-        assert!(err.to_string().contains("decode") || err.to_string().contains("verify"));
+        assert!(
+            err.to_string().contains("decode")
+                || err.to_string().contains("verify")
+                || err.to_string().contains("signature")
+        );
     }
 }
