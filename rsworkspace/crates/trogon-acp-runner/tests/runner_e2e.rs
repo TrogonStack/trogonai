@@ -2122,6 +2122,107 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
         .await;
 }
 
+/// After auto-compact triggers on the first prompt, the runner continues
+/// working normally: a second prompt sent immediately after also completes
+/// with `end_turn`, and the persisted state reflects the second turn.
+///
+/// This exercises the real scenario where a user keeps chatting after the
+/// context window compaction point is crossed mid-session.
+#[tokio::test]
+async fn runner_continues_working_after_auto_compact() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("ok"));
+    });
+
+    let nats_for_compactor = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_for_compactor
+            .subscribe("trogon.compactor.compact")
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let compacted = serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "<context-summary>\nCompacted\n</context-summary>"}]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Continuing from summary."}]
+                    }
+                ],
+                "compacted": true,
+                "tokens_before": 50000,
+                "tokens_after": 500
+            });
+            nats_for_compactor
+                .publish(reply, serde_json::to_vec(&compacted).unwrap().into())
+                .await
+                .ok();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let prefix = "test-compact2";
+    let session_id = "sess-compact2-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_compactor(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+            )
+            .await;
+
+            let mut seed_state = trogon_acp_runner::SessionState::default();
+            seed_state.token_budget = 1;
+            store.save(session_id, &seed_state).await.unwrap();
+
+            // ── Prompt 1 → compaction fires → end_turn ────────────────────────
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "first message").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must end_turn after compaction; got: {resp1}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 → runner must still work after compact ────────────────
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "second message").await;
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "second prompt must complete normally after prior compaction; got: {resp2}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            let json = serde_json::to_string(&state.messages).unwrap();
+            assert!(
+                json.contains("context-summary"),
+                "compacted history must survive into state after second prompt; got: {json}"
+            );
+        })
+        .await;
+}
+
 // ── Elicitation channel ───────────────────────────────────────────────────────
 
 /// Start a `TrogonAgent` wired with an elicitation channel.
@@ -3840,6 +3941,72 @@ async fn runner_fork_session_inherits_todos_and_permission_rules() {
         .await;
 }
 
+/// After forking a session, a prompt sent to the forked session must complete
+/// with `end_turn` — verifying that the new session is fully wired to the
+/// agent's NATS subscriptions and the LLM can be reached through it.
+///
+/// The existing fork test only verifies that the forked session inherits state.
+/// This test closes the gap by exercising the actual prompt→response path on
+/// the forked session.
+#[tokio::test]
+async fn runner_prompt_on_forked_session_returns_end_turn() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-fork-prompt";
+    let source_id = "sess-fork-prompt-src-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done in forked session"));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Fork the source session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
+            let fork_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&fork_req).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&fork_msg.payload)
+                    .expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+            assert!(!forked_id.is_empty(), "fork must return a non-empty session_id");
+
+            // Send a prompt to the forked session.
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, &forked_id, "continue here").await;
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt to forked session must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
 // ── token tracking — completion persists totals to NATS KV ───────────────────
 
 /// After a successful turn the agent must persist the token totals to the
@@ -4595,6 +4762,121 @@ async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
                 state_after_2.terminal_id.as_deref(),
                 Some(terminal_id),
                 "terminal_id must remain the same after prompt 2 (same terminal reused)"
+            );
+        })
+        .await;
+}
+
+/// Full programming tool chain: LLM calls `read_file` → sees file contents →
+/// calls `str_replace` to edit → calls `git_diff` to inspect the diff →
+/// finally produces `end_turn`.
+///
+/// Exercises the realistic multi-step code-editing workflow that is the primary
+/// use-case for the acp-runner programming mode, verifying all three tool
+/// dispatch-and-forward roundtrips in sequence.
+#[tokio::test]
+async fn programming_tool_sequence_read_str_replace_git_diff() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("src.rs"),
+        "fn old_function() {}\n",
+    )
+    .unwrap();
+
+    let server = MockServer::start();
+
+    // Call 4: git_diff tool_result in body (identified by tu_gd) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_gd");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done with edits"));
+    });
+
+    // Call 3: str_replace tool_result in body (identified by tu_sr) → git_diff.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_sr");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_gd",
+                "git_diff",
+                serde_json::json!({}),
+            ));
+    });
+
+    // Call 2: read_file tool_result in body (identified by tu_rf) → str_replace.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_rf");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_sr",
+                "str_replace",
+                serde_json::json!({
+                    "path": "src.rs",
+                    "old_str": "old_function",
+                    "new_str": "new_function"
+                }),
+            ));
+    });
+
+    // Call 1: initial user message (no tool_result yet) → read_file.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_rf",
+                "read_file",
+                serde_json::json!({"path": "src.rs"}),
+            ));
+    });
+
+    let prefix = "test-prog-chain";
+    let session_id = "sess-prog-chain-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(trogon_agent_core::tools::ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "refactor the function").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 20).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "programming tool chain must complete with end_turn; got: {resp}"
+            );
+
+            // Verify the file was actually modified by str_replace.
+            let content = std::fs::read_to_string(dir.path().join("src.rs")).unwrap();
+            assert!(
+                content.contains("new_function"),
+                "str_replace must have renamed old_function to new_function; got: {content:?}"
             );
         })
         .await;

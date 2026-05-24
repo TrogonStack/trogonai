@@ -936,3 +936,383 @@ async fn or_fork_inherits_disabled_tool_excluded_from_wire() {
         })
         .await;
 }
+
+// ── remaining tool wire-format tests ─────────────────────────────────────────
+
+/// `read_file` dispatched via OR wire format — `tool`-role message in the second
+/// API call contains the file's content.
+#[tokio::test]
+async fn or_read_file_tool_returns_content() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("data.txt"), "or-read-sentinel-abc123").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(&http, "read_file", r#"{"path":"data.txt"}"#, "call_rf_1");
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("read")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+            let tool_msg = calls[1]
+                .messages
+                .iter()
+                .find(|m| m.role == "tool")
+                .expect("second call must include a tool-role message");
+            assert!(
+                tool_msg.content.contains("or-read-sentinel-abc123"),
+                "read_file result must contain file content; got: {}",
+                tool_msg.content
+            );
+        })
+        .await;
+}
+
+/// `write_file` dispatched via OR wire format — file is created on disk and the
+/// tool-role message confirms success.
+#[tokio::test]
+async fn or_write_file_tool_creates_file_on_disk() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "write_file",
+        r#"{"path":"out.txt","content":"or-write-sentinel-999"}"#,
+        "call_wf_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(resp.session_id, vec![ContentBlock::from("write")]))
+                .await
+                .unwrap();
+
+            let written = std::fs::read_to_string(dir.path().join("out.txt"))
+                .expect("write_file must create the file");
+            assert!(
+                written.contains("or-write-sentinel-999"),
+                "written content must match; got: {written}"
+            );
+            let calls = http.calls.lock().unwrap();
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message must exist");
+            assert!(!tool_msg.content.contains("Unknown tool"), "write_file must be dispatched; got: {}", tool_msg.content);
+        })
+        .await;
+}
+
+/// `list_dir` dispatched via OR wire format — result contains filenames from cwd.
+#[tokio::test]
+async fn or_list_dir_tool_returns_directory_listing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("beta.rs"), "fn b(){}").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(&http, "list_dir", r#"{}"#, "call_ld_1");
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(resp.session_id, vec![ContentBlock::from("list")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
+            assert!(
+                tool_msg.content.contains("beta.rs"),
+                "list_dir must include 'beta.rs'; got: {}",
+                tool_msg.content
+            );
+        })
+        .await;
+}
+
+/// `str_replace` dispatched via OR wire format — modifies the file on disk.
+#[tokio::test]
+async fn or_str_replace_tool_modifies_file_on_disk() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("edit.rs"), "fn original() {}").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "str_replace",
+        r#"{"path":"edit.rs","old_str":"original","new_str":"replaced"}"#,
+        "call_sr_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(resp.session_id, vec![ContentBlock::from("replace")]))
+                .await
+                .unwrap();
+
+            let content = std::fs::read_to_string(dir.path().join("edit.rs")).unwrap();
+            assert!(content.contains("replaced"), "str_replace must have applied; got: {content}");
+            let calls = http.calls.lock().unwrap();
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
+            assert!(!tool_msg.content.contains("Unknown tool"), "str_replace must be dispatched; got: {}", tool_msg.content);
+        })
+        .await;
+}
+
+// ── session/list_children stub ────────────────────────────────────────────────
+
+/// `session/list_children` on the OpenRouter runner is a stub that always
+/// returns an empty JSON array.  This test verifies the endpoint is registered
+/// and does not error, consistent with the programming.md spec for the runner.
+#[tokio::test]
+async fn or_ext_method_list_children_returns_empty_array() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    let agent = make_agent(Arc::clone(&http));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let sid = sess.session_id;
+
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": sid }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/list_children", params))
+                .await
+                .expect("session/list_children must not error on OpenRouter runner");
+
+            let val: serde_json::Value =
+                serde_json::from_str(resp.0.get()).expect("response must be valid JSON");
+            assert!(
+                val.is_array(),
+                "session/list_children must return a JSON array; got: {val}"
+            );
+            assert_eq!(
+                val.as_array().unwrap().len(),
+                0,
+                "OpenRouter session/list_children stub must return empty array; got: {val}"
+            );
+        })
+        .await;
+}
+
+/// `notebook_edit` dispatched via OR wire format — updates the cell source in
+/// a real `.ipynb` file on disk.
+#[tokio::test]
+async fn or_notebook_edit_tool_updates_cell_on_disk() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let nb = serde_json::json!({
+        "nbformat": 4, "nbformat_minor": 5, "metadata": {},
+        "cells": [{"cell_type":"code","source":"print('old')","metadata":{},"outputs":[],"execution_count":null}]
+    });
+    std::fs::write(dir.path().join("nb.ipynb"), serde_json::to_string(&nb).unwrap()).unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "notebook_edit",
+        r#"{"path":"nb.ipynb","cell_index":0,"content":"print('new')"}"#,
+        "call_ne_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            agent
+                .prompt(PromptRequest::new(resp.session_id, vec![ContentBlock::from("edit nb")]))
+                .await
+                .unwrap();
+
+            let nb_after: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap(),
+            )
+            .unwrap();
+            let source = &nb_after["cells"][0]["source"];
+            let src = if let Some(s) = source.as_str() {
+                s.to_string()
+            } else if let Some(arr) = source.as_array() {
+                arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("")
+            } else {
+                String::new()
+            };
+            assert!(src.contains("new"), "notebook_edit must update cell; got: {src}");
+            let calls = http.calls.lock().unwrap();
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool").expect("tool message");
+            assert!(!tool_msg.content.contains("Unknown tool"), "notebook_edit must be dispatched; got: {}", tool_msg.content);
+        })
+        .await;
+}
+
+// ── TROGON.md absent ─────────────────────────────────────────────────────────
+
+/// When a session is started in a directory that has no `TROGON.md`, the
+/// OR runner must not crash and must complete prompts normally with `EndTurn`.
+///
+/// Exercises the real scenario where users open a project that has no
+/// TROGON.md — previously untested for openrouter.
+#[tokio::test]
+async fn or_no_crash_when_trogon_md_absent_from_session_directory() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // Intentionally NOT writing TROGON.md in dir.
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+
+            let result = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id,
+                    vec![ContentBlock::from("hello")],
+                ))
+                .await
+                .expect("prompt must not error when TROGON.md is absent");
+
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "prompt must complete with EndTurn when TROGON.md is absent; got: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            if let Some(sys) = calls[0].messages.iter().find(|m| m.role == "system") {
+                assert!(
+                    !sys.content.contains("TROGON"),
+                    "system message must not inject TROGON.md content when file is absent; got: {}",
+                    sys.content
+                );
+            }
+        })
+        .await;
+}
+
+// ── Multi-tool programming chain ──────────────────────────────────────────────
+
+/// Full OR programming tool chain: `read_file` → `str_replace` → `git_diff`
+/// → `end_turn`, verifying that the OR runner correctly routes three
+/// sequential tool calls in a single session without losing state.
+///
+/// Exercises the realistic multi-step code-editing flow that is the primary
+/// use-case for OpenRouter programming mode.
+#[tokio::test]
+async fn or_programming_tool_chain_read_str_replace_git_diff() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("src.rs"), "fn old_function() {}\n").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+
+    // Call 1: read_file tool_use.
+    http.push_response(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c-rf".to_string(),
+            name: "read_file".to_string(),
+            arguments: r#"{"path":"src.rs"}"#.to_string(),
+        }],
+    }]);
+    // Call 2: str_replace tool_use (LLM saw "old_function" in tool result).
+    http.push_response(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c-sr".to_string(),
+            name: "str_replace".to_string(),
+            arguments: r#"{"path":"src.rs","old_str":"old_function","new_str":"new_function"}"#
+                .to_string(),
+        }],
+    }]);
+    // Call 3: git_diff tool_use (LLM wants to inspect the diff).
+    http.push_response(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c-gd".to_string(),
+            name: "git_diff".to_string(),
+            arguments: "{}".to_string(),
+        }],
+    }]);
+    // Call 4: LLM is satisfied → end_turn.
+    http.push_response(vec![OpenRouterEvent::TextDelta {
+        text: "done with edits".to_string(),
+    }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+
+            let result = agent
+                .prompt(PromptRequest::new(
+                    sess.session_id,
+                    vec![ContentBlock::from("refactor the function")],
+                ))
+                .await
+                .unwrap();
+
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "programming chain must complete with EndTurn; got: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(
+                calls.len(),
+                4,
+                "must have exactly 4 API calls (read_file + str_replace + git_diff + done); got: {}",
+                calls.len()
+            );
+
+            let on_disk = std::fs::read_to_string(dir.path().join("src.rs")).unwrap();
+            assert!(
+                on_disk.contains("new_function"),
+                "str_replace must have renamed old_function → new_function; got: {on_disk:?}"
+            );
+            assert!(
+                !on_disk.contains("old_function"),
+                "old_function must be gone after str_replace; got: {on_disk:?}"
+            );
+        })
+        .await;
+}
