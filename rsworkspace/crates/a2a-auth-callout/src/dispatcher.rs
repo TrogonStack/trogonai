@@ -37,6 +37,12 @@ pub struct AuthCalloutRequest {
     pub client_info: Option<ClientInfo>,
     /// Optional tags or headers from the client connect options.
     pub connect_opts: Option<ConnectOpts>,
+    /// Server NKey (`iss` on the server-signed auth request JWT); echoed as `aud` on denial responses.
+    #[serde(default)]
+    pub server_id: Option<String>,
+    /// `jti` from the server auth request JWT, when the request is JWT-encoded.
+    #[serde(default)]
+    pub request_jti: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -237,6 +243,8 @@ pub(crate) mod tests {
             account: None,
             client_info: None,
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_err());
     }
@@ -315,6 +323,8 @@ pub(crate) mod tests {
                 auth_scheme: Some(AuthScheme::Oidc),
                 api_key: None,
             }),
+            server_id: None,
+            request_jti: None,
         };
         let resp = d.dispatch(req).await.unwrap();
         assert_eq!(resp.user_jwt.split('.').count(), 3);
@@ -333,6 +343,8 @@ pub(crate) mod tests {
                 auth_scheme: Some(AuthScheme::Oidc),
                 api_key: None,
             }),
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_err());
     }
@@ -347,6 +359,8 @@ pub(crate) mod tests {
             account: None,
             client_info: None,
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_err());
     }
@@ -361,6 +375,8 @@ pub(crate) mod tests {
             account: Some("tenant-acme".into()),
             client_info: None,
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_ok());
     }
@@ -377,6 +393,8 @@ pub(crate) mod tests {
                 client_cert_pem: Some("-----BEGIN CERT-----\n-----END CERT-----".into()),
             }),
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_ok());
     }
@@ -390,6 +408,8 @@ pub(crate) mod tests {
             account: Some("tenant-acme".into()),
             client_info: None,
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_err());
     }
@@ -418,6 +438,8 @@ pub(crate) mod tests {
                 auth_scheme: Some(AuthScheme::ApiKey),
                 api_key: Some("k_live_demo".into()),
             }),
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_ok());
     }
@@ -451,6 +473,8 @@ pub(crate) mod tests {
                 auth_scheme: Some(AuthScheme::ApiKey),
                 api_key: Some("k_live_demo".into()),
             }),
+            server_id: None,
+            request_jti: None,
         };
         assert!(d.dispatch(req).await.is_err());
     }
