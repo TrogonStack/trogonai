@@ -152,6 +152,8 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT` | when Tier-1 on | — | Authzed/SpiceDB gRPC endpoint for gateway Tier-1 gate |
 | `A2A_GATEWAY_TIER1_SPICEDB_TOKEN` | when Tier-1 on | — | Bearer token for gateway Tier-1 Authzed client |
 | `A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS` | no | `60` | Session ZedToken cache TTL for Tier-1 bulk checks (keyed by JWT `sub` + Account) |
+| `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | no | off | Truthy loads `*.tier1.toml` declarative allow/deny matrices from `A2A_GATEWAY_TIER1_BUNDLE_DIR`; runs after SpiceDB Tier-1 (see [Tier-1 declarative](./A2A_TIER1_DECLARATIVE.md)) |
+| `A2A_GATEWAY_TIER1_BUNDLE_DIR` | when declarative on | — | Directory of `*.tier1.toml` bundle files for Tier-1 declarative policy |
 
 Optional attribution: callers can set [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) on NATS messages for tracing; `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
 
