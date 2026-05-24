@@ -31,7 +31,7 @@ pub use agent_id::{A2aAgentId, AgentIdError};
 pub use config::{Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use constants::{
     ENV_MAX_CONCURRENT_CLIENT_TASKS, ENV_PUSH_DLQ_CALLER_SEGMENT, GATEWAY_CALLER_ID_HEADER,
-    GATEWAY_CALLER_ID_HTTP,
+    GATEWAY_CALLER_ID_HTTP, GATEWAY_PRINCIPAL_HEADER,
 };
 pub use context_id::{A2aContextId, ContextIdError};
 pub use error::{AGENT_UNAVAILABLE, TASK_NOT_CANCELABLE, TASK_NOT_FOUND};

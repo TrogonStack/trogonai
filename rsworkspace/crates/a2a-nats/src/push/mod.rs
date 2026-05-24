@@ -15,7 +15,7 @@ pub mod target;
 pub mod terminal_push_task_state;
 
 pub use authentication_header::{AuthenticationHeaderBuildError, authorization_header_value};
-pub use caller_id::CallerId;
+pub use caller_id::{CallerId, resolve_push_dlq_caller_id};
 pub use delivery_semantics::{
     DEFAULT_WEBHOOK_IDEMPOTENCY_HEADER_NAME, DeliverySemantics, DeliverySemanticsParseError,
     merged_request_delivery_semantics, parse_delivery_semantics_value,

@@ -41,6 +41,10 @@ pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
 /// HTTP correlate for [`GATEWAY_CALLER_ID_HEADER`] on the bridge ingress path (`POST /`).
 pub const GATEWAY_CALLER_ID_HTTP: &str = "x-a2a-caller-id";
 
+/// JSON-encoded minted User JWT `data` claim (SpiceDB principal payload) forwarded by gateway
+/// ingress onto agent-bound NATS messages. Agent `Bridge` reads this for push DLQ `{caller_id}`.
+pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
+
 /// Maximum attempts for terminal task push delivery over HTTPS, core NATS (`subject:` URLs), and JetStream (`jetstream:` URLs).
 ///
 /// HTTPS retries are status- and transport-aware in [`crate::push::HttpPushDispatcher`]. NATS targets use the same
@@ -99,6 +103,7 @@ mod tests {
     fn headers_use_x_prefix() {
         assert!(REQ_ID_HEADER.starts_with("X-"));
         assert!(GATEWAY_CALLER_ID_HEADER.starts_with("X-"));
+        assert!(GATEWAY_PRINCIPAL_HEADER.starts_with("X-"));
         assert!(
             GATEWAY_CALLER_ID_HTTP
                 .chars()
