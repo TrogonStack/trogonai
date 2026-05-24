@@ -81,11 +81,12 @@ mod tests {
     async fn provision_with_events_max_age_override() {
         use async_nats::jetstream::stream::RetentionPolicy;
 
-        use crate::jetstream::stream_options::{EventsStreamMaxAge, StreamProvisionOptions};
+        use crate::jetstream::stream_options::{EventsStreamMaxAge, PushDlqDuplicateWindow, StreamProvisionOptions};
 
         let ctx = MockJetStreamContext::new();
         let options = StreamProvisionOptions {
             events_max_age: EventsStreamMaxAge::from_secs(3600),
+            push_dlq_duplicate_window: PushDlqDuplicateWindow::DEFAULT,
         };
         provision_streams_with_options(&ctx, &p("a2a"), &options).await.unwrap();
         let streams = ctx.created_streams();

@@ -3,6 +3,7 @@ pub mod caller_id;
 pub mod delivery_semantics;
 pub mod dispatcher;
 pub(crate) mod dlq;
+pub mod dlq_dedup;
 pub mod idempotency_key_header;
 pub mod nats_push_subject;
 pub mod push_delivery_semantics_registry;
@@ -11,6 +12,7 @@ pub mod push_notification_config;
 pub mod push_notification_config_id;
 pub mod push_notification_target;
 pub(crate) mod push_payload;
+pub mod status_transition_id;
 pub mod target;
 pub mod terminal_push_task_state;
 
@@ -26,10 +28,12 @@ pub use dispatcher::{
     JetStreamPublishPushDispatcher, NatsPublishDispatchError, NatsPublishPushDispatcher, PushDispatcher,
     composite_push_dispatcher,
 };
+pub use dlq_dedup::PushDlqDedupGate;
 pub use idempotency_key_header::{IdempotencyKeyHeader, IdempotencyKeyHeaderError};
 pub use nats_push_subject::{NatsPushSubject, NatsPushSubjectError};
 pub use push_delivery_semantics_registry::PushDeliverySemanticsRegistry;
 pub use push_idempotency_key::PushIdempotencyKey;
+pub use status_transition_id::StatusTransitionId;
 pub use push_notification_config::PushNotificationConfig;
 pub use push_notification_config_id::{PushNotificationConfigId, PushNotificationConfigIdError};
 pub use push_notification_target::{PushNotificationTarget, PushNotificationTargetError};

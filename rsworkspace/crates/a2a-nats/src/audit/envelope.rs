@@ -73,7 +73,9 @@ pub struct AuditEnvelopeFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zed_token_snapshot: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub refusal_skill: Option<String>,
+    pub caller_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_source: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
