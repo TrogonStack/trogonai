@@ -13,10 +13,43 @@ deadline guard → Tier-1 SpiceDB → Tier-2 CEL → Tier-3 redaction → forwar
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `A2A_GATEWAY_TIER3_REDACTION_ENABLED` | off | Truthy enables `RealTier3RedactionGate` when a policy bundle substrate is loaded |
-| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | — | Bundle root; required parent for `{skill}.wasm` and `{skill}.manifest.json` |
+| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | — | Bundle root; required parent for `{skill}.wasm`, `{skill}.manifest.json`, and optional `{skill}.sig` |
 | `A2A_GATEWAY_POLICY_SKILLS` | — | Comma-separated skill slugs to preload WASM + manifests |
+| `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` | — | Hex-encoded 32-byte ed25519 public key (no `0x` prefix); when set, preload verifies `{skill}.sig` for every listed skill |
 
 When redaction is off, `NoopTier3RedactionGate` returns `Allow { rewrites: [] }` without invoking WASM.
+
+When `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` is unset, bundle preload skips signature verification (a one-time startup warning is emitted). When set, missing or invalid `{skill}.sig` files cause that skill to fail preload (closed-fail for the skill bundle).
+
+## Signed bundle envelope (`{skill}.sig`)
+
+Each skill may ship a detached signature envelope next to its WASM and manifest:
+
+```json
+{
+  "version": 1,
+  "skill_id": "pii-email",
+  "manifest_sha256": "<hex(32)>",
+  "wasm_sha256": "<hex(32)>",
+  "signature": "<hex(64)>"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `version` | Envelope schema version (`1`) |
+| `skill_id` | Must match the preload slug / filename stem |
+| `manifest_sha256` | SHA-256 of `{skill}.manifest.json` bytes |
+| `wasm_sha256` | SHA-256 of `{skill}.wasm` bytes |
+| `signature` | ed25519 signature over the 64-byte concatenation `manifest_sha256 \|\| wasm_sha256` (raw digest bytes, not hex) |
+
+Operators sign bundles with the `a2a-sign-bundle` CLI (`a2a-redaction` crate) before deployment:
+
+```bash
+a2a-sign-bundle --key <hex-signing-seed> --skill-dir /path/to/bundles
+```
+
+Writes `{skill}.sig` for each `*.wasm` in the skill directory (expects a matching `{skill}.manifest.json`).
 
 ## Manifest schema
 
@@ -96,5 +129,6 @@ On **Error**, `rules_fired` includes `gateway.tier3.engine_error`.
 
 - Gate + value objects: `a2a-gateway/src/policy/tier3_redaction/`
 - Runtime wiring: `a2a-gateway/src/runtime.rs` (`GatewayPolicyStack`, post–Tier-2 call site)
-- WASM host + sentinel: `a2a-redaction` (`WasmRedactorHost::redact_part_bytes`, `TIER3_REFUSE_SENTINEL`)
+- WASM host + sentinel: `a2a-redaction` (`WasmRedactorHost::preload_skill_bundle`, `TIER3_REFUSE_SENTINEL`)
+- Signed bundle verification: `a2a-redaction/src/signed_bundle/` (`verify_signed_bundle`, env-gated via `A2A_GATEWAY_TIER3_SIGNING_PUBKEY`)
 - Ingress replies: `a2a-nats::ingress_gateway_tier3_refused_response_bytes`
