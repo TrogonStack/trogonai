@@ -16,7 +16,7 @@ Engineering checklist for [`a2a-gateway`](../rsworkspace/crates/a2a-gateway/) be
 
 ## Shipped today
 
-Opaque request/reply forward; Wasmtime policy substrate scaffolded but not yet wired into the request path.
+Opaque request/reply forward with Tier-1 SpiceDB, Tier-2 CEL, and authoritative Tier-3 redaction on the ingress path (env-gated).
 
 - [x] **Queue group** — optional `A2A_GATEWAY_QUEUE_GROUP` (CLI `--queue-group`) on `{prefix}.gateway.>`; unset = ephemeral subscriber.
 - [x] **Ingress → agent subject map** — `a2a_nats::gateway_ingress` resolves `{prefix}.gateway.{agent_id}.{method…}` → `{prefix}.agent.{agent_id}.{method…}`; invalid shapes get JSON-RPC `-32600` on the caller reply inbox when present.
@@ -27,8 +27,8 @@ Opaque request/reply forward; Wasmtime policy substrate scaffolded but not yet w
   - `caller_id` — reserved (`tracing::field::Empty` until JWT extraction)
   - `agent_subject` — mapped target (success paths)
   - `routing_outcome` — `forwarded` \| `ingress_error` \| `ignored_no_reply` \| `forward_failed`
-- [x] **Wasmtime policy substrate scaffold** — `src/policy/{mod,wasmtime_substrate,tier2,spicedb_tier1,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator` trait + `NoopTier2Evaluator`) with Tier 3 (re-uses `a2a_redaction::wasm::WasmRedactorHost`). Tier-2 predicate invoked from ingress when `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set.
-- [x] **Tier-1 SpiceDB gate** — `src/policy/spicedb_tier1.rs` reuses `a2a-nats` Authzed client types; env-gated via `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` (+ endpoint/token/TTL). Dispatch order: unary deadline guard → Tier-1 `BulkCheckPermission` → Tier-2 predicate → forward. Deny/transport error → JSON-RPC `-32801` with `gateway.tier1.spicedb_denied`; allow populates audit `zed_token_snapshot`. Owner tuples on `message/send` accept via `WriteRelationships` (best-effort).
+- [x] **Wasmtime policy substrate** — `src/policy/{mod,wasmtime_substrate,tier2,tier3_redaction,spicedb_tier1,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator`) with Tier 3 (`a2a_redaction::WasmRedactorHost`). Tier-2 predicate and Tier-3 authoritative redaction invoke from ingress when `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set; Tier-3 gated by `A2A_GATEWAY_TIER3_REDACTION_ENABLED` (see [`./A2A_TIER3_REDACTION.md`](./A2A_TIER3_REDACTION.md)).
+- [x] **Tier-1 SpiceDB gate** — `src/policy/spicedb_tier1.rs` reuses `a2a-nats` Authzed client types; env-gated via `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` (+ endpoint/token/TTL). Dispatch order: unary deadline guard → Tier-1 `BulkCheckPermission` → Tier-2 predicate → Tier-3 redaction → forward. Deny/transport error → JSON-RPC `-32801` with `gateway.tier1.spicedb_denied`; allow populates audit `zed_token_snapshot`. Owner tuples on `message/send` accept via `WriteRelationships` (best-effort).
 
 Run: `cargo run -p a2a-gateway` from `rsworkspace/` (`NATS_URL`, `A2A_PREFIX`, optional queue group).
 

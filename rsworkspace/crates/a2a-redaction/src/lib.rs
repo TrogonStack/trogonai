@@ -4,6 +4,7 @@ pub mod noop;
 pub mod redactor;
 pub mod skill_id;
 pub mod skill_manifest;
+pub mod tier3_sentinel;
 pub mod wasm;
 pub mod wasm_bundle_path;
 
@@ -16,5 +17,6 @@ pub use skill_manifest::{
     JsonPathExpr, SkillCategory, SkillManifest, SkillManifestError, SkillManifestRegistry,
     SkillManifestVersion, SkillMethodMatcher, SkillSelectionPlan,
 };
+pub use tier3_sentinel::{output_is_tier3_refusal, tier3_refusal_reason_tag, TIER3_REFUSE_SENTINEL};
 pub use wasm::WasmRedactorHost;
 pub use wasm_bundle_path::WasmBundlePath;

@@ -1,13 +1,15 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
-use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
+use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
 use a2a_nats::constants::{DEFAULT_OPERATION_TIMEOUT, GATEWAY_CALLER_ID_HEADER};
 use a2a_nats::{
     gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_policy_denied_response_bytes, ingress_invalid_request_response_bytes, NatsConfig,
+    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
+    ingress_invalid_request_response_bytes, NatsConfig,
 };
 use a2a_redaction::wasm_bundle_path::WasmBundlePath;
 use a2a_redaction::SkillId;
@@ -15,7 +17,7 @@ use async_nats::HeaderMap;
 use bytes::Bytes;
 use futures::stream::StreamExt;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 use uuid::Uuid;
 
 use trogon_std::env::ReadEnv;
@@ -35,7 +37,18 @@ use crate::policy::tier2::Tier2Decision;
 use crate::policy::tier2_cel::{
     tier2_evaluation_context_from_ingress, RealTier2CelEvaluator, Tier2CompiledBundle,
 };
+use crate::policy::tier3_redaction::{
+    gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, merge_forward_audit_rewrites,
+    NoopTier3RedactionGate, RealTier3RedactionGate, Tier3EvaluationContext, Tier3RedactionDecision,
+    Tier3RedactionGate, tier3_redaction_audit_rewrites,
+};
 use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
+
+struct GatewayPolicyStack {
+    substrate: Option<Arc<WasmtimeSubstrate>>,
+    tier3_gate: Arc<dyn Tier3RedactionGate>,
+    tier3_manifests: BTreeMap<SkillId, crate::policy::Tier3SkillManifest>,
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -104,7 +117,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         .await
         .map_err(RuntimeError::NatsConnect)?;
 
-    let policy_layer = wasm_policy_layer_from_env(env);
+    let policy_stack = gateway_policy_stack_from_env(env);
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
 
@@ -188,7 +201,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             tier1_layer.gate.as_ref(),
                             tier1_layer.owner_emitter.as_ref(),
                             tier1_declarative_layer.gate.as_ref(),
-                            policy_layer.as_ref(),
+                            &policy_stack,
                             env,
                             msg,
                         )
@@ -216,7 +229,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    policy: Option<&Arc<WasmtimeSubstrate>>,
+    policy: &GatewayPolicyStack,
     env: &E,
     msg: async_nats::Message,
 ) {
@@ -267,7 +280,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     tracing::Span::current().record("caller_id", slug.as_str());
                 }
                 tracing::Span::current().record("agent_subject", tracing::field::display(&agent_subject));
-                let payload = msg.payload.clone();
+                let mut payload = msg.payload.clone();
                 let started_mono = Instant::now();
                 let started_wall_ms = unix_epoch_ms();
                 let trace_id = Uuid::new_v4().to_string();
@@ -464,7 +477,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     }
                 }
 
-                if let Some(sub) = policy {
+                if let Some(sub) = policy.substrate.as_ref() {
                     let eval_ctx = tier2_evaluation_context_from_ingress(
                         &method_slashes,
                         &agent_id,
@@ -516,6 +529,162 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                             );
                             return;
                         }
+                    }
+                }
+
+                let mut tier3_rewrites = Vec::new();
+                let mut tier3_ctx = Tier3EvaluationContext::from_json_rpc_payload(
+                    method_slashes.clone(),
+                    caller_slug.clone(),
+                    payload.as_ref(),
+                    policy.tier3_manifests.clone(),
+                );
+                match policy.tier3_gate.redact(&mut tier3_ctx) {
+                    Tier3RedactionDecision::Allow { rewrites } => {
+                        tier3_rewrites = rewrites;
+                        if !tier3_rewrites.is_empty() {
+                            info!(
+                                count = tier3_rewrites.len(),
+                                caller_id = caller_slug.as_deref().unwrap_or(""),
+                                method = %method_slashes,
+                                "gateway tier-3 redaction applied before forward",
+                            );
+                        }
+                        match tier3_ctx.into_payload_bytes() {
+                            Ok(bytes) => payload = bytes,
+                            Err(err) => {
+                                error!(
+                                    caller_id = caller_slug.as_deref().unwrap_or(""),
+                                    method = %method_slashes,
+                                    error = %err,
+                                    "tier-3 rewritten payload serialization failed; denying ingress",
+                                );
+                                let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                                    payload.as_ref(),
+                                    "tier-3 redaction engine error",
+                                ) else {
+                                    return;
+                                };
+                                reply_error(client, reply, HeaderMap::new(), body).await;
+                                spawn_gateway_audit_publish(
+                                    audit_enabled,
+                                    client.clone(),
+                                    config.a2a_prefix.clone(),
+                                    agent_id.clone(),
+                                    AuditEnvelope::new(
+                                        &agent_id,
+                                        method_slashes.clone(),
+                                        json_rpc_audit_req_id(payload.as_ref()),
+                                        started_wall_ms,
+                                        started_mono
+                                            .elapsed()
+                                            .as_millis()
+                                            .min(u128::from(u64::MAX))
+                                            as u64,
+                                        AuditOutcome::Err {
+                                            code: -32_801,
+                                            message: "tier-3 redaction engine error".into(),
+                                        },
+                                        Some(payload.as_ref()),
+                                        AuditEnvelopeFields {
+                                            trace_id: Some(trace_id.clone()),
+                                            rules_fired: Some(vec!["gateway.tier3.engine_error".into()]),
+                                            rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                                            ..Default::default()
+                                        },
+                                    ),
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    Tier3RedactionDecision::Refuse { reason, rule } => {
+                        tracing::Span::current().record("routing_outcome", "tier3_refused");
+                        warn!(
+                            skill_id = %rule,
+                            caller_id = caller_slug.as_deref().unwrap_or(""),
+                            method = %method_slashes,
+                            reason = %reason.as_str(),
+                            routing_outcome = "tier3_refused",
+                            "gateway tier-3 skill refused part redaction",
+                        );
+                        let Ok(body) = ingress_gateway_tier3_refused_response_bytes(
+                            payload.as_ref(),
+                            "tier-3 skill refused part redaction",
+                            rule.as_str(),
+                        ) else {
+                            return;
+                        };
+                        reply_error(client, reply, HeaderMap::new(), body).await;
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes.clone(),
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Err {
+                                    code: -32_802,
+                                    message: format!("tier-3 skill refused: {}", reason.as_str()),
+                                },
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id.clone()),
+                                    rules_fired: Some(vec![format!("gateway.tier3.refused.{}", rule.as_str())]),
+                                    rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                                    refusal_skill: Some(rule.as_str().to_owned()),
+                                    ..Default::default()
+                                },
+                            ),
+                        );
+                        return;
+                    }
+                    Tier3RedactionDecision::Error { rule, kind } => {
+                        tracing::Span::current().record("routing_outcome", "tier3_engine_error");
+                        error!(
+                            skill_id = %rule,
+                            caller_id = caller_slug.as_deref().unwrap_or(""),
+                            method = %method_slashes,
+                            kind = %kind.as_str(),
+                            routing_outcome = "tier3_engine_error",
+                            "gateway tier-3 redaction engine failed closed",
+                        );
+                        let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                            payload.as_ref(),
+                            "tier-3 redaction engine error",
+                        ) else {
+                            return;
+                        };
+                        reply_error(client, reply, HeaderMap::new(), body).await;
+                        spawn_gateway_audit_publish(
+                            audit_enabled,
+                            client.clone(),
+                            config.a2a_prefix.clone(),
+                            agent_id.clone(),
+                            AuditEnvelope::new(
+                                &agent_id,
+                                method_slashes.clone(),
+                                json_rpc_audit_req_id(payload.as_ref()),
+                                started_wall_ms,
+                                started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                                AuditOutcome::Err {
+                                    code: -32_801,
+                                    message: "tier-3 redaction engine error".into(),
+                                },
+                                Some(payload.as_ref()),
+                                AuditEnvelopeFields {
+                                    trace_id: Some(trace_id.clone()),
+                                    rules_fired: Some(vec!["gateway.tier3.engine_error".into()]),
+                                    rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                                    ..Default::default()
+                                },
+                            ),
+                        );
+                        return;
                     }
                 }
 
@@ -577,7 +746,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 } else {
                     rules_fired.push("gateway.tier1.declarative.layer_disabled".into());
                 }
-                if let Some(sub) = policy {
+                if let Some(sub) = policy.substrate.as_ref() {
                     if sub.tier2_cel_active {
                         rules_fired.push("gateway.tier2.evaluated_allow".into());
                     } else {
@@ -586,8 +755,22 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 } else {
                     rules_fired.push("gateway.tier2.layer_disabled".into());
                 }
-                let (rewrites, stream_consumer) =
-                    gateway_forward_audit_extras(ingress_subject, &agent_subject, &agent_id, method_dots.as_str());
+                if gateway_tier3_redaction_enabled(env) {
+                    if tier3_rewrites.is_empty() {
+                        rules_fired.push("gateway.tier3.evaluated_allow".into());
+                    } else {
+                        rules_fired.push("gateway.tier3.redacted".into());
+                    }
+                } else {
+                    rules_fired.push("gateway.tier3.layer_disabled".into());
+                }
+                let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
+                    &tier3_rewrites,
+                    ingress_subject,
+                    &agent_subject,
+                    &agent_id,
+                    method_dots.as_str(),
+                );
 
                 match disposition {
                     ForwardDisposition::Ok => {
@@ -824,12 +1007,28 @@ fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Object(Default::default()))
 }
 
-fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstrate>> {
-    let raw = env.var("A2A_GATEWAY_POLICY_BUNDLE_DIR").ok()?;
+fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack {
+    let tier3_enabled = gateway_tier3_redaction_enabled(env);
+    let noop_stack = || GatewayPolicyStack {
+        substrate: None,
+        tier3_gate: Arc::new(NoopTier3RedactionGate),
+        tier3_manifests: BTreeMap::new(),
+    };
+
+    let Some(raw) = env.var("A2A_GATEWAY_POLICY_BUNDLE_DIR").ok() else {
+        if tier3_enabled {
+            warn!("A2A_GATEWAY_TIER3_REDACTION_ENABLED=on but A2A_GATEWAY_POLICY_BUNDLE_DIR unset; tier-3 noop");
+        }
+        return noop_stack();
+    };
     let dir = raw.trim();
     if dir.is_empty() {
-        return None;
+        if tier3_enabled {
+            warn!("A2A_GATEWAY_TIER3_REDACTION_ENABLED=on but A2A_GATEWAY_POLICY_BUNDLE_DIR empty; tier-3 noop");
+        }
+        return noop_stack();
     }
+
     let bundle_path = WasmBundlePath::new(dir);
     let tier2_cel_active = gateway_tier2_cel_enabled(env);
     let tier2: Box<dyn crate::policy::Tier2CelEvaluator> = if tier2_cel_active {
@@ -848,6 +1047,7 @@ fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstra
     } else {
         Box::new(crate::policy::NoopTier2Evaluator)
     };
+
     match WasmtimeSubstrate::try_new_with_tier2(bundle_path.clone(), tier2, tier2_cel_active) {
         Err(err) => {
             warn!(
@@ -855,10 +1055,14 @@ fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstra
                 bundle_dir = dir,
                 "A2A_GATEWAY_POLICY_BUNDLE_DIR invalid — Wasmtime substrate disabled",
             );
-            None
+            if tier3_enabled {
+                warn!("A2A_GATEWAY_TIER3_REDACTION_ENABLED=on but substrate failed to load; tier-3 noop");
+            }
+            noop_stack()
         }
         Ok(layer) => {
             let substrate = Arc::new(layer);
+            let mut loaded_skills = Vec::new();
             if let Ok(slugs) = env.var("A2A_GATEWAY_POLICY_SKILLS") {
                 for slug in slugs.split(',').map(str::trim).filter(|slug| !slug.is_empty()) {
                     let skill_id = SkillId::new(slug);
@@ -868,14 +1072,28 @@ fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstra
                             warn!(skill=%slug, path=?wasm_path, error=%err, "skipped gateway policy WASM preload");
                         }
                         Ok(bytes) => {
-                            if let Err(err) = substrate.register_redaction_skill(skill_id, &bytes) {
+                            if let Err(err) = substrate.register_redaction_skill(skill_id.clone(), &bytes) {
                                 warn!(skill=%slug, error=%err, "gateway failed to register redaction WASM");
+                            } else {
+                                loaded_skills.push(skill_id);
                             }
                         }
                     }
                 }
             }
-            Some(substrate)
+
+            let tier3_manifests = load_tier3_manifests_from_bundle(&bundle_path, &loaded_skills);
+            let tier3_gate: Arc<dyn Tier3RedactionGate> = if tier3_enabled {
+                Arc::new(RealTier3RedactionGate::from_substrate(substrate.clone()))
+            } else {
+                Arc::new(NoopTier3RedactionGate)
+            };
+
+            GatewayPolicyStack {
+                substrate: Some(substrate),
+                tier3_gate,
+                tier3_manifests,
+            }
         }
     }
 }
@@ -979,8 +1197,8 @@ fn spawn_gateway_audit_publish(
 mod gateway_dispatch_tests {
     use a2a_nats::agent_id::A2aAgentId;
     use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
-    use a2a_nats::resolve_gateway_ingress_subject;
     use a2a_nats::ingress_gateway_policy_denied_response_bytes;
+    use a2a_nats::resolve_gateway_ingress_subject;
     use async_nats::HeaderMap;
     use trogon_std::env::InMemoryEnv;
 

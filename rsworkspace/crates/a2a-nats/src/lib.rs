@@ -40,7 +40,8 @@ pub use gateway_ingress::{
     GATEWAY_INGRESS_METHOD_SUFFIXES, GatewayComposeError, GatewayIngressError, compose_gateway_ingress_subject,
     gateway_ingress_agent_and_method_dots, gateway_ingress_subject_from_agent_subject,
     ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_invalid_request_response_bytes, resolve_gateway_ingress_subject,
+    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
+    resolve_gateway_ingress_subject,
 };
 pub use jsonrpc::{JsonRpcId, extract_request_id};
 pub use req_id::ReqId;
