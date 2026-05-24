@@ -4362,3 +4362,240 @@ async fn runner_cache_tokens_persisted_to_kv() {
         })
         .await;
 }
+
+// ── Stateful bash: terminal reused across two successive prompts ───────────────
+
+/// Spawns mock NATS responders for TWO successive bash tool calls on the same
+/// terminal.  The first call creates the terminal and runs command 1.  The
+/// second call must reuse the same terminal (no extra `terminal.create` request)
+/// and runs command 2.
+fn spawn_two_bash_calls(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output1: &'static str,
+    output2: &'static str,
+) {
+    tokio::spawn(async move {
+        use futures_util::StreamExt;
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        // ── First bash call ────────────────────────────────────────────────────
+        // terminal.create (only once — second call reuses the same terminal)
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
+            nats.publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+        // baseline output (empty)
+        if let Some(msg) = output_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": ""}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // write_stdin for command 1
+        if let Some(msg) = write_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // poll output for command 1
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output1}__EXIT_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+
+        // ── Second bash call (no create — terminal already exists) ─────────────
+        // baseline output
+        if let Some(msg) = output_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": ""}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // write_stdin for command 2
+        if let Some(msg) = write_sub.next().await {
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+        // poll output for command 2
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output2}__EXIT_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full}))
+                    .unwrap()
+                    .into(),
+            )
+            .await
+            .unwrap();
+        }
+    });
+}
+
+/// Stateful bash: two successive prompts on the same session each trigger a bash
+/// tool call.  The second call must reuse the same terminal (no extra
+/// `terminal.create` request), which proves that the terminal_id is persisted
+/// in NATS KV after the first call and loaded by the second.
+///
+/// Concretely:
+/// - Prompt 1 → bash tool_use "cmd1" → terminal.create + run → end_turn
+/// - Prompt 2 → bash tool_use "cmd2" → no terminal.create (reuse) → run → end_turn
+///
+/// Assertion: both prompts complete, and session.terminal_id is non-None
+/// throughout (same terminal was used for both calls).
+#[tokio::test]
+async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-bash-stateful";
+    let session_id = "sess-bash-stateful-1";
+    let terminal_id = "term-stateful-001";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    spawn_two_bash_calls(
+        nats.clone(),
+        base,
+        ext_base,
+        terminal_id,
+        "output-from-cmd1\n",
+        "output-from-cmd2\n",
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let server = MockServer::start();
+
+    // Prompt 2, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd2 done"));
+    });
+    // Prompt 2, first LLM turn: → bash tool_use for cmd2
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("output-from-cmd1"); // history from prompt 1 is present
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s2",
+                "bash",
+                serde_json::json!({"command": "cmd2"}),
+            ));
+    });
+    // Prompt 1, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd1");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd1 done"));
+    });
+    // Prompt 1, first LLM turn: → bash tool_use for cmd1
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s1",
+                "bash",
+                serde_json::json!({"command": "cmd1"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_tool(
+                nats.clone(),
+                &js,
+                prefix,
+                session_id,
+                &server.base_url(),
+            )
+            .await;
+
+            // ── Prompt 1 ──────────────────────────────────────────────────────────
+            let (mut notif_sub1, mut resp_sub1) =
+                send_text(&nats, prefix, session_id, "run cmd1").await;
+            let (_notifs1, resp1) =
+                collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 1 must complete with end_turn; got: {resp1}"
+            );
+
+            let state_after_1 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_1.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must be persisted after prompt 1"
+            );
+
+            // Short pause so session state is committed to NATS KV before prompt 2.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 ──────────────────────────────────────────────────────────
+            let (mut notif_sub2, mut resp_sub2) =
+                send_text(&nats, prefix, session_id, "run cmd2").await;
+            let (_notifs2, resp2) =
+                collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 2 must complete with end_turn; got: {resp2}"
+            );
+
+            let state_after_2 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_2.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must remain the same after prompt 2 (same terminal reused)"
+            );
+        })
+        .await;
+}
