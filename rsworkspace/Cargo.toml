@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = [
+    "crates/*",
+    "crates/a2a-pack/skills/tier3-skill-abi",
+    "crates/a2a-pack/skills/pii-regex-redactor",
+    "crates/a2a-pack/skills/secrets-redactor",
+    "crates/a2a-pack/skills/json-path-sanitizer",
+]
 
 [workspace.lints.rust]
 warnings = "deny"

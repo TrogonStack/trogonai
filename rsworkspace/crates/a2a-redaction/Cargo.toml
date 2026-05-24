@@ -27,5 +27,6 @@ tracing = { workspace = true }
 wasmtime = { workspace = true }
 
 [dev-dependencies]
+a2a-types = { workspace = true }
 ed25519-dalek = { workspace = true }
 tempfile = { workspace = true }
