@@ -101,13 +101,27 @@ Use DLQ messages for remediation: fix webhook endpoints, replay after config cor
 
 ---
 
+## Caller ID segment
+
+The `{caller_id}` token in **`{prefix}.push.dlq.{caller_id}.{task_id}`** identifies which external caller triggered the failed push.
+
+| Source | `{caller_id}` value |
+|--------|---------------------|
+| **No principal** (default today — auth-callout not deployed, direct agent connect) | **`_`** (`DEFAULT_PUSH_DLQ_CALLER_SEGMENT`), or **`A2A_PUSH_DLQ_CALLER_SEGMENT`** / **`Config::with_push_dlq_caller_segment`** when set explicitly |
+| **Principal present** via NATS header **`X-A2a-Spicedb-Principal`** (JSON User JWT `data` claim forwarded by gateway ingress once auth-callout deploys) | Sanitized **`spicedb_subject`** from the principal payload (`.` and spaces → `_`) |
+| **Principal present but `spicedb_subject` absent** | Falls back to **`_`** (or env override); agent logs a structured warning |
+
+Gateway-side DLQ mirror preserves whatever segment the agent published.
+
+---
+
 ## Embedder configuration
 
-Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** (see **`a2a-nats-agent`**, **`a2a-nats-stdio`**, **`a2a-nats-server`**). Set the DLQ **`{caller_id}`** subject segment via:
+Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** (see **`a2a-nats-agent`**, **`a2a-nats-stdio`**, **`a2a-nats-server`**). Set the DLQ **`{caller_id}`** fallback segment via:
 
 | Mechanism | Notes |
 |-----------|-------|
-| **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | Runtime env read by **`apply_timeout_overrides`**; whitespace-only values fall back to **`_`**. Prefer a JWT/OIDC-safe identifier once auth-callout lands ([sketch](./A2A_AUTH_CALLOUT_SKETCH.md)). |
+| **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | Fallback when no gateway principal arrives; whitespace-only values fall back to **`_`**. Superseded per-request when **`X-A2a-Spicedb-Principal`** carries a principal with **`spicedb_subject`** ([auth callout sketch](./A2A_AUTH_CALLOUT_SKETCH.md)). |
 | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** | Caps concurrent **`Bridge`** streaming tasks (**`Semaphore`**). **`0`** normalizes to **`1`**. Invalid integers are ignored with a warning. |
 | **`Config::with_push_dlq_caller_segment`** | Programmatic override when constructing **`Config`**. |
 
