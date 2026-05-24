@@ -36,9 +36,9 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 - [ ] Mark live tests `#[ignore]` so CI can skip without infra.
 
 ### 9. Gateway consumption path
-- [ ] In `a2a-gateway`, read the verified principal from the NATS connection metadata (once `async-nats` exposes it) and prefer it over the `X-A2a-Spicedb-Principal` header.
-- [ ] Gate the header-trust fallback behind a new env (`A2A_GATEWAY_TRUST_CALLER_HEADERS`, default off in prod). Surface a warn-once when the fallback is active.
-- [ ] Update `resolve_gateway_caller_identity` tests for both paths.
+- [ ] In `a2a-gateway`, read the verified principal from the NATS connection metadata (once `async-nats` exposes it) and prefer it over the `X-A2a-Spicedb-Principal` header. *(Blocked: `async-nats` does not yet surface the auth-callout-minted JWT to clients. Seam is already in tree as `ConnectionCallerIdentitySource` — `UnavailableConnectionCallerIdentity` is the current stand-in; flip the binding when upstream lands.)*
+- [x] Gate the header-trust fallback behind a new env (`A2A_GATEWAY_TRUST_CALLER_HEADERS`, default off in prod). Surface a warn-once when the fallback is active. *(`jwt_caller_identity::gateway_caller_identity_policy` + `TRUST_CALLER_HEADERS_WARN`.)*
+- [x] Update `resolve_gateway_caller_identity` tests for both paths.
 
 ### 11. Docs
 - [ ] Promote `docs/A2A_AUTH_CALLOUT_SKETCH.md` from "sketch" to "design" now that the wire format is pinned; rename if appropriate.
@@ -52,8 +52,8 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 ## Suggested ordering
 
 1. **#8** — testcontainer end-to-end so the rest of the rollout has a regression net.
-2. **#9** — flip the gateway to JWT-derived caller identity; retire the header-trust default.
-3. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
+2. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
+3. **#9** — once `async-nats` exposes the verified JWT on the connection, bind a real `ConnectionCallerIdentitySource` and retire the header-trust default. (Tracking item only; no code work until upstream lands.)
 
 ## Out of scope
 
