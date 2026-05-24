@@ -41,7 +41,7 @@ This is the shared per-Account stream for all task event traffic. It backs `mess
 | `max_age` | `24h` | Baseline replay/resubscribe window; per-Account override for longer audit needs |
 | `storage` | `file` | Matches in-tree provisioner |
 
-The in-tree `provision_streams` helper currently sets `retention = limits` while already using `discard = old`. When provisioning server-side (CLI, Terraform, platform tooling), align retention with the landed **`interest` + `discard=old`** policy so agents never block on publish.
+The in-tree `provision_streams` helper sets **`retention = interest`**, **`discard = old`**, and **`max_age = 24h`** (override via **`A2A_EVENTS_MAX_AGE_SECS`** on agent startup).
 
 ---
 
