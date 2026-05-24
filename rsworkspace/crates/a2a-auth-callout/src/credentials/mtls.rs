@@ -136,11 +136,13 @@ impl X509MtlsVerifier {
                 AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}"))
             })?;
 
+        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             sub,
             aud: account.clone(),
             data,
             caller_id,
+            nats_permissions,
         })
     }
 }

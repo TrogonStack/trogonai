@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt;
 use std::sync::Arc;
 
 use crate::error::AuthCalloutError;
@@ -21,24 +22,26 @@ impl RequestedAccount {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum AccountResolverError {
-    #[error("requested account must be non-empty")]
     EmptyRequest,
-    #[error("requested account {0:?} not allowlisted")]
     Unknown(String),
 }
 
+impl fmt::Display for AccountResolverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyRequest => f.write_str("requested account must be non-empty"),
+            Self::Unknown(name) => write!(f, "requested account {name:?} not allowlisted"),
+        }
+    }
+}
+
+impl std::error::Error for AccountResolverError {}
+
 impl From<AccountResolverError> for AuthCalloutError {
     fn from(value: AccountResolverError) -> Self {
-        // Variant-to-variant routing — no string matching on the failure
-        // message, the category is determined by the typed enum tag.
-        match value {
-            AccountResolverError::EmptyRequest => {
-                crate::error::CredentialError::InvalidRequest("requested account is empty".into()).into()
-            }
-            AccountResolverError::Unknown(name) => crate::error::CredentialError::UnknownAccount(name).into(),
-        }
+        Self::CredentialVerification(value.to_string())
     }
 }
 
@@ -79,4 +82,38 @@ impl<R: AccountResolver + ?Sized> AccountResolver for Arc<R> {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_request_rejected() {
+        assert!(matches!(
+            RequestedAccount::new("").unwrap_err(),
+            AccountResolverError::EmptyRequest
+        ));
+    }
+
+    #[test]
+    fn static_resolver_allows_known_account() {
+        let resolver = StaticAccountResolver::new(["tenant-acme", "tenant-foo"]);
+        let resolved = resolver
+            .resolve(&RequestedAccount::new("tenant-acme").unwrap())
+            .unwrap();
+        assert_eq!(resolved.as_str(), "tenant-acme");
+    }
+
+    #[test]
+    fn static_resolver_denies_unknown_account() {
+        let resolver = StaticAccountResolver::new(["tenant-acme"]);
+        let err = resolver
+            .resolve(&RequestedAccount::new("tenant-evil").unwrap())
+            .unwrap_err();
+        assert!(matches!(err, AccountResolverError::Unknown(_)));
+    }
+
+    #[test]
+    fn error_into_auth_callout_error_preserves_message() {
+        let err: AuthCalloutError = AccountResolverError::Unknown("x".into()).into();
+        assert!(err.to_string().contains("\"x\""));
+    }
+}
