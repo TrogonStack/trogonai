@@ -22,7 +22,10 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_pull_backpressure;
-use crate::policy::tier2::{CelProgramRef, PolicyEnvelopeBlob};
+use crate::policy::tier2::Tier2Decision;
+use crate::policy::tier2_cel::{
+    tier2_evaluation_context_from_ingress, RealTier2CelEvaluator, Tier2CompiledBundle,
+};
 use crate::policy::wasmtime_substrate::WasmtimeSubstrate;
 
 #[derive(Debug)]
@@ -229,16 +232,22 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 let method_slashes = method_dots.replace('.', "/");
 
                 if let Some(sub) = policy {
-                    match sub.tier2.predicate_holds(
-                        CelProgramRef("true"),
-                        PolicyEnvelopeBlob(payload.as_ref()),
-                    ) {
-                        Ok(true) => {}
-                        Ok(false) => {
+                    let eval_ctx = tier2_evaluation_context_from_ingress(
+                        &method_slashes,
+                        &agent_id,
+                        caller_slug.as_deref(),
+                        &headers_owned,
+                        payload.as_ref(),
+                    );
+                    match sub.tier2.evaluate(&eval_ctx) {
+                        Tier2Decision::Allow => {}
+                        Tier2Decision::Deny { rule } => {
+                            let rule_fired = format!("gateway.tier2.{}", rule.as_str());
                             tracing::Span::current().record("routing_outcome", "policy_denied");
                             warn!(
                                 ingress.subject = %msg.subject,
                                 agent_subject = %agent_subject,
+                                rule = %rule,
                                 routing_outcome = "policy_denied",
                                 "gateway tier-2 predicate rejected ingress envelope",
                             );
@@ -267,50 +276,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     Some(payload.as_ref()),
                                     AuditEnvelopeFields {
                                         trace_id: Some(trace_id.clone()),
-                                        rules_fired: Some(vec![
-                                            "gateway.tier2.predicate_denied_false".into(),
-                                        ]),
-                                        ..Default::default()
-                                    },
-                                ),
-                            );
-                            return;
-                        }
-                        Err(policy_err) => {
-                            tracing::Span::current().record("routing_outcome", "policy_evaluation_error");
-                            warn!(
-                                ingress.subject = %msg.subject,
-                                agent_subject = %agent_subject,
-                                error = %policy_err,
-                                routing_outcome = "policy_evaluation_error",
-                                "gateway tier-2 evaluator error",
-                            );
-                            let Ok(body) = ingress_gateway_policy_denied_response_bytes(
-                                payload.as_ref(),
-                                policy_err.to_string(),
-                            ) else {
-                                return;
-                            };
-                            reply_error(client, reply, HeaderMap::new(), body).await;
-                            spawn_gateway_audit_publish(
-                                audit_enabled,
-                                client.clone(),
-                                config.a2a_prefix.clone(),
-                                agent_id.clone(),
-                                AuditEnvelope::new(
-                                    &agent_id,
-                                    method_slashes.clone(),
-                                    json_rpc_audit_req_id(payload.as_ref()),
-                                    started_wall_ms,
-                                    started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-                                    AuditOutcome::Err {
-                                        code: -32_801,
-                                        message: policy_err.to_string(),
-                                    },
-                                    Some(payload.as_ref()),
-                                    AuditEnvelopeFields {
-                                        trace_id: Some(trace_id.clone()),
-                                        rules_fired: Some(vec!["gateway.tier2.evaluation_error".into()]),
+                                        rules_fired: Some(vec![rule_fired]),
                                         ..Default::default()
                                     },
                                 ),
@@ -365,8 +331,12 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 };
 
                 let mut rules_fired: Vec<String> = Vec::new();
-                if policy.is_some() {
-                    rules_fired.push("gateway.tier2.no_op_evaluated_true".into());
+                if let Some(sub) = policy {
+                    if sub.tier2_cel_active {
+                        rules_fired.push("gateway.tier2.evaluated_allow".into());
+                    } else {
+                        rules_fired.push("gateway.tier2.no_op_evaluated_true".into());
+                    }
                 } else {
                     rules_fired.push("gateway.tier2.layer_disabled".into());
                 }
@@ -523,7 +493,25 @@ fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstra
     if dir.is_empty() {
         return None;
     }
-    match WasmtimeSubstrate::try_new(WasmBundlePath::new(dir)) {
+    let bundle_path = WasmBundlePath::new(dir);
+    let tier2_cel_active = gateway_tier2_cel_enabled(env);
+    let tier2: Box<dyn crate::policy::Tier2CelEvaluator> = if tier2_cel_active {
+        let tier2_dir = bundle_path.as_path().join("tier2");
+        match Tier2CompiledBundle::load_from_dir(&tier2_dir) {
+            Ok(bundle) => Box::new(RealTier2CelEvaluator::new(bundle)),
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    tier2_dir = %tier2_dir.display(),
+                    "A2A_GATEWAY_TIER2_CEL_ENABLED=on but tier2 bundle load failed — denying all ingress",
+                );
+                Box::new(crate::policy::tier2::DenyAllTier2Evaluator)
+            }
+        }
+    } else {
+        Box::new(crate::policy::NoopTier2Evaluator)
+    };
+    match WasmtimeSubstrate::try_new_with_tier2(bundle_path.clone(), tier2, tier2_cel_active) {
         Err(err) => {
             warn!(
                 error = %err,
@@ -553,6 +541,16 @@ fn wasm_policy_layer_from_env<E: ReadEnv>(env: &E) -> Option<Arc<WasmtimeSubstra
             Some(substrate)
         }
     }
+}
+
+fn gateway_tier2_cel_enabled<E: ReadEnv>(env: &E) -> bool {
+    let Ok(flag) = env.var("A2A_GATEWAY_TIER2_CEL_ENABLED") else {
+        return false;
+    };
+    matches!(
+        flag.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
@@ -627,10 +625,15 @@ mod gateway_dispatch_tests {
     use a2a_nats::agent_id::A2aAgentId;
     use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
     use a2a_nats::resolve_gateway_ingress_subject;
+    use a2a_nats::ingress_gateway_policy_denied_response_bytes;
+    use async_nats::HeaderMap;
     use trogon_std::env::InMemoryEnv;
 
-    use super::*;
-    use crate::Args;
+    use super::{config_from_args, Args, Config};
+    use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision};
+    use crate::policy::tier2_cel::tier2_evaluation_context_from_ingress;
+    use crate::policy::RuleName;
+    use crate::policy::tier2_cel::{RealTier2CelEvaluator, Tier2CompiledBundle};
 
     fn test_config(prefix: &str) -> Config {
         let env = InMemoryEnv::new();
@@ -662,10 +665,10 @@ mod gateway_dispatch_tests {
         }
     }
 
-    fn denial_audit_fields() -> AuditEnvelopeFields {
+    fn denial_audit_fields(rule: &str) -> AuditEnvelopeFields {
         AuditEnvelopeFields {
             trace_id: Some("trace-test".into()),
-            rules_fired: Some(vec!["gateway.tier2.predicate_denied_false".into()]),
+            rules_fired: Some(vec![format!("gateway.tier2.{rule}")]),
             ..Default::default()
         }
     }
@@ -765,10 +768,67 @@ mod gateway_dispatch_tests {
                 message: "tier-2 predicate rejected envelope".into(),
             },
             None,
-            denial_audit_fields(),
+            denial_audit_fields("deny_guests"),
         );
         let json = serde_json::to_value(envelope).unwrap();
         assert!(json.get("rewrites").is_none());
         assert!(json.get("stream_consumer").is_none());
+    }
+
+    #[test]
+    fn tier2_cel_denies_message_send_matching_payload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tier2_dir = dir.path().join("tier2");
+        std::fs::create_dir_all(&tier2_dir).expect("tier2 dir");
+        std::fs::write(
+            tier2_dir.join("deny_guests.cel"),
+            r#"request.method == "message/send" && request.params.message.role != "guest""#,
+        )
+        .expect("write cel");
+
+        let bundle = Tier2CompiledBundle::load_from_dir(&tier2_dir).expect("load bundle");
+        let evaluator = RealTier2CelEvaluator::new(bundle);
+        let _keep_dir = dir;
+        let agent = test_agent();
+        let payload = br#"{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"guest","parts":[]}}}"#;
+        let ctx = tier2_evaluation_context_from_ingress(
+            "message/send",
+            &agent,
+            Some("caller-1"),
+            &HeaderMap::new(),
+            payload,
+        );
+        let decision = evaluator.evaluate(&ctx);
+        assert_eq!(
+            decision,
+            Tier2Decision::Deny {
+                rule: RuleName::new("deny_guests")
+            }
+        );
+
+        let denied_body = ingress_gateway_policy_denied_response_bytes(payload, "tier-2 predicate rejected envelope")
+            .expect("deny response");
+        let denied_json: serde_json::Value =
+            serde_json::from_slice(&denied_body).expect("deny json");
+        assert_eq!(denied_json["error"]["code"], -32_801);
+
+        let envelope = AuditEnvelope::new(
+            &agent,
+            "message/send",
+            Some("1".into()),
+            0,
+            0,
+            AuditOutcome::Err {
+                code: -32_801,
+                message: "tier-2 predicate rejected envelope".into(),
+            },
+            Some(payload.as_ref()),
+            denial_audit_fields("deny_guests"),
+        );
+        let audit_json = serde_json::to_value(envelope).expect("audit json");
+        assert_eq!(
+            audit_json["rules_fired"],
+            serde_json::json!(["gateway.tier2.deny_guests"])
+        );
     }
 }
