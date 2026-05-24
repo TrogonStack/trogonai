@@ -109,6 +109,19 @@ nsc add import -a [CONSUMER_ACCOUNT] \
 | Revocation = remove export or import | No application-level "soft delete" across Accounts — operator JWT change is the kill switch |
 | AgentCard `transports` must declare reachable endpoints | Federated card may advertise HTTPS or NATS URLs in **publisher** infrastructure; consumer gateway still enforces invoke auth separately |
 
+### Operator-signed export envelope (`a2a-nats-discovery`)
+
+Cross-Account NATS JWT export/import proves operator intent at the wire boundary; **`a2a-nats-discovery`** additionally verifies an Ed25519 **`SignedExportEnvelope`** over the opaque export payload **before** [`SpiceDbImportGate`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/mod.rs) runs at `list_cards_federated_gated`.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `key_id` | string (`^[A-Za-z0-9._-]{1,64}$`) | Operator key identifier in the consumer trust registry |
+| `signed_at_unix_ms` | u64 | Signature timestamp (reject when older than `A2A_DISCOVERY_SIGNATURE_MAX_AGE_SECS`, default 7 days) |
+| `payload_sha256` | 32 bytes | SHA-256 digest of the export payload bytes |
+| `signature` | 64 bytes | Ed25519 signature over `a2a.discovery.export.v1\x00 \|\| key_id \|\| signed_at_unix_ms_le \|\| payload_sha256` |
+
+Trusted operator public keys load from `A2A_DISCOVERY_OPERATOR_KEYS` (`key_id:hexpubkey,...`). When unset, labs use [`AllowAllOperatorSignatureGate`](../../rsworkspace/crates/a2a-nats-discovery/src/operator_signature_gate.rs). Reference signer: `sign_discovery_export` in [`signed_export/signing.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/signed_export/signing.rs).
+
 Detailed per-Account ACL templates for registrar/gateway/caller Users: [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md). Cross-Account federation steps remain **out of scope** for that bootstrap outline until Phase 4 automation lands.
 
 ---

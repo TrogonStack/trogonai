@@ -126,8 +126,10 @@ Agent catalog discovery and registrar over NATS KV. Configuration is via **clap 
 | `A2A_SPICEDB_ENDPOINT` | no | — | Authzed/SpiceDB gRPC endpoint for federated import gate (`SpiceDbImportGate`); unset ⇒ deny-only |
 | `A2A_SPICEDB_TOKEN` | no | — | Bearer token for Authzed API; required when `A2A_SPICEDB_ENDPOINT` is set |
 | `A2A_SPICEDB_ZEDTOKEN_TTL_SECS` | no | 30 | ZedToken cache TTL for import-gate bulk checks |
+| `A2A_DISCOVERY_OPERATOR_KEYS` | no | — | Comma-separated operator Ed25519 registry (`key_id:hexpubkey,...`) for federated discover export signatures; unset ⇒ lab `AllowAllOperatorSignatureGate` |
+| `A2A_DISCOVERY_SIGNATURE_MAX_AGE_SECS` | no | 604800 (7 days) | Maximum age for operator-signed discover export envelopes |
 
-Source: [`a2a-nats-discovery/src/config.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs), [`a2a-nats/src/catalog/import_gate/spicedb/`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/).
+Source: [`a2a-nats-discovery/src/config.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs), [`signed_export/`](../../rsworkspace/crates/a2a-nats-discovery/src/signed_export/), [`operator_signature_gate.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/operator_signature_gate.rs), [`a2a-nats/src/catalog/import_gate/spicedb/`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/).
 
 ---
 
