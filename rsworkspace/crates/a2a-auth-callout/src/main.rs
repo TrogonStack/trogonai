@@ -11,7 +11,12 @@ use a2a_auth_callout::error::AuthCalloutError;
 use a2a_auth_callout::signing_key_source::{
     EnvSigningKeySource, FileSigningKeySource, SigningKeySource,
 };
-use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
+use a2a_auth_callout::{
+    AccountResolver, CalloutIssuer, DenialPublisherConfig, SigningKey, StaticAccountResolver,
+    Subscriber,
+};
+
+const DEFAULT_CALLOUT_ISSUER: &str = "AUTH_CALLOUT_DEV_ISSUER";
 
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
@@ -120,6 +125,17 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let signing_key_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
+        .unwrap_or_else(|_| "dev-secret-not-for-production".into());
+    let callout_issuer_raw = std::env::var("AUTH_CALLOUT_ISSUER")
+        .unwrap_or_else(|_| DEFAULT_CALLOUT_ISSUER.into());
+    let callout_issuer = match CalloutIssuer::new(callout_issuer_raw) {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::error!(error = %e, "AUTH_CALLOUT_ISSUER is invalid");
+            std::process::exit(1);
+        }
+    };
     let allowed_accounts = split_env_list("AUTH_CALLOUT_ALLOWED_ACCOUNTS");
     if allowed_accounts.is_empty() {
         tracing::error!(
@@ -158,7 +174,11 @@ async fn main() {
         mtls,
         api_key: None,
     });
-    let subscriber = Subscriber::new(client, dispatcher);
+    let denial = DenialPublisherConfig::new(
+        SigningKey::from_secret(signing_key_secret.as_bytes()),
+        callout_issuer,
+    );
+    let subscriber = Subscriber::new(client, dispatcher, denial);
 
     info!("auth callout subscriber running");
 

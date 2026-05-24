@@ -58,8 +58,8 @@ Today the gateway derives caller identity from `X-A2a-Spicedb-Principal` / `X-A2
 - [ ] Pin against a specific `nats-server` minor version in tests; record the version in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`.
 
 ### 7. Denial encoding
-- [ ] `subscriber.rs::publish_denial` today emits `{"error":"authorization denied"}`. Replace with the auth-callout extension's denial format (signed JWT carrying the deny indicator).
-- [ ] Make sure denial paths still preserve trace context for audit.
+- [x] `subscriber.rs::publish_denial` today emits `{"error":"authorization denied"}`. Replace with the auth-callout extension's denial format (signed JWT carrying the deny indicator).
+- [x] Make sure denial paths still preserve trace context for audit.
 
 ### 8. Integration test
 - [ ] Testcontainer-backed `nats-server` configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
@@ -79,7 +79,7 @@ Today the gateway derives caller identity from `X-A2a-Spicedb-Principal` / `X-A2
 
 ### 11. Docs
 - [ ] Promote `docs/A2A_AUTH_CALLOUT_SKETCH.md` from "sketch" to "design" once wire format is pinned; rename if appropriate.
-- [ ] Add `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md` — runbook covering NSC operator/account provisioning, callout service NATS config block, signing-key custody, rotation procedure.
+- [ ] Add `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md` — runbook covering NSC operator/account provisioning, callout service NATS config block, signing-key custody, rotation procedure. (Denial semantics section landed in #7.)
 - [ ] Update `docs/A2A_RUNTIME_ENV.md` for new `AUTH_CALLOUT_*` envs.
 
 ### 12. Operator artifacts
