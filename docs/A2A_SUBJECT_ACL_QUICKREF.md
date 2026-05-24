@@ -41,4 +41,4 @@ One **NATS Account per tenant**. Subjects carry **no `{tenant}` segment** — th
 - `a2a.push.{caller_id}.>` (push consumer read ACL)
 - `{prefix}.push.dlq.{caller_id}.{task_id}` (DLQ subjects)
 
-Details: [A2A auth callout sketch](./A2A_AUTH_CALLOUT_SKETCH.md).
+Details: [A2A auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md).

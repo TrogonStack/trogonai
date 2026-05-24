@@ -9,7 +9,7 @@ Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge i
 | [`./A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) | Gateway ingress checklist — auth-callout, policy, audit on `{prefix}.gateway.>` |
 | [`./A2A_PUSH_DLQ_OPS.md`](./A2A_PUSH_DLQ_OPS.md) | Push DLQ triage — terminal failures publish from the agent `Bridge`, not from gateway or bridge ingress |
 | [`../A2A_TODO.md`](../A2A_TODO.md) | Open engineering items and suggested ordering |
-| [`./A2A_AUTH_CALLOUT_SKETCH.md`](./A2A_AUTH_CALLOUT_SKETCH.md) | Auth callout contract the bridge reuses for credential minting |
+| [`./A2A_AUTH_CALLOUT_DESIGN.md`](./A2A_AUTH_CALLOUT_DESIGN.md) | Auth callout contract the bridge reuses for credential minting |
 
 ---
 
@@ -59,7 +59,7 @@ This aligns with the **NATS CONNECT URL security model** described in [`./A2A_GA
 The bridge terminates **HTTPS-facing** auth before any NATS publish:
 
 1. Validate the caller's external credential — OIDC bearer token (primary), mTLS client certificate (service-to-service), or transitional API key.
-2. Resolve the target **tenant Account** and stable **`caller_id`** (same mapping contract as [`./A2A_AUTH_CALLOUT_SKETCH.md`](./A2A_AUTH_CALLOUT_SKETCH.md)).
+2. Resolve the target **tenant Account** and stable **`caller_id`** (same mapping contract as [`./A2A_AUTH_CALLOUT_DESIGN.md`](./A2A_AUTH_CALLOUT_DESIGN.md)).
 3. Call the auth callout (or an equivalent minting API with the same JWT shape) to obtain a **short-lived User JWT** bound to that Account.
 4. Open (or reuse from a pool keyed by caller session) a NATS connection authenticated with the minted User.
 
