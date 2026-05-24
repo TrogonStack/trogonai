@@ -428,6 +428,44 @@ mod tests {
 
     // ── Import payload correctness ────────────────────────────────────────────
 
+    /// Verifies that the `cwd` argument passed to `switch_model` is forwarded
+    /// verbatim to `new_session` on the target runner — CrossRunnerSwitcher must
+    /// not silently drop or replace the workspace path.
+    #[tokio::test]
+    async fn cwd_is_passed_to_target_new_session() {
+        let (_container, port) = start_nats().await;
+        let nats_bg = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+        mock_responder(nats_bg.clone(), "acp.src.agent.ext.session/export", b"[]").await;
+        // Capture the new_session request payload so we can inspect its cwd field.
+        let new_session_rx = capturing_responder(
+            nats_bg.clone(),
+            "acp.tgt.agent.session.new",
+            br#"{"sessionId":"cwd-check-session"}"#,
+        )
+        .await;
+        mock_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let registry = Registry::new(MockRegistryStore::new());
+        registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
+
+        let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
+        switcher
+            .switch_model("acp.src", "session-1", "gpt-4", "/workspace/myproject")
+            .await
+            .unwrap();
+
+        let new_session_body = new_session_rx.await.expect("new_session request must have been captured");
+        let json: serde_json::Value = serde_json::from_slice(&new_session_body).unwrap();
+        assert_eq!(
+            json["cwd"].as_str(),
+            Some("/workspace/myproject"),
+            "cwd must be forwarded verbatim to new_session on the target runner; got: {json}"
+        );
+    }
+
     #[tokio::test]
     async fn import_payload_contains_exported_messages() {
         let (_container, port) = start_nats().await;

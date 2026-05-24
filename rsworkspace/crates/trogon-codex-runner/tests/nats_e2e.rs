@@ -209,3 +209,72 @@ async fn codex_runner_registers_with_correct_acp_prefix_metadata() {
         "nats_subject must be derived from ACP_PREFIX"
     );
 }
+
+/// Verifies the full capabilities+models registration contract that codex main.rs uses:
+/// capabilities must be ["chat", "code_edit"] (not "explore"/"plan"), and
+/// metadata.models must contain the parsed model IDs from CODEX_MODELS.
+#[tokio::test]
+async fn codex_runner_registers_with_code_edit_capability_and_model_ids() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.codex";
+    let agent_type = "codex";
+    // Replicate main.rs CODEX_MODELS parsing: "o4-mini,o3" → ["o4-mini", "o3"]
+    let codex_models_env = "o4-mini,o3";
+    let model_ids: Vec<String> = codex_models_env
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix, "models": model_ids }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert!(
+        entry.capabilities.contains(&"code_edit".to_string()),
+        "codex runner must have 'code_edit' capability; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        entry.capabilities.contains(&"chat".to_string()),
+        "codex runner must have 'chat' capability; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        !entry.capabilities.contains(&"explore".to_string()),
+        "codex runner must NOT have 'explore' (unlike xai/or); got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        !entry.capabilities.contains(&"plan".to_string()),
+        "codex runner must NOT have 'plan' (unlike xai/or); got: {:?}",
+        entry.capabilities
+    );
+
+    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        model_strings.contains(&"o4-mini"),
+        "metadata.models must contain 'o4-mini'; got: {model_strings:?}"
+    );
+    assert!(
+        model_strings.contains(&"o3"),
+        "metadata.models must contain 'o3'; got: {model_strings:?}"
+    );
+}

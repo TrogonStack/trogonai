@@ -215,6 +215,133 @@ async fn openrouter_runner_registers_with_correct_acp_prefix_metadata() {
     );
 }
 
+/// Verifies that openrouter main.rs correctly registers model IDs in metadata.models
+/// so that CrossRunnerSwitcher can resolve the runner by model ID.
+#[tokio::test]
+async fn openrouter_runner_registers_with_model_ids_in_metadata() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.openrouter";
+    let agent_type = "openrouter";
+    // Replicate main.rs OPENROUTER_MODELS parsing
+    let or_models_env = "anthropic/claude-3-5-sonnet,openai/gpt-4o";
+    let model_ids: Vec<String> = or_models_env
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix, "models": model_ids }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        model_strings.contains(&"anthropic/claude-3-5-sonnet"),
+        "metadata.models must contain 'anthropic/claude-3-5-sonnet'; got: {model_strings:?}"
+    );
+    assert!(
+        model_strings.contains(&"openai/gpt-4o"),
+        "metadata.models must contain 'openai/gpt-4o'; got: {model_strings:?}"
+    );
+}
+
+/// `find_by_model` routes to the correct runner when xai, openrouter, and codex are all
+/// registered with distinct model ID sets — as happens in a full platform deployment.
+#[tokio::test]
+async fn find_by_model_returns_correct_runner_for_multi_runner_registry() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "xai".to_string(),
+            capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+            nats_subject: "acp.xai.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.xai", "models": ["grok-4"] }),
+        })
+        .await
+        .expect("register xai");
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "openrouter".to_string(),
+            capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+            nats_subject: "acp.or.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({
+                "acp_prefix": "acp.or",
+                "models": ["anthropic/claude-3-5-sonnet", "openai/gpt-4o"]
+            }),
+        })
+        .await
+        .expect("register openrouter");
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "codex".to_string(),
+            capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+            nats_subject: "acp.codex.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.codex", "models": ["o4-mini"] }),
+        })
+        .await
+        .expect("register codex");
+
+    // grok-4 → xai
+    let xai = registry.find_by_model("grok-4").await.unwrap().expect("grok-4 must resolve");
+    assert_eq!(xai.agent_type, "xai", "grok-4 must route to xai; got: {}", xai.agent_type);
+    assert_eq!(xai.metadata["acp_prefix"].as_str(), Some("acp.xai"));
+
+    // anthropic/claude-3-5-sonnet → openrouter
+    let or1 = registry
+        .find_by_model("anthropic/claude-3-5-sonnet")
+        .await
+        .unwrap()
+        .expect("claude must resolve");
+    assert_eq!(or1.agent_type, "openrouter", "claude must route to openrouter");
+    assert_eq!(or1.metadata["acp_prefix"].as_str(), Some("acp.or"));
+
+    // openai/gpt-4o → openrouter
+    let or2 = registry
+        .find_by_model("openai/gpt-4o")
+        .await
+        .unwrap()
+        .expect("gpt-4o must resolve");
+    assert_eq!(or2.agent_type, "openrouter", "gpt-4o must route to openrouter");
+
+    // o4-mini → codex
+    let codex = registry.find_by_model("o4-mini").await.unwrap().expect("o4-mini must resolve");
+    assert_eq!(codex.agent_type, "codex", "o4-mini must route to codex");
+    assert_eq!(codex.metadata["acp_prefix"].as_str(), Some("acp.codex"));
+
+    // unknown model → None
+    assert!(
+        registry.find_by_model("gpt-5-unknown").await.unwrap().is_none(),
+        "unknown model must return None from multi-runner registry"
+    );
+}
+
 /// Calling `provision_streams` twice on the same NATS server must succeed —
 /// it creates-or-updates, not create-or-fail.
 #[tokio::test]

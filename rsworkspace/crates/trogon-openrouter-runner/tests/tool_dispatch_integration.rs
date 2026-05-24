@@ -11,13 +11,22 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use agent_client_protocol::{Agent as _, ContentBlock, ExtRequest, NewSessionRequest, PromptRequest};
+use agent_client_protocol::{
+    Agent as _, ContentBlock, ExtRequest, ForkSessionRequest, NewSessionRequest, PromptRequest,
+    SetSessionConfigOptionRequest, SetSessionModelRequest,
+};
 use trogon_openrouter_runner::{
     AssembledToolCall, MockOpenRouterHttpClient, MockSessionNotifier, OpenRouterAgent,
     OpenRouterEvent,
 };
+use trogon_tools;
+
+static OR_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+fn or_env_lock() -> &'static Mutex<()> {
+    OR_ENV_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -430,6 +439,305 @@ async fn or_file_tool_after_import_uses_new_session_cwd() {
                 tool_msg.content.contains("cross-runner-content"),
                 "read_file must read from destination cwd; got: {}",
                 tool_msg.content
+            );
+        })
+        .await;
+}
+
+// ── _meta.systemPrompt → OR wire ─────────────────────────────────────────────
+
+/// `_meta.systemPrompt` passed in `new_session` must appear as a system-role
+/// message in the first API call wire.
+#[tokio::test]
+async fn or_meta_system_prompt_sent_to_api_wire() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("systemPrompt".to_string(), serde_json::json!("always respond in JSON"));
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")).meta(meta))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sess.session_id, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            assert!(!calls.is_empty());
+            let system_msg = calls[0]
+                .messages
+                .iter()
+                .find(|m| m.role == "system")
+                .expect("_meta.systemPrompt must appear as system-role message in OR wire");
+            assert!(
+                system_msg.content.contains("always respond in JSON"),
+                "system message must contain the _meta.systemPrompt value; got: {}",
+                system_msg.content
+            );
+        })
+        .await;
+}
+
+// ── OR set_model appears in wire ──────────────────────────────────────────────
+
+/// After `set_session_model`, the next prompt must use the new model in the
+/// OpenRouter API call.
+#[tokio::test]
+async fn or_set_model_appears_in_wire_request() {
+    let _guard = or_env_lock().lock().unwrap();
+    unsafe {
+        std::env::set_var("OPENROUTER_MODELS", "test-model:Test Model,alt-model:Alt Model");
+    }
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+    let agent = make_agent(Arc::clone(&http));
+    unsafe {
+        std::env::remove_var("OPENROUTER_MODELS");
+    }
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let sid = sess.session_id;
+
+            agent
+                .set_session_model(SetSessionModelRequest::new(sid.clone(), "alt-model"))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("q")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(
+                calls[0].model, "alt-model",
+                "set_session_model must change the model in OR wire request; got: {}",
+                calls[0].model
+            );
+        })
+        .await;
+}
+
+// ── OR enabled_tools filter appears in wire tools array ───────────────────────
+
+/// Disabling a tool via `set_session_config_option` must remove it from the
+/// `tools` array sent to the OpenRouter API.
+#[tokio::test]
+async fn or_disabled_tool_absent_from_wire_tools_array() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let sid = sess.session_id;
+
+            // Disable glob tool
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "glob",
+                    "disabled",
+                ))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("search files")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            assert!(!calls.is_empty());
+            let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name.as_str()).collect();
+            assert!(
+                !tool_names.contains(&"glob"),
+                "disabled tool 'glob' must not appear in OR wire tools array; got: {tool_names:?}"
+            );
+        })
+        .await;
+}
+
+// ── TROGON.md → OR system prompt wire ────────────────────────────────────────
+
+/// A TROGON.md file in the session cwd must be injected into the system prompt
+/// sent to the OpenRouter API.
+#[tokio::test]
+async fn or_trogon_md_injected_into_system_prompt_in_wire_request() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "or-project-rules: keep it short").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sess.session_id, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            let system_msg = calls[0]
+                .messages
+                .iter()
+                .find(|m| m.role == "system")
+                .expect("TROGON.md must appear as system message in OR wire");
+            assert!(
+                system_msg.content.contains("or-project-rules"),
+                "system message must contain TROGON.md content; got: {}",
+                system_msg.content
+            );
+        })
+        .await;
+}
+
+// ── OR all tools present in wire request by default ───────────────────────────
+
+/// A freshly created session must forward all trogon tools to the OR API.
+#[tokio::test]
+async fn or_all_tools_present_in_wire_request_by_default() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sess.session_id, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            let expected = trogon_tools::all_tool_defs().len();
+            let got = calls[0].tools.len();
+            assert_eq!(
+                got, expected,
+                "new session must include all {expected} trogon tools in wire request; got {got}"
+            );
+        })
+        .await;
+}
+
+// ── OR _meta.systemPrompt + TROGON.md merged into one system message ──────────
+
+/// When both TROGON.md and `_meta.systemPrompt` are provided, both must appear
+/// in the single system message sent to the OpenRouter API.
+#[tokio::test]
+async fn or_meta_system_prompt_and_trogon_md_both_in_system_message() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "or-md-rules: prefer brevity").unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("systemPrompt".to_string(), serde_json::json!("or-meta-rules: use JSON"));
+            let sess = agent
+                .new_session(
+                    NewSessionRequest::new(PathBuf::from(dir.path())).meta(meta),
+                )
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(sess.session_id, vec![ContentBlock::from("hello")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            let system_msg = calls[0]
+                .messages
+                .iter()
+                .find(|m| m.role == "system")
+                .expect("system message must be present when both TROGON.md and _meta.systemPrompt are set");
+            assert!(
+                system_msg.content.contains("or-md-rules"),
+                "system message must contain TROGON.md content; got: {}",
+                system_msg.content
+            );
+            assert!(
+                system_msg.content.contains("or-meta-rules"),
+                "system message must contain _meta.systemPrompt content; got: {}",
+                system_msg.content
+            );
+        })
+        .await;
+}
+
+// ── OR fork inherits disabled tool excluded from wire ─────────────────────────
+
+/// A forked session must inherit the parent's disabled tools and exclude them
+/// from the tools array sent to the OpenRouter API.
+#[tokio::test]
+async fn or_fork_inherits_disabled_tool_excluded_from_wire() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "fork ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let parent = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let parent_id = parent.session_id;
+
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    parent_id.clone(),
+                    "glob",
+                    "disabled",
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(parent_id, PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id;
+
+            agent
+                .prompt(PromptRequest::new(fork_id, vec![ContentBlock::from("hi")]))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name.as_str()).collect();
+            assert!(
+                !tool_names.contains(&"glob"),
+                "fork must inherit disabled 'glob' from parent; got tools: {tool_names:?}"
             );
         })
         .await;
