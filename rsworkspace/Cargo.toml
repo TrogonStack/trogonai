@@ -85,7 +85,6 @@ reqwest = { version = "0.12", default-features = false }
 # Misc
 tempfile = "=3.27.0"
 time = "=0.3.47"
-toml = "=0.8.23"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 sha2 = "=0.10.8"
 hmac = "=0.12.1"
