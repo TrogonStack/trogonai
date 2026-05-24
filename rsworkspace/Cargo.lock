@@ -28,6 +28,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "wiremock",
  "x509-parser",
 ]

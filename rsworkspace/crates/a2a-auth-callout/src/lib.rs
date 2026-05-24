@@ -1,5 +1,8 @@
 pub mod account_resolver;
 pub mod credentials;
+pub mod denial_category;
+pub mod denial_claims;
+pub mod denial_reason;
 pub mod dispatcher;
 pub mod error;
 pub mod jwt;
@@ -22,4 +25,7 @@ pub use signing_key_source::{
     SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
 };
 pub use permissions::{IssuedPermissions, SubjectPattern, SubjectPatternError};
-pub use subscriber::Subscriber;
+pub use denial_category::DenialCategory;
+pub use denial_claims::{CalloutIssuer, DenialClaims, ServerAudience, UserNkeySubject};
+pub use denial_reason::DenialReason;
+pub use subscriber::{DenialPublisherConfig, Subscriber};

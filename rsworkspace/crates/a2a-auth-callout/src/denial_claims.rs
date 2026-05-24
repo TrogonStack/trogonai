@@ -1,6 +1,7 @@
+use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::{Algorithm, Header, encode};
+use jsonwebtoken::{encode, Algorithm, Header};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -11,11 +12,20 @@ use crate::jwt::SigningKey;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalloutIssuer(String);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CalloutIssuerError {
-    #[error("callout issuer must be non-empty")]
     Empty,
 }
+
+impl fmt::Display for CalloutIssuerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("callout issuer must be non-empty"),
+        }
+    }
+}
+
+impl std::error::Error for CalloutIssuerError {}
 
 impl CalloutIssuer {
     pub fn new(issuer: impl Into<String>) -> Result<Self, CalloutIssuerError> {
@@ -34,11 +44,20 @@ impl CalloutIssuer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerAudience(String);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ServerAudienceError {
-    #[error("server audience must be non-empty")]
     Empty,
 }
+
+impl fmt::Display for ServerAudienceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("server audience must be non-empty"),
+        }
+    }
+}
+
+impl std::error::Error for ServerAudienceError {}
 
 impl ServerAudience {
     pub fn new(audience: impl Into<String>) -> Result<Self, ServerAudienceError> {
@@ -57,11 +76,20 @@ impl ServerAudience {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserNkeySubject(String);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UserNkeySubjectError {
-    #[error("user nkey subject must be non-empty")]
     Empty,
 }
+
+impl fmt::Display for UserNkeySubjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("user nkey subject must be non-empty"),
+        }
+    }
+}
+
+impl std::error::Error for UserNkeySubjectError {}
 
 impl UserNkeySubject {
     pub fn new(subject: impl Into<String>) -> Result<Self, UserNkeySubjectError> {
@@ -86,22 +114,36 @@ pub struct DenialClaims {
     pub request_jti: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum DenialClaimsError {
-    #[error("denial JWT encode error: {0}")]
-    Encode(#[source] jsonwebtoken::errors::Error),
-    #[error("system time error: {0}")]
-    SystemTime(#[source] std::time::SystemTimeError),
-    #[error("issued-at timestamp out of portable range")]
+    Encode(jsonwebtoken::errors::Error),
+    SystemTime(std::time::SystemTimeError),
     IssuedAtOutOfRange,
+}
+
+impl fmt::Display for DenialClaimsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Encode(e) => write!(f, "denial JWT encode error: {e}"),
+            Self::SystemTime(e) => write!(f, "system time error: {e}"),
+            Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
+        }
+    }
+}
+
+impl std::error::Error for DenialClaimsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encode(e) => Some(e),
+            Self::SystemTime(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 impl From<DenialClaimsError> for AuthCalloutError {
     fn from(value: DenialClaimsError) -> Self {
-        // Denial-claims minting failures aren't JwtError — they're this
-        // module's own typed error. Wrap as Internal so the source chain
-        // is preserved via the std::error::Error impl above.
-        Self::Internal(value.to_string())
+        Self::JwtMint(value.to_string())
     }
 }
 
@@ -150,11 +192,15 @@ impl DenialClaims {
             },
         };
 
-        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.encoding_key()).map_err(DenialClaimsError::Encode)
+        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0).map_err(DenialClaimsError::Encode)
     }
 
     #[cfg(test)]
-    pub(crate) fn mint_for_test(&self, signing_key: &SigningKey, ttl: Duration) -> Result<String, DenialClaimsError> {
+    pub(crate) fn mint_for_test(
+        &self,
+        signing_key: &SigningKey,
+        ttl: Duration,
+    ) -> Result<String, DenialClaimsError> {
         self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
 }
@@ -168,4 +214,81 @@ fn secs_since_unix(t: SystemTime) -> Result<i64, DenialClaimsError> {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+    use serde::Deserialize;
+
+    use super::*;
+    use crate::denial_category::DenialCategory;
+
+    #[derive(Debug, Deserialize)]
+    struct ParsedDenial {
+        iss: String,
+        aud: String,
+        sub: String,
+        nats: ParsedNats,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ParsedNats {
+        error: String,
+        #[serde(rename = "type")]
+        typ: String,
+        version: u32,
+        jwt: Option<String>,
+    }
+
+    fn sample_claims() -> DenialClaims {
+        DenialClaims {
+            iss: CalloutIssuer::new("ACALLOUTISSUER").unwrap(),
+            aud: ServerAudience::new("ASERVERPUBKEY").unwrap(),
+            sub: UserNkeySubject::new("UCLIENTNKEY").unwrap(),
+            reason: DenialReason::new(DenialCategory::InvalidCredentials).unwrap(),
+            request_jti: Some("REQJTI123".into()),
+        }
+    }
+
+    #[test]
+    fn denial_jwt_round_trip() {
+        let signing_key = SigningKey::from_secret(b"denial-test-secret--------------");
+        let claims = sample_claims();
+        let token = claims
+            .mint_for_test(&signing_key, Duration::from_secs(60))
+            .unwrap();
+
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let decoded = decode::<ParsedDenial>(
+            &token,
+            &DecodingKey::from_secret(b"denial-test-secret--------------"),
+            &validation,
+        )
+        .unwrap();
+
+        assert_eq!(decoded.claims.iss, "ACALLOUTISSUER");
+        assert_eq!(decoded.claims.aud, "ASERVERPUBKEY");
+        assert_eq!(decoded.claims.sub, "UCLIENTNKEY");
+        assert_eq!(decoded.claims.nats.error, "invalid_credentials");
+        assert_eq!(decoded.claims.nats.typ, "authorization_response");
+        assert_eq!(decoded.claims.nats.version, 2);
+        assert!(decoded.claims.nats.jwt.is_none());
+    }
+
+    #[test]
+    fn denial_jwt_rejects_wrong_signing_key() {
+        let signing_key = SigningKey::from_secret(b"signer-a------------------------");
+        let token = sample_claims()
+            .mint_for_test(&signing_key, Duration::from_secs(60))
+            .unwrap();
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        let err = decode::<ParsedDenial>(
+            &token,
+            &DecodingKey::from_secret(b"signer-b------------------------"),
+            &validation,
+        );
+        assert!(err.is_err());
+    }
+}

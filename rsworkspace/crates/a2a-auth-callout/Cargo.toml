@@ -33,6 +33,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 x509-parser = { workspace = true, features = ["verify"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
