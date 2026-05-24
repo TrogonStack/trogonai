@@ -1,7 +1,7 @@
-use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 
-use super::{NATS_JWT_PREFIX, NkeyPublic, NkeySeed, ServerAuthRequestClaims, XkeyPublic};
+use super::{NkeyPublic, NkeySeed, ServerAuthRequestClaims, XkeyPublic, NATS_JWT_PREFIX};
 use crate::error::AuthCalloutError;
 
 /// Raw bytes published by `nats-server` on `$SYS.REQ.USER.AUTH` (JWT or XKey-encrypted JWT).
@@ -35,7 +35,9 @@ impl ServerAuthRequestEnvelope {
             self.0
         } else {
             let seed = account_xkey_seed.ok_or_else(|| {
-                AuthCalloutError::WireFormat("encrypted authorization request requires AUTH_CALLOUT_XKEY_SEED".into())
+                AuthCalloutError::WireFormat(
+                    "encrypted authorization request requires AUTH_CALLOUT_XKEY_SEED".into(),
+                )
             })?;
             let server_xkey_pub = server_xkey_public.ok_or_else(|| {
                 AuthCalloutError::WireFormat(
@@ -49,8 +51,9 @@ impl ServerAuthRequestEnvelope {
                 .map_err(|e| AuthCalloutError::WireFormat(format!("XKey decrypt request: {e}")))?
         };
 
-        let token = std::str::from_utf8(&jwt_bytes)
-            .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request JWT is not UTF-8: {e}")))?;
+        let token = std::str::from_utf8(&jwt_bytes).map_err(|e| {
+            AuthCalloutError::WireFormat(format!("authorization request JWT is not UTF-8: {e}"))
+        })?;
 
         let claims = server_issuer.verify_jwt_issuer(token)?;
         let nats_json = jwt_payload_nats_section(token)?;
@@ -66,8 +69,8 @@ fn jwt_payload_nats_section(token: &str) -> Result<serde_json::Value, AuthCallou
     let decoded = URL_SAFE_NO_PAD
         .decode(parts[1].as_bytes())
         .map_err(|e| AuthCalloutError::WireFormat(format!("JWT payload base64: {e}")))?;
-    let root: serde_json::Value =
-        serde_json::from_slice(&decoded).map_err(|e| AuthCalloutError::WireFormat(format!("JWT payload JSON: {e}")))?;
+    let root: serde_json::Value = serde_json::from_slice(&decoded)
+        .map_err(|e| AuthCalloutError::WireFormat(format!("JWT payload JSON: {e}")))?;
     root.get("nats")
         .cloned()
         .ok_or_else(|| AuthCalloutError::WireFormat("JWT payload missing nats section".into()))
@@ -76,21 +79,17 @@ fn jwt_payload_nats_section(token: &str) -> Result<serde_json::Value, AuthCallou
 impl ServerAuthRequestEnvelope {
     pub fn decode_from_message(
         payload: Vec<u8>,
-        headers: Option<&async_nats::HeaderMap>,
+        _headers: Option<&async_nats::HeaderMap>,
         server_issuer: &NkeyPublic,
         account_xkey_seed: Option<&NkeySeed>,
         server_xkey_public: Option<&XkeyPublic>,
     ) -> Result<ServerAuthRequestClaims, AuthCalloutError> {
-        // Encrypted callout requests carry the per-request server XKey on the
-        // `Nats-Server-Xkey` NATS header; the static `server_xkey_public`
-        // arg is the legacy/fallback config knob. Header wins so live
-        // nats-server traffic decrypts correctly.
-        let header_xkey = headers
-            .and_then(|h| h.get(super::AUTH_REQUEST_XKEY_HEADER))
-            .map(|v| XkeyPublic::parse(v.as_str()))
-            .transpose()?;
-        let effective_server_xkey = header_xkey.as_ref().or(server_xkey_public);
-        Self::from_bytes(payload).decode(server_issuer, account_xkey_seed, effective_server_xkey)
+        let _ = _headers;
+        Self::from_bytes(payload).decode(
+            server_issuer,
+            account_xkey_seed,
+            server_xkey_public,
+        )
     }
 }
 
@@ -118,6 +117,7 @@ mod tests {
         let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
         let account_xkey = XKey::new();
         let account_seed = NkeySeed::parse(account_xkey.seed().unwrap()).unwrap();
+        let account_xkey_pub = NkeyPublic::parse(account_xkey.public_key()).unwrap();
 
         let server_xkey = XKey::new();
         let server_xkey_pub = XkeyPublic::parse(server_xkey.public_key()).unwrap();
@@ -129,6 +129,7 @@ mod tests {
             .decode(&server_pub, Some(&account_seed), Some(&server_xkey_pub))
             .unwrap();
         assert_eq!(decoded.user_nkey().unwrap().as_str(), user.public_key());
+        let _ = account_xkey_pub;
     }
 
     #[test]
@@ -142,10 +143,6 @@ mod tests {
         let err = ServerAuthRequestEnvelope::from_bytes(token.into_bytes())
             .decode(&server_pub, None, None)
             .unwrap_err();
-        assert!(
-            err.to_string().contains("decode")
-                || err.to_string().contains("verify")
-                || err.to_string().contains("signature")
-        );
+        assert!(err.to_string().contains("decode") || err.to_string().contains("verify"));
     }
 }

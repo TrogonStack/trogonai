@@ -349,7 +349,7 @@ mod tests {
         let minted = user
             .mint(&handle, std::time::SystemTime::now(), Duration::from_secs(60))
             .unwrap();
-        assert!(minted.split('.').count() == 3);
+        assert!(minted.as_str().split('.').count() == 3);
     }
 
     #[tokio::test]

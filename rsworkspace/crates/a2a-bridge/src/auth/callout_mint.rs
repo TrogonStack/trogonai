@@ -2,7 +2,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use a2a_auth_callout::{AuthCalloutRequest, AuthDispatcher, AuthScheme, dispatcher::ConnectOpts};
+use a2a_auth_callout::{
+    AuthDispatcher, BridgeAuthScheme, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse,
+    ServerAuthRequestClaims,
+};
 
 use super::{AuthMintWire, BytesPayload};
 use crate::error::BridgeError;
@@ -51,22 +54,27 @@ impl InProcessCalloutDispatcherMintWire {
 impl AuthMintWire for InProcessCalloutDispatcherMintWire {
     async fn roundtrip_message(&self, _subject: String, payload: BytesPayload) -> Result<Vec<u8>, BridgeError> {
         self.mint_count.fetch_add(1, Ordering::SeqCst);
-        let mut request: AuthCalloutRequest =
+        let mut request: BridgeMintRequest =
             serde_json::from_slice(&payload.0).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
         if request.account.is_none() {
             request.account = Some(self.tenant.as_str().to_owned());
         }
         if request.connect_opts.is_none() && request.user_jwt.is_some() {
-            request.connect_opts = Some(ConnectOpts {
-                auth_scheme: Some(AuthScheme::Oidc),
+            request.connect_opts = Some(BridgeConnectOpts {
+                auth_scheme: Some(BridgeAuthScheme::Oidc),
                 api_key: None,
             });
         }
-        let response = self
+        let claims = ServerAuthRequestClaims::from_bridge_mint(request)
+            .map_err(|e| BridgeError::Mint(e.to_string()))?;
+        let user_jwt = self
             .dispatcher
-            .dispatch(request)
+            .dispatch(claims)
             .await
             .map_err(|e| BridgeError::Mint(e.to_string()))?;
+        let response = BridgeMintResponse {
+            user_jwt: user_jwt.as_str().to_owned(),
+        };
         serde_json::to_vec(&response).map_err(|e: serde_json::Error| BridgeError::Serialize(e))
     }
 }

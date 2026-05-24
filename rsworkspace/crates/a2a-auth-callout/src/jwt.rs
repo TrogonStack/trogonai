@@ -104,8 +104,21 @@ impl SpiceDbPrincipal {
     }
 }
 
-#[derive(Clone)]
-pub struct SigningKey(Vec<u8>);
+/// HS256 User JWT minted for bridge/gateway consumption (inner `nats.jwt` on wire responses).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintedUserJwt(String);
+
+impl MintedUserJwt {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+pub struct SigningKey(pub(crate) EncodingKey);
 
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -192,7 +205,7 @@ impl UserJwtClaims {
         handle: &SigningKeyHandle,
         issued_at: SystemTime,
         ttl: Duration,
-    ) -> Result<String, JwtError> {
+    ) -> Result<MintedUserJwt, JwtError> {
         let iat_secs = secs_since_unix(issued_at)?;
         let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
         let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
@@ -223,59 +236,18 @@ impl UserJwtClaims {
             nbf: iat_secs,
         };
 
-        let mut header = Header::new(Algorithm::HS256);
-        header.kid = Some(kid.to_owned());
-        encode(
-            &header,
-            &claims,
-            &handle.signing_key().encoding_key(),
-        )
-        .map_err(JwtError::Encode)
-    }
-
-    pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
-        Self::verify_with_handles(token, &source.accepted())
-    }
-
-    pub fn verify_with_handles(token: &str, handles: &[SigningKeyHandle]) -> Result<Self, JwtError> {
-        if handles.is_empty() {
-            return Err(JwtError::NoSigningKeyForKid);
-        }
-
-        let header_kid = peek_header_kid(token)?;
-
-        if let Some(kid) = header_kid.as_deref()
-            && let Some(handle) = handles.iter().find(|h| h.version().as_str() == kid)
-        {
-            return Self::verify_with_handle(token, handle);
-        }
-
-        let mut last_err = None;
-        for handle in handles {
-            match Self::verify_with_handle(token, handle) {
-                Ok(claims) => return Ok(claims),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(last_err.unwrap_or(JwtError::NoSigningKeyForKid))
-    }
-
-    pub(crate) fn verify_with_handle(token: &str, handle: &SigningKeyHandle) -> Result<Self, JwtError> {
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        let decoded = decode::<UserJwtClaims>(
-            token,
-            &handle.signing_key().decoding_key(),
-            &validation,
-        )
-        .map_err(JwtError::Decode)?;
-        Ok(decoded.claims)
+        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0)
+            .map(MintedUserJwt::new)
+            .map_err(JwtError::Encode)
     }
 
     #[cfg(test)]
-    fn mint_for_test_ttl(&self, handle: &SigningKeyHandle, ttl: Duration) -> Result<String, JwtError> {
-        self.mint(handle, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
+    fn mint_for_test_ttl(
+        &self,
+        signing_key: &SigningKey,
+        ttl: Duration,
+    ) -> Result<MintedUserJwt, JwtError> {
+        self.mint(signing_key, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
     }
 }
 
@@ -380,7 +352,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let decoded = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"secret-for-hs256-test"),
             &validation,
         )
@@ -415,7 +387,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let err =
-            decode::<ParsedMinted>(&token, &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
+            decode::<ParsedMinted>(token.as_str(), &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
         assert!(
             matches!(err.kind(), jsonwebtoken::errors::ErrorKind::InvalidAlgorithm)
                 || err.to_string().to_lowercase().contains("algorithm"),
@@ -447,7 +419,7 @@ mod tests {
         validation.validate_exp = false;
         validation.validate_aud = false;
         let wrong = decode::<ParsedMinted>(
-            &token,
+            token.as_str(),
             &DecodingKey::from_secret(b"signer-b------------------------"),
             &validation,
         );

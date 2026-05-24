@@ -8,8 +8,8 @@ use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcV
 use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
 use a2a_auth_callout::{
-    AccountResolver, CalloutIssuer, DenialPublisherConfig, SigningKey, StaticAccountResolver,
-    Subscriber,
+    AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, SigningKey, StaticAccountResolver,
+    Subscriber, XkeyPublic,
 };
 use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
 
@@ -30,44 +30,18 @@ fn split_env_list(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn load_signing_key_source() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
-    let kind = std::env::var("AUTH_CALLOUT_SIGNING_KEY_SOURCE")
-        .unwrap_or_else(|_| "env".into());
-    match kind.as_str() {
-        "env" => {
-            if std::env::var("AUTH_CALLOUT_SIGNING_SECRET").is_err() {
-                unsafe {
-                    std::env::set_var(
-                        "AUTH_CALLOUT_SIGNING_SECRET",
-                        "dev-secret-not-for-production",
-                    );
-                }
-            }
-            Ok(Arc::new(EnvSigningKeySource::from_env()?))
-        }
-        "file" => {
-            let current = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PATH").map_err(|_| {
-                AuthCalloutError::Internal(
-                    "AUTH_CALLOUT_SIGNING_KEY_PATH is required when AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
-                        .into(),
-                )
-            })?;
-            let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH").ok();
-            Ok(Arc::new(FileSigningKeySource::new(
-                current,
-                previous.as_deref(),
-            )?))
-        }
-        "vault" => {
-            Err(AuthCalloutError::Internal(
-                "AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet; use file or env"
-                    .into(),
-            ))
-        }
-        other => Err(AuthCalloutError::Internal(format!(
-            "unknown AUTH_CALLOUT_SIGNING_KEY_SOURCE: {other} (expected env, file, or vault)"
-        ))),
-    }
+fn env_required(name: &str) -> Result<String, String> {
+    std::env::var(name).map_err(|_| format!("{name} is required"))
+}
+
+fn load_nkey_seed_env(name: &str) -> Result<NkeySeed, String> {
+    let raw = env_required(name)?;
+    NkeySeed::parse(raw).map_err(|e| e.to_string())
+}
+
+fn load_nkey_public_env(name: &str) -> Result<NkeyPublic, String> {
+    let raw = env_required(name)?;
+    NkeyPublic::parse(raw).map_err(|e| e.to_string())
 }
 
 async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
@@ -139,6 +113,59 @@ async fn main() {
         .map(Duration::from_secs)
         .unwrap_or_else(|| Duration::from_secs(DEFAULT_USER_JWT_TTL_SECS));
 
+    let server_issuer = match load_nkey_public_env("AUTH_CALLOUT_SERVER_NKEY_PUBLIC") {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid server NKey configuration");
+            std::process::exit(1);
+        }
+    };
+    let callout_issuer_seed = match load_nkey_seed_env("AUTH_CALLOUT_ISSUER_NKEY_SEED") {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid callout issuer NKey seed");
+            std::process::exit(1);
+        }
+    };
+    let account_xkey_seed = std::env::var("AUTH_CALLOUT_XKEY_SEED")
+        .ok()
+        .map(NkeySeed::parse)
+        .transpose()
+        .map_err(|e| e.to_string());
+    let account_xkey_seed = match account_xkey_seed {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid AUTH_CALLOUT_XKEY_SEED");
+            std::process::exit(1);
+        }
+    };
+
+    let server_xkey_public = std::env::var("AUTH_CALLOUT_SERVER_XKEY_PUBLIC")
+        .ok()
+        .map(XkeyPublic::parse)
+        .transpose()
+        .map_err(|e| e.to_string());
+    let server_xkey_public = match server_xkey_public {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "invalid AUTH_CALLOUT_SERVER_XKEY_PUBLIC");
+            std::process::exit(1);
+        }
+    };
+
+    let wire = match AuthCalloutWireCodec::new(
+        server_issuer,
+        callout_issuer_seed,
+        account_xkey_seed,
+        server_xkey_public,
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to build auth callout wire codec");
+            std::process::exit(1);
+        }
+    };
+
     let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(allowed_accounts.clone()));
     let oidc = build_oidc_verifier().await;
     let mtls = build_mtls_verifier();
@@ -164,11 +191,7 @@ async fn main() {
         mtls,
         api_key: None,
     });
-    let denial = DenialPublisherConfig::new(
-        SigningKey::from_secret(signing_key_secret.as_bytes()),
-        callout_issuer,
-    );
-    let subscriber = Subscriber::new(client, dispatcher, denial);
+    let subscriber = Subscriber::new(client, dispatcher, wire);
 
     info!("auth callout subscriber running");
 

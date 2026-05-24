@@ -1,7 +1,8 @@
 use nkeys::{KeyPair, XKey};
 
 use super::{
-    CalloutAuthResponseClaims, NkeyPublic, NkeySeed, ServerAuthRequestClaims, ServerAuthRequestEnvelope, XkeyPublic,
+    CalloutAuthResponseClaims, NkeyPublic, NkeySeed, ServerAuthRequestClaims,
+    ServerAuthRequestEnvelope, XkeyPublic,
 };
 use crate::error::AuthCalloutError;
 use crate::jwt::MintedUserJwt;
@@ -22,24 +23,11 @@ impl AuthCalloutWireCodec {
         account_xkey_seed: Option<NkeySeed>,
         server_xkey_public: Option<XkeyPublic>,
     ) -> Result<Self, AuthCalloutError> {
-        // XKey encryption is symmetric in shape: account_xkey_seed lets the
-        // callout decrypt server-encrypted requests; server_xkey_public is the
-        // pinned identity of the server's encryption key for encrypt-of-the-
-        // response or fallback decrypt. Configuring only one side is a foot-
-        // gun — requests stay readable but responses won't encrypt, or vice
-        // versa. Fail fast instead of silently half-enabling encryption.
-        match (account_xkey_seed.as_ref(), server_xkey_public.as_ref()) {
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(AuthCalloutError::WireFormat(
-                    "AuthCalloutWireCodec XKey config is partial: account_xkey_seed and \
-                     server_xkey_public must both be set or both unset"
-                        .into(),
-                ));
-            }
-            _ => {}
-        }
         let callout_issuer = callout_issuer_seed.to_signing_keypair()?;
-        let account_xkey = account_xkey_seed.as_ref().map(NkeySeed::to_xkey).transpose()?;
+        let account_xkey = account_xkey_seed
+            .as_ref()
+            .map(NkeySeed::to_xkey)
+            .transpose()?;
         Ok(Self {
             server_issuer,
             callout_issuer,
@@ -68,7 +56,8 @@ impl AuthCalloutWireCodec {
         request: &ServerAuthRequestClaims,
         user_jwt: MintedUserJwt,
     ) -> Result<Vec<u8>, AuthCalloutError> {
-        let response = CalloutAuthResponseClaims::success(request, &user_jwt, &self.callout_issuer)?;
+        let response =
+            CalloutAuthResponseClaims::success(request, &user_jwt, &self.callout_issuer)?;
         response.into_wire_bytes(request, self.account_xkey.as_ref())
     }
 
@@ -77,7 +66,8 @@ impl AuthCalloutWireCodec {
         request: &ServerAuthRequestClaims,
         message: impl Into<String>,
     ) -> Result<Vec<u8>, AuthCalloutError> {
-        let response = CalloutAuthResponseClaims::denial(request, message, &self.callout_issuer)?;
+        let response =
+            CalloutAuthResponseClaims::denial(request, message, &self.callout_issuer)?;
         response.into_wire_bytes(request, self.account_xkey.as_ref())
     }
 }
