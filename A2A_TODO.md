@@ -23,10 +23,9 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 ## Phase 2 — streaming & lifecycle
 
-- [ ] CEL → WASM compile path + real `Tier2CelEvaluator` impl to replace `NoopTier2Evaluator` in `a2a-gateway/src/policy/tier2.rs`.
-- [ ] Extend gateway policy stack — authoritative Tier 2 CEL + richer Tier 3 skill matrix beyond preload-only redaction stubs (`A2A_GATEWAY_POLICY_BUNDLE_DIR` / `_SKILLS` already host Wasmtime preload today).
+- [ ] Extend gateway policy stack — richer Tier 3 skill matrix beyond preload-only redaction stubs (`A2A_GATEWAY_POLICY_BUNDLE_DIR` / `_SKILLS` already host Wasmtime preload today).
 
-**Shipped (Phase 2):** Streaming back-pressure — `A2A_EVENTS` provisioned with `retention=interest, discard=old, max_age=24h`; env-gated gateway pull consumer (`A2A_GATEWAY_EVENTS_PULL=on|off`, default off) with configurable `max_ack_pending`, fetch batch, heartbeat, and per-caller in-flight cap.
+**Shipped (Phase 2):** Streaming back-pressure — `A2A_EVENTS` provisioned with `retention=interest, discard=old, max_age=24h`; env-gated gateway pull consumer (`A2A_GATEWAY_EVENTS_PULL=on|off`, default off) with configurable `max_ack_pending`, fetch batch, heartbeat, and per-caller in-flight cap. **Tier-2 CEL evaluator** — `tier2/*.cel` bundle compile path + `RealTier2CelEvaluator` in `a2a-gateway` (env-gated via `A2A_GATEWAY_TIER2_CEL_ENABLED`; see [`docs/A2A_TIER2_CEL.md`](./docs/A2A_TIER2_CEL.md)).
 
 ## Phase 3 — push delivery & redaction
 
@@ -43,15 +42,15 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 ## Cross-cutting
 
-- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + ingress Tier-2 predicate seam, decision-site audit publish with `trace_id`, `rules_fired`, `rewrites`, and `stream_consumer`, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier.
+- Gateway request path (**partial**) — Wasmtime-hosted Tier-3 redaction preload + env-gated CEL Tier-2 evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), decision-site audit publish with `trace_id`, `rules_fired`, `rewrites`, and `stream_consumer`, unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), and caller tracing via NATS `X-A2a-Caller-Id` / HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Still pending:** SpiceDB Tier 1, authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier.
 
 ---
 
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines).
-2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits atop the Wasmtime preload + unary deadline scaffolding now in-tree (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` ship today).
+2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, richer decision-site audits atop the Wasmtime preload + env-gated CEL Tier-2 + unary deadline scaffolding now in-tree (`trace_id`, `rules_fired`, `rewrites`, and `stream_consumer` ship today).
 3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping on the gateway request path (federated **`SpiceDbImportGate`** landed in `a2a-nats::catalog::import_gate`).
-4. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
+4. Tier 3 redaction semantics once payloads are enforceable beyond today's preload seam (CEL Tier-2 ships in-tree, env-gated).
 5. Hardened push residuals — principal → DLQ `caller_id` wiring shipped in-tree; live when auth-callout + gateway header forward deploy (gateway-side DLQ mirror already shipped, env-gated).
 6. `a2a-bridge` env-gated **`A2A_BRIDGE_TRANSPORT=nats`** bootstrap (mint unary + unary gateway + SSE JetStream) alongside federated discovery exports + cross-binding collaboration tests (`stub` stays default so unit tests skip live NATS).

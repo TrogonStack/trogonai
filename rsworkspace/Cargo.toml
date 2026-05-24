@@ -47,6 +47,7 @@ async-nats = { version = "=0.47.0", default-features = false }
 async-trait = "=0.1.89"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.11.1"
+cel-interpreter = "=0.10.0"
 futures = "=0.3.32"
 futures-util = "=0.3.32"
 tokio = "=1.52.1"

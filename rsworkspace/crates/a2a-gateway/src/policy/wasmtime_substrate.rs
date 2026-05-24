@@ -12,22 +12,25 @@ use crate::policy::tier2::{NoopTier2Evaluator, Tier2CelEvaluator};
 pub struct WasmtimeSubstrate {
     pub redaction: WasmRedactorHost,
     pub tier2: Box<dyn Tier2CelEvaluator>,
+    pub tier2_cel_active: bool,
 }
 
 impl WasmtimeSubstrate {
     pub fn try_new_with_tier2(
         bundles_base: WasmBundlePath,
         tier2: Box<dyn Tier2CelEvaluator>,
+        tier2_cel_active: bool,
     ) -> Result<Self, PolicyError> {
         let host = WasmRedactorHost::new(bundles_base)?;
         Ok(Self {
             redaction: host,
             tier2,
+            tier2_cel_active,
         })
     }
 
     pub fn try_new(bundles_base: WasmBundlePath) -> Result<Self, PolicyError> {
-        Self::try_new_with_tier2(bundles_base, Box::new(NoopTier2Evaluator))
+        Self::try_new_with_tier2(bundles_base, Box::new(NoopTier2Evaluator), false)
     }
 
     pub fn register_redaction_skill(
@@ -63,7 +66,7 @@ mod tests {
     use a2a_redaction::{SkillId, WasmBundlePath};
     use a2a_types::part;
     use a2a_types::{Artifact, Role};
-    use crate::policy::tier2::{CelProgramRef, NoopTier2Evaluator, PolicyEnvelopeBlob};
+    use crate::policy::tier2::{Tier2Decision, Tier2EvaluationContext};
 
     fn fixture_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -111,11 +114,16 @@ mod tests {
     }
 
     #[test]
-    fn noop_tier2_evaluator_returns_ok_true() {
+    fn noop_tier2_evaluator_returns_allow() {
         let evaluator = NoopTier2Evaluator;
-        let holds = evaluator
-            .predicate_holds(CelProgramRef("true"), PolicyEnvelopeBlob(b"{}"))
-            .expect("tier2 noop");
-        assert!(holds);
+        let ctx = Tier2EvaluationContext::new(
+            "message/send",
+            serde_json::json!({}),
+            None,
+            a2a_nats::A2aAgentId::new("planner").unwrap(),
+            None,
+            Default::default(),
+        );
+        assert_eq!(evaluator.evaluate(&ctx), Tier2Decision::Allow);
     }
 }
