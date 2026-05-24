@@ -10,7 +10,7 @@ configurable events.
   S83. codex get_state fresh      thread_id set at session creation; history=[], model=null
   S84. codex basic prompt         text "event 0" received; 2 history entries
   S85. codex 3-turn accumulation  6 history entries after 3 prompts (3 user + 3 assistant)
-  S86. codex set_model            state.model reflects change; unknown model → -32602 error
+  S86. codex set_model            state.model reflects change; unknown model → -32602 (InvalidParams)
   S87. codex list_children        root session → {"children": []}
   S88. codex export format        PortableMessages with role/text/blocks
   S89. codex tool event           4 history entries: user + asst_tool_call + user_tool_result + asst_text
@@ -360,14 +360,13 @@ async def s86_codex_set_model(nc):
         else:
             fail("S86: get_state.model wrong after set_model", str(state.get("model")))
 
-        # Set to unknown model → should fail
+        # Set to unknown model → should fail with -32602 (InvalidParams)
         r2 = await send_set_model(nc, prefix, sid, "completely-unknown-codex-model-s86")
         info(f"S86: unknown model response = {str(r2)[:100]!r}")
-        # codex uses internal_error() → -32603 for unknown model (unlike acp/xai/or which use -32602)
-        if r2.get("code") in (-32602, -32603):
-            ok(f"S86: error code {r2.get('code')} for unknown model (codex uses -32603)")
+        if r2.get("code") == -32602:
+            ok("S86: error code -32602 (InvalidParams) for unknown model")
         else:
-            fail("S86: expected error code for unknown model", str(r2.get("code")))
+            fail("S86: expected -32602 for unknown model", str(r2.get("code")))
 
         if "unknown model" in r2.get("message", "").lower():
             ok("S86: error message mentions 'unknown model'")
