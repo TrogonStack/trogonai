@@ -62,7 +62,23 @@ impl ServerAuthRequestClaims {
     }
 
     pub fn connect_opts_jwt(&self) -> Option<&str> {
-        self.inner.nats.connect_opts.jwt.as_deref()
+        non_empty_opt(self.inner.nats.connect_opts.jwt.as_deref()).or_else(|| {
+            self.nats_json
+                .get("connect_opts")?
+                .get("jwt")?
+                .as_str()
+                .filter(|s| !s.is_empty())
+        })
+    }
+
+    pub fn connect_opts_opaque_pass(&self) -> Option<&str> {
+        non_empty_opt(self.inner.nats.connect_opts.pass.as_deref()).or_else(|| {
+            self.nats_json
+                .get("connect_opts")?
+                .get("pass")?
+                .as_str()
+                .filter(|s| !s.is_empty())
+        })
     }
 
     pub fn connect_opts_auth_token(&self) -> Option<&str> {
@@ -106,6 +122,10 @@ impl ServerAuthRequestClaims {
         self.client_tls_pem_certs().into_iter().next()
     }
 
+}
+
+fn non_empty_opt(value: Option<&str>) -> Option<&str> {
+    value.filter(|s| !s.is_empty())
 }
 
 impl fmt::Debug for ServerAuthRequestClaims {
