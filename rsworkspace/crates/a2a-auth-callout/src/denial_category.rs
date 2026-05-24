@@ -31,6 +31,7 @@ impl DenialCategory {
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
             AuthCalloutError::JwtMint(_) => Self::InternalError,
+            AuthCalloutError::Internal(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(msg) => Self::from_credential_message(msg),
         }
     }

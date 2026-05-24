@@ -192,7 +192,7 @@ impl DenialClaims {
             },
         };
 
-        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.0).map_err(DenialClaimsError::Encode)
+        encode(&Header::new(Algorithm::HS256), &claims, &signing_key.encoding_key()).map_err(DenialClaimsError::Encode)
     }
 
     #[cfg(test)]
