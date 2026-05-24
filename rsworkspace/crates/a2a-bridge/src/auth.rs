@@ -145,6 +145,8 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             account: self.tenant_account.as_ref().map(|a| a.as_str().to_owned()),
             client_info: None,
             connect_opts: None,
+            server_id: None,
+            request_jti: None,
         };
         let bytes =
             serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;
