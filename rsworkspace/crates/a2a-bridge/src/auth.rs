@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::json;
 use tokio::time::timeout;
 
 use a2a_auth_callout::{AuthCalloutRequest, AuthCalloutResponse};
@@ -118,14 +117,17 @@ impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
 #[async_trait]
 impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<W> {
     async fn mint(&self, caller_auth: &CallerHttpsAuth) -> Result<BridgeUserJwt, BridgeError> {
+        let bearer_jwt = caller_auth
+            .as_str()
+            .strip_prefix("Bearer ")
+            .or_else(|| caller_auth.as_str().strip_prefix("bearer "))
+            .map(str::to_owned);
         let envelope = AuthCalloutRequest {
             user_nkey: None,
-            user_jwt: None,
+            user_jwt: bearer_jwt,
             account: None,
-            client_info: Some(json!({
-                "https_authorization_header": caller_auth.as_str(),
-            })),
-            connect_opts: Some(json!({ "ingress": "a2a-bridge_https" })),
+            client_info: None,
+            connect_opts: None,
         };
         let bytes =
             serde_json::to_vec(&envelope).map_err(|e: serde_json::Error| BridgeError::Serialize(e))?;

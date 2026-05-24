@@ -6,6 +6,7 @@ use crate::error::AuthCalloutError;
 use crate::jwt::{
     derive_caller_id, spicedb_principal_from_oidc_claims, AudienceAccount, ExternalSubject, UserJwtClaims,
 };
+use crate::permissions::IssuedPermissions;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OidcIssuerUrl(String);
@@ -193,11 +194,13 @@ impl JwksOidcVerifier {
         let caller_id = derive_caller_id(sub_str, account).map_err(|e| {
             AuthCalloutError::CredentialVerification(format!("caller_id derivation failed: {e}"))
         })?;
+        let nats_permissions = IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
             sub,
             aud: account.clone(),
             data,
             caller_id,
+            nats_permissions,
         })
     }
 }
