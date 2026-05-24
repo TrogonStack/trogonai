@@ -30,6 +30,7 @@
 #     ./scripts/a2a-nsc-bootstrap.sh
 #
 # Automated path: this script. Manual path: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md.
+# Auth callout fleet keys / AUTH·APP·SYS layout: scripts/a2a-auth-callout-bootstrap.sh.
 #
 # nsc flag references (all flags used below are from these sources):
 #   nsc add account  : https://nats-io.github.io/nsc/nsc_add_account.html
