@@ -13,7 +13,7 @@ use a2a_nats::{
     ingress_invalid_request_response_bytes, NatsConfig,
 };
 use a2a_redaction::wasm_bundle_path::WasmBundlePath;
-use a2a_redaction::SkillId;
+use a2a_redaction::{Ed25519PublicKey, SkillId};
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use futures::stream::StreamExt;
@@ -1086,6 +1086,7 @@ fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack {
     }
 
     let bundle_path = WasmBundlePath::new(dir);
+    let tier3_signing_pubkey = gateway_tier3_signing_pubkey(env);
     let tier2_cel_active = gateway_tier2_cel_enabled(env);
     let tier2: Box<dyn crate::policy::Tier2CelEvaluator> = if tier2_cel_active {
         let tier2_dir = bundle_path.as_path().join("tier2");
@@ -1104,7 +1105,12 @@ fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack {
         Box::new(crate::policy::NoopTier2Evaluator)
     };
 
-    match WasmtimeSubstrate::try_new_with_tier2(bundle_path.clone(), tier2, tier2_cel_active) {
+    match WasmtimeSubstrate::try_new_with_tier2(
+        bundle_path.clone(),
+        tier2,
+        tier2_cel_active,
+        tier3_signing_pubkey,
+    ) {
         Err(err) => {
             warn!(
                 error = %err,
@@ -1122,17 +1128,12 @@ fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack {
             if let Ok(slugs) = env.var("A2A_GATEWAY_POLICY_SKILLS") {
                 for slug in slugs.split(',').map(str::trim).filter(|slug| !slug.is_empty()) {
                     let skill_id = SkillId::new(slug);
-                    let wasm_path = substrate.redaction.bundles_base().join_skill_wasm(&skill_id);
-                    match std::fs::read(&wasm_path) {
+                    match substrate.preload_redaction_skill(skill_id.clone()) {
                         Err(err) => {
-                            warn!(skill=%slug, path=?wasm_path, error=%err, "skipped gateway policy WASM preload");
+                            error!(skill=%slug, error=%err, "gateway tier-3 policy bundle preload failed");
                         }
-                        Ok(bytes) => {
-                            if let Err(err) = substrate.register_redaction_skill(skill_id.clone(), &bytes) {
-                                warn!(skill=%slug, error=%err, "gateway failed to register redaction WASM");
-                            } else {
-                                loaded_skills.push(skill_id);
-                            }
+                        Ok(()) => {
+                            loaded_skills.push(skill_id);
                         }
                     }
                 }
@@ -1162,6 +1163,23 @@ fn gateway_tier2_cel_enabled<E: ReadEnv>(env: &E) -> bool {
         flag.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn gateway_tier3_signing_pubkey<E: ReadEnv>(env: &E) -> Option<Ed25519PublicKey> {
+    let Ok(raw) = env.var("A2A_GATEWAY_TIER3_SIGNING_PUBKEY") else {
+        return None;
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match Ed25519PublicKey::from_hex(trimmed) {
+        Ok(pubkey) => Some(pubkey),
+        Err(err) => {
+            warn!(error=%err, "A2A_GATEWAY_TIER3_SIGNING_PUBKEY invalid; tier-3 bundle signing disabled");
+            None
+        }
+    }
 }
 
 fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {

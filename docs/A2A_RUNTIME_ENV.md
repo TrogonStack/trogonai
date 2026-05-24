@@ -146,6 +146,7 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_TIER2_CEL_ENABLED` | no | off | Truthy loads `{bundle_dir}/tier2/*.cel` and runs the CEL evaluator; off keeps noop Tier-2 (see [Tier-2 CEL](./A2A_TIER2_CEL.md)) |
 | `A2A_GATEWAY_TIER3_REDACTION_ENABLED` | no | off | Truthy runs authoritative Tier-3 WASM redaction on ingress after Tier-2 (see [Tier-3 redaction](./A2A_TIER3_REDACTION.md)); requires `A2A_GATEWAY_POLICY_BUNDLE_DIR` + preloaded skills |
 | `A2A_GATEWAY_POLICY_SKILLS` | no | — | Comma-separated skill slugs; preload `{skill}.wasm` and `{skill}.manifest.json` from `A2A_GATEWAY_POLICY_BUNDLE_DIR` (missing files skipped) |
+| `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` | no | — | Hex-encoded 32-byte ed25519 public key (no `0x` prefix); when set, every preloaded skill must ship a valid `{skill}.sig` envelope verified at preload (see [Tier-3 redaction](./A2A_TIER3_REDACTION.md)) |
 | `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
 | `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
 | `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](./A2A_PUSH_DLQ_OPS.md)) |
