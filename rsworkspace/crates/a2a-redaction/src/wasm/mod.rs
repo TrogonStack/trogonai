@@ -47,6 +47,19 @@ impl WasmRedactorHost {
             std::fs::read(&path).map_err(|e| RedactionError::WasmModule(format!("read {}: {e}", path.display())))?;
         self.register_skill_wasm(skill, &bytes)
     }
+
+    pub fn redact_part_bytes(&self, skill: &SkillId, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
+        let modules = self.modules.read().unwrap_or_else(|e| {
+            tracing::error!("wasm redactor skill module cache poisoned after write failure");
+            e.into_inner()
+        });
+
+        let Some(wasm_mod) = modules.get(skill) else {
+            return Ok(payload.to_vec());
+        };
+
+        engine::redact_part_guest(&self.engine, wasm_mod, payload)
+    }
 }
 
 impl Redactor for WasmRedactorHost {
