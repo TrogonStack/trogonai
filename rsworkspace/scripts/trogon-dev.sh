@@ -40,7 +40,7 @@ if running trogon-wasm-runtime; then
 else
   echo "Starting trogon-wasm-runtime (prefix=acp.wasm)"
   WASM_ONLY=0 \
-  WASM_AUTO_ALLOW_PERMISSIONS=1 \
+  WASM_AUTO_ALLOW_PERMISSIONS=0 \
   ACP_PREFIX=acp.wasm \
   AGENT_TYPE=wasm \
   NATS_URL="${NATS_URL:-nats://localhost:4222}" \

@@ -271,7 +271,7 @@ async fn dispatch<N, R>(
                     return;
                 }
             };
-            let result = runtime.handle_request_permission(req);
+            let result = runtime.handle_request_permission(req).await;
             reply_result(&nats, reply, result).await;
         }
 
@@ -366,6 +366,12 @@ async fn dispatch<N, R>(
     }
 }
 
+/// NATS default max_payload is 1 MB. Replies larger than this are silently
+/// dropped by async-nats; the caller then blocks until timeout. We enforce
+/// the limit here so the error is logged with useful context rather than
+/// manifesting as an unexplained hang on the caller side.
+const NATS_MAX_PAYLOAD: usize = 1024 * 1024; // 1 MB
+
 async fn reply_result<N, T>(
     nats: &N,
     reply: Option<async_nats::Subject>,
@@ -398,6 +404,29 @@ async fn reply_result<N, T>(
             }
         }
     };
+
+    if body.len() > NATS_MAX_PAYLOAD {
+        error!(
+            bytes = body.len(),
+            limit = NATS_MAX_PAYLOAD,
+            "Reply payload exceeds NATS max_payload — dropping to avoid silent hang. \
+             Reduce WASM_OUTPUT_BYTE_LIMIT or raise the NATS server max_payload."
+        );
+        let err_body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": format!(
+                    "Terminal output too large ({} bytes); increase NATS max_payload or reduce output",
+                    body.len()
+                )
+            }
+        });
+        if let Ok(err_bytes) = serde_json::to_vec(&err_body) {
+            let _ = nats.publish(reply_to, err_bytes.into()).await;
+        }
+        return;
+    }
 
     if let Err(e) = nats.publish(reply_to, body.into()).await {
         warn!(error = %e, "Failed to publish reply");
@@ -630,7 +659,7 @@ mod tests {
             Ok(ReadTextFileResponse::new("mock content"))
         }
 
-        fn handle_request_permission(
+        async fn handle_request_permission(
             &self,
             _: RequestPermissionRequest,
         ) -> agent_client_protocol::Result<RequestPermissionResponse> {

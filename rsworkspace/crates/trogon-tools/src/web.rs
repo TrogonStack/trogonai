@@ -35,7 +35,8 @@ pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     };
 
     if text.len() > MAX_RESPONSE {
-        format!("{}... (truncated at 8KB)", &text[..MAX_RESPONSE])
+        let boundary = text.floor_char_boundary(MAX_RESPONSE);
+        format!("{}... (truncated at 8KB)", &text[..boundary])
     } else {
         text
     }

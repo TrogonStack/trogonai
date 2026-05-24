@@ -61,6 +61,18 @@ const VALID_MODES: &[&str] = &[
     "bypassPermissions",
 ];
 
+fn parse_bash_cd(command: &str) -> Option<&str> {
+    let trimmed = command.trim();
+    if trimmed == "cd" {
+        return Some("");
+    }
+    let rest = trimmed.strip_prefix("cd ")?;
+    if rest.contains(';') || rest.contains('|') || rest.contains('\n') {
+        return None;
+    }
+    Some(rest.trim())
+}
+
 fn default_session_mode() -> String {
     "default".to_string()
 }
@@ -806,12 +818,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         {
-            let sessions = self.sessions.lock().await;
-            if let Some(s) = sessions.get(&session_id) {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.cwd = cwd.clone();
+                let mode = s.mode.clone();
+                let model = s.model.clone();
+                let enabled_tools = s.enabled_tools.clone();
+                drop(sessions);
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
-                    .modes(self.session_mode_state(&s.mode))
-                    .models(self.session_model_state(s.model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+                    .modes(self.session_mode_state(&mode))
+                    .models(self.session_model_state(model.as_deref()))
+                    .config_options(Self::all_tool_config_options(&enabled_tools)));
             }
         }
 
@@ -1111,7 +1128,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1123,14 +1140,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
                 s.cwd.clone(),
+                s.mode.clone(),
             )
         };
 
         let trogon_md = self.md_loader.load(&cwd).await;
-        let session_system_prompt = match (trogon_md, session_system_prompt) {
-            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
-            (Some(md), None) => Some(md),
-            (None, sp) => sp,
+        let session_system_prompt = {
+            let header = format!(
+                "Current working directory: {cwd}\nPermission mode: {session_mode}"
+            );
+            match (trogon_md, session_system_prompt) {
+                (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
+                (Some(md), None) => Some(format!("{header}\n\n{md}")),
+                (None, Some(sp)) => Some(format!("{header}\n\n{sp}")),
+                (None, None) => Some(header),
+            }
         };
 
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
@@ -1405,8 +1429,36 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
                 let result = if !allowed {
                     format!("Permission denied: user refused to run tool `{}`", call.name)
+                } else if call.name == "change_directory" {
+                    let path = tool_input
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(".");
+                    match trogon_tools::fs::resolve_directory_target(&cwd, path) {
+                        Ok(resolved) => {
+                            cwd = resolved.to_string_lossy().into_owned();
+                            if let Some(s) = self.sessions.lock().await.get_mut(&session_id) {
+                                s.cwd = cwd.clone();
+                            }
+                            format!("Working directory is now {cwd}")
+                        }
+                        Err(e) => e,
+                    }
                 } else if call.name == "bash" {
-                    if let Some(nats) = &self.execution_nats {
+                    if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+                        && let Some(target) = parse_bash_cd(cmd)
+                    {
+                        match trogon_tools::fs::resolve_directory_target(&cwd, target) {
+                            Ok(resolved) => {
+                                cwd = resolved.to_string_lossy().into_owned();
+                                if let Some(s) = self.sessions.lock().await.get_mut(&session_id) {
+                                    s.cwd = cwd.clone();
+                                }
+                                format!("Working directory is now {cwd}")
+                            }
+                            Err(e) => e,
+                        }
+                    } else if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
                         execute_bash_via_nats(nats, wasm, &session_id, &call.arguments).await
                     } else {
@@ -1459,6 +1511,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     messages.push(msg);
                 }
                 s.history = messages;
+                s.cwd = cwd.clone();
                 compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
                     .await;
                 if let Some(store) = &self.session_store {

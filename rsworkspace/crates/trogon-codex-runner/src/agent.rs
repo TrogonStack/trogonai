@@ -371,12 +371,15 @@ where
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
+        let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get(&session_id) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.cwd = cwd;
+            let mode = session.mode.clone();
             let model = session.model.as_deref();
             return Ok(LoadSessionResponse::new()
-                .modes(self.session_mode_state(&session.mode))
+                .modes(self.session_mode_state(&mode))
                 .models(self.session_model_state(model)));
         }
 
@@ -1045,6 +1048,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.models.unwrap().current_model_id.to_string(), "o3");
+    }
+
+    #[tokio::test]
+    async fn load_session_updates_cwd_for_in_memory_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s2", "/home/user", None).await;
+        agent
+            .load_session(LoadSessionRequest::new("s2", "/new/project"))
+            .await
+            .unwrap();
+        let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = list
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id.to_string() == "s2")
+            .expect("session must be listed");
+        assert_eq!(info.cwd.to_string_lossy(), "/new/project");
     }
 
     #[tokio::test]

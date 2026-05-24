@@ -319,7 +319,7 @@ where
             let sessions = self.sessions.borrow();
             sessions
                 .get(session_id)
-                .map(|s| s.terminal_cwd(req.cwd.as_deref()))
+                .map(|s| s.terminal_cwd(req.cwd.as_deref(), self.wasm_only))
                 .unwrap_or_else(|| sandbox_dir.clone())
         };
 
@@ -1058,7 +1058,7 @@ where
 
     // ── Permission ─────────────────────────────────────────────────────────
 
-    pub fn handle_request_permission(
+    pub async fn handle_request_permission(
         &self,
         req: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
@@ -1071,10 +1071,39 @@ where
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }
-        // No options or permissions disabled → cancel.
-        Ok(RequestPermissionResponse::new(
-            RequestPermissionOutcome::Cancelled,
-        ))
+        // Forward to the CLI via NATS so the user can approve or deny.
+        if let Some(ref nats) = self.nats_client {
+            let session_id = req.session_id.0.as_ref();
+            let subject = format!(
+                "{}.session.{}.client.session.request_permission",
+                self.acp_prefix, session_id
+            );
+            if let Ok(payload) = serde_json::to_vec(&req) {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    nats.request(subject, bytes::Bytes::from(payload)),
+                )
+                .await
+                {
+                    Ok(Ok(msg)) => {
+                        match serde_json::from_slice::<RequestPermissionResponse>(&msg.payload) {
+                            Ok(resp) => return Ok(resp),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to deserialize permission response — cancelling");
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "NATS permission request failed — cancelling");
+                    }
+                    Err(_) => {
+                        tracing::warn!("NATS permission request timed out after 60s — cancelling");
+                    }
+                }
+            }
+        }
+        // No NATS client or all paths above fell through → cancel.
+        Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
     }
 
     /// Returns a snapshot of all active session IDs.
@@ -1182,11 +1211,11 @@ where
         WasmRuntime::handle_read_text_file(self, session_id, req).await
     }
 
-    fn handle_request_permission(
+    async fn handle_request_permission(
         &self,
         req: agent_client_protocol::RequestPermissionRequest,
     ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
-        WasmRuntime::handle_request_permission(self, req)
+        WasmRuntime::handle_request_permission(self, req).await
     }
 
     fn handle_session_notification(&self, notif: agent_client_protocol::SessionNotification) {
@@ -1620,7 +1649,7 @@ mod tests {
         let mut config = test_config();
         config.auto_allow_permissions = true;
         let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
         assert!(
             matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
             "first option must be selected when auto_allow is true"
@@ -1632,14 +1661,14 @@ mod tests {
         let mut config = test_config();
         config.auto_allow_permissions = true;
         let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
-        let resp = rt.handle_request_permission(perm_req(vec![])).unwrap();
+        let resp = rt.handle_request_permission(perm_req(vec![])).await.unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
     async fn request_permission_cancelled_when_auto_allow_disabled() {
         let rt = make_runtime(); // auto_allow_permissions = false
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
     }
 

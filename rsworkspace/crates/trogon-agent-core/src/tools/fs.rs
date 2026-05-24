@@ -8,33 +8,54 @@ pub(crate) fn resolve_path(
     cwd: &str,
     path: &str,
 ) -> Result<std::path::PathBuf, String> {
-    use std::path::{Component, PathBuf};
+    use std::path::{Component, Path, PathBuf};
 
-    let joined = std::path::Path::new(cwd).join(path);
-    let mut normalized = PathBuf::new();
-
-    for component in joined.components() {
-        match component {
-            Component::ParentDir => {
-                if !normalized.pop() {
-                    return Err("path is outside the working directory".to_string());
-                }
-            }
-            Component::CurDir => {}
-            c => normalized.push(c),
-        }
-    }
-
-    let cwd_norm: PathBuf = std::path::Path::new(cwd)
+    let cwd_norm: PathBuf = Path::new(cwd)
         .components()
         .filter(|c| !matches!(c, Component::CurDir))
         .collect();
+
+    let path_obj = Path::new(path);
+    let normalized = if path_obj.is_absolute() {
+        normalize_components(path_obj)
+    } else {
+        let joined = Path::new(cwd).join(path);
+        normalize_components(&joined)
+    };
 
     if !normalized.starts_with(&cwd_norm) {
         return Err("path is outside the working directory".to_string());
     }
 
+    // Resolve symlinks for parts that exist so a symlink pointing outside cwd
+    // is caught. For paths that don't exist yet, fall back to the lexically-
+    // normalized result which already passed the starts_with check.
+    if let Ok(canonical) = std::fs::canonicalize(&normalized) {
+        let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or(cwd_norm);
+        if !canonical.starts_with(&cwd_canonical) {
+            return Err("path is outside the working directory".to_string());
+        }
+        return Ok(canonical);
+    }
+
     Ok(normalized)
+}
+
+fn normalize_components(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(p) => out.push(p.as_os_str()),
+            Component::RootDir => out.push("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(name) => out.push(name),
+        }
+    }
+    out
 }
 
 pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {

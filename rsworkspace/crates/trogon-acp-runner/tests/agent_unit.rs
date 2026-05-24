@@ -166,6 +166,30 @@ async fn load_session_returns_ok_for_missing_session() {
         .await;
 }
 
+#[tokio::test]
+async fn load_session_updates_stored_cwd() {
+    let (store, _, agent) = make_agent_parts();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let resp = agent
+                .new_session(NewSessionRequest::new("/home/user/project"))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .load_session(LoadSessionRequest::new(session_id.clone(), "/new/project"))
+                .await
+                .unwrap();
+
+            let state = store.load(&session_id).await.unwrap();
+            assert_eq!(state.cwd, "/new/project");
+        })
+        .await;
+}
+
 // ── set_session_mode ──────────────────────────────────────────────────────────
 
 #[tokio::test]

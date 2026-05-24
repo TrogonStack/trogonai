@@ -1,5 +1,6 @@
 pub mod client_supervisor;
 pub mod doctor;
+pub mod env_local;
 pub mod fs;
 pub mod markdown;
 pub mod nats;
@@ -11,6 +12,7 @@ pub mod session;
 pub mod session_store;
 pub mod stdio_mcp_bridge;
 pub mod tool_update;
+pub mod terminal;
 pub mod tui_client;
 
 pub use fs::{Fs, RealFs};

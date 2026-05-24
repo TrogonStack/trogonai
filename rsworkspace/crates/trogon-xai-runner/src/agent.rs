@@ -133,6 +133,18 @@ struct XaiSession {
     mode: String,
 }
 
+fn parse_bash_cd(command: &str) -> Option<&str> {
+    let trimmed = command.trim();
+    if trimmed == "cd" {
+        return Some("");
+    }
+    let rest = trimmed.strip_prefix("cd ")?;
+    if rest.contains(';') || rest.contains('|') || rest.contains('\n') {
+        return None;
+    }
+    Some(rest.trim())
+}
+
 fn default_session_mode() -> String {
     "default".to_string()
 }
@@ -730,12 +742,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let cwd = req.cwd.to_string_lossy().into_owned();
 
         {
-            let sessions = self.sessions.lock().await;
-            if let Some(s) = sessions.get(&session_id) {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.cwd = cwd.clone();
+                let mode = s.mode.clone();
+                let model = s.model.clone();
+                let enabled_tools = s.enabled_tools.clone();
+                drop(sessions);
                 return Ok(LoadSessionResponse::new()
-                    .modes(self.session_mode_state(&s.mode))
-                    .models(self.session_model_state(s.model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+                    .modes(self.session_mode_state(&mode))
+                    .models(self.session_model_state(model.as_deref()))
+                    .config_options(Self::all_tool_config_options(&enabled_tools)));
             }
         }
 
@@ -1069,7 +1086,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
+        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1082,6 +1099,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
                 s.cwd.clone(),
+                s.mode.clone(),
             )
         };
 
@@ -1098,10 +1116,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         let trogon_md = self.md_loader.load(&cwd).await;
-        let session_system_prompt = match (trogon_md, session_system_prompt) {
-            (Some(md), Some(sp)) => Some(format!("{md}\n\n{sp}")),
-            (Some(md), None) => Some(md),
-            (None, sp) => sp,
+        let session_system_prompt = {
+            let header = format!(
+                "Current working directory: {cwd}\nPermission mode: {session_mode}"
+            );
+            match (trogon_md, session_system_prompt) {
+                (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
+                (Some(md), None) => Some(format!("{header}\n\n{md}")),
+                (None, Some(sp)) => Some(format!("{header}\n\n{sp}")),
+                (None, None) => Some(header),
+            }
         };
 
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
@@ -1539,8 +1563,39 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         format!("Permission denied: user refused to run tool `{name}`")
                     } else {
                     match name.as_str() {
+                        "change_directory" => {
+                            let path = tool_input
+                                .get("path")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(".");
+                            match trogon_tools::fs::resolve_directory_target(&cwd, path) {
+                                Ok(resolved) => {
+                                    cwd = resolved.to_string_lossy().into_owned();
+                                    if let Some(s) = self.sessions.lock().await.get_mut(&session_id) {
+                                        s.cwd = cwd.clone();
+                                    }
+                                    format!("Working directory is now {cwd}")
+                                }
+                                Err(e) => e,
+                            }
+                        }
                         "bash" => {
-                            if let Some(nats) = &self.execution_nats {
+                            if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+                                && let Some(target) = parse_bash_cd(cmd)
+                            {
+                                match trogon_tools::fs::resolve_directory_target(&cwd, target) {
+                                    Ok(resolved) => {
+                                        cwd = resolved.to_string_lossy().into_owned();
+                                        if let Some(s) =
+                                            self.sessions.lock().await.get_mut(&session_id)
+                                        {
+                                            s.cwd = cwd.clone();
+                                        }
+                                        format!("Working directory is now {cwd}")
+                                    }
+                                    Err(e) => e,
+                                }
+                            } else if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
                                 execute_bash_via_nats(nats, wasm, &session_id, &arguments).await
                             } else {
@@ -1626,6 +1681,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     };
                     s.history.push(assistant_msg);
                 }
+                s.cwd = cwd.clone();
                 compact_or_trim_xai_history(&self.execution_nats, &mut s.history, self.max_history)
                     .await;
                 // Update the stored response ID from this turn.
@@ -2267,6 +2323,20 @@ mod tests {
         assert_eq!(
             resp.models.unwrap().current_model_id.to_string(),
             "grok-3-mini"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_session_updates_cwd_for_in_memory_session() {
+        let agent = make_agent();
+        agent.test_insert_session("s2", "/home/user", None).await;
+        agent
+            .load_session(LoadSessionRequest::new("s2", "/new/project"))
+            .await
+            .unwrap();
+        assert_eq!(
+            agent.test_session_cwd("s2").await.as_deref(),
+            Some("/new/project")
         );
     }
 

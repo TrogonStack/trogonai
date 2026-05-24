@@ -128,6 +128,10 @@ pub struct SessionState {
     /// Set on the first bash call; subsequent calls reuse the same terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// Working directory the persistent terminal was created in.
+    /// When this differs from the current session cwd, `terminal_id` is cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_cwd: Option<String>,
     /// Todo list for this session, persisted in NATS KV.
     #[serde(default)]
     pub todos: Vec<TodoItem>,
@@ -179,6 +183,7 @@ impl Default for SessionState {
             egress_policy: None,
             audit_log: Vec::new(),
             terminal_id: None,
+            terminal_cwd: None,
             todos: Vec::new(),
             permission_rules_text: None,
             token_budget: default_token_budget(),

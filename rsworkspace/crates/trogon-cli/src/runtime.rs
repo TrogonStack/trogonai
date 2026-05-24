@@ -14,6 +14,8 @@ use crate::fs::Fs;
 use crate::repl;
 use crate::session::SessionFactory;
 use crate::tui_client::{ActiveClientState, TuiClient};
+
+pub use crate::tui_client::PermissionCoordinator;
 use crate::RunnerSwitcher;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
@@ -75,7 +77,11 @@ where
         prefix: prefix.to_string(),
         allowed_tools: Vec::new(),
     }));
-    let tui_client = Rc::new(TuiClient::new(client_state.clone()));
+    let permission_coordinator = PermissionCoordinator::new();
+    let tui_client = Rc::new(TuiClient::new(
+        client_state.clone(),
+        permission_coordinator.clone(),
+    ));
 
     let supervisor = Rc::new(AcpClientSupervisor::new(
         client_state,
@@ -95,6 +101,7 @@ where
         switcher,
         registry,
         Some(supervisor),
+        permission_coordinator,
         stream,
         resume,
     )

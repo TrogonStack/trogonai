@@ -133,7 +133,8 @@ fn strip_exit_markers(output: &str) -> String {
 
 fn truncate_output(mut output: String) -> String {
     if output.len() > OUTPUT_TRUNCATE {
-        output.truncate(OUTPUT_TRUNCATE);
+        let boundary = output.floor_char_boundary(OUTPUT_TRUNCATE);
+        output.truncate(boundary);
         output.push_str("… [truncated]");
     }
     output

@@ -64,7 +64,7 @@ pub trait Runtime {
     fn handle_request_permission(
         &self,
         req: RequestPermissionRequest,
-    ) -> agent_client_protocol::Result<RequestPermissionResponse>;
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<RequestPermissionResponse>>;
 
     fn handle_session_notification(&self, notif: SessionNotification);
 
