@@ -16,7 +16,7 @@ pub(crate) fn signed_auth_request(
             name: server.public_key(),
             host: "127.0.0.1".into(),
             id: server.public_key(),
-            version: Some("2.10.29".into()),
+            version: Some("2.14.1".into()),
             cluster: None,
             tags: None,
             xkey: None,
