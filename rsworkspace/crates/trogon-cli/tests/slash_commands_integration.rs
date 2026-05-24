@@ -450,6 +450,111 @@ async fn model_slash_command_same_runner_returns_unchanged_session() {
     );
 }
 
+// ── /clear after model switch ─────────────────────────────────────────────────
+
+/// After a `/model` cross-runner switch, `/clear` must create the new session
+/// on the destination runner prefix, not the original one.
+///
+/// Sequence: switch_model(src→grok) → NatsSessionFactory::create_session(new_prefix) →
+/// assert session routes to acp.grok, not acp.src.
+#[tokio::test]
+async fn clear_after_model_switch_creates_session_on_new_runner_prefix() {
+    let (_container, port) = start_nats().await;
+    let nats = connect(port).await;
+    let nats_bg = connect(port).await;
+
+    // Single subscriber handles BOTH the switch's new_session call AND the /clear call
+    // on the grok prefix (returns "grok-sess-1" then "grok-sess-2").
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.grok.agent.session.new")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            let mut count = 0usize;
+            while let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    count += 1;
+                    let id = format!("grok-sess-{count}");
+                    let body = serde_json::json!({ "sessionId": id });
+                    n.publish(reply, serde_json::to_vec(&body).unwrap().into())
+                        .await
+                        .ok();
+                }
+            }
+        });
+    }
+    // export from src runner
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.src.agent.ext.session/export")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    n.publish(reply, b"[]"[..].into()).await.ok();
+                }
+            }
+        });
+    }
+    // session/import on grok runner
+    {
+        let n = nats_bg.clone();
+        let mut sub = nats_bg
+            .subscribe("acp.grok.agent.ext.session/import")
+            .await
+            .unwrap();
+        tokio::spawn(async move {
+            if let Some(msg) = sub.next().await {
+                if let Some(reply) = msg.reply {
+                    n.publish(reply, b"{}"[..].into()).await.ok();
+                }
+            }
+        });
+    }
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Registry: grok-4 → acp.grok
+    let registry = trogon_registry::Registry::new(trogon_registry::MockRegistryStore::new());
+    let mut cap = trogon_registry::AgentCapability::new("xai", ["chat"], "acp.grok.agent.>");
+    cap.metadata = serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.grok" });
+    registry.register(&cap).await.unwrap();
+
+    let base_config = acp_nats::Config::new(
+        acp_nats::AcpPrefix::new("acp.src").unwrap(),
+        trogon_nats::NatsConfig {
+            servers: vec![format!("127.0.0.1:{port}")],
+            auth: trogon_nats::NatsAuth::None,
+        },
+    );
+    let mut switcher = CrossRunnerSwitcher::new(nats.clone(), base_config, registry);
+
+    // /model: switch from acp.src to grok-4
+    let (new_prefix, _) = switcher
+        .switch_model("acp.src", "old-session", "grok-4", "/workspace")
+        .await
+        .expect("switch_model must succeed");
+
+    assert_eq!(new_prefix, "acp.grok", "/model must resolve to grok prefix");
+
+    // /clear: create a new session using the prefix obtained from the switch
+    let factory = NatsSessionFactory::new(nats);
+    let cleared_session = factory
+        .create_session(&new_prefix, std::env::current_dir().unwrap())
+        .await
+        .expect("/clear must create session on new runner prefix");
+
+    assert_eq!(
+        cleared_session.session_id(),
+        "grok-sess-2",
+        "/clear after model switch must create session on the new runner prefix (acp.grok)"
+    );
+}
+
 /// compact() on a session created via attach_session also sends to the right
 /// subject with the correct session_id.
 #[tokio::test]
