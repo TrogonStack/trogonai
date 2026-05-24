@@ -17,7 +17,7 @@ Partial items state the in-tree code surface and what remains before the item is
 ## Phase 1 — policy & audit
 
 - [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) and federated `SpiceDbImportGate`. **Remaining:** non-SpiceDB declarative bundle tables and their evaluator.
-- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code shipped:** `AuditEnvelopeFields` populates `trace_id`, `rules_fired`, `rewrites`, `stream_consumer`, `zed_token_snapshot`; caller attribution rides `X-A2a-Caller-Id` header. **Remaining:** replace header-derived caller with JWT-derived `caller_id` once auth-callout is deployed.
+- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired:** `resolve_gateway_caller_identity` reads **`X-A2a-Spicedb-Principal`** (JWT `data` claim) with deprecated **`X-A2a-Caller-Id`** fallback; audits populate `caller_id`, `caller_source`. **Pending deployed auth-callout** for production header population on live ingress.
 
 ## Phase 2 — streaming & lifecycle
 
@@ -27,7 +27,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 - [ ] Tier 3 authoritative redaction in the gateway beyond preload-only skill hosts — deterministic policies, refusal semantics, telemetry. **Code shipped:** engine, module loader, and skill-id dispatch in `a2a-redaction`; gateway invokes the substrate when bundles are configured. **Remaining:** authoritative call site, deterministic policy semantics, refusal codes, and telemetry on the redaction path.
 - [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`, agent `Bridge` / `message/stream` wiring, gateway-side DLQ mirror (env-gated). **Remaining:** deployed auth-callout mint + gateway `X-A2a-Spicedb-Principal` header forward so the populated caller_id surfaces in DLQ subjects (today's `_` fallback stays active without a principal).
-- [ ] Exactly-once dedup across agent + mirror DLQ paths ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)). **Code shipped:** `DeliverySemantics` JSON-RPC extension, `PushDeliverySemanticsRegistry`, `PushIdempotencyKey` + `IdempotencyKeyHeader`. **Remaining:** sketched dedup contract wired across both paths.
+- [ ] Exactly-once dedup across agent + mirror DLQ paths ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)). **Code wired:** `PushIdempotencyKey::derive_dlq`, in-process LRU (`A2A_PUSH_DLQ_DEDUP_LRU_SIZE`), JetStream `Nats-Msg-Id` + `duplicate_window` (`A2A_PUSH_DLQ_DEDUP_WINDOW_SECS`) on agent + gateway mirror publish paths.
 
 ## Phase 4 — interop & federation
 
@@ -37,7 +37,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Cross-cutting
 
-- [ ] Gateway request path completeness. **Code shipped:** Tier-1 SpiceDB gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), Wasmtime-hosted Tier-3 preload, decision-site audit publish (`trace_id`, `rules_fired`, `rewrites`, `stream_consumer`, `zed_token_snapshot`), unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), caller tracing via NATS `X-A2a-Caller-Id` ↔ HTTPS `x-a2a-caller-id` from `a2a-bridge`. **Remaining:** authoritative JWT-derived `caller_id`, end-to-end auth-callout verifier in the gateway tier, authoritative Tier-3 redaction call site.
+- [ ] Gateway request path completeness. **Code shipped:** Tier-1 SpiceDB gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), Wasmtime-hosted Tier-3 preload, decision-site audit publish (`trace_id`, `rules_fired`, `rewrites`, `stream_consumer`, `zed_token_snapshot`, `caller_id`, `caller_source`), unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), JWT-data-claim caller resolution with header-trust fallback. **Remaining:** end-to-end auth-callout verifier in the gateway tier, authoritative Tier-3 redaction call site.
 
 ---
 

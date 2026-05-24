@@ -72,6 +72,10 @@ pub struct AuditEnvelopeFields {
     pub stream_consumer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zed_token_snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_source: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

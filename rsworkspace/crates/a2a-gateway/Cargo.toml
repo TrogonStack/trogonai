@@ -11,6 +11,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 a2a-pack = { workspace = true }
 a2a-redaction = { workspace = true }

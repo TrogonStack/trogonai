@@ -106,6 +106,18 @@ mod tests {
     }
 
     #[test]
+    fn push_dlq_stream_sets_duplicate_window_default() {
+        let config = A2aStream::push_dlq_config(
+            &p("a2a"),
+            std::time::Duration::from_secs(crate::constants::DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS),
+        );
+        assert_eq!(
+            config.duplicate_window,
+            std::time::Duration::from_secs(crate::constants::DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS)
+        );
+    }
+
+    #[test]
     fn push_dlq_stream_uses_limits_retention() {
         let config = A2aStream::PushDlq.config(&p("a2a"));
         assert_eq!(config.retention, RetentionPolicy::Limits);

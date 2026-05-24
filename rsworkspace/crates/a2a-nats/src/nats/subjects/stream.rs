@@ -1,7 +1,7 @@
 use async_nats::jetstream::stream::{Config, DiscardPolicy, RetentionPolicy, StorageType};
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::DEFAULT_STREAM_MAX_AGE;
+use crate::constants::{DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS, DEFAULT_STREAM_MAX_AGE};
 use crate::jetstream::stream_options::EventsStreamMaxAge;
 
 /// The JetStream stream that captures a subject's messages.
@@ -53,18 +53,26 @@ impl A2aStream {
         }
     }
 
+    pub fn push_dlq_config(prefix: &A2aPrefix, duplicate_window: std::time::Duration) -> Config {
+        Config {
+            name: Self::PushDlq.stream_name(prefix),
+            subjects: Self::PushDlq.subject_patterns(prefix),
+            storage: StorageType::File,
+            retention: RetentionPolicy::Limits,
+            max_age: DEFAULT_STREAM_MAX_AGE,
+            discard: DiscardPolicy::Old,
+            duplicate_window,
+            ..Default::default()
+        }
+    }
+
     pub fn config(&self, prefix: &A2aPrefix) -> Config {
         match self {
             Self::Events => Self::events_config(prefix, EventsStreamMaxAge::DEFAULT),
-            Self::PushDlq => Config {
-                name: self.stream_name(prefix),
-                subjects: self.subject_patterns(prefix),
-                storage: StorageType::File,
-                retention: RetentionPolicy::Limits,
-                max_age: DEFAULT_STREAM_MAX_AGE,
-                discard: DiscardPolicy::Old,
-                ..Default::default()
-            },
+            Self::PushDlq => Self::push_dlq_config(
+                prefix,
+                std::time::Duration::from_secs(DEFAULT_PUSH_DLQ_DEDUP_WINDOW_SECS),
+            ),
         }
     }
 

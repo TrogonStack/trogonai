@@ -84,6 +84,7 @@ Minimal envelope skeleton:
   "push_config_id": "<push-notification-config-id>",
   "target_url": "https://example.com/webhook",
   "error": "HTTP request failed: 503 Service Unavailable",
+  "idempotency_key": "task-uuid:failed:https://example.com/webhook",
   "notification": { }
 }
 ```
@@ -95,6 +96,7 @@ Minimal envelope skeleton:
 | `push_config_id` | string | **`tasks/pushNotificationConfig`** entry that failed |
 | `target_url` | string | Resolved push target (HTTP URL, **`subject:…`**, or **`jetstream:…`**) |
 | `error` | string | Terminal failure reason from the dispatcher |
+| `idempotency_key` | string | Deterministic dedupe key: `{task_id}:{status_transition_id}:{target_url}` |
 | `notification` | JSON value **or** string | Original notification body when JSON; fallback string when serialization fails |
 
 Use DLQ messages for remediation: fix webhook endpoints, replay after config correction, or alert on sustained failure rates per **`caller_id`** / **`task_id`** subject segments.
@@ -111,7 +113,22 @@ The `{caller_id}` token in **`{prefix}.push.dlq.{caller_id}.{task_id}`** identif
 | **Principal present** via NATS header **`X-A2a-Spicedb-Principal`** (JSON User JWT `data` claim forwarded by gateway ingress once auth-callout deploys) | Sanitized **`spicedb_subject`** from the principal payload (`.` and spaces → `_`) |
 | **Principal present but `spicedb_subject` absent** | Falls back to **`_`** (or env override); agent logs a structured warning |
 
+Gateway decision-site audits use the same identity precedence: **`X-A2a-Spicedb-Principal`** → `caller_source: jwt_data_claim`; deprecated **`X-A2a-Caller-Id`** header-trust fallback → `caller_source: header_trusted` (structured warn); neither → audit `caller_id: _`.
+
 Gateway-side DLQ mirror preserves whatever segment the agent published.
+
+---
+
+## Deduplication
+
+Terminal push DLQ publishes include a deterministic **`idempotency_key`** on the envelope (`{task_id}:{status_transition_id}:{target_url}`) and set JetStream header **`Nats-Msg-Id`** to the same value.
+
+| Layer | Mechanism | Knob |
+|-------|-----------|------|
+| **In-process LRU** | Agent `Bridge` and gateway mirror each maintain a bounded LRU keyed by `idempotency_key`; duplicate publishes within the process are skipped with structured `info!` logs | **`A2A_PUSH_DLQ_DEDUP_LRU_SIZE`** (default **`1024`**) |
+| **JetStream server** | `Nats-Msg-Id` dedupe within the stream `duplicate_window` catches cross-process / cross-restart duplicates | **`A2A_PUSH_DLQ_DEDUP_WINDOW_SECS`** on stream provisioning (default **`120`** seconds) |
+
+The LRU suppresses local restart bursts; JetStream dedupe is authoritative across agents and mirror replicas.
 
 ---
 
@@ -146,4 +163,4 @@ When **`A2A_GATEWAY_PUSH_DLQ_MIRROR=on`**, the **`a2a-gateway`** process runs a 
 
 The gateway User must have JetStream **read** on **`A2A_PUSH_DLQ`** (consumer + get) and **publish** on **`{prefix}.push.dlq.mirror.*.*`**. Existing streams provisioned before mirror support may need their subject filter extended with **`{prefix}.push.dlq.mirror.*.*`** (in-tree **`provision_streams`** includes both patterns).
 
-Mirror mode is for operator visibility alongside agent publishes — it does **not** replace agent-side terminal DLQ emission or provide exactly-once deduplication across agent + mirror paths.
+Mirror mode is for operator visibility alongside agent publishes — it does **not** replace agent-side terminal DLQ emission. Both paths share the dedupe contract documented in **Deduplication** above.

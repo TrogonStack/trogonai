@@ -16,6 +16,8 @@ use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::task::TaskEventsSubject;
 use crate::push::CallerId;
 use crate::push::PushDeliverySemanticsRegistry;
+use crate::push::PushDlqDedupGate;
+use crate::push::StatusTransitionId;
 use crate::push::dispatcher::{DispatchError, PushDispatcher, maybe_terminal_push_idempotency_key};
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::push::push_payload::augment_terminal_push_notification_bytes;
@@ -47,7 +49,8 @@ use crate::task_id::A2aTaskId;
         cancel,
         audit_emitter,
         push_delivery_semantics,
-        principal_carrier
+        principal_carrier,
+        push_dlq_dedup
     )
 )]
 pub async fn handle<H, N, J, D>(
@@ -63,6 +66,7 @@ pub async fn handle<H, N, J, D>(
     push_delivery_semantics: Arc<PushDeliverySemanticsRegistry>,
     cancel: CancellationToken,
     principal_carrier: PrincipalCarrier,
+    push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) -> Option<(A2aTaskId, tokio::task::JoinHandle<()>)>
 where
     H: A2aHandler,
@@ -161,6 +165,7 @@ where
             json_rpc_req_id,
             bootstrap_task_state,
             dlq_caller,
+            push_dlq_dedup,
         )
         .await;
     });
@@ -184,6 +189,7 @@ async fn pump_events<J, H, D>(
     json_rpc_req_id: Option<String>,
     bootstrap_task_state: i32,
     push_dlq_caller_id: CallerId,
+    push_dlq_dedup: Arc<PushDlqDedupGate>,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
     H: A2aHandler,
@@ -242,6 +248,7 @@ async fn pump_events<J, H, D>(
                                 &js,
                                 &prefix,
                                 &push_dlq_caller_id,
+                                &push_dlq_dedup,
                             )
                             .await;
                         }
@@ -305,6 +312,7 @@ async fn dispatch_push_notifications<H, D, J>(
     js: &J,
     prefix: &crate::a2a_prefix::A2aPrefix,
     push_dlq_caller_id: &CallerId,
+    push_dlq_dedup: &PushDlqDedupGate,
 ) where
     H: A2aHandler,
     D: PushDispatcher + ?Sized,
@@ -317,6 +325,7 @@ async fn dispatch_push_notifications<H, D, J>(
         );
         return;
     };
+    let status_transition_id = StatusTransitionId::from_terminal(terminal_state);
 
     let list_req = a2a_types::ListTaskPushNotificationConfigsRequest {
         task_id: task_id.as_str().to_owned(),
@@ -356,7 +365,8 @@ async fn dispatch_push_notifications<H, D, J>(
                     config,
                     delivery_payload_bytes,
                     &dispatch_err,
-                    None,
+                    status_transition_id.clone(),
+                    push_dlq_dedup,
                 )
                 .await;
                 continue;
@@ -392,7 +402,8 @@ async fn dispatch_push_notifications<H, D, J>(
                     config,
                     augmented.as_ref(),
                     e,
-                    derived_opt.as_ref(),
+                    status_transition_id.clone(),
+                    push_dlq_dedup,
                 )
                 .await;
             }
@@ -595,6 +606,10 @@ mod tests {
         MockJetStreamPublisher::new()
     }
 
+    fn test_dlq_dedup() -> Arc<PushDlqDedupGate> {
+        Arc::new(PushDlqDedupGate::default())
+    }
+
     #[tokio::test]
     async fn bootstrap_reply_contains_task_id() {
         let nats = AdvancedMockNatsClient::new();
@@ -617,6 +632,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
 
@@ -646,6 +662,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
         assert!(result.is_none());
@@ -675,6 +692,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
         assert!(result.is_none());
@@ -705,6 +723,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             cancel.clone(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
 
@@ -740,6 +759,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
 
@@ -791,6 +811,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
 
@@ -848,6 +869,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             PrincipalCarrier::absent(CallerId::default()),
+            test_dlq_dedup(),
         )
         .await;
 
@@ -925,6 +947,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             caller,
+            test_dlq_dedup(),
         )
         .await;
 
@@ -990,6 +1013,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             carrier,
+            test_dlq_dedup(),
         )
         .await;
 
@@ -1052,6 +1076,7 @@ mod tests {
             Arc::new(crate::push::PushDeliverySemanticsRegistry::default()),
             CancellationToken::new(),
             carrier,
+            test_dlq_dedup(),
         )
         .await;
 
