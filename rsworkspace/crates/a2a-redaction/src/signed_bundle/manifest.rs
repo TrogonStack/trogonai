@@ -33,35 +33,16 @@ impl SignedBundleManifest {
     }
 
     pub fn parse_json(raw: &[u8], skill_id: &SkillId) -> Result<Self, SignatureVerificationError> {
-        let envelope: Self =
-            serde_json::from_slice(raw).map_err(|err| SignatureVerificationError::MalformedSignatureFile {
-                skill_id: skill_id.to_string(),
-                detail: err.to_string(),
-            })?;
-        // Refuse a signature file whose declared skill_id disagrees with the
-        // skill we are loading. Without this check a signed envelope for
-        // skill A could parse cleanly while loading skill B as long as B's
-        // manifest + wasm digests happened to match — verify_signed_bundle
-        // would then pass A's signature against B's identity.
-        if envelope.skill_id != skill_id.as_str() {
-            return Err(SignatureVerificationError::MalformedSignatureFile {
-                skill_id: skill_id.to_string(),
-                detail: format!(
-                    "signature envelope declares skill_id `{}` but loader expected `{}`",
-                    envelope.skill_id,
-                    skill_id.as_str(),
-                ),
-            });
-        }
-        Ok(envelope)
+        serde_json::from_slice(raw).map_err(|err| SignatureVerificationError::MalformedSignatureFile {
+            skill_id: skill_id.to_string(),
+            detail: err.to_string(),
+        })
     }
 
     pub fn manifest_digest(&self, skill_id: &SkillId) -> Result<Sha256Digest, SignatureVerificationError> {
-        Sha256Digest::from_hex(&self.manifest_sha256).map_err(|err| {
-            SignatureVerificationError::MalformedSignatureFile {
-                skill_id: skill_id.to_string(),
-                detail: format!("manifest_sha256: {err}"),
-            }
+        Sha256Digest::from_hex(&self.manifest_sha256).map_err(|err| SignatureVerificationError::MalformedSignatureFile {
+            skill_id: skill_id.to_string(),
+            detail: format!("manifest_sha256: {err}"),
         })
     }
 

@@ -1,14 +1,13 @@
-#[cfg(not(coverage))]
-use {
-    a2a_redaction::signed_bundle::{
-        Ed25519Signature, SIGNED_BUNDLE_VERSION, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
-    },
-    a2a_redaction::{SkillId, SkillIdError},
-    clap::Parser,
-    ed25519_dalek::{Signer, SigningKey},
-    std::fs,
-    std::path::{Path, PathBuf},
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use clap::Parser;
+use ed25519_dalek::{Signer, SigningKey};
+
+use a2a_redaction::signed_bundle::{
+    Ed25519Signature, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
 };
+use a2a_redaction::SkillId;
 
 #[cfg(not(coverage))]
 #[derive(Debug, Parser)]
@@ -23,62 +22,12 @@ struct Args {
     skill_dir: PathBuf,
 }
 
-#[cfg(not(coverage))]
-#[derive(Debug, thiserror::Error)]
-enum CliError {
-    #[error("signing key must not use 0x prefix")]
-    KeyHasHexPrefix,
-    #[error("invalid signing key hex: {0}")]
-    KeyHexDecode(#[source] hex::FromHexError),
-    #[error("signing key must be 32 bytes, got {0}")]
-    KeyWrongLength(usize),
-    #[error("read dir {path}: {source}", path = path.display())]
-    ReadDir {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("read dir entry under {path}: {source}", path = path.display())]
-    ReadDirEntry {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("invalid skill id derived from {path}: {source}", path = path.display())]
-    InvalidSkillId {
-        path: PathBuf,
-        #[source]
-        source: SkillIdError,
-    },
-    #[error("no *.wasm bundles found in {}", .0.display())]
-    NoSkillBundles(PathBuf),
-    #[error("read {path}: {source}", path = path.display())]
-    ReadFile {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("serialize signature envelope for skill {skill}: {source}")]
-    SerializeSignature {
-        skill: String,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("write {path}: {source}", path = path.display())]
-    WriteFile {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-}
-
-#[cfg(not(coverage))]
-fn main() -> Result<(), CliError> {
+fn main() -> Result<(), String> {
     let args = Args::parse();
     let signing_key = parse_signing_key(&args.key)?;
     let skills = discover_skills(&args.skill_dir)?;
     if skills.is_empty() {
-        return Err(CliError::NoSkillBundles(args.skill_dir));
+        return Err(format!("no *.wasm bundles found in {}", args.skill_dir.display()));
     }
 
     for skill in skills {
@@ -89,32 +38,24 @@ fn main() -> Result<(), CliError> {
     Ok(())
 }
 
-#[cfg(not(coverage))]
-fn parse_signing_key(raw: &str) -> Result<SigningKey, CliError> {
+fn parse_signing_key(raw: &str) -> Result<SigningKey, String> {
     let trimmed = raw.trim();
     if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
-        return Err(CliError::KeyHasHexPrefix);
+        return Err("signing key must not use 0x prefix".into());
     }
-    let decoded = hex::decode(trimmed).map_err(CliError::KeyHexDecode)?;
+    let decoded = hex::decode(trimmed).map_err(|err| format!("invalid signing key hex: {err}"))?;
     if decoded.len() != 32 {
-        return Err(CliError::KeyWrongLength(decoded.len()));
+        return Err(format!("signing key must be 32 bytes, got {}", decoded.len()));
     }
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&decoded);
     Ok(SigningKey::from_bytes(&seed))
 }
 
-#[cfg(not(coverage))]
-fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, CliError> {
+fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, String> {
     let mut skills = Vec::new();
-    for entry in fs::read_dir(dir).map_err(|source| CliError::ReadDir {
-        path: dir.to_path_buf(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| CliError::ReadDirEntry {
-            path: dir.to_path_buf(),
-            source,
-        })?;
+    for entry in fs::read_dir(dir).map_err(|err| format!("read {}: {err}", dir.display()))? {
+        let entry = entry.map_err(|err| format!("read dir entry: {err}"))?;
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("wasm") {
             continue;
@@ -122,41 +63,28 @@ fn discover_skills(dir: &Path) -> Result<Vec<SkillId>, CliError> {
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
-        let skill = SkillId::new(stem).map_err(|source| CliError::InvalidSkillId {
-            path: path.clone(),
-            source,
-        })?;
-        skills.push(skill);
+        skills.push(SkillId::new(stem));
     }
     skills.sort();
     skills.dedup();
     Ok(skills)
 }
 
-#[cfg(not(coverage))]
-fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> Result<(), CliError> {
+fn sign_skill_bundle(dir: &Path, skill: &SkillId, signing_key: &SigningKey) -> Result<(), String> {
     let wasm_path = dir.join(format!("{}.wasm", skill.as_str()));
     let manifest_path = dir.join(format!("{}.manifest.json", skill.as_str()));
-    let wasm_bytes = fs::read(&wasm_path).map_err(|source| CliError::ReadFile {
-        path: wasm_path.clone(),
-        source,
-    })?;
-    let manifest_bytes = fs::read(&manifest_path).map_err(|source| CliError::ReadFile {
-        path: manifest_path.clone(),
-        source,
-    })?;
+    let wasm_bytes = fs::read(&wasm_path).map_err(|err| format!("read {}: {err}", wasm_path.display()))?;
+    let manifest_bytes =
+        fs::read(&manifest_path).map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
 
     let manifest_digest = Sha256Digest::hash(&manifest_bytes);
     let wasm_digest = Sha256Digest::hash(&wasm_bytes);
-    let message = sign_bundle_digest(SIGNED_BUNDLE_VERSION, skill, manifest_digest, wasm_digest);
+    let message = sign_bundle_digest(manifest_digest, wasm_digest);
     let signature = Ed25519Signature::from_bytes(signing_key.sign(&message).to_bytes());
     let envelope = SignedBundleManifest::new(skill, manifest_digest, wasm_digest, signature);
     let sig_path = dir.join(format!("{}.sig", skill.as_str()));
-    let sig_json = serde_json::to_vec_pretty(&envelope).map_err(|source| CliError::SerializeSignature {
-        skill: skill.to_string(),
-        source,
-    })?;
-    fs::write(&sig_path, sig_json).map_err(|source| CliError::WriteFile { path: sig_path, source })
+    let sig_json = serde_json::to_vec_pretty(&envelope).map_err(|err| err.to_string())?;
+    fs::write(&sig_path, sig_json).map_err(|err| format!("write {}: {err}", sig_path.display()))
 }
 
 #[cfg(coverage)]
