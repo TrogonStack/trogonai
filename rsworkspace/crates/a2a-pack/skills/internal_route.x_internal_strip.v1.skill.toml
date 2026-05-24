@@ -1,0 +1,6 @@
+skill_id = "internal_route.x_internal_strip.v1"
+wasm_path = "skills/internal_route_x_internal_strip.wasm"
+applies_to_method = { kind = "OneOf", methods = ["message/send", "message/stream", "agent/card"] }
+applies_to_paths = ["$.message.metadata", "$.metadata", "$.extensions"]
+category = "InternalRoute"
+version = "1.0.0"

@@ -14,5 +14,9 @@ workspace = true
 a2a-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 wasmtime = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
