@@ -24,7 +24,6 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 - [ ] CEL → WASM compile path + real `Tier2CelEvaluator` impl to replace `NoopTier2Evaluator` in `a2a-gateway/src/policy/tier2.rs`.
 - [ ] Extend gateway policy stack — authoritative Tier 2 CEL + richer Tier 3 skill matrix beyond preload-only redaction stubs (`A2A_GATEWAY_POLICY_BUNDLE_DIR` / `_SKILLS` already host Wasmtime preload today).
-- [ ] Streaming back-pressure — gateway pull consumer with flow control; `A2A_EVENTS` policy `retention=interest, discard=old`. Ops/design: [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
 
 ## Phase 3 — push delivery & redaction
 
@@ -49,7 +48,6 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines).
 2. Finish `a2a-gateway` policy depth — SpiceDB Tier 1, authoritative JWT-derived `caller_id`, CEL Tier 2, richer decision-site audits (`rules_fired`, `rewrites`, stable `trace_id`) atop the Wasmtime preload + unary deadline scaffolding now in-tree.
 3. SpiceDB Tier 1 — gateway client, resource-tuple derivation, owner tuples on task lifecycle, `BulkCheckPermission` catalog shaping, real `SpiceDbImportGate` impl.
-4. Streaming back-pressure (gateway pull consumer + `A2A_EVENTS` policy); unary deadline knobs already wired via env.
-5. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
-6. Hardened push residuals — optional gateway-side DLQ mirroring, end-to-end principal propagation once auth-callout deployed.
-7. `a2a-bridge` env-gated **`A2A_BRIDGE_TRANSPORT=nats`** bootstrap (mint unary + unary gateway + SSE JetStream) alongside federated discovery exports + cross-binding collaboration tests (`stub` stays default so unit tests skip live NATS).
+4. Tier 3 redaction semantics + CEL Tier 2 (WASM compile path replaces `NoopTier2Evaluator`) once payloads are enforceable beyond today’s preload seam.
+5. Hardened push residuals — optional gateway-side DLQ mirroring, end-to-end principal propagation once auth-callout deployed.
+6. `a2a-bridge` env-gated **`A2A_BRIDGE_TRANSPORT=nats`** bootstrap (mint unary + unary gateway + SSE JetStream) alongside federated discovery exports + cross-binding collaboration tests (`stub` stays default so unit tests skip live NATS).

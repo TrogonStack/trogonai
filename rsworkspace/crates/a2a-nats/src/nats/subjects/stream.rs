@@ -2,6 +2,7 @@ use async_nats::jetstream::stream::{Config, DiscardPolicy, RetentionPolicy, Stor
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::DEFAULT_STREAM_MAX_AGE;
+use crate::jetstream::stream_options::EventsStreamMaxAge;
 
 /// The JetStream stream that captures a subject's messages.
 ///
@@ -37,15 +38,30 @@ impl A2aStream {
         }
     }
 
-    pub fn config(&self, prefix: &A2aPrefix) -> Config {
+    pub fn events_config(prefix: &A2aPrefix, max_age: EventsStreamMaxAge) -> Config {
         Config {
-            name: self.stream_name(prefix),
-            subjects: self.subject_patterns(prefix),
+            name: Self::Events.stream_name(prefix),
+            subjects: Self::Events.subject_patterns(prefix),
             storage: StorageType::File,
-            retention: RetentionPolicy::Limits,
-            max_age: DEFAULT_STREAM_MAX_AGE,
+            retention: RetentionPolicy::Interest,
+            max_age: max_age.as_duration(),
             discard: DiscardPolicy::Old,
             ..Default::default()
+        }
+    }
+
+    pub fn config(&self, prefix: &A2aPrefix) -> Config {
+        match self {
+            Self::Events => Self::events_config(prefix, EventsStreamMaxAge::DEFAULT),
+            Self::PushDlq => Config {
+                name: self.stream_name(prefix),
+                subjects: self.subject_patterns(prefix),
+                storage: StorageType::File,
+                retention: RetentionPolicy::Limits,
+                max_age: DEFAULT_STREAM_MAX_AGE,
+                discard: DiscardPolicy::Old,
+                ..Default::default()
+            },
         }
     }
 

@@ -19,6 +19,25 @@ use crate::task_id::A2aTaskId;
 
 const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
 
+/// Durable gateway egress consumer on the full task-events filter.
+pub fn gateway_events_consumer(
+    prefix: &A2aPrefix,
+    durable_name: &str,
+    max_ack_pending: i64,
+) -> Config {
+    let pfx = prefix.as_str();
+    Config {
+        durable_name: Some(durable_name.to_string()),
+        filter_subject: format!("{pfx}.task.*.events.*"),
+        deliver_policy: DeliverPolicy::All,
+        ack_policy: AckPolicy::Explicit,
+        replay_policy: ReplayPolicy::Instant,
+        max_ack_pending,
+        inactive_threshold: INACTIVE_THRESHOLD,
+        ..Default::default()
+    }
+}
+
 pub fn stream_events_consumer(prefix: &A2aPrefix, req_id: &ReqId) -> Config {
     let pfx = prefix.as_str();
     Config {
@@ -59,6 +78,15 @@ mod tests {
 
     fn rid(s: &str) -> ReqId {
         ReqId::from_test(s)
+    }
+
+    #[test]
+    fn gateway_events_consumer_uses_durable_full_task_filter() {
+        let config = gateway_events_consumer(&p("a2a"), "A2A_GATEWAY_EVENTS", 1024);
+        assert_eq!(config.durable_name.as_deref(), Some("A2A_GATEWAY_EVENTS"));
+        assert_eq!(config.filter_subject, "a2a.task.*.events.*");
+        assert_eq!(config.max_ack_pending, 1024);
+        assert_eq!(config.ack_policy, AckPolicy::Explicit);
     }
 
     #[test]

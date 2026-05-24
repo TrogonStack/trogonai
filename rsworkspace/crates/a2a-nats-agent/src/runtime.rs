@@ -1,5 +1,5 @@
 use a2a_nats::agent::{A2aHandler, Bridge};
-use a2a_nats::jetstream::provision_streams;
+use a2a_nats::jetstream::{provision_streams_with_options, StreamProvisionOptions};
 use a2a_nats::{
     A2aAgentId, A2aPrefix, AgentIdError, Config, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX, NatsConfig,
     apply_timeout_overrides, nats_connect_timeout,
@@ -61,7 +61,7 @@ where
     let js_context = async_nats::jetstream::new(nats_client.clone());
     let js_client = NatsJetStreamClient::new(js_context);
 
-    provision_streams(&js_client, &prefix)
+    provision_streams_with_options(&js_client, &prefix, &StreamProvisionOptions::from_env(env))
         .await
         .map_err(RuntimeError::Provision)?;
 

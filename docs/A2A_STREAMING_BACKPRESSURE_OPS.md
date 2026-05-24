@@ -7,10 +7,10 @@ How task event streaming stays non-blocking for agents, what JetStream policy to
 | Document | Purpose |
 |----------|---------|
 | [A2A plan](../A2A_PLAN.md) | Streaming semantics, working surface (what ships today) |
-| [A2A TODO](../A2A_TODO.md) | Phase 2 open item — gateway flow control + `interest` retention |
+| [A2A TODO](../A2A_TODO.md) | Phase 2 — gateway unary deadline and policy depth remain open |
 | [A2A pending decisions](../A2A_PENDING_DECISION.md) | Landed §5 — pull consumer flow control + `discard=old` |
 | [Per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) | **`A2A_EVENTS`** provisioning reference |
-| [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md) | Gateway owns future streaming egress; not implemented today |
+| [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md) | Gateway streaming egress (env-gated pull consumer) |
 | [Runtime env](./A2A_RUNTIME_ENV.md) | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** for agent **`Bridge`** |
 | [Documentation index](./A2A_DOCS_INDEX.md) | Hub linking operator and design docs |
 
@@ -42,7 +42,7 @@ If a slow or crashed consumer caused JetStream to block publishers, agent handle
 
 **Why this pair:** With **`limits`** retention, the stream keeps messages until **`max_age`** / byte limits even when no consumer cares — agents can still publish, but storage grows with every task. With **`interest`**, unconsumed backlog can be reclaimed once consumer interest ends (for example after a client disconnect and ephemeral consumer expiry). **`discard=old`** ensures that when pressure hits, publishers are never blocked waiting for a slow consumer to drain — the stream sheds the oldest events inside the retention window instead.
 
-**In-tree today:** `provision_streams` / `A2aStream::Events` already sets **`discard=old`** but **`retention=limits`** (see `rsworkspace/crates/a2a-nats/src/nats/subjects/stream.rs`). When provisioning outside the helper (CLI, Terraform, platform tooling), align **`retention`** with the landed **`interest`** decision. See [JetStream account streams](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) §`A2A_EVENTS`.
+**In-tree today:** `provision_streams` / `A2aStream::Events` sets **`retention=interest`**, **`discard=old`**, and **`max_age=24h`** (override **`A2A_EVENTS_MAX_AGE_SECS`** per Account). Gateway pull egress ships env-gated in `a2a-gateway` (`A2A_GATEWAY_EVENTS_PULL=on`). See [Runtime env](./A2A_RUNTIME_ENV.md) §`a2a-gateway`.
 
 ---
 
@@ -72,11 +72,11 @@ Shipped today in **`a2a-nats`** agent **`Bridge`** ([A2A plan](../A2A_PLAN.md) �
 
 **Relationship to gateway limits:** When the gateway ships per-caller streaming quotas (plan §Policy — max concurrent streaming tasks per caller per agent), that policy sits at **ingress** alongside auth. The **`Bridge`** semaphore remains the **last line of defense** on the agent process regardless of gateway enforcement — tune it for agent capacity, not caller fairness.
 
-### Gateway egress: pull consumer with flow control (planned)
+### Gateway egress: pull consumer with flow control (shipped, env-gated)
 
-**Not shipped in `a2a-gateway` today** — the gateway forwards opaque request/reply only ([Gateway roadmap](./A2A_GATEWAY_ROADMAP.md) §Explicit non-goals). Streaming consumers are created today by **`a2a_nats::Client`** on the caller/agent path (ephemeral pull configs in `jetstream/consumers.rs`).
+**Shipped in `a2a-gateway`** when **`A2A_GATEWAY_EVENTS_PULL=on`** (default off). A durable pull consumer on **`A2A_EVENTS`** (`{prefix}.task.*.events.*`) fetches with batch + heartbeat flow control, forwards to **`{prefix}.gateway.egress.{req_id}`**, and acks explicitly. Full rewrite/redact and caller inbox wiring remain future work alongside ingress policy.
 
-**Target shape** when gateway owns the caller-facing pipe ([A2A plan](../A2A_PLAN.md) §Streaming, [A2A TODO](../A2A_TODO.md) Phase 2):
+**Target shape** for per-RPC ephemeral consumers when gateway owns the full caller pipe ([A2A plan](../A2A_PLAN.md) §Streaming):
 
 1. **`message/stream`** — gateway forwards to agent, then creates an **ephemeral pull consumer** on `{prefix}.task.{task_id}.events.*` (or req-scoped filter), delivers to the caller reply inbox after rewrite/redact.
 2. **`tasks/resubscribe`** — new ephemeral consumer starting at **`last_seq + 1`** (same semantics as today’s client-side `resubscribe_consumer`).
@@ -102,17 +102,18 @@ inactive_threshold: 5m       # matches in-tree INACTIVE_THRESHOLD (consumer hygi
 
 ## Shipped today vs planned
 
-| Area | Shipped today | Planned (Phase 2+) |
-|------|---------------|-------------------|
+| Area | Shipped today | Planned |
+|------|---------------|---------|
 | **`message/stream` / `tasks/resubscribe`** | End-to-end via agent **`Bridge`** + **`a2a_nats::Client`**; bootstrap reply + JetStream pump | Gateway-owned consumer-to-caller pipe with rewrite/audit |
-| **Pull consumers** | Ephemeral pull configs (`stream_events_consumer`, `resubscribe_consumer`); explicit ack; **`inactive_threshold = 5m`** | Same semantics at gateway egress + **flow control** + tuned **`max_ack_pending`** |
+| **Pull consumers (client path)** | Ephemeral pull configs (`stream_events_consumer`, `resubscribe_consumer`); explicit ack; **`inactive_threshold = 5m`** | Same semantics at gateway egress + per-RPC ephemeral consumers |
+| **Gateway pull egress** | Durable consumer on **`A2A_EVENTS`** when **`A2A_GATEWAY_EVENTS_PULL=on`**; fetch batch + heartbeat; forward to **`{prefix}.gateway.egress.{req_id}`** | Rewrite/redact, caller inbox delivery, ingress-coordinated ephemeral consumers |
 | **`A2A_EVENTS` discard** | **`discard=old`** in provisioner | unchanged |
-| **`A2A_EVENTS` retention** | **`limits`** in provisioner | **`interest`** (operators should set on server-side provision) |
+| **`A2A_EVENTS` retention** | **`interest`** in provisioner | unchanged |
 | **Agent ingress limit** | **`Bridge`** semaphore / **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** | Gateway per-caller streaming quotas (policy bundle) in addition |
-| **Gateway streaming** | **Not implemented** — ingress forward only | Pull consumer, flow control, stream policy enforcement at provision |
-| **`message/send` deadline** | Agent-side operation timeout only | **30s gateway deadline** ([A2A TODO](../A2A_TODO.md) Phase 2) |
+| **Gateway streaming (full pipe)** | Env-gated durable pull + egress subject forward only | Pull consumer per stream/resubscribe with rewrite/audit at ingress |
+| **`message/send` deadline** | Agent-side operation timeout; gateway unary deadline via **`A2A_GATEWAY_UNARY_DEADLINE_SECS`** | Broader gateway lifecycle deadlines ([A2A TODO](../A2A_TODO.md) Phase 2) |
 
-Do not assume gateway flow control or **`interest`** retention from in-tree **`provision_streams`** alone until the Phase 2 items close.
+Enable gateway pull egress with **`A2A_GATEWAY_EVENTS_PULL=on`** after verifying **`A2A_EVENTS`** stream policy on the tenant Account.
 
 ---
 
@@ -124,7 +125,7 @@ Connect with JetStream read access inside the tenant Account:
 # Stream policy
 nats --context TENANT stream info A2A_EVENTS
 
-# Expect: discard old; retention interest (target) or limits (in-tree default)
+# Expect: discard old; retention interest
 # Subject filter: a2a.task.*.events.*  (adjust prefix if non-default)
 ```
 
