@@ -211,6 +211,9 @@ fn reference_skills_in_a2a_pack_parse() {
             .lookup(&SkillId::new("internal_route.x_internal_strip.v1"))
             .is_some()
     );
+    assert!(registry.lookup(&SkillId::new("pii-regex-redactor")).is_some());
+    assert!(registry.lookup(&SkillId::new("secrets-redactor")).is_some());
+    assert!(registry.lookup(&SkillId::new("json-path-sanitizer")).is_some());
 }
 
 #[test]

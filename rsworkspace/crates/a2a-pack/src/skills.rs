@@ -17,6 +17,9 @@ mod tests {
             "pii.email_mask.v1",
             "credentials.bearer_redact.v1",
             "internal_route.x_internal_strip.v1",
+            "pii-regex-redactor",
+            "secrets-redactor",
+            "json-path-sanitizer",
         ] {
             assert!(
                 registry.lookup(&SkillId::new(skill_id)).is_some(),
