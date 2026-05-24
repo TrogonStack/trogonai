@@ -200,7 +200,7 @@ impl fmt::Display for PlannedAgentCardValidateError {
 
 impl std::error::Error for PlannedAgentCardValidateError {}
 
-/// Stub validator — documents the future **`a2a-pack`** delegation without pulling the crate here.
+/// Delegates to [`a2a_pack::validate_agent_card_on_read`] for bypass materializations.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlannedPackAgentCardIngressValidator;
 
@@ -216,8 +216,11 @@ impl AgentCardIngressValidator for PlannedPackAgentCardIngressValidator {
             });
         }
 
-        // Production: serde_json::from_slice + a2a_pack::validate_agent_card_value(...)
-        Err(PlannedAgentCardValidateError::NotImplemented)
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| {
+            PlannedAgentCardValidateError::NotImplemented
+        })?;
+        a2a_pack::validate_agent_card_on_read(&value, a2a_pack::AgentCardSource::GatewaySurface)
+            .map_err(|_| PlannedAgentCardValidateError::NotImplemented)
     }
 }
 
@@ -245,12 +248,17 @@ mod tests {
     #[test]
     fn bypass_path_invokes_validator() {
         let policy = AgentCardGatewayRevalidation::new(PlannedPackAgentCardIngressValidator);
+        let valid = br#"{"name":"remote","supportedInterfaces":[{"url":"https://example.com/a2a","protocolBinding":"JSONRPC","protocolVersion":"0.2.0"}]}"#;
+        policy
+            .revalidate_on_read(AgentCardMaterializationPath::FederationImported, valid)
+            .expect("valid federated card passes gateway revalidation");
+
         let err = policy
             .revalidate_on_read(
                 AgentCardMaterializationPath::FederationImported,
-                br#"{"name":"remote"}"#,
+                br#"{"name":""}"#,
             )
-            .expect_err("stub validator returns NotImplemented for non-empty bytes");
+            .expect_err("invalid federated card fails gateway revalidation");
 
         assert!(matches!(err, PlannedAgentCardValidateError::NotImplemented));
     }

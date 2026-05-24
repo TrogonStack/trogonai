@@ -157,4 +157,22 @@ mod catalog_list_tests {
         let err = store.list_cards().await.expect_err("invalid KV key must surface");
         assert!(matches!(err, CatalogStoreError::Kv(_)));
     }
+
+    #[test]
+    fn federated_import_batch_drops_invalid_cards() {
+        use a2a_pack::{AgentCardSource, filter_agent_cards_on_read};
+        use serde_json::json;
+
+        let good = json!({
+            "name": "federated",
+            "supportedInterfaces": [{
+                "url": "https://example.com/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "0.2.0"
+            }]
+        });
+        let bad = json!({ "name": "" });
+        let filtered = filter_agent_cards_on_read(vec![good.clone(), bad, good], AgentCardSource::FederatedImport);
+        assert_eq!(filtered.len(), 2);
+    }
 }
