@@ -695,6 +695,80 @@ async fn or_meta_system_prompt_and_trogon_md_both_in_system_message() {
         .await;
 }
 
+// ── notebook_edit → OR wire ───────────────────────────────────────────────────
+
+/// `notebook_edit` dispatched via OR wire format — the tool result is sent in
+/// the second OpenRouter API call and the notebook cell is updated on disk.
+#[tokio::test]
+async fn or_notebook_edit_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let notebook = serde_json::json!({
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [{
+            "cell_type": "code",
+            "source": ["original content"],
+            "metadata": {},
+            "outputs": [],
+            "execution_count": null
+        }]
+    });
+    std::fs::write(
+        dir.path().join("nb.ipynb"),
+        serde_json::to_string(&notebook).unwrap(),
+    )
+    .unwrap();
+
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    push_tool_then_done(
+        &http,
+        "notebook_edit",
+        r#"{"path":"nb.ipynb","cell_index":0,"content":"updated content"}"#,
+        "call_nbedit_1",
+    );
+
+    let agent = make_agent(Arc::clone(&http));
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+            let sid = resp.session_id;
+
+            let result = agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("edit notebook")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(result.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "expected end_turn: {:?}",
+                result.stop_reason
+            );
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 2, "must have exactly 2 API calls");
+            let tool_msg = calls[1].messages.iter().find(|m| m.role == "tool")
+                .expect("second API call must include a tool-role message");
+            assert!(
+                !tool_msg.content.contains("Unknown tool"),
+                "notebook_edit must be dispatched; got: {}",
+                tool_msg.content
+            );
+
+            let raw = std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap();
+            let nb: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            let source = nb["cells"][0]["source"].to_string();
+            assert!(
+                source.contains("updated content"),
+                "notebook cell must be updated on disk; got: {source}"
+            );
+        })
+        .await;
+}
+
 // ── OR fork inherits disabled tool excluded from wire ─────────────────────────
 
 /// A forked session must inherit the parent's disabled tools and exclude them

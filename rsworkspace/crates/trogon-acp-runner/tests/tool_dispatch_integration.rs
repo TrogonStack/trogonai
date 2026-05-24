@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use acp_nats::acp_prefix::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
-use agent_client_protocol::{ContentBlock, PromptRequest, TextContent};
+use agent_client_protocol::{ContentBlock, NewSessionRequest, PromptRequest, TextContent};
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -451,4 +451,165 @@ async fn acp_search_files_tool_dispatched_via_wire_format() {
         .await;
 
     assert_eq!(second_mock.hits(), 1, "second mock (tool_result with marker_string_xyz) must be hit once");
+}
+
+// ── TROGON.md → ACP system prompt wire ───────────────────────────────────────
+
+/// A TROGON.md file in the session cwd must be injected into the system prompt
+/// sent to the Anthropic API (appears in the first HTTP request body).
+///
+/// The agent loads TROGON.md from `state.cwd`, which is set during new_session.
+/// This test calls new_session first so state.cwd points to the temp dir, then
+/// asserts that the TROGON.md content appears in the Anthropic API wire request.
+#[tokio::test]
+async fn acp_trogon_md_injected_into_system_prompt_in_wire_request() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "acp-project-rules: safety first").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-trogon-md";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+
+    // Specific mock: first call must contain TROGON.md content in request body
+    let trogon_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("acp-project-rules");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done"));
+    });
+    // Catch-all: if TROGON.md is NOT injected the request won't match above and
+    // falls through here — the test then fails on trogon_mock.hits() == 0.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("fallback"));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+
+            // Call new_session so state.cwd is set to the dir containing TROGON.md.
+            let session_id = {
+                let req = NewSessionRequest::new(std::path::PathBuf::from(&cwd));
+                let inbox = nats.new_inbox();
+                let mut resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
+                nats.publish_with_reply(
+                    format!("{prefix}.agent.session.new"),
+                    inbox,
+                    Bytes::from(serde_json::to_vec(&req).unwrap()),
+                )
+                .await
+                .unwrap();
+                let msg = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    resp_sub.next(),
+                )
+                .await
+                .expect("timed out waiting for new_session response")
+                .expect("no new_session response");
+                let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+                v["sessionId"].as_str().unwrap().to_string()
+            };
+
+            let resp = prompt_and_wait(&nats, prefix, &session_id, "hello", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        trogon_mock.hits(),
+        1,
+        "TROGON.md content must appear in the first Anthropic API request body"
+    );
+}
+
+// ── notebook_edit → ACP wire ──────────────────────────────────────────────────
+
+/// `notebook_edit` dispatched via ACP wire format — the tool_result is sent in
+/// the second Anthropic API call and the notebook cell is updated on disk.
+#[tokio::test]
+async fn acp_notebook_edit_tool_dispatched_via_wire_format() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let notebook = serde_json::json!({
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [{
+            "cell_type": "code",
+            "source": ["original content"],
+            "metadata": {},
+            "outputs": [],
+            "execution_count": null
+        }]
+    });
+    std::fs::write(
+        dir.path().join("nb.ipynb"),
+        serde_json::to_string(&notebook).unwrap(),
+    )
+    .unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-nbedit";
+    let session_id = "sess-acp-nbedit-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("notebook edited"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_nbedit_001",
+                "notebook_edit",
+                serde_json::json!({
+                    "path": "nb.ipynb",
+                    "cell_index": 0,
+                    "content": "updated content"
+                }),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+            let resp = prompt_and_wait(&nats, prefix, session_id, "edit notebook", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after notebook_edit dispatch; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "tool_result mock must be hit once for notebook_edit");
+
+    let raw = std::fs::read_to_string(dir.path().join("nb.ipynb")).unwrap();
+    let nb: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let source = nb["cells"][0]["source"].to_string();
+    assert!(
+        source.contains("updated content"),
+        "notebook cell must be updated on disk by notebook_edit; got: {source}"
+    );
 }
