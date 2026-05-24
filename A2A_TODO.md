@@ -6,7 +6,7 @@ Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementat
 
 Partial items state the in-tree code surface and what remains before the item is fully effective. They stay open until the remaining work lands.
 
-**Design supplements (not duplicate trackers):** [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](./docs/A2A_AUTH_CALLOUT_SKETCH.md), [`docs/A2A_BRIDGE_SKETCH.md`](./docs/A2A_BRIDGE_SKETCH.md), [`docs/A2A_DEVELOPMENT.md`](./docs/A2A_DEVELOPMENT.md), [`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md), [`docs/A2A_GATEWAY_ROADMAP.md`](./docs/A2A_GATEWAY_ROADMAP.md), [`docs/A2A_PUSH_DLQ_OPS.md`](./docs/A2A_PUSH_DLQ_OPS.md), [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md), [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md), [`docs/A2A_SUBJECT_ACL_QUICKREF.md`](./docs/A2A_SUBJECT_ACL_QUICKREF.md), [`docs/A2A_RUNTIME_ENV.md`](./docs/A2A_RUNTIME_ENV.md), [`docs/A2A_TIER2_CEL.md`](./docs/A2A_TIER2_CEL.md), [`docs/A2A_DOCS_INDEX.md`](./docs/A2A_DOCS_INDEX.md) (navigation hub).
+**Design supplements (not duplicate trackers):** [`docs/A2A_AUTH_CALLOUT_SKETCH.md`](./docs/A2A_AUTH_CALLOUT_SKETCH.md), [`docs/A2A_BRIDGE_SKETCH.md`](./docs/A2A_BRIDGE_SKETCH.md), [`docs/A2A_DEVELOPMENT.md`](./docs/A2A_DEVELOPMENT.md), [`docs/A2A_FEDERATED_DISCOVERY_SKETCH.md`](./docs/A2A_FEDERATED_DISCOVERY_SKETCH.md), [`docs/A2A_GATEWAY_ROADMAP.md`](./docs/A2A_GATEWAY_ROADMAP.md), [`docs/A2A_PUSH_DLQ_OPS.md`](./docs/A2A_PUSH_DLQ_OPS.md), [`docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md), [`docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](./docs/A2A_STREAMING_BACKPRESSURE_OPS.md), [`docs/A2A_SUBJECT_ACL_QUICKREF.md`](./docs/A2A_SUBJECT_ACL_QUICKREF.md), [`docs/A2A_RUNTIME_ENV.md`](./docs/A2A_RUNTIME_ENV.md), [`docs/A2A_TIER1_DECLARATIVE.md`](./docs/A2A_TIER1_DECLARATIVE.md), [`docs/A2A_TIER2_CEL.md`](./docs/A2A_TIER2_CEL.md), [`docs/A2A_DOCS_INDEX.md`](./docs/A2A_DOCS_INDEX.md) (navigation hub).
 
 ## Phase 0 — perimeter & catalog
 
@@ -16,7 +16,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 1 — policy & audit
 
-- [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) and federated `SpiceDbImportGate`. **Remaining:** non-SpiceDB declarative bundle tables and their evaluator.
+- [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), federated `SpiceDbImportGate`, and declarative Tier-1 evaluator (`A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED`, default off). **Remaining:** operator bundle authoring and production rollout.
 - [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code shipped:** `AuditEnvelopeFields` populates `trace_id`, `rules_fired`, `rewrites`, `stream_consumer`, `zed_token_snapshot`; caller attribution rides `X-A2a-Caller-Id` header. **Remaining:** replace header-derived caller with JWT-derived `caller_id` once auth-callout is deployed.
 
 ## Phase 2 — streaming & lifecycle
@@ -44,6 +44,6 @@ Partial items state the in-tree code surface and what remains before the item is
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines remain). Unblocks JWT-derived `caller_id` and live push DLQ subject population.
-2. Finish gateway policy depth — authoritative JWT-derived `caller_id` on audits, non-SpiceDB Tier-1 declarative bundle tables.
+2. Finish gateway policy depth — authoritative JWT-derived `caller_id` on audits, operator Tier-1 declarative bundle rollout.
 3. Tier 3 authoritative redaction call site on the gateway request path.
 4. Operator-signed cross-Account export/import + cross-binding collaboration tests against a live stack, then flip `A2A_BRIDGE_TRANSPORT=nats` to production wiring.
