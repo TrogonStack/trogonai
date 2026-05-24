@@ -7,9 +7,11 @@ use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
 use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-use a2a_auth_callout::{
-    AccountResolver, SigningKey, StaticAccountResolver, Subscriber,
+use a2a_auth_callout::error::AuthCalloutError;
+use a2a_auth_callout::signing_key_source::{
+    EnvSigningKeySource, FileSigningKeySource, SigningKeySource,
 };
+use a2a_auth_callout::{AccountResolver, StaticAccountResolver, Subscriber};
 
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
@@ -24,6 +26,46 @@ fn split_env_list(name: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn load_signing_key_source() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
+    let kind = std::env::var("AUTH_CALLOUT_SIGNING_KEY_SOURCE")
+        .unwrap_or_else(|_| "env".into());
+    match kind.as_str() {
+        "env" => {
+            if std::env::var("AUTH_CALLOUT_SIGNING_SECRET").is_err() {
+                unsafe {
+                    std::env::set_var(
+                        "AUTH_CALLOUT_SIGNING_SECRET",
+                        "dev-secret-not-for-production",
+                    );
+                }
+            }
+            Ok(Arc::new(EnvSigningKeySource::from_env()?))
+        }
+        "file" => {
+            let current = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PATH").map_err(|_| {
+                AuthCalloutError::Internal(
+                    "AUTH_CALLOUT_SIGNING_KEY_PATH is required when AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
+                        .into(),
+                )
+            })?;
+            let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH").ok();
+            Ok(Arc::new(FileSigningKeySource::new(
+                current,
+                previous.as_deref(),
+            )?))
+        }
+        "vault" => {
+            Err(AuthCalloutError::Internal(
+                "AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet; use file or env"
+                    .into(),
+            ))
+        }
+        other => Err(AuthCalloutError::Internal(format!(
+            "unknown AUTH_CALLOUT_SIGNING_KEY_SOURCE: {other} (expected env, file, or vault)"
+        ))),
+    }
 }
 
 async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
@@ -71,8 +113,13 @@ async fn main() {
         .init();
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let signing_key_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
-        .unwrap_or_else(|_| "dev-secret-not-for-production".into());
+    let signing_key_source = match load_signing_key_source() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load signing key custody");
+            std::process::exit(1);
+        }
+    };
     let allowed_accounts = split_env_list("AUTH_CALLOUT_ALLOWED_ACCOUNTS");
     if allowed_accounts.is_empty() {
         tracing::error!(
@@ -104,7 +151,7 @@ async fn main() {
     });
 
     let dispatcher = CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key: SigningKey::from_secret(signing_key_secret.as_bytes()),
+        signing_key_source,
         user_jwt_ttl,
         account_resolver: resolver,
         oidc,

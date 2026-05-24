@@ -196,6 +196,7 @@ impl JwksOidcVerifier {
         })?;
         let nats_permissions = IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
+            kid: crate::signing_key_source::unminted_placeholder(),
             sub,
             aud: account.clone(),
             data,
@@ -229,6 +230,7 @@ impl OidcVerifier for JwksOidcVerifier {
 mod tests {
     use super::*;
     use crate::jwt::SigningKey;
+    use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
     use std::time::Duration;
 
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -338,12 +340,14 @@ mod tests {
         assert_eq!(user.sub.as_str(), "user-42");
         assert_eq!(user.aud.as_str(), "nats-acct-1");
         assert!(!user.caller_id.as_str().contains('.'));
+        let handle = SigningKeyHandle::new(
+            KeyVersion::new("test").unwrap(),
+            SigningKey::from_secret(b"gw-secret-----------------------"),
+        );
+        let mut user = user;
+        user.kid = handle.version().clone();
         let minted = user
-            .mint(
-                &SigningKey::from_secret(b"gw-secret-----------------------"),
-                std::time::SystemTime::now(),
-                Duration::from_secs(60),
-            )
+            .mint(&handle, std::time::SystemTime::now(), Duration::from_secs(60))
             .unwrap();
         assert!(minted.split('.').count() == 3);
     }

@@ -23,6 +23,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.8",
+ "tempfile",
  "time",
  "tokio",
  "tracing",

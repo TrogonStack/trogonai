@@ -81,8 +81,9 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::C
     };
     use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
     use a2a_auth_callout::jwt::{
-        AudienceAccount, CallerId, ExternalSubject, SigningKey, SpiceDbPrincipal, UserJwtClaims,
+        AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims,
     };
+    use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
     use a2a_auth_callout::permissions::IssuedPermissions;
     use serde_json::json;
 
@@ -98,6 +99,7 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::C
             account: &AudienceAccount,
         ) -> Result<UserJwtClaims, a2a_auth_callout::AuthCalloutError> {
             Ok(UserJwtClaims {
+                kid: KeyVersion::new("pending").expect("fixture kid"),
                 sub: ExternalSubject::new("harness-sub").expect("fixture sub"),
                 aud: account.clone(),
                 data: SpiceDbPrincipal(json!({"spicedb_subject": "harness-sub"})),
@@ -111,8 +113,12 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::C
     let oidc: Arc<dyn OidcVerifier> = Arc::new(HarnessOidcVerifier { caller_id: caller });
     let resolver: Arc<dyn a2a_auth_callout::AccountResolver> =
         Arc::new(StaticAccountResolver::new(["tenant-harness".to_string()]));
+    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(StaticSigningKeySource::new(
+        b"bridge-harness-callout-secret",
+        KeyVersion::new("test").expect("harness version"),
+    ));
     CalloutDispatcher::new(CalloutDispatcherConfig {
-        signing_key: SigningKey::from_secret(b"bridge-harness-callout-secret"),
+        signing_key_source,
         user_jwt_ttl: Duration::from_secs(60),
         account_resolver: resolver,
         oidc: Some(oidc),

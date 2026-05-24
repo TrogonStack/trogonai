@@ -47,9 +47,9 @@ Today the gateway derives caller identity from `X-A2a-Spicedb-Principal` / `X-A2
 - [ ] Cross-check against the role templates in `scripts/acl-templates/` so the minted permissions match the deployed ACL posture.
 
 ### 5. Signing-key custody
-- [ ] Replace the dev `AUTH_CALLOUT_SIGNING_SECRET` env fallback in `main.rs` with a `SigningKeySource` trait: `FileSource` (path), `EnvSource` (raw secret — dev only, log a warn once), pluggable `VaultSource` stub.
-- [ ] Support key versioning so rotation can prefer the new key on mint while accepting the old one during an overlap window.
-- [ ] Document expected secret-store integration points in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md` (new).
+- [x] Replace the dev `AUTH_CALLOUT_SIGNING_SECRET` env fallback in `main.rs` with a `SigningKeySource` trait: `FileSource` (path), `EnvSource` (raw secret — dev only, log a warn once), pluggable `VaultSource` stub.
+- [x] Support key versioning so rotation can prefer the new key on mint while accepting the old one during an overlap window.
+- [x] Document expected secret-store integration points in `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md` (new).
 
 ### 6. Wire format pin (NATS auth-callout extension)
 - [ ] Replace the illustrative `AuthCalloutRequest` / `AuthCalloutResponse` structs with the real NATS server wire format: NKey-signed envelope + JWT-encoded inner payload per the auth-callout extension.

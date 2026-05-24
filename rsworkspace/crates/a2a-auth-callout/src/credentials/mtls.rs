@@ -138,6 +138,7 @@ impl X509MtlsVerifier {
 
         let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
         Ok(UserJwtClaims {
+            kid: crate::signing_key_source::unminted_placeholder(),
             sub,
             aud: account.clone(),
             data,
