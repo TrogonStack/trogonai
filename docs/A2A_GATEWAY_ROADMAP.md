@@ -27,9 +27,34 @@ Opaque request/reply forward; Wasmtime policy substrate scaffolded but not yet w
   - `caller_id` — reserved (`tracing::field::Empty` until JWT extraction)
   - `agent_subject` — mapped target (success paths)
   - `routing_outcome` — `forwarded` \| `ingress_error` \| `ignored_no_reply` \| `forward_failed`
-- [x] **Wasmtime policy substrate scaffold** — `src/policy/{mod,wasmtime_substrate,tier2,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator` trait + `NoopTier2Evaluator`) with Tier 3 (re-uses `a2a_redaction::wasm::WasmRedactorHost`). Not yet called from the ingress path.
+- [x] **Wasmtime policy substrate scaffold** — `src/policy/{mod,wasmtime_substrate,tier2,spicedb_tier1,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator` trait + `NoopTier2Evaluator`) with Tier 3 (re-uses `a2a_redaction::wasm::WasmRedactorHost`). Tier-2 predicate invoked from ingress when `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set.
+- [x] **Tier-1 SpiceDB gate** — `src/policy/spicedb_tier1.rs` reuses `a2a-nats` Authzed client types; env-gated via `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` (+ endpoint/token/TTL). Dispatch order: unary deadline guard → Tier-1 `BulkCheckPermission` → Tier-2 predicate → forward. Deny/transport error → JSON-RPC `-32801` with `gateway.tier1.spicedb_denied`; allow populates audit `zed_token_snapshot`. Owner tuples on `message/send` accept via `WriteRelationships` (best-effort).
 
 Run: `cargo run -p a2a-gateway` from `rsworkspace/` (`NATS_URL`, `A2A_PREFIX`, optional queue group).
+
+### Tier 1 SpiceDB
+
+Env knobs (see [`./A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md)):
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` | off | Master switch (`on` requires endpoint + token) |
+| `A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT` | — | Authzed gRPC endpoint |
+| `A2A_GATEWAY_TIER1_SPICEDB_TOKEN` | — | Bearer token |
+| `A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS` | `60` | Session cache TTL (4096 entries max; key = JWT `sub` + Account) |
+
+Resource tuples (`derive_tuple` in `spicedb_tier1.rs`):
+
+| Method | Resource | Permission |
+|--------|----------|------------|
+| `agent/getAuthenticatedExtendedCard` | `agent_card:{publisher}:{agent_id}` | `view` |
+| `message/send`, `message/stream` | `agent:{agent_id}` | `invoke` |
+| `tasks/list` | `agent:{agent_id}` | `discover` |
+| `tasks/*` (get, cancel, resubscribe, pushNotificationConfig/*) | `task:{agent_id}:{task_id}` | per plan (`read`, `cancel`, `configure_push`) |
+
+Owner-tuple lifecycle: on Tier-1 allow for `message/send`, gateway writes `task:{agent_id}:{task_id}#owner@subject` via Authzed `WriteRelationships` (Touch). Write transport failure is logged; dispatch still proceeds.
+
+ZedToken cache: session-scoped moka cache; fresh tokens attached as `AtLeastAsFresh` consistency on subsequent bulk checks; snapshot string emitted on allow audit envelopes.
 
 ---
 
@@ -61,9 +86,9 @@ Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates
 
 ### Coordination with SpiceDB Tier 1
 
-- [ ] Gateway holds org-standard **SpiceDB client**; derive resource tuples per method (`a2a-pack` / plan §SpiceDB).
-- [ ] **Tier 1 declarative policies** on the gateway request path before forward (allow/deny, catalog shaping via `BulkCheckPermission`).
-- [ ] Task owner tuples (`task:{id}#owner@user:{sub}`) at task creation on ingress paths that create tasks — coordinate with agent lifecycle, not duplicate in bridge-only paths.
+- [x] Gateway holds org-standard **SpiceDB client** (reuses `a2a-nats::catalog::import_gate` Authzed types); derive resource tuples per method in `spicedb_tier1.rs`.
+- [x] **Tier 1 SpiceDB policies** on the gateway request path before Tier-2 (`BulkCheckPermission`; env-gated).
+- [x] Task owner tuples at `message/send` accept — best-effort `WriteRelationships` on the same client; terminal removal remains agent lifecycle work.
 
 ---
 
