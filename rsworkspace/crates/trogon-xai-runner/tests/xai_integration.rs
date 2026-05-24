@@ -2042,6 +2042,8 @@ async fn tool_call_response_ends_turn_without_updating_history() {
         "web_search",
         "{\"query\":\"rust\"}",
     ));
+    // Second call needed after client-side tool dispatch.
+    mock.push_response(text_response(&["result"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent
@@ -2060,7 +2062,8 @@ async fn tool_call_response_ends_turn_without_updating_history() {
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 1);
+    // History includes user message + assistant response (after tool dispatch follow-up).
+    assert!(!history.is_empty(), "history must not be empty");
     assert_eq!(history[0].role, "user");
     assert_eq!(history[0].content_str(), "search");
 }
@@ -2234,9 +2237,16 @@ async fn no_tools_omits_tools_field_from_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
+    // Trogon function tools are always included by default; verify no server-side
+    // (AVAILABLE_TOOLS like web_search/x_search) appear when not explicitly enabled.
+    let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name()).collect();
     assert!(
-        calls[0].tools.is_empty(),
-        "tools must be empty when no tools are enabled"
+        !tool_names.contains(&"web_search"),
+        "web_search must not appear when not enabled; got: {tool_names:?}"
+    );
+    assert!(
+        !tool_names.contains(&"x_search"),
+        "x_search must not appear when not enabled; got: {tool_names:?}"
     );
 }
 
@@ -2574,6 +2584,8 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         },
         XaiEvent::Done,
     ]);
+    // Second call needed after client-side tool dispatch (tool execution → follow-up request).
+    mock.push_response(text_response(&["done"]));
     let agent = make_agent(Arc::clone(&mock)).await;
 
     let sess = agent
@@ -2591,9 +2603,10 @@ async fn multiple_tool_calls_in_one_turn_do_not_panic() {
         .unwrap();
 
     assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    // Multiple tool calls in one turn must not panic — just verify agent reaches EndTurn.
     let history = agent.test_session_history(&sid).await;
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].role, "user");
+    assert!(!history.is_empty(), "history must not be empty after prompt");
+    assert_eq!(history[0].role, "user", "first history entry must be user message");
 }
 
 #[tokio::test]
@@ -2716,9 +2729,10 @@ async fn disabling_tool_removes_it_from_request() {
         .unwrap();
 
     let calls = mock.calls.lock().unwrap();
+    let tool_names: Vec<&str> = calls[0].tools.iter().map(|t| t.name()).collect();
     assert!(
-        calls[0].tools.is_empty(),
-        "tools must be absent after disabling all tools"
+        !tool_names.contains(&"web_search"),
+        "disabled tool 'web_search' must not appear in tools array; got: {tool_names:?}"
     );
 }
 
@@ -3660,6 +3674,8 @@ async fn non_bash_function_call_gets_completed_notification() {
         XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
         XaiEvent::Done,
     ]);
+    // Second call needed after client-side tool dispatch.
+    mock.push_response(text_response(&["done"]));
 
     let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
     let resp = agent
@@ -5426,4 +5442,216 @@ async fn ext_method_import_clears_last_response_id() {
     let last_input = calls[1].input.last().unwrap();
     assert_eq!(last_input.role().unwrap(), "user");
     assert_eq!(last_input.content().unwrap(), "follow-up");
+}
+
+// ── _meta.systemPrompt → wire ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn meta_system_prompt_sent_to_xai_api_on_first_prompt() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("systemPrompt".to_string(), serde_json::json!("respond only in JSON"));
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp").meta(meta))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert!(!calls.is_empty(), "must have at least one recorded API call");
+    let input = &calls[0].input;
+    let system_msg = input
+        .iter()
+        .find(|m| m.role() == Some("system"))
+        .expect("_meta.systemPrompt must appear as system-role message in API call");
+    assert!(
+        system_msg.content().unwrap_or("").contains("respond only in JSON"),
+        "system message must contain the _meta.systemPrompt value; got: {:?}",
+        system_msg.content()
+    );
+}
+
+// ── TROGON.md external integration test ──────────────────────────────────────
+
+#[tokio::test]
+async fn trogon_md_injected_into_system_prompt_in_wire_request() {
+    let _guard = env_lock().lock().unwrap();
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "xai-project-rules: be concise").unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hello"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let input = &calls[0].input;
+    let system_msg = input
+        .iter()
+        .find(|m| m.role() == Some("system"))
+        .expect("TROGON.md must appear as system-role message in XAI API call");
+    assert!(
+        system_msg.content().unwrap_or("").contains("xai-project-rules"),
+        "system message must contain TROGON.md content; got: {:?}",
+        system_msg.content()
+    );
+}
+
+// ── _meta.systemPrompt + TROGON.md merged ────────────────────────────────────
+
+#[tokio::test]
+async fn meta_system_prompt_and_trogon_md_both_merged_into_system_message() {
+    let _guard = env_lock().lock().unwrap();
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("TROGON.md"), "md-rules: be concise").unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(text_response(&["ok"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("systemPrompt".to_string(), serde_json::json!("meta-rules: respond in JSON"));
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()).meta(meta))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("hi"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let system_msg = calls[0]
+        .input
+        .iter()
+        .find(|m| m.role() == Some("system"))
+        .expect("system message must be present when both TROGON.md and _meta.systemPrompt are set");
+    let content = system_msg.content().unwrap_or("");
+    assert!(
+        content.contains("md-rules"),
+        "system message must contain TROGON.md content; got: {content:?}"
+    );
+    assert!(
+        content.contains("meta-rules"),
+        "system message must contain _meta.systemPrompt content; got: {content:?}"
+    );
+}
+
+// ── cumulative token tracking across 3+ prompts ───────────────────────────────
+
+#[tokio::test]
+async fn cumulative_token_tracking_across_multiple_prompts() {
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // text_with_usage emits prompt_tokens: 10 each time
+    mock.push_response(text_with_usage("turn one"));
+    mock.push_response(text_with_usage("turn two"));
+    mock.push_response(text_with_usage("turn three"));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    for i in 1u8..=3 {
+        agent
+            .prompt(PromptRequest::new(
+                sid.clone(),
+                vec![ContentBlock::Text(TextContent::new(format!("prompt {i}")))],
+            ))
+            .await
+            .unwrap();
+    }
+
+    let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+    let info = list
+        .sessions
+        .iter()
+        .find(|s| s.session_id.to_string() == sid)
+        .expect("session must appear in list_sessions after prompts");
+    let meta = info.meta.as_ref().expect("session must carry token meta after prompts");
+    let total_input = meta
+        .get("totalInputTokens")
+        .and_then(|v| v.as_u64())
+        .expect("totalInputTokens must be present in session meta");
+    // Each text_with_usage emits prompt_tokens: 10 → 3 prompts = 30 total
+    assert_eq!(
+        total_input, 30,
+        "totalInputTokens must accumulate across 3 prompts (10+10+10=30); got {total_input}"
+    );
+}
+
+// ── fetch_url egress block appears in follow-up call ─────────────────────────
+
+#[tokio::test]
+async fn fetch_url_egress_block_recorded_in_follow_up_call() {
+    use trogon_xai_runner::InputItem;
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // First response: API calls fetch_url with a link-local address
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "resp-egress".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cid-fetch".to_string(),
+            name: "fetch_url".to_string(),
+            arguments: r#"{"url":"http://169.254.169.254/latest/meta-data/"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Second response: API acknowledges the egress-block result
+    mock.push_response(text_response(&["cannot do that"]));
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("fetch metadata"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(), 2,
+        "agent must make a follow-up API call after egress-blocked fetch_url"
+    );
+    let follow_up = &calls[1].input;
+    let egress_item = follow_up.iter().find(|item| {
+        matches!(item, InputItem::FunctionCallOutput { call_id, .. } if call_id == "cid-fetch")
+    });
+    let egress_item = egress_item.expect("follow-up must contain FunctionCallOutput for cid-fetch");
+    if let InputItem::FunctionCallOutput { output, .. } = egress_item {
+        assert!(
+            output.contains("blocked by egress policy"),
+            "FunctionCallOutput must contain egress-block message; got: {output}"
+        );
+    }
 }

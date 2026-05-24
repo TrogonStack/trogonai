@@ -545,3 +545,120 @@ async fn xai_runner_registers_with_correct_acp_prefix_metadata() {
         "nats_subject must be derived from ACP_PREFIX"
     );
 }
+
+/// Verifies the full capabilities+models registration contract that xai main.rs uses:
+/// capabilities must include "explore" and "plan" (in addition to "chat"), and
+/// metadata.models must contain parsed model IDs with context weights (:N) stripped.
+#[tokio::test]
+async fn xai_runner_registers_with_explore_plan_capabilities_and_model_ids() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.xai";
+    let agent_type = "xai";
+    // Replicate main.rs XAI_MODELS parsing: "grok-4:10,grok-3:5" → ["grok-4", "grok-3"]
+    let xai_models_env = "grok-4:10,grok-3:5";
+    let model_ids: Vec<String> = xai_models_env
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix, "models": model_ids }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert!(
+        entry.capabilities.contains(&"explore".to_string()),
+        "xai runner must have 'explore' capability for programming mode; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        entry.capabilities.contains(&"plan".to_string()),
+        "xai runner must have 'plan' capability for programming mode; got: {:?}",
+        entry.capabilities
+    );
+    assert!(
+        entry.capabilities.contains(&"chat".to_string()),
+        "xai runner must have 'chat' capability; got: {:?}",
+        entry.capabilities
+    );
+
+    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        model_strings.contains(&"grok-4"),
+        "metadata.models must contain 'grok-4'; got: {model_strings:?}"
+    );
+    assert!(
+        model_strings.contains(&"grok-3"),
+        "metadata.models must contain 'grok-3'; got: {model_strings:?}"
+    );
+    assert!(
+        !model_strings.iter().any(|s| s.contains(':')),
+        "context weights (':N') must be stripped from model IDs; got: {model_strings:?}"
+    );
+}
+
+/// `Registry::find_by_model` must return the xai runner entry for any model ID stored
+/// in metadata.models — which is how CrossRunnerSwitcher resolves the target runner.
+#[tokio::test]
+async fn xai_find_by_model_returns_runner_for_registered_model() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: "xai".to_string(),
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        nats_subject: "acp.xai.agent.>".to_string(),
+        current_load: 0,
+        metadata: serde_json::json!({
+            "acp_prefix": "acp.xai",
+            "models": ["grok-4", "grok-3"]
+        }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let found = registry
+        .find_by_model("grok-4")
+        .await
+        .expect("find_by_model must not error")
+        .expect("find_by_model must return Some for registered model 'grok-4'");
+
+    assert_eq!(
+        found.agent_type, "xai",
+        "find_by_model('grok-4') must return the xai runner; got: {}",
+        found.agent_type
+    );
+    assert_eq!(
+        found.metadata["acp_prefix"].as_str(),
+        Some("acp.xai"),
+        "returned entry must have acp_prefix='acp.xai'"
+    );
+
+    let not_found = registry
+        .find_by_model("unknown-model")
+        .await
+        .expect("find_by_model must not error");
+    assert!(
+        not_found.is_none(),
+        "find_by_model must return None for an unregistered model"
+    );
+}

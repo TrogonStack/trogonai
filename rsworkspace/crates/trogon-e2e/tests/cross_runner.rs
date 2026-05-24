@@ -679,3 +679,73 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
         })
         .await;
 }
+
+// ── PortableBlock backward compat via import flow ─────────────────────────────
+
+/// Old-format export JSON (no `blocks` field) must be importable by the OR
+/// runner — verifying that `#[serde(default)]` on `blocks` works end-to-end
+/// through the actual import ACP endpoint, not just unit-level serde.
+#[tokio::test]
+async fn portable_message_without_blocks_field_imports_into_or_runner() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![trogon_openrouter_runner::OpenRouterEvent::TextDelta {
+        text: "done".to_string(),
+    }]);
+
+    let agent = OpenRouterAgent::with_deps(
+        OrMockNotifier::new(),
+        "test-model",
+        "test-key",
+        Arc::clone(&http),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent
+                .new_session(agent_client_protocol::NewSessionRequest::new(
+                    std::path::PathBuf::from("/tmp"),
+                ))
+                .await
+                .unwrap();
+            let sid = sess.session_id.clone();
+
+            // Old-format JSON: no "blocks" field — only "role" and "text"
+            let old_format_json = format!(
+                r#"{{"sessionId":"{}","messages":[{{"role":"user","text":"old question"}},{{"role":"assistant","text":"old answer"}}]}}"#,
+                sid
+            );
+            let import_params = std::sync::Arc::from(
+                serde_json::value::RawValue::from_string(old_format_json).unwrap(),
+            );
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .expect("session/import of old-format (no blocks) must succeed");
+
+            // Re-export and verify messages arrived correctly
+            let export_params: std::sync::Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": sid }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let export = agent
+                .ext_method(ExtRequest::new("session/export", export_params))
+                .await
+                .expect("session/export must succeed after importing old format");
+
+            let messages: Vec<PortableMessage> = serde_json::from_str(export.0.get())
+                .expect("export must be valid JSON");
+            assert_eq!(messages.len(), 2, "must have 2 imported messages");
+            assert_eq!(messages[0].role, "user");
+            assert_eq!(messages[0].text, "old question");
+            // The runner converts text→PortableBlock::Text on re-export; the important
+            // thing is that old-format import (no blocks field) round-trips without loss.
+            assert!(
+                messages[0].text.contains("old question"),
+                "old-format import must preserve the text value; got: {:?}",
+                messages[0].text
+            );
+        })
+        .await;
+}

@@ -11,6 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use acp_nats::{AcpPrefix, Config};
+use trogon_xai_runner::{MockXaiHttpClient, NatsSessionNotifier as XaiNatsNotifier, XaiAgent};
+use trogon_openrouter_runner::{
+    MockOpenRouterHttpClient, NatsSessionNotifier as OrNatsNotifier, OpenRouterAgent,
+};
 use acp_nats_agent::AgentSideNatsConnection;
 use async_nats::jetstream;
 use testcontainers_modules::nats::Nats;
@@ -170,6 +174,170 @@ async fn switch_model_migrates_history_between_two_acp_runners() {
                     AgentContentBlock::Text { text } if text == "original answer"
                 ),
                 "assistant message text must match after migration"
+            );
+        })
+        .await;
+}
+
+/// `CrossRunnerSwitcher::switch_model` migrates a session from a live XaiAgent to a live
+/// OpenRouterAgent over real NATS — exercises the full cross-runner export→new_session→import
+/// chain between two different runner implementations.
+#[tokio::test]
+async fn switch_model_migrates_history_from_xai_to_openrouter() {
+    let (_c, port) = start_nats_js().await;
+    let (nats, _js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Attach XaiAgent to "acp.xai" ──────────────────────────────
+            let xai_prefix = AcpPrefix::new("acp.xai").unwrap();
+            let xai_notifier = XaiNatsNotifier::new(nats.clone(), xai_prefix.clone());
+            let xai_agent =
+                XaiAgent::with_deps(xai_notifier, "grok-4", "", MockXaiHttpClient::default());
+            let (_, xai_io) = AgentSideNatsConnection::new(
+                xai_agent,
+                nats.clone(),
+                xai_prefix,
+                |fut| { tokio::task::spawn_local(fut); },
+            );
+            tokio::task::spawn_local(async move { xai_io.await.ok(); });
+
+            // ── 2. Attach OpenRouterAgent to "acp.or" ─────────────────────────
+            let or_prefix = AcpPrefix::new("acp.or").unwrap();
+            let or_notifier = OrNatsNotifier::new(nats.clone(), or_prefix.clone());
+            let or_agent = OpenRouterAgent::with_deps(
+                or_notifier,
+                "anthropic/claude-3-5-sonnet",
+                "",
+                MockOpenRouterHttpClient::default(),
+            );
+            let (_, or_io) = AgentSideNatsConnection::new(
+                or_agent,
+                nats.clone(),
+                or_prefix,
+                |fut| { tokio::task::spawn_local(fut); },
+            );
+            tokio::task::spawn_local(async move { or_io.await.ok(); });
+
+            // Allow both agents to subscribe before sending requests.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            // ── 3. Create a session in XAI and import messages into it ────────
+            let new_resp_msg = tokio::time::timeout(
+                Duration::from_secs(10),
+                nats.request(
+                    "acp.xai.agent.session.new",
+                    serde_json::to_vec(&serde_json::json!({
+                        "sessionId": null,
+                        "cwd": "/tmp",
+                        "mcpServers": []
+                    }))
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let new_resp: serde_json::Value =
+                serde_json::from_slice(&new_resp_msg.payload).unwrap();
+            let xai_session_id = new_resp["sessionId"].as_str().unwrap().to_string();
+
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                nats.request(
+                    "acp.xai.agent.ext.session/import",
+                    serde_json::to_vec(&serde_json::json!({
+                        "sessionId": xai_session_id,
+                        "messages": [
+                            {"role": "user",      "text": "question from xai"},
+                            {"role": "assistant", "text": "answer from xai"}
+                        ]
+                    }))
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            // ── 4. Register both runners in the registry ───────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut xai_cap =
+                AgentCapability::new("xai", ["chat", "explore", "plan"], "acp.xai.agent.>");
+            xai_cap.metadata =
+                serde_json::json!({ "models": ["grok-4"], "acp_prefix": "acp.xai" });
+            registry.register(&xai_cap).await.unwrap();
+
+            let mut or_cap = AgentCapability::new(
+                "openrouter",
+                ["chat", "explore", "plan"],
+                "acp.or.agent.>",
+            );
+            or_cap.metadata = serde_json::json!({
+                "models": ["anthropic/claude-3-5-sonnet"],
+                "acp_prefix": "acp.or"
+            });
+            registry.register(&or_cap).await.unwrap();
+
+            // ── 5. Migrate XAI session to OpenRouter via CrossRunnerSwitcher ───
+            let mut switcher =
+                CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+            let (new_prefix, new_session_id) = switcher
+                .switch_model(
+                    "acp.xai",
+                    &xai_session_id,
+                    "anthropic/claude-3-5-sonnet",
+                    "/tmp",
+                )
+                .await
+                .expect("switch_model from xai to openrouter must succeed");
+
+            assert_eq!(new_prefix, "acp.or", "target prefix must be acp.or");
+            assert!(!new_session_id.is_empty(), "new_session_id must not be empty");
+
+            // ── 6. Verify messages in the OR session via session/export ─────────
+            let export_msg = tokio::time::timeout(
+                Duration::from_secs(10),
+                nats.request(
+                    "acp.or.agent.ext.session/export",
+                    serde_json::to_vec(&serde_json::json!({ "sessionId": new_session_id }))
+                        .unwrap()
+                        .into(),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let messages: Vec<serde_json::Value> =
+                serde_json::from_slice(&export_msg.payload).unwrap();
+
+            assert_eq!(
+                messages.len(),
+                2,
+                "migrated OR session must have 2 messages; got: {messages:?}"
+            );
+            assert_eq!(
+                messages[0]["role"].as_str(),
+                Some("user"),
+                "first migrated message must be user"
+            );
+            assert_eq!(
+                messages[0]["text"].as_str(),
+                Some("question from xai"),
+                "first message text must survive migration"
+            );
+            assert_eq!(
+                messages[1]["role"].as_str(),
+                Some("assistant"),
+                "second migrated message must be assistant"
+            );
+            assert_eq!(
+                messages[1]["text"].as_str(),
+                Some("answer from xai"),
+                "second message text must survive migration"
             );
         })
         .await;

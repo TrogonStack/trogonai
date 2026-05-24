@@ -1669,6 +1669,54 @@ async fn cache_tokens_persisted_to_sessions_kv() {
         .await;
 }
 
+/// Token totals must accumulate across multiple prompts in the same session.
+/// UsageHttpClient returns 10 prompt + 5 completion per call, so three prompts
+/// must yield total_input_tokens=30 and total_output_tokens=15.
+#[tokio::test]
+async fn token_totals_accumulate_across_three_prompts() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            for i in 0..3u32 {
+                agent
+                    .prompt(PromptRequest::new(
+                        resp.session_id.clone(),
+                        vec![ContentBlock::from(format!("prompt {i}"))],
+                    ))
+                    .await
+                    .unwrap();
+            }
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 30,
+                "total_input_tokens must accumulate to 30 across 3 prompts (10 each); got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 15,
+                "total_output_tokens must accumulate to 15 across 3 prompts (5 each); got: {v}"
+            );
+        })
+        .await;
+}
+
 // ── cancel path persists tokens to KV ────────────────────────────────────────
 
 /// HTTP client that emits Usage + text then blocks forever.
