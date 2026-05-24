@@ -1,59 +1,38 @@
-//! Push-DLQ mirror.
-//!
-//! A pull-consumer that observes `{prefix}.push.dlq.>` and republishes each
-//! envelope to `{prefix}.push.dlq.mirror.<caller_id>.<task_id>` so a tenant
-//! audit surface can subscribe to its own DLQ without needing access to the
-//! authoritative stream. Loop markers (`X-A2a-Dlq-Mirrored` header and the
-//! `.mirror.` subject infix) plus a `PushDlqDedupGate` keep redelivery from
-//! producing duplicate mirror publishes.
-
-use std::sync::Arc;
+use std::fmt;
 use std::time::Duration;
 
 use a2a_nats::A2aPrefix;
-use a2a_nats::constants::NATS_MSG_ID_HEADER;
-use a2a_nats::push::dlq_dedup::PushDlqDedupGate;
-use a2a_nats::push::push_idempotency_key::PushIdempotencyKey;
+use a2a_nats::nats::subjects::A2aStream;
 use async_nats::HeaderMap;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 use bytes::Bytes;
+use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_std::env::ReadEnv;
 
-// Only the real `run_push_dlq_mirror` uses these — the cfg(coverage) stub
-// returns immediately and would otherwise carry unused-import warnings.
-#[cfg(not(coverage))]
-use a2a_nats::nats::subjects::A2aStream;
-#[cfg(not(coverage))]
-use futures::StreamExt;
-
 pub const ENV_PUSH_DLQ_MIRROR: &str = "A2A_GATEWAY_PUSH_DLQ_MIRROR";
 pub const ENV_PUSH_DLQ_MIRROR_DURABLE: &str = "A2A_GATEWAY_PUSH_DLQ_DURABLE";
 pub const PUSH_DLQ_MIRROR_HEADER: &str = "X-A2a-Dlq-Mirrored";
-/// Prefix applied to the `Nats-Msg-Id` header on mirror publishes so the
-/// authoritative DLQ envelope and its mirror don't collide in JetStream's
-/// `duplicate_window` dedup — they share a stream.
-pub const MIRROR_MSG_ID_PREFIX: &str = "mirror:";
 
 const MAX_PUBLISH_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
 
-/// Validated NATS durable name for the mirror's pull consumer.
-///
-/// NATS rejects durables with whitespace or punctuation outside the
-/// `[A-Za-z0-9-_]` set; carrying the validation in the type stops a
-/// misconfigured env var from reaching the JetStream client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushDlqMirrorDurable(String);
 
-#[derive(Debug, thiserror::Error)]
-pub enum PushDlqMirrorDurableError {
-    #[error("push DLQ mirror durable name must be non-empty ASCII alphanumeric, '-', or '_'")]
-    Invalid,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushDlqMirrorDurableError;
+
+impl std::fmt::Display for PushDlqMirrorDurableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("push DLQ mirror durable name must be non-empty ASCII alphanumeric, '-', or '_'")
+    }
 }
+
+impl std::error::Error for PushDlqMirrorDurableError {}
 
 impl PushDlqMirrorDurable {
     pub const DEFAULT: &'static str = "a2a-gateway-push-dlq-mirror";
@@ -65,12 +44,11 @@ impl PushDlqMirrorDurable {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(PushDlqMirrorDurableError::Invalid);
+            return Err(PushDlqMirrorDurableError);
         }
         Ok(Self(trimmed.to_owned()))
     }
 
-    #[must_use]
     pub fn default_durable() -> Self {
         Self(Self::DEFAULT.to_owned())
     }
@@ -133,7 +111,12 @@ pub fn push_dlq_mirror_subject(prefix: &A2aPrefix, source_subject: &str) -> Opti
         return None;
     }
 
-    Some(format!("{}.push.dlq.mirror.{}.{}", prefix.as_str(), caller_id, task_id))
+    Some(format!(
+        "{}.push.dlq.mirror.{}.{}",
+        prefix.as_str(),
+        caller_id,
+        task_id
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,7 +132,6 @@ pub async fn mirror_push_dlq_envelope<J>(
     source_subject: &str,
     headers: Option<&HeaderMap>,
     payload: &[u8],
-    dedup: &PushDlqDedupGate,
 ) -> MirrorDispatchOutcome
 where
     J: JetStreamPublisher + Clone + Send + Sync,
@@ -166,33 +148,8 @@ where
         return MirrorDispatchOutcome::Skipped;
     };
 
-    let Some(idempotency_key) = idempotency_key_from_dlq_payload(payload) else {
-        warn!(
-            source_subject,
-            "push DLQ mirror: envelope missing idempotency_key; skipping mirror publish"
-        );
-        return MirrorDispatchOutcome::Skipped;
-    };
-
-    if !dedup.try_acquire(&idempotency_key) {
-        info!(
-            source_subject,
-            idempotency_key = %idempotency_key,
-            "push DLQ mirror publish suppressed by in-process dedup gate"
-        );
-        return MirrorDispatchOutcome::Skipped;
-    }
-
     let mut mirror_headers = HeaderMap::new();
     mirror_headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
-    // The mirror publish lands on the same A2A_PUSH_DLQ stream as the
-    // authoritative envelope, which dedupes by Nats-Msg-Id within its
-    // `duplicate_window`. Reusing the authoritative key here would cause
-    // JetStream to silently drop the mirror as a duplicate — prefix so
-    // mirror records get their own dedup namespace while staying derived
-    // from the source idempotency key.
-    let mirror_msg_id = format!("{}{}", MIRROR_MSG_ID_PREFIX, idempotency_key.as_str());
-    mirror_headers.insert(NATS_MSG_ID_HEADER, mirror_msg_id.as_str());
     if let Some(hdrs) = headers {
         if let Some(content_type) = hdrs.get("Content-Type") {
             mirror_headers.insert("Content-Type", content_type.clone());
@@ -246,36 +203,14 @@ where
         }
     }
 
-    // All publish attempts failed. Release the dedup reservation so a
-    // JetStream redelivery (the consumer NAKs on PublishFailed) isn't
-    // silently dedup-suppressed and ACKed by the next pass — the envelope
-    // would otherwise never land on the tenant mirror subject.
-    dedup.release(&idempotency_key);
     MirrorDispatchOutcome::PublishFailed
 }
 
-fn idempotency_key_from_dlq_payload(payload: &[u8]) -> Option<PushIdempotencyKey> {
-    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
-    let key = value.get("idempotency_key")?.as_str()?;
-    if key.is_empty() {
-        return None;
-    }
-    Some(PushIdempotencyKey::from_dedupe_wire(key))
-}
-
-/// Background pull-consumer that mirrors DLQ envelopes until shutdown.
-///
-/// Gated behind `cfg(not(coverage))` because it binds a real JetStream
-/// context and would block coverage measurement; the pure helpers
-/// (`mirror_push_dlq_envelope`, `push_dlq_mirror_subject`, etc.) are
-/// exercised by unit tests under all build modes.
-#[cfg(not(coverage))]
 pub async fn run_push_dlq_mirror(
     js: async_nats::jetstream::Context,
     prefix: A2aPrefix,
     durable: PushDlqMirrorDurable,
     shutdown: CancellationToken,
-    dedup: Arc<PushDlqDedupGate>,
 ) {
     let stream_name = A2aStream::PushDlq.stream_name(&prefix);
     let stream = match js.get_stream(&stream_name).await {
@@ -291,7 +226,10 @@ pub async fn run_push_dlq_mirror(
     };
 
     let consumer_config = push_dlq_mirror_pull_config(&prefix, &durable);
-    let consumer = match stream.get_or_create_consumer(durable.as_str(), consumer_config).await {
+    let consumer = match stream
+        .get_or_create_consumer(durable.as_str(), consumer_config)
+        .await
+    {
         Ok(consumer) => consumer,
         Err(error) => {
             warn!(
@@ -347,7 +285,6 @@ pub async fn run_push_dlq_mirror(
                             source_subject.as_str(),
                             headers,
                             payload,
-                            dedup.as_ref(),
                         )
                         .await;
 
@@ -378,15 +315,156 @@ pub async fn run_push_dlq_mirror(
     }
 }
 
-#[cfg(coverage)]
-pub async fn run_push_dlq_mirror(
-    _js: async_nats::jetstream::Context,
-    _prefix: A2aPrefix,
-    _durable: PushDlqMirrorDurable,
-    _shutdown: CancellationToken,
-    _dedup: Arc<PushDlqDedupGate>,
-) {
-}
-
 #[cfg(test)]
-mod tests;
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_nats::HeaderMap;
+    use bytes::Bytes;
+    use trogon_nats::jetstream::JetStreamPublisher;
+    use trogon_std::env::InMemoryEnv;
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct RecordingPublisher {
+        publishes: Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
+        fail_until: Arc<Mutex<u32>>,
+    }
+
+    impl RecordingPublisher {
+        fn fail_next_n(&self, n: u32) {
+            *self.fail_until.lock().unwrap() = n;
+        }
+    }
+
+    impl JetStreamPublisher for RecordingPublisher {
+        type PublishError = std::io::Error;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: HeaderMap,
+            payload: Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            let mut remaining = self.fail_until.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(std::io::Error::other("simulated publish failure"));
+            }
+            self.publishes
+                .lock()
+                .unwrap()
+                .push((subject.to_subject().to_string(), headers, payload));
+            Ok(std::future::ready(Ok(async_nats::jetstream::publish::PublishAck {
+                duplicate: false,
+                stream: "A2A_PUSH_DLQ".into(),
+                sequence: 1,
+                domain: String::new(),
+                value: None,
+            })))
+        }
+    }
+
+    fn prefix() -> A2aPrefix {
+        A2aPrefix::new("a2a".to_string()).unwrap()
+    }
+
+    #[test]
+    fn durable_rejects_empty_and_invalid_tokens() {
+        assert!(PushDlqMirrorDurable::new("").is_err());
+        assert!(PushDlqMirrorDurable::new("bad name").is_err());
+        assert_eq!(
+            PushDlqMirrorDurable::new("custom-mirror").unwrap().as_str(),
+            "custom-mirror"
+        );
+    }
+
+    #[test]
+    fn settings_default_off_without_env() {
+        let env = InMemoryEnv::new();
+        let settings = push_dlq_mirror_settings(&env);
+        assert!(!settings.enabled);
+        assert_eq!(settings.durable, PushDlqMirrorDurable::default_durable());
+    }
+
+    #[test]
+    fn settings_enable_and_durable_override() {
+        let env = InMemoryEnv::new();
+        env.set(ENV_PUSH_DLQ_MIRROR, "on");
+        env.set(ENV_PUSH_DLQ_MIRROR_DURABLE, "ops-mirror");
+        let settings = push_dlq_mirror_settings(&env);
+        assert!(settings.enabled);
+        assert_eq!(settings.durable.as_str(), "ops-mirror");
+    }
+
+    #[test]
+    fn mirror_subject_maps_agent_dlq_shape() {
+        assert_eq!(
+            push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9"),
+            Some("a2a.push.dlq.mirror.c1.task-9".to_string())
+        );
+    }
+
+    #[test]
+    fn mirror_subject_rejects_existing_mirror_and_extra_tokens() {
+        assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.mirror.c1.task-9").is_none());
+        assert!(push_dlq_mirror_subject(&prefix(), "a2a.push.dlq.c1.task-9.extra").is_none());
+    }
+
+    #[test]
+    fn skip_mirror_loop_markers() {
+        assert!(should_skip_push_dlq_mirror(
+            "a2a.push.dlq.mirror.c1.task-9",
+            None
+        ));
+        let mut headers = HeaderMap::new();
+        headers.insert(PUSH_DLQ_MIRROR_HEADER, "true");
+        assert!(should_skip_push_dlq_mirror("a2a.push.dlq.c1.task-9", Some(&headers)));
+    }
+
+    #[test]
+    fn pull_consumer_filter_uses_prefix_wildcard() {
+        let config = push_dlq_mirror_pull_config(&prefix(), &PushDlqMirrorDurable::default_durable());
+        assert_eq!(config.filter_subject, "a2a.push.dlq.>");
+        assert_eq!(
+            config.durable_name.as_deref(),
+            Some(PushDlqMirrorDurable::DEFAULT)
+        );
+    }
+
+    #[tokio::test]
+    async fn mirror_publish_adds_header_and_retries() {
+        let js = RecordingPublisher::default();
+        js.fail_next_n(2);
+        let outcome = mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.push.dlq.alice.task-1",
+            None,
+            br#"{"schema":"a2a.push.dlq/v1"}"#,
+        )
+        .await;
+        assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
+        let published = js.publishes.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, "a2a.push.dlq.mirror.alice.task-1");
+        assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
+    }
+
+    #[tokio::test]
+    async fn mirror_skips_already_mirrored_subjects() {
+        let js = RecordingPublisher::default();
+        let outcome = mirror_push_dlq_envelope(
+            &js,
+            &prefix(),
+            "a2a.push.dlq.mirror.alice.task-1",
+            None,
+            b"{}",
+        )
+        .await;
+        assert_eq!(outcome, MirrorDispatchOutcome::Skipped);
+        assert!(js.publishes.lock().unwrap().is_empty());
+    }
+}

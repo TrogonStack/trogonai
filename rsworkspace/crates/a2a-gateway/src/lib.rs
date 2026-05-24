@@ -21,6 +21,7 @@
 pub mod config;
 pub mod planned;
 pub mod policy;
+pub mod push_dlq_mirror;
 pub mod runtime;
 
 pub use config::{Args, Config, ConfigError};

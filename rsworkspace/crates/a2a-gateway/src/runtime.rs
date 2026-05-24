@@ -105,6 +105,21 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         shutdown_for_task.cancel();
     });
 
+    let mirror_settings = crate::push_dlq_mirror::push_dlq_mirror_settings(env);
+    if mirror_settings.enabled {
+        let js = async_nats::jetstream::new(client.clone());
+        let mirror_prefix = config.a2a_prefix.clone();
+        let mirror_durable = mirror_settings.durable.clone();
+        let mirror_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            crate::push_dlq_mirror::run_push_dlq_mirror(js, mirror_prefix, mirror_durable, mirror_shutdown).await;
+        });
+        info!(
+            durable = %mirror_settings.durable.as_str(),
+            "push DLQ mirror background task started"
+        );
+    }
+
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {
