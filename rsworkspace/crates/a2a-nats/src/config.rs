@@ -7,9 +7,10 @@ use trogon_std::env::ReadEnv;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
-    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT, DEFAULT_TASK_TIMEOUT,
-    ENV_CONNECT_TIMEOUT_SECS, ENV_MAX_CONCURRENT_CLIENT_TASKS, ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT,
-    ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
+    DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_MAX_CONCURRENT_CLIENT_TASKS, DEFAULT_OPERATION_TIMEOUT,
+    DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE, DEFAULT_TASK_TIMEOUT, ENV_CONNECT_TIMEOUT_SECS,
+    ENV_MAX_CONCURRENT_CLIENT_TASKS, ENV_OPERATION_TIMEOUT_SECS, ENV_PUSH_DLQ_CALLER_SEGMENT,
+    ENV_PUSH_DLQ_DEDUP_LRU_SIZE, ENV_TASK_TIMEOUT_SECS, MIN_TIMEOUT_SECS,
 };
 use crate::push::CallerId;
 
@@ -23,6 +24,7 @@ pub struct Config {
     pub(crate) task_timeout: Duration,
     pub(crate) max_concurrent_client_tasks: usize,
     pub(crate) push_dlq_caller_segment: CallerId,
+    pub(crate) push_dlq_dedup_lru_size: usize,
 }
 
 impl Config {
@@ -34,6 +36,7 @@ impl Config {
             task_timeout: DEFAULT_TASK_TIMEOUT,
             max_concurrent_client_tasks: DEFAULT_MAX_CONCURRENT_CLIENT_TASKS,
             push_dlq_caller_segment: CallerId::default(),
+            push_dlq_dedup_lru_size: DEFAULT_PUSH_DLQ_DEDUP_LRU_SIZE,
         }
     }
 
@@ -88,6 +91,10 @@ impl Config {
 
     pub fn push_dlq_caller_segment(&self) -> &CallerId {
         &self.push_dlq_caller_segment
+    }
+
+    pub fn push_dlq_dedup_lru_size(&self) -> usize {
+        self.push_dlq_dedup_lru_size
     }
 
     #[cfg(test)]
@@ -147,6 +154,20 @@ pub fn apply_timeout_overrides<E: ReadEnv>(config: Config, env_provider: &E) -> 
 
     if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_CALLER_SEGMENT) {
         config = config.with_push_dlq_caller_segment(raw);
+    }
+
+    if let Ok(raw) = env_provider.var(ENV_PUSH_DLQ_DEDUP_LRU_SIZE) {
+        match raw.trim().parse::<usize>() {
+            Ok(size) if size > 0 => {
+                config.push_dlq_dedup_lru_size = size;
+            }
+            Ok(_) => {
+                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} must be positive, using default");
+            }
+            Err(_) => {
+                warn!("{ENV_PUSH_DLQ_DEDUP_LRU_SIZE}={raw:?} is not a valid integer, using default");
+            }
+        }
     }
 
     config

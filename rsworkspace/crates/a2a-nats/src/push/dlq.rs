@@ -5,10 +5,13 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
+use crate::constants::NATS_MSG_ID_HEADER;
 use crate::push::CallerId;
 use crate::push::caller_id::sanitize_subject_token;
 use crate::push::dispatcher::DispatchError;
+use crate::push::dlq_dedup::PushDlqDedupGate;
 use crate::push::push_idempotency_key::PushIdempotencyKey;
+use crate::push::status_transition_id::StatusTransitionId;
 use crate::task_id::A2aTaskId;
 
 pub(crate) const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
@@ -23,6 +26,9 @@ pub(crate) fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId,
     )
 }
 
+/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.push.dlq/v1`**).
+///
+/// `idempotency_key` is deterministic: `{task_id}:{status_transition_id}:{target_url}`.
 #[derive(Serialize)]
 pub(crate) struct PushDlqMessageV1<'a> {
     pub schema: &'static str,
@@ -30,8 +36,7 @@ pub(crate) struct PushDlqMessageV1<'a> {
     pub push_config_id: &'a str,
     pub target_url: &'a str,
     pub error: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<&'a str>,
+    pub idempotency_key: &'a str,
     pub notification: serde_json::Value,
 }
 
@@ -50,10 +55,23 @@ pub(crate) async fn publish_push_delivery_failure<J>(
     config: &a2a_types::TaskPushNotificationConfig,
     notification_payload: &[u8],
     dispatch_error: &DispatchError,
-    idempotency_key: Option<&PushIdempotencyKey>,
+    status_transition_id: StatusTransitionId,
+    dedup: &PushDlqDedupGate,
 ) where
     J: trogon_nats::jetstream::JetStreamPublisher + Clone + Send + Sync,
 {
+    let idempotency_key = PushIdempotencyKey::derive_dlq(task_id, &status_transition_id, config.url.as_str());
+
+    if !dedup.try_acquire(&idempotency_key) {
+        tracing::info!(
+            task_id = %task_id,
+            push_config_id = %config.id,
+            idempotency_key = %idempotency_key,
+            "push DLQ publish suppressed by in-process dedup gate"
+        );
+        return;
+    }
+
     let subject = push_dlq_publish_subject(prefix, caller_id, task_id);
 
     let body = PushDlqMessageV1 {
@@ -62,7 +80,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
         push_config_id: config.id.as_str(),
         target_url: config.url.as_str(),
         error: dispatch_error.to_string(),
-        idempotency_key: idempotency_key.map(PushIdempotencyKey::as_str),
+        idempotency_key: idempotency_key.as_str(),
         notification: notification_body_json(notification_payload),
     };
 
@@ -78,6 +96,7 @@ pub(crate) async fn publish_push_delivery_failure<J>(
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/json");
+    headers.insert(NATS_MSG_ID_HEADER, idempotency_key.as_str());
 
     match js
         .publish_with_headers(
@@ -108,10 +127,58 @@ pub(crate) async fn publish_push_delivery_failure<J>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::a2a_prefix::A2aPrefix;
     use crate::constants::DEFAULT_PUSH_DLQ_CALLER_SEGMENT;
+    use crate::push::dispatcher::DispatchError;
+    use crate::push::push_notification_target::PushNotificationTargetError;
     use crate::push::resolve_push_dlq_caller_id;
+    use crate::push::terminal_push_task_state::TerminalPushTaskState;
+    use bytes::Bytes;
+    use trogon_nats::jetstream::JetStreamPublisher;
+
+    #[derive(Clone, Default)]
+    struct RecordingPublisher {
+        publishes: Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
+    }
+
+    impl JetStreamPublisher for RecordingPublisher {
+        type PublishError = std::io::Error;
+        type AckFuture = std::future::Ready<Result<async_nats::jetstream::publish::PublishAck, Self::PublishError>>;
+
+        async fn publish_with_headers<S: async_nats::subject::ToSubject + Send>(
+            &self,
+            subject: S,
+            headers: HeaderMap,
+            payload: Bytes,
+        ) -> Result<Self::AckFuture, Self::PublishError> {
+            self.publishes
+                .lock()
+                .unwrap()
+                .push((subject.to_subject().to_string(), headers, payload));
+            Ok(std::future::ready(Ok(async_nats::jetstream::publish::PublishAck {
+                duplicate: false,
+                stream: "A2A_PUSH_DLQ".into(),
+                sequence: 1,
+                domain: String::new(),
+                value: None,
+            })))
+        }
+    }
+
+    fn prefix() -> A2aPrefix {
+        A2aPrefix::new("a2a".to_string()).unwrap()
+    }
+
+    fn sample_config() -> a2a_types::TaskPushNotificationConfig {
+        a2a_types::TaskPushNotificationConfig {
+            id: "pcfg-1".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn push_dlq_subject_default_caller_round_trips_expected_pattern() {
@@ -184,6 +251,117 @@ mod tests {
         assert_eq!(
             push_dlq_publish_subject(&prefix, &cid, &tid),
             "a2a.push.dlq._.task7"
+        );
+    }
+
+    #[tokio::test]
+    async fn second_publish_with_same_key_is_suppressed_by_lru() {
+        let js = RecordingPublisher::default();
+        let dedup = PushDlqDedupGate::with_capacity(32);
+        let prefix = prefix();
+        let task_id = A2aTaskId::new("task-1").unwrap();
+        let config = sample_config();
+        let transition = StatusTransitionId::from_terminal(TerminalPushTaskState::Failed);
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
+            raw: "bad".into(),
+        });
+
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            transition.clone(),
+            &dedup,
+        )
+        .await;
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            transition,
+            &dedup,
+        )
+        .await;
+
+        assert_eq!(js.publishes.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn different_transition_ids_both_publish() {
+        let js = RecordingPublisher::default();
+        let dedup = PushDlqDedupGate::with_capacity(32);
+        let prefix = prefix();
+        let task_id = A2aTaskId::new("task-1").unwrap();
+        let config = sample_config();
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
+            raw: "bad".into(),
+        });
+
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+            &dedup,
+        )
+        .await;
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            StatusTransitionId::from_terminal(TerminalPushTaskState::Completed),
+            &dedup,
+        )
+        .await;
+
+        assert_eq!(js.publishes.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn publish_sets_nats_msg_id_header() {
+        let js = RecordingPublisher::default();
+        let dedup = PushDlqDedupGate::with_capacity(32);
+        let prefix = prefix();
+        let task_id = A2aTaskId::new("task-1").unwrap();
+        let config = sample_config();
+        let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme {
+            raw: "bad".into(),
+        });
+
+        publish_push_delivery_failure(
+            &js,
+            &prefix,
+            &CallerId::default(),
+            &task_id,
+            &config,
+            br#"{}"#,
+            &err,
+            StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+            &dedup,
+        )
+        .await;
+
+        let published = js.publishes.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(
+            published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
+            "task-1:failed:https://example.com/webhook"
         );
     }
 }
