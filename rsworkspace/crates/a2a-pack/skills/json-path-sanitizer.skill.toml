@@ -1,0 +1,6 @@
+skill_id = "json-path-sanitizer"
+wasm_path = "skills/json_path_sanitizer.wasm"
+applies_to_method = { kind = "OneOf", methods = ["message/send", "message/stream", "agent/card"] }
+applies_to_paths = ["$.message.parts[*]", "$.parts[*]", "$.metadata", "$.extensions"]
+category = { Custom = "JsonPathSanitizer" }
+version = "1.0.0"
