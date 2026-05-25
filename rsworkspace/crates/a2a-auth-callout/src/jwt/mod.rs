@@ -3,7 +3,7 @@ mod nats_user_jwt;
 mod user_jwt_subject;
 
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -217,6 +217,36 @@ impl UserJwtClaims {
 
     pub fn verify_with_handles(token: &str, handles: &[SigningKeyHandle]) -> Result<Self, JwtError> {
         nats_user_jwt::verify_nats_user_jwt(token, handles)
+    }
+
+    pub fn verify_minted_user_jwt(
+        token: &str,
+        source: &dyn SigningKeySource,
+        expected_aud: &AccountName,
+    ) -> Result<Self, JwtError> {
+        let claims = Self::verify_with_source(token, source)?;
+        if claims.aud.as_str() != expected_aud.as_str() {
+            return Err(JwtError::Decode("user JWT audience does not match gateway account".into()));
+        }
+        let payload = decode_nats_user_payload(token)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(JwtError::SystemTime)?
+            .as_secs();
+        let now_i64 = i64::try_from(now).map_err(|_| JwtError::IssuedAtOutOfRange)?;
+        let exp = payload
+            .get("exp")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| JwtError::Decode("user JWT missing exp".into()))?;
+        if exp <= now_i64 {
+            return Err(JwtError::Decode("user JWT expired".into()));
+        }
+        if let Some(nbf) = payload.get("nbf").and_then(serde_json::Value::as_i64)
+            && nbf > now_i64
+        {
+            return Err(JwtError::Decode("user JWT not yet valid".into()));
+        }
+        Ok(claims)
     }
 
     #[cfg(test)]

@@ -25,9 +25,11 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
 use crate::gw_pull_backpressure;
+use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
+
 use crate::jwt_caller_identity::{
-    gateway_audit_caller_attribution, gateway_caller_identity_policy, resolve_gateway_caller_identity,
-    UnavailableConnectionCallerIdentity,
+    gateway_audit_caller_attribution, gateway_caller_identity_policy, gateway_jwt_audience,
+    resolve_gateway_caller_identity, JwtHeaderCallerIdentitySource,
 };
 use crate::policy::spicedb_tier1::{
     OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1SpiceDbBuildError, Tier1SpiceDbConfig,
@@ -62,6 +64,7 @@ pub enum RuntimeError {
     Subscribe(String),
     Tier1Config(Tier1SpiceDbBuildError),
     Tier1DeclarativeConfig(Tier1DeclarativeBuildError),
+    SigningKeySource(a2a_auth_callout::AuthCalloutError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -72,6 +75,7 @@ impl fmt::Display for RuntimeError {
             Self::Subscribe(msg) => write!(f, "gateway subscribe failed: {msg}"),
             Self::Tier1Config(error) => write!(f, "{error}"),
             Self::Tier1DeclarativeConfig(error) => write!(f, "{error}"),
+            Self::SigningKeySource(error) => write!(f, "gateway signing key source: {error}"),
         }
     }
 }
@@ -84,6 +88,7 @@ impl std::error::Error for RuntimeError {
             Self::Subscribe(_) => None,
             Self::Tier1Config(_) => None,
             Self::Tier1DeclarativeConfig(_) => None,
+            Self::SigningKeySource(error) => Some(error),
         }
     }
 }
@@ -124,6 +129,10 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
 
     let policy_stack = gateway_policy_stack_from_env(env);
     let caller_identity_policy = gateway_caller_identity_policy(env);
+    let signing_key_source = signing_key_source_from_process_env().map_err(RuntimeError::SigningKeySource)?;
+    let jwt_audience = gateway_jwt_audience(env, config.a2a_prefix.as_str());
+    let message_caller_identity =
+        JwtHeaderCallerIdentitySource::new(signing_key_source, jwt_audience);
     let tier1_layer = Tier1SpiceDbConfig::from_env(env).await?;
     let tier1_declarative_layer = Tier1DeclarativeConfig::from_env(env)?;
 
@@ -216,6 +225,7 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             tier1_layer.owner_emitter.as_ref(),
                             tier1_declarative_layer.gate.as_ref(),
                             &policy_stack,
+                            &message_caller_identity,
                             caller_identity_policy,
                             env,
                             msg,
@@ -245,12 +255,21 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
     policy: &GatewayPolicyStack,
+    message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: crate::jwt_caller_identity::GatewayCallerIdentityPolicy,
     env: &E,
     msg: async_nats::Message,
 ) {
     let ingress_subject = msg.subject.as_str();
     let reply_present = msg.reply.is_some();
+    let headers_for_identity = msg.headers.clone().unwrap_or_default();
+    let caller_identity = resolve_gateway_caller_identity(
+        message_caller_identity,
+        &msg,
+        &headers_for_identity,
+        caller_identity_policy,
+    );
+    let (audit_caller_id, audit_caller_source) = gateway_audit_caller_attribution(caller_identity);
 
     let span = tracing::info_span!(
         "gateway.ingress.dispatch",
@@ -269,7 +288,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
             "gateway ingress envelope received",
         );
 
-        let Some(reply) = msg.reply else {
+        let Some(reply) = msg.reply.clone() else {
             tracing::Span::current().record("routing_outcome", "ignored_no_reply");
             warn!(
                 ingress.subject = %msg.subject,
@@ -288,14 +307,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                     agent_id.as_str(),
                     method_dots
                 );
-                let headers_owned = msg.headers.unwrap_or_default();
-                let connection_identity = UnavailableConnectionCallerIdentity;
-                let caller_identity = resolve_gateway_caller_identity(
-                    &connection_identity,
-                    &headers_owned,
-                    caller_identity_policy,
-                );
-                let (audit_caller_id, audit_caller_source) = gateway_audit_caller_attribution(caller_identity);
+                let headers_owned = msg.headers.clone().unwrap_or_default();
                 if audit_caller_id != "_" {
                     tracing::Span::current().record("caller_id", audit_caller_id.as_str());
                 }

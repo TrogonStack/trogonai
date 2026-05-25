@@ -7,10 +7,7 @@ use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
 use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
 use a2a_auth_callout::credentials::mtls::MTlsVerifier;
 use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-use a2a_auth_callout::error::AuthCalloutError;
-use a2a_auth_callout::signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, SigningKeySource,
-};
+use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 use a2a_auth_callout::{
     AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver,
     Subscriber, XkeyPublic,
@@ -43,49 +40,6 @@ fn load_nkey_seed_env(name: &str) -> Result<NkeySeed, String> {
 fn load_nkey_public_env(name: &str) -> Result<NkeyPublic, String> {
     let raw = env_required(name)?;
     NkeyPublic::parse(raw).map_err(|e| e.to_string())
-}
-
-fn load_signing_key_source() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
-    let kind = std::env::var("AUTH_CALLOUT_SIGNING_KEY_SOURCE")
-        .unwrap_or_else(|_| "env".into());
-    match kind.as_str() {
-        "env" => {
-            if std::env::var("AUTH_CALLOUT_SIGNING_SECRET").is_err() {
-                let fallback = std::env::var("AUTH_CALLOUT_ISSUER_NKEY_SEED").map_err(|_| {
-                    AuthCalloutError::Internal(
-                        "AUTH_CALLOUT_SIGNING_SECRET or AUTH_CALLOUT_ISSUER_NKEY_SEED is required for env custody"
-                            .into(),
-                    )
-                })?;
-                unsafe {
-                    std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", fallback);
-                }
-            }
-            Ok(Arc::new(EnvSigningKeySource::from_env()?))
-        }
-        "file" => {
-            let current = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PATH").map_err(|_| {
-                AuthCalloutError::Internal(
-                    "AUTH_CALLOUT_SIGNING_KEY_PATH is required when AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
-                        .into(),
-                )
-            })?;
-            let previous = std::env::var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH").ok();
-            Ok(Arc::new(FileSigningKeySource::new(
-                current,
-                previous.as_deref(),
-            )?))
-        }
-        "vault" => {
-            Err(AuthCalloutError::Internal(
-                "AUTH_CALLOUT_SIGNING_KEY_SOURCE=vault is not wired yet; use file or env"
-                    .into(),
-            ))
-        }
-        other => Err(AuthCalloutError::Internal(format!(
-            "unknown AUTH_CALLOUT_SIGNING_KEY_SOURCE: {other} (expected env, file, or vault)"
-        ))),
-    }
 }
 
 async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
@@ -133,7 +87,7 @@ async fn main() {
         .init();
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let signing_key_source = match load_signing_key_source() {
+    let signing_key_source = match signing_key_source_from_process_env() {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "failed to load signing key custody");

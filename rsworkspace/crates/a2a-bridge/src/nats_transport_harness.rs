@@ -9,7 +9,7 @@ use serde_json::json;
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditOutcome};
 use a2a_nats::agent_id::A2aAgentId;
-use a2a_nats::constants::GATEWAY_CALLER_ID_HEADER;
+use a2a_auth_callout::CALLER_JWT_HEADER_NAME;
 use a2a_nats::{A2aPrefix};
 
 use crate::auth::{
@@ -32,7 +32,7 @@ pub struct HarnessGatewayUnary {
     nats: trogon_nats::AdvancedMockNatsClient,
     prefix: A2aPrefix,
     agent_id: A2aAgentId,
-    last_caller_id: Arc<Mutex<Option<String>>>,
+    last_caller_jwt_present: Arc<Mutex<bool>>,
     last_subject: Arc<Mutex<Option<String>>>,
 }
 
@@ -47,14 +47,17 @@ impl HarnessGatewayUnary {
             nats,
             prefix,
             agent_id,
-            last_caller_id: Arc::new(Mutex::new(None)),
+            last_caller_jwt_present: Arc::new(Mutex::new(false)),
             last_subject: Arc::new(Mutex::new(None)),
         }
     }
 
     #[must_use]
-    pub fn last_caller_id(&self) -> Option<String> {
-        self.last_caller_id.lock().ok().and_then(|g| (*g).clone())
+    pub fn last_caller_jwt_present(&self) -> bool {
+        self.last_caller_jwt_present
+            .lock()
+            .ok()
+            .is_some_and(|g| *g)
     }
 
     #[must_use]
@@ -75,14 +78,9 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         if let Ok(mut guard) = self.last_subject.lock() {
             *guard = Some(subject.to_owned());
         }
-        let caller = headers
-            .get(GATEWAY_CALLER_ID_HEADER)
-            .and_then(|v| std::str::from_utf8(v.as_ref()).ok())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-        if let Ok(mut guard) = self.last_caller_id.lock() {
-            *guard = caller.clone();
+        let jwt_present = headers.get(CALLER_JWT_HEADER_NAME).is_some();
+        if let Ok(mut guard) = self.last_caller_jwt_present.lock() {
+            *guard = jwt_present;
         }
 
         let gateway_prefix = format!("{}.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
@@ -208,11 +206,11 @@ mod tests {
             .expect("message/send should succeed");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(mint_wire.mint_count(), 1);
-        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
+        assert!(harness.last_caller_jwt_present());
     }
 
     #[tokio::test]
-    async fn nats_transport_message_send_round_trips_caller_id_and_audit() {
+    async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
         let nats = AdvancedMockNatsClient::new();
         let (state, harness, mint_wire) = build_nats_transport_app_state(nats.clone(), "planner");
         let body = Bytes::from(
@@ -235,7 +233,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert!(parsed.get("result").is_some());
 
-        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
+        assert!(harness.last_caller_jwt_present());
         assert_eq!(
             harness.last_subject().as_deref(),
             Some("a2a.gateway.planner.message.send")
@@ -272,7 +270,7 @@ mod tests {
             "text/event-stream"
         );
 
-        assert_eq!(harness.last_caller_id().as_deref(), Some(HARNESS_CALLER_ID));
+        assert!(harness.last_caller_jwt_present());
         assert_eq!(
             harness.last_subject().as_deref(),
             Some("a2a.gateway.planner.tasks.resubscribe")

@@ -166,8 +166,11 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS` | no | `60` | Session ZedToken cache TTL for Tier-1 bulk checks (keyed by JWT `sub` + Account) |
 | `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | no | off | Truthy loads `*.tier1.toml` declarative allow/deny matrices from `A2A_GATEWAY_TIER1_BUNDLE_DIR`; runs after SpiceDB Tier-1 (see [Tier-1 declarative](./A2A_TIER1_DECLARATIVE.md)) |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | when declarative on | — | Directory of `*.tier1.toml` bundle files for Tier-1 declarative policy |
+| `A2A_GATEWAY_JWT_AUDIENCE` | no | `A2A_PREFIX` | Expected `aud` on minted User JWTs in [`CALLER_JWT_HEADER_NAME`](../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) (`A2a-Caller-Jwt`) |
+| `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | Gateway JWT verification uses the same signing-key custody as `a2a-auth-callout` (`env` \| `file`; see auth-callout section) |
+| `A2A_GATEWAY_TRUST_CALLER_HEADERS` | no | off | **Deprecated.** Labs-only fallback: honor [`GATEWAY_PRINCIPAL_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) / [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) only when no verified `A2a-Caller-Jwt` is present. Scheduled for removal once all publishers attach the JWT header. |
 
-Optional attribution: callers can set [`GATEWAY_PRINCIPAL_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Spicedb-Principal`, JSON User JWT `data` claim from auth-callout mint) on NATS messages for gateway audit `caller_id`; [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`X-A2a-Caller-Id`) remains a deprecated header-trust fallback. `a2a-bridge` maps HTTPS [`GATEWAY_CALLER_ID_HTTP`](../../rsworkspace/crates/a2a-nats/src/constants.rs) (`x-a2a-caller-id`) when publishing to `{prefix}.gateway.*`.
+Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token).
 
 CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
 

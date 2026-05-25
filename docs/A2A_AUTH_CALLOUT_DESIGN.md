@@ -170,7 +170,7 @@ Where auth callout work meets in-tree crates.
 ### `a2a-gateway` — ingress
 
 - **Crate:** `rsworkspace/crates/a2a-gateway`
-- **Today:** Queue-group subscriber on `{prefix}.gateway.>`; opaque forward to `{prefix}.agent.{agent_id}.{method}`. Caller identity from `X-A2a-Spicedb-Principal` / deprecated `X-A2a-Caller-Id` when `A2A_GATEWAY_TRUST_CALLER_HEADERS` is on; `ConnectionCallerIdentitySource` is the stand-in until `async-nats` exposes connection-bound minted JWTs.
+- **Today:** Queue-group subscriber on `{prefix}.gateway.>`; opaque forward to `{prefix}.agent.{agent_id}.{method}`. Caller identity from verified `A2a-Caller-Jwt` message header (`MessageCallerIdentitySource`); deprecated `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1` and no JWT header verifies.
 - **Target:** Parse minted User JWT / connection identity on each ingress message; extract **`caller_id`** for spans and Phase 1 audit; thread identity into SpiceDB checks.
 - **Non-goal:** gateway does **not** publish push DLQ messages; terminal DLQ originates from the agent `Bridge` (see [A2A push DLQ ops](./A2A_PUSH_DLQ_OPS.md)).
 
