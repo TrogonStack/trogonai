@@ -1,14 +1,15 @@
-use async_nats::HeaderMap;
 use bytes::Bytes;
 use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
 use trogon_nats::RequestClient;
 
-use crate::constants::REQ_ID_HEADER;
+use a2a_auth_callout::MintedUserJwt;
+
 use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
+use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::wire::{JsonRpcRequest, JsonRpcResponse};
 
 pub async fn send_unary<N, Req, Res>(
@@ -18,6 +19,7 @@ pub async fn send_unary<N, Req, Res>(
     params: &Req,
     req_id: &ReqId,
     timeout: Duration,
+    gateway_caller_jwt: Option<&MintedUserJwt>,
 ) -> Result<Res, ClientError>
 where
     N: RequestClient,
@@ -27,8 +29,10 @@ where
     let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
     let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
 
-    let mut headers = HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
+    let headers = match gateway_caller_jwt {
+        Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
+        None => agent_rpc_headers(req_id),
+    };
 
     let msg = tokio::time::timeout(
         timeout,
@@ -98,6 +102,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -117,6 +122,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -135,6 +141,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -153,6 +160,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -171,6 +179,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_millis(10),
+            None,
         )
         .await;
 
@@ -189,6 +198,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 
@@ -207,6 +217,7 @@ mod tests {
             &Params { x: 1 },
             &req_id(),
             Duration::from_secs(5),
+            None,
         )
         .await;
 

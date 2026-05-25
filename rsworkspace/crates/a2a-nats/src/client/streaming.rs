@@ -8,7 +8,8 @@ use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::REQ_ID_HEADER;
+use a2a_auth_callout::MintedUserJwt;
+
 use crate::jetstream::consumers::stream_events_consumer;
 use crate::jetstream::streams::events_stream_name;
 use crate::jsonrpc::JsonRpcId;
@@ -16,6 +17,7 @@ use crate::req_id::ReqId;
 
 use super::error::ClientError;
 use super::event_stream::{TypedEventStream, build_event_stream};
+use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::wire::{JsonRpcRequest, JsonRpcResponse};
 
 pub struct StreamingRequest<'a, N, J> {
@@ -26,6 +28,7 @@ pub struct StreamingRequest<'a, N, J> {
     pub req_id: &'a ReqId,
     pub prefix: &'a A2aPrefix,
     pub op_timeout: std::time::Duration,
+    pub gateway_caller_jwt: Option<&'a MintedUserJwt>,
 }
 
 pub async fn send_streaming<N, J, Req>(
@@ -51,6 +54,7 @@ where
         req_id,
         prefix,
         op_timeout,
+        gateway_caller_jwt,
     } = ctx;
     let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
     let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
@@ -72,8 +76,10 @@ where
 
     let event_stream = build_event_stream(consumer, last_seq);
 
-    let mut headers = async_nats::HeaderMap::new();
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
+    let headers = match gateway_caller_jwt {
+        Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
+        None => agent_rpc_headers(req_id),
+    };
 
     let msg = timeout(
         op_timeout,
@@ -191,6 +197,7 @@ mod tests {
             req_id,
             prefix,
             op_timeout: timeout,
+            gateway_caller_jwt: None,
         }
     }
 
