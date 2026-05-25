@@ -6,7 +6,7 @@ Design context: [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](./docs/A2A_AUTH_CALLOUT_DESI
 
 ## Why
 
-Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` request headers with a header-trust fallback. Once a callout is deployed and gateway clients carry the auth-callout-minted JWT as a signed message header, these downstream items unblock:
+Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` request headers with a header-trust fallback. Once gateway clients carry the auth-callout-minted JWT as a signed message header, these downstream items unblock:
 
 - JWT-derived `caller_id` on gateway decision-site audits (live in production)
 - Populated `caller_id` segments on `A2A_PUSH_DLQ` subjects (today's `_` fallback retires)
@@ -28,13 +28,11 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 
 ## Remaining work
 
-### 9. Gateway per-message caller identity
+### Gateway per-message caller identity
 
-**Status:** architectural decision needed; previously framed as "blocked on async-nats" — that framing was incorrect.
+The NATS protocol authenticates the publishing **connection** at connect time but does not stamp publisher identity onto MSG / HMSG frames delivered to subscribers. A client library can only surface what the server sends; there is no per-message principal field to expose. The gap is structural — no client-side change can close it.
 
-**Background.** The NATS protocol authenticates the publishing **connection** at connect time but does not stamp publisher identity onto MSG / HMSG frames delivered to subscribers. A client library can only surface what the server sends; there is no per-message principal field to expose. No upstream change to `async-nats` will produce one — the missing surface is the protocol, not the client. The gap is structural.
-
-**Implication.** The current seam — `ConnectionCallerIdentitySource` trait + `UnavailableConnectionCallerIdentity` stand-in at `rsworkspace/crates/a2a-gateway/src/runtime.rs:292`, with the connection-wins branch in `resolve_gateway_caller_identity` (`rsworkspace/crates/a2a-gateway/src/jwt_caller_identity.rs:129`) — encodes an abstraction that cannot be satisfied. It needs to be either deleted or repurposed.
+The current seam — `ConnectionCallerIdentitySource` trait + `UnavailableConnectionCallerIdentity` stand-in at `rsworkspace/crates/a2a-gateway/src/runtime.rs:292`, with the connection-wins branch in `resolve_gateway_caller_identity` (`rsworkspace/crates/a2a-gateway/src/jwt_caller_identity.rs:129`) — encodes an abstraction that cannot be satisfied. It needs to be deleted or repurposed.
 
 **Decision needed.** Pick one:
 
@@ -46,10 +44,6 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 - [ ] Implement the chosen scheme; verifier lives in the gateway crate; signing-key material reuses `a2a-auth-callout`'s `SigningKeySource`.
 - [ ] Delete `ConnectionCallerIdentitySource` + `UnavailableConnectionCallerIdentity`, or rename the trait to match the new abstraction.
 - [ ] Retire `A2A_GATEWAY_TRUST_CALLER_HEADERS` from production env once the new path is live.
-
-## Suggested ordering
-
-1. **#9** — design decision, then gateway-side implementation.
 
 ## Out of scope
 
