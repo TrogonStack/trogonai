@@ -17,7 +17,7 @@ Partial items state the in-tree code surface and what remains before the item is
 ## Phase 1 — policy & audit
 
 - [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), federated `SpiceDbImportGate`, declarative Tier-1 evaluator (`A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED`, default off), and reference bundles under `a2a-pack/policies/` (per-method allowlist, per-agent allowlist, time-of-day approximation). **Remaining:** production rollout (operator-signed bundle distribution per the Tier-3 contract once that's deployed; bundle authoring extensions for true time-of-day predicates).
-- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired:** `resolve_gateway_caller_identity` reads **`X-A2a-Spicedb-Principal`** (JWT `data` claim) with deprecated **`X-A2a-Caller-Id`** fallback; audits populate `caller_id`, `caller_source`. **Pending deployed auth-callout** for production header population on live ingress.
+- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired:** `resolve_gateway_caller_identity` verifies **`A2a-Caller-Jwt`** on ingress messages via `MessageCallerIdentitySource`; deprecated **`X-A2a-Spicedb-Principal`** / **`X-A2a-Caller-Id`** apply only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1` and no verified JWT header is present. **`a2a-bridge`** attaches the minted JWT on publishes to `{prefix}.gateway.>`. **Remaining:** production signing-key custody + publisher rollout.
 
 ## Phase 2 — streaming & lifecycle
 
