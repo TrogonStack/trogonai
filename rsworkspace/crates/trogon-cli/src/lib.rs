@@ -51,7 +51,16 @@ pub async fn connect_or_start_nats(
         return Ok((client, None));
     }
 
-    let child = match Command::new("nats-server").args(["-p", "4222", "-js"]).spawn() {
+    // MED-38: bind the autostarted server to the port the client will dial,
+    // not a hardcoded 4222. NATS URLs have no path, so the segment after the
+    // last ':' is the port; fall back to 4222 when none is present.
+    let port = url
+        .rsplit(':')
+        .next()
+        .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        .unwrap_or("4222");
+
+    let child = match Command::new("nats-server").args(["-p", port, "-js"]).spawn() {
         Ok(c) => c,
         Err(_) => {
             return Err(anyhow::anyhow!(

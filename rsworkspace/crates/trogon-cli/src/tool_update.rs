@@ -58,17 +58,15 @@ fn tool_name_from_update(update: &ToolCallUpdate) -> String {
 
 fn extract_output(raw: Option<&Value>, _content: Option<&[ToolCallContent]>) -> String {
     if let Some(raw) = raw {
+        // MED-15: a string value (including the empty string) is already the
+        // literal output. Returning early avoids serializing `""` into `"\"\""`.
         if let Some(s) = raw.as_str() {
-            if !s.is_empty() {
-                return s.to_string();
-            }
+            return s.to_string();
         }
-        // Non-string JSON value (object/array) — serialize so the output is visible.
+        // Non-string JSON value (object/array/number/bool) — serialize so the
+        // output is visible. Null collapses to empty.
         if !raw.is_null() {
-            let serialized = raw.to_string();
-            if !serialized.is_empty() {
-                return serialized;
-            }
+            return raw.to_string();
         }
     }
     String::new()
