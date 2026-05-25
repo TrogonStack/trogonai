@@ -342,11 +342,11 @@ pub fn build_mode_permission_checker(
     allowed_tools: Vec<String>,
     rules: Arc<PermissionRules>,
     tool_policies: Vec<ToolPolicy>,
+    audit_buf: AuditBuf,
 ) -> Option<Arc<dyn PermissionChecker>> {
     if mode == "bypassPermissions" {
         return None;
     }
-    let audit_buf: AuditBuf = Arc::new(Mutex::new(Vec::new()));
     let inner = ChannelPermissionChecker {
         session_id: session_id.to_string(),
         tx: perm_tx.clone(),
@@ -391,6 +391,7 @@ pub async fn check_tool_permission(
         allowed_tools.to_vec(),
         Arc::new(rules),
         tool_policies.to_vec(),
+        Arc::new(Mutex::new(Vec::new())),
     ) else {
         return true;
     };
@@ -659,6 +660,7 @@ mod tests {
             vec![],
             Arc::new(PermissionRules::default()),
             vec![],
+            Arc::new(Mutex::new(Vec::new())),
         );
         assert!(checker.is_none());
     }

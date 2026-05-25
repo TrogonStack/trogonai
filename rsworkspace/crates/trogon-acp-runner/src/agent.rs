@@ -583,6 +583,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         state.allowed_tools.clone(),
                         Arc::new(rules),
                         state.tool_policies.clone(),
+                        audit_buf.clone(),
                     ) {
                         a.set_permission_checker(checker);
                     }
