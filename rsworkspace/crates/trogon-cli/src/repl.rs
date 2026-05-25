@@ -349,7 +349,20 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     );
                                     eprintln!("resumed session {}", session.session_id());
                                 }
-                                Err(e) => eprintln!("error resuming session: {e}"),
+                                Err(e) => {
+                                    // MED-3: the old session's MCP bridges were shut down
+                                    // before the switch attempt. Since resume failed and we
+                                    // remain on the old session, restore its bridges so MCP
+                                    // tools keep working instead of silently failing.
+                                    eprintln!("error resuming session: {e}");
+                                    if let Err(re) =
+                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
+                                    {
+                                        eprintln!(
+                                            "warning: could not restore MCP bridges for current session: {re}"
+                                        );
+                                    }
+                                }
                             }
                         }
                     } else if cmd == "/sessions" {
@@ -785,7 +798,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 break;
             }
             Err(e) => {
+                // MED-2: tear down the session and MCP bridges on any readline
+                // error, not just EOF, so we don't leak the runner session and
+                // MCP child processes when the terminal errors out.
                 eprintln!("readline error: {e}");
+                mcp_manager.shutdown_session(session.session_id()).await;
+                session.close().await;
+                mcp_manager.shutdown_all().await;
                 break;
             }
         }

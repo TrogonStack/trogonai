@@ -398,6 +398,13 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                     }
                     tokio::select! {
                         biased;
+                        // MED-6: stop as soon as the receiver is dropped (prompt
+                        // cancelled via Ctrl+C or superseded by a new prompt). Otherwise
+                        // this task lingers holding the NATS subscription, and the next
+                        // prompt's subscription delivers every event twice.
+                        _ = tx.closed() => {
+                            break;
+                        }
                         _ = tokio::time::sleep(remaining) => {
                             let _ = tx
                                 .send(StreamEvent::Error(
