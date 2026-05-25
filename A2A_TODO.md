@@ -19,7 +19,7 @@ Partial items state the in-tree code surface and what remains before the item is
 ## Phase 1 — policy & audit
 
 - [ ] Tier 1 declarative policies — bundle tables beyond SpiceDB wired into the gateway request path. **Code shipped:** SpiceDB Tier-1 gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), federated `SpiceDbImportGate`, declarative Tier-1 evaluator (`A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED`, default off), and reference bundles under `a2a-pack/policies/` (per-method allowlist, per-agent allowlist, time-of-day approximation). **Remaining:** production rollout (operator-signed bundle distribution per the Tier-3 contract once that's deployed; bundle authoring extensions for true time-of-day predicates).
-- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired:** `resolve_gateway_caller_identity` verifies **`A2a-Caller-Jwt`** on ingress messages via `MessageCallerIdentitySource`; deprecated **`X-A2a-Spicedb-Principal`** / **`X-A2a-Caller-Id`** apply only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1` and no verified JWT header is present. **`a2a-bridge`** attaches the minted JWT on publishes to `{prefix}.gateway.>`. **Remaining:** production signing-key custody + publisher rollout.
+- [ ] Authoritative JWT-derived `caller_id` on gateway decision-site audits. **Code wired and locally provable:** `resolve_gateway_caller_identity` verifies **`A2a-Caller-Jwt`** on ingress messages; deprecated header trust applies only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1`. **`a2a-bridge`** attaches the minted JWT on gateway publishes. **`make smoke`** / [`compose.a2a.smoke.yml`](./devops/docker/compose/compose.a2a.smoke.yml) exercises the path end-to-end. **Remaining:** production signing-key custody and fleet-wide publisher rollout (not code-path uncertainty).
 
 ## Phase 2 — streaming & lifecycle
 
@@ -27,7 +27,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 3 — push delivery & redaction
 
-- [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`, agent `Bridge` / `message/stream` wiring, gateway-side DLQ mirror (env-gated), gateway-side `A2a-Caller-Jwt` verification surfacing the `SpiceDbPrincipal` for downstream DLQ subjects. **Remaining:** production signing-key custody + publisher rollout so the populated `caller_id` surfaces in DLQ subjects (today's `_` fallback stays active until production publishers attach the JWT header).
+- [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal`, agent `Bridge` / `message/stream` wiring, gateway DLQ mirror, JWT verification on ingress. **Remaining:** production signing-key custody and publisher rollout so DLQ subjects pick up the JWT-derived segment fleet-wide (smoke compose validates the gateway attribution path; DLQ subject population in prod is deployment work).
 
 ## Phase 4 — interop & federation
 

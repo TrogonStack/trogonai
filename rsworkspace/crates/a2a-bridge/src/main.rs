@@ -113,11 +113,14 @@ async fn bootstrap_nats_transport(nats_raw: &str) -> Result<AppState, BridgeErro
     let gateway_rpc_timeout =
         Duration::from_secs(parse_u64_env("BRIDGE_GATEWAY_RPC_TIMEOUT_SECS").unwrap_or(180).max(1));
 
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(connect_timeout)
+    let mut connect_opts = async_nats::ConnectOptions::new().connection_timeout(connect_timeout);
+    if let (Ok(user), Ok(password)) = (env::var("NATS_USER"), env::var("NATS_PASSWORD")) {
+        connect_opts = connect_opts.user_and_password(user, password);
+    }
+    let client = connect_opts
         .connect(servers.as_slice())
         .await
-        .map_err(|e| BridgeError::NatsPublish(format!("anonymous NATS connect failed: {e}")))?;
+        .map_err(|e| BridgeError::NatsPublish(format!("NATS connect failed: {e}")))?;
 
     let client_arc = Arc::new(client);
     let wire = AsyncNatsAuthMintWire::new(client_arc.clone(), mint_wire_timeout);
