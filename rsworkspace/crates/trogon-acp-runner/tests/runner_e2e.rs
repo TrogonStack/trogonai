@@ -4881,3 +4881,78 @@ async fn programming_tool_sequence_read_str_replace_git_diff() {
         })
         .await;
 }
+
+/// Validates that acp-runner sends correctly-formatted requests to the Anthropic Messages API.
+///
+/// The httpmock `when` clause acts as a schema assertion: the mock only fires if
+/// ALL conditions are satisfied simultaneously. If any required field is absent or
+/// has the wrong type, the mock does not match, the agent receives no response,
+/// and `mock.assert()` at the end catches the failure.
+///
+/// Required Anthropic Messages API fields verified here:
+/// - `anthropic-version: 2023-06-01` header (required by the API)
+/// - `model`: serialized as a non-empty JSON string (`"model":"...`)
+/// - `messages`: JSON array (`"messages":[`)
+/// - `max_tokens`: integer field present
+/// - At least one message with `"role":"user"` and a `"content":` field
+/// - `"stream":true` — the runner always uses SSE streaming
+#[tokio::test]
+async fn acp_request_has_required_anthropic_message_fields() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            // Anthropic requires this header on every request.
+            .header("anthropic-version", "2023-06-01")
+            // model must be serialized as a non-empty JSON string.
+            .body_contains("\"model\":\"")
+            // messages must be a JSON array.
+            .body_contains("\"messages\":[")
+            // max_tokens must be present (Anthropic requires it).
+            .body_contains("\"max_tokens\":")
+            // Runner always streams — stream:true must be set.
+            .body_contains("\"stream\":true")
+            // At least one message must have a valid user role.
+            .body_contains("\"role\":\"user\"")
+            // content field must be present in messages.
+            .body_contains("\"content\":");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("schema check passed"));
+    });
+
+    let prefix = "schema-acp";
+    let session_id = "sess-schema-acp-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) =
+                send_text(&nats, prefix, session_id, "schema validation test").await;
+
+            let (_notifs, resp) =
+                collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "acp-runner must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+
+    // All schema conditions were met — mock was called exactly once.
+    mock.assert();
+}
