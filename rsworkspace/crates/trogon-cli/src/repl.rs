@@ -116,14 +116,32 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
             if path_str.is_empty() {
                 result.push('@');
             } else {
-                match fs.read_to_string(&cwd.join(path_str)) {
-                    Ok(content) => {
-                        result.push_str(&format!("`{path_str}`:\n```\n{content}\n```"));
+                let full_path = cwd.join(path_str);
+                let contained = {
+                    let mut norm = std::path::PathBuf::new();
+                    for comp in full_path.components() {
+                        match comp {
+                            std::path::Component::ParentDir => { norm.pop(); }
+                            std::path::Component::CurDir => {}
+                            c => norm.push(c),
+                        }
                     }
-                    Err(_) => {
-                        eprintln!("warning: @{path_str}: file not found or not readable");
-                        result.push('@');
-                        result.push_str(path_str);
+                    norm.starts_with(cwd)
+                };
+                if !contained {
+                    eprintln!("warning: @{path_str}: path escapes working directory — ignored");
+                    result.push('@');
+                    result.push_str(path_str);
+                } else {
+                    match fs.read_to_string(&full_path) {
+                        Ok(content) => {
+                            result.push_str(&format!("`{path_str}`:\n```\n{content}\n```"));
+                        }
+                        Err(_) => {
+                            eprintln!("warning: @{path_str}: file not found or not readable");
+                            result.push('@');
+                            result.push_str(path_str);
+                        }
                     }
                 }
             }
@@ -1104,7 +1122,30 @@ async fn handle_memory_command<F: Fs>(arg: &str, cwd: &Path, fs: &F) {
         let path = if arg == "show" {
             trogon_runner_tools::project_trogon_md_path(cwd)
         } else {
-            PathBuf::from(arg.trim_start_matches("show ").trim())
+            let raw = PathBuf::from(arg.trim_start_matches("show ").trim());
+            // Only allow paths within the current project directory.
+            let mut norm = std::path::PathBuf::new();
+            for comp in raw.components() {
+                match comp {
+                    std::path::Component::ParentDir => { norm.pop(); }
+                    std::path::Component::CurDir => {}
+                    c => norm.push(c),
+                }
+            }
+            let resolved = if norm.is_absolute() { norm } else { cwd.join(norm) };
+            let mut norm2 = std::path::PathBuf::new();
+            for comp in resolved.components() {
+                match comp {
+                    std::path::Component::ParentDir => { norm2.pop(); }
+                    std::path::Component::CurDir => {}
+                    c => norm2.push(c),
+                }
+            }
+            if !norm2.starts_with(cwd) {
+                eprintln!("/memory show: path must be within the project directory");
+                return;
+            }
+            norm2
         };
         match fs.read_to_string(&path) {
             Ok(content) => {

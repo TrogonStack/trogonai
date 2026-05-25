@@ -77,13 +77,18 @@ pub async fn handle_permission_request_nats<S, N>(
         }
     };
 
-    if save_always
-        && let Ok(mut state) = store.load(&req.session_id).await
-        && !state.allowed_tools.contains(&req.tool_name)
-    {
-        state.allowed_tools.push(req.tool_name.clone());
-        if let Err(e) = store.save(&req.session_id, &state).await {
-            warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
+    if save_always {
+        // Update in-memory list immediately so subsequent tool calls this turn
+        // are auto-approved without another permission round-trip.
+        req.always_allowed.lock().unwrap().push(req.tool_name.clone());
+        // Persist to KV store so future turns and sessions also see the decision.
+        if let Ok(mut state) = store.load(&req.session_id).await
+            && !state.allowed_tools.contains(&req.tool_name)
+        {
+            state.allowed_tools.push(req.tool_name.clone());
+            if let Err(e) = store.save(&req.session_id, &state).await {
+                warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
+            }
         }
     }
 
@@ -113,6 +118,7 @@ mod tests {
             tool_name: tool_name.to_string(),
             tool_input: serde_json::json!({"path": "/tmp/x"}),
             response_tx: tx,
+            always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
         };
         (req, rx)
     }

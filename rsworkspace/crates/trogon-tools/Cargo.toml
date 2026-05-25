@@ -11,6 +11,7 @@ reqwest    = { version = "0.12", default-features = false, features = ["rustls-t
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio      = { version = "1", features = ["full"] }
+url        = "2"
 globset    = "0.4"
 html2text  = "0.12"
 ignore     = "0.4"

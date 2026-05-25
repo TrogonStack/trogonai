@@ -4,11 +4,45 @@ use crate::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
 
+/// Returns `true` for URLs that target loopback, private, link-local, or unspecified
+/// addresses — the primary SSRF risk categories.
+fn is_ssrf_blocked(url: &str) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return true,
+    };
+    match parsed.host() {
+        None => true,
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (ip.segments()[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
+                || (ip.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
+        }
+    }
+}
+
 pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     let url = match input.get("url").and_then(|v| v.as_str()) {
         Some(u) => u,
         None => return "Error: missing required parameter 'url'".to_string(),
     };
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return "Error: only http:// and https:// URLs are supported".to_string();
+    }
+    // cfg(test) is true only in `cargo test -p trogon-tools --lib`, allowing httpmock
+    // servers on 127.0.0.1 to work. is_ssrf_blocked is covered by dedicated unit tests.
+    // When trogon-tools is compiled as a dependency (e.g. integration tests), cfg(test)
+    // is false and the guard is active.
+    #[cfg(not(test))]
+    if is_ssrf_blocked(url) {
+        return "Error: requests to private, loopback, or link-local addresses are not permitted"
+            .to_string();
+    }
     let raw = input
         .get("raw")
         .and_then(|v| v.as_bool())
@@ -54,6 +88,34 @@ mod tests {
             cwd: ".".to_string(),
             http_client: reqwest::Client::new(),
         }
+    }
+
+    #[test]
+    fn ssrf_blocked_loopback() {
+        assert!(is_ssrf_blocked("http://127.0.0.1/"));
+        assert!(is_ssrf_blocked("http://127.1.2.3/"));
+        assert!(is_ssrf_blocked("http://localhost/"));
+        assert!(is_ssrf_blocked("http://LOCALHOST/"));
+        assert!(is_ssrf_blocked("http://[::1]/"));
+    }
+
+    #[test]
+    fn ssrf_blocked_private_ranges() {
+        assert!(is_ssrf_blocked("http://10.0.0.1/"));
+        assert!(is_ssrf_blocked("http://172.16.0.1/"));
+        assert!(is_ssrf_blocked("http://192.168.1.1/"));
+    }
+
+    #[test]
+    fn ssrf_blocked_link_local_metadata() {
+        assert!(is_ssrf_blocked("http://169.254.169.254/latest/meta-data/"));
+        assert!(is_ssrf_blocked("http://[fe80::1]/"));
+    }
+
+    #[test]
+    fn ssrf_allowed_public_address() {
+        assert!(!is_ssrf_blocked("https://example.com/"));
+        assert!(!is_ssrf_blocked("https://8.8.8.8/"));
     }
 
     #[tokio::test]

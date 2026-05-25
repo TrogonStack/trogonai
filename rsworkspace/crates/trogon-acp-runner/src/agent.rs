@@ -929,9 +929,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut needs_save = false;
         let new_cwd = req.cwd.to_string_lossy().into_owned();
         if !new_cwd.is_empty() && state.cwd != new_cwd {
-            state.cwd = new_cwd;
-            state.terminal_id = None;
-            state.terminal_cwd = None;
+            state.cwd = new_cwd.clone();
+            // Update terminal_cwd so the next bash command runs from the new cwd
+            // without recreating the terminal (preserving shell env/history).
+            state.terminal_cwd = Some(new_cwd);
             state.updated_at = now_iso8601();
             needs_save = true;
         }
@@ -958,6 +959,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let session_id = req.session_id.to_string();
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut state = match self.store.load(&session_id).await {
             Ok(s) => s,
             Err(e) => {
@@ -980,6 +984,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: SetSessionModelRequest,
     ) -> agent_client_protocol::Result<SetSessionModelResponse> {
         let session_id = req.session_id.to_string();
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut state = match self.store.load(&session_id).await {
             Ok(s) => s,
             Err(e) => {
@@ -1002,6 +1009,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         req: SetSessionConfigOptionRequest,
     ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
         let session_id = req.session_id.to_string();
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let config_id = req.config_id.to_string();
         let value = match &req.value {
             agent_client_protocol::SessionConfigOptionValue::ValueId { value } => {
@@ -1282,6 +1292,9 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore.acquire_owned().await
+                .map_err(|_| internal_error("session lock closed"))?;
             let messages_json = params["messages"].to_string();
             let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
                 .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;

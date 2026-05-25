@@ -5361,6 +5361,7 @@ dependencies = [
  "trogon-mcp",
  "trogon-std",
  "trogon-tools",
+ "url",
 ]
 
 [[package]]
@@ -5948,6 +5949,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]
