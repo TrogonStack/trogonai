@@ -31,7 +31,7 @@ The HTTPS bridge does **not** speak the server JWT envelope. It request/replies 
 
 ## Signing key custody
 
-Inner User JWTs (`nats.jwt`) are signed via a pluggable `SigningKeySource`. Select custody with `AUTH_CALLOUT_SIGNING_KEY_SOURCE`:
+Inner User JWTs (`nats.jwt`) are NATS-shaped User JWTs (`typ: JWT`, `alg: ed25519-nkey`, `nats.type: user`, `pub`/`sub` permissions) signed by the callout Account NKey via `SigningKeySource`. Select custody with `AUTH_CALLOUT_SIGNING_KEY_SOURCE`:
 
 | Value | Use | Notes |
 |-------|-----|--------|
@@ -75,8 +75,8 @@ Structured audit logs on denial include `reason_category`, `server_id`, `caller_
 | `AUTH_CALLOUT_SERVER_XKEY_PUBLIC` | when encryption enabled | Server **persistent** XKey public key (`nats-server` seals requests with this keypair). |
 | `AUTH_CALLOUT_ALLOWED_ACCOUNTS` | **yes** | Comma-separated tenant account names the resolver may mint for. |
 | `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no (default `env`) | `env` \| `file` \| `vault` — selects signing key custody. |
-| `AUTH_CALLOUT_SIGNING_SECRET` / `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS` | dev fallback | HS256 secret(s) for inner user JWT (`nats.jwt`) when source is `env`. |
-| `AUTH_CALLOUT_SIGNING_KEY_PATH` / `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH` | when source is `file` | Key file paths for the current and previous keys. |
+| `AUTH_CALLOUT_SIGNING_SECRET` / `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS` | dev fallback | Account NKey seed(s) for inner user JWT signing when source is `env` (defaults to `AUTH_CALLOUT_ISSUER_NKEY_SEED` when unset). |
+| `AUTH_CALLOUT_SIGNING_KEY_PATH` / `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH` | when source is `file` | UTF-8 Account NKey seed file paths for current and previous keys. |
 | `AUTH_CALLOUT_USER_JWT_TTL_SECS` | no | TTL for minted user JWT (default 300). |
 | `AUTH_CALLOUT_OIDC_*` / `AUTH_CALLOUT_MTLS_*` | per verifier | See credential modules. |
 
@@ -111,7 +111,6 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 
 ## Open questions
 
-- **Inner user JWT**: responses currently embed the HS256 `UserJwtClaims` mint via `SigningKeySource`. A real deployment must mint **NATS User JWTs** (nkey-signed, with `pub`/`sub` permissions) before `nats-server` will accept `nats.jwt` in production (tracked in `A2A_AUTH_CALLOUT_TODO.md` #4 and integration test #8).
 - **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per `A2A_PLAN.md`).
 
 ## Related

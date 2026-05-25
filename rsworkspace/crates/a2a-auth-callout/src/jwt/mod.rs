@@ -1,15 +1,21 @@
+mod nats_permission_claims;
+mod nats_user_jwt;
+mod user_jwt_subject;
+
 use std::fmt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-
-use crate::signing_key_source::{KeyVersion, SigningKeyHandle, SigningKeySource};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 
+pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
+pub use nats_user_jwt::decode_nats_user_payload;
+pub use user_jwt_subject::UserJwtSubject;
+
 use crate::error::AuthCalloutError;
 use crate::permissions::IssuedPermissions;
+use crate::signing_key_source::{KeyVersion, MintingMaterial, SigningKeyHandle, SigningKeySource};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountName(String);
@@ -122,7 +128,7 @@ impl MintedUserJwt {
 }
 
 #[derive(Clone)]
-pub struct SigningKey(Vec<u8>);
+pub struct SigningKey(nkeys::KeyPair);
 
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -131,28 +137,27 @@ impl fmt::Debug for SigningKey {
 }
 
 impl SigningKey {
-    pub fn from_secret(secret: &[u8]) -> Self {
-        Self(secret.to_vec())
+    pub fn from_seed(seed: impl AsRef<str>) -> Result<Self, JwtError> {
+        nkeys::KeyPair::from_seed(seed.as_ref())
+            .map(Self)
+            .map_err(|e| JwtError::InvalidSigningSeed(e.to_string()))
     }
 
-    pub(crate) fn encoding_key(&self) -> EncodingKey {
-        EncodingKey::from_secret(&self.0)
-    }
-
-    pub(crate) fn decoding_key(&self) -> DecodingKey {
-        DecodingKey::from_secret(&self.0)
+    pub(crate) fn keypair(&self) -> &nkeys::KeyPair {
+        &self.0
     }
 }
 
 #[derive(Debug)]
 pub enum JwtError {
-    Encode(jsonwebtoken::errors::Error),
-    Decode(jsonwebtoken::errors::Error),
+    Encode(String),
+    Decode(String),
     SystemTime(std::time::SystemTimeError),
     InvalidCallerId,
     InvalidExternalSubject,
     IssuedAtOutOfRange,
     NoSigningKeyForKid,
+    InvalidSigningSeed(String),
 }
 
 impl fmt::Display for JwtError {
@@ -165,6 +170,7 @@ impl fmt::Display for JwtError {
             Self::InvalidExternalSubject => f.write_str("external subject must be non-empty"),
             Self::IssuedAtOutOfRange => f.write_str("issued-at timestamp out of portable range"),
             Self::NoSigningKeyForKid => f.write_str("no accepted signing key matched token kid"),
+            Self::InvalidSigningSeed(e) => write!(f, "invalid account signing seed: {e}"),
         }
     }
 }
@@ -172,7 +178,6 @@ impl fmt::Display for JwtError {
 impl std::error::Error for JwtError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Encode(e) | Self::Decode(e) => Some(e),
             Self::SystemTime(e) => Some(e),
             _ => None,
         }
@@ -192,124 +197,51 @@ pub struct UserJwtClaims {
     pub aud: AccountName,
     pub data: SpiceDbPrincipal,
     pub caller_id: CallerId,
-    #[serde(default = "default_permissions_for_serde_back_compat")]
     pub nats_permissions: IssuedPermissions,
-}
-
-fn default_permissions_for_serde_back_compat() -> IssuedPermissions {
-    IssuedPermissions {
-        publish_allow: Vec::new(),
-        subscribe_allow: Vec::new(),
-    }
 }
 
 impl UserJwtClaims {
     pub fn mint(
         &self,
-        handle: &SigningKeyHandle,
+        material: &MintingMaterial,
+        user_subject: &UserJwtSubject,
         issued_at: SystemTime,
         ttl: Duration,
     ) -> Result<MintedUserJwt, JwtError> {
-        let iat_secs = secs_since_unix(issued_at)?;
-        let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
-        let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
-
-        #[derive(Serialize)]
-        struct Claims<'a> {
-            kid: &'a str,
-            sub: &'a str,
-            aud: &'a str,
-            caller_id: &'a str,
-            data: &'a Value,
-            nats_permissions: &'a IssuedPermissions,
-            exp: i64,
-            iat: i64,
-            nbf: i64,
-        }
-
-        let kid = handle.version().as_str();
-        let claims = Claims {
-            kid,
-            sub: self.sub.as_str(),
-            aud: self.aud.as_str(),
-            caller_id: self.caller_id.as_str(),
-            data: &self.data.0,
-            nats_permissions: &self.nats_permissions,
-            exp: exp_secs,
-            iat: iat_secs,
-            nbf: iat_secs,
-        };
-
-        let mut header = Header::new(Algorithm::HS256);
-        header.kid = Some(kid.to_owned());
-        encode(
-            &header,
-            &claims,
-            &handle.signing_key().encoding_key(),
-        )
-        .map(MintedUserJwt::new)
-        .map_err(JwtError::Encode)
+        nats_user_jwt::mint_nats_user_jwt(self, material, user_subject, issued_at, ttl)
     }
 
     pub fn verify_with_source(token: &str, source: &dyn SigningKeySource) -> Result<Self, JwtError> {
-        Self::verify_with_handles(token, &source.accepted())
+        nats_user_jwt::verify_nats_user_jwt_with_source(token, source)
     }
 
     pub fn verify_with_handles(token: &str, handles: &[SigningKeyHandle]) -> Result<Self, JwtError> {
-        if handles.is_empty() {
-            return Err(JwtError::NoSigningKeyForKid);
-        }
-
-        let header_kid = peek_header_kid(token)?;
-
-        if let Some(kid) = header_kid.as_deref()
-            && let Some(handle) = handles.iter().find(|h| h.version().as_str() == kid)
-        {
-            return Self::verify_with_handle(token, handle);
-        }
-
-        let mut last_err = None;
-        for handle in handles {
-            match Self::verify_with_handle(token, handle) {
-                Ok(claims) => return Ok(claims),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(last_err.unwrap_or(JwtError::NoSigningKeyForKid))
-    }
-
-    pub(crate) fn verify_with_handle(token: &str, handle: &SigningKeyHandle) -> Result<Self, JwtError> {
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        let decoded = decode::<UserJwtClaims>(
-            token,
-            &handle.signing_key().decoding_key(),
-            &validation,
-        )
-        .map_err(JwtError::Decode)?;
-        Ok(decoded.claims)
+        nats_user_jwt::verify_nats_user_jwt(token, handles)
     }
 
     #[cfg(test)]
-    fn mint_for_test_ttl(&self, handle: &SigningKeyHandle, ttl: Duration) -> Result<MintedUserJwt, JwtError> {
-        self.mint(handle, UNIX_EPOCH + Duration::from_secs(1_000), ttl)
+    fn mint_for_test_ttl(
+        &self,
+        material: &MintingMaterial,
+        user_subject: &UserJwtSubject,
+        ttl: Duration,
+    ) -> Result<MintedUserJwt, JwtError> {
+        self.mint(
+            material,
+            user_subject,
+            std::time::UNIX_EPOCH + Duration::from_secs(1_000),
+            ttl,
+        )
     }
 }
 
 pub fn caller_id_from_minted_jwt(token: &str) -> Result<CallerId, JwtError> {
-    #[derive(Deserialize)]
-    struct Payload {
-        caller_id: String,
-    }
-
-    let mut validation = Validation::new(Algorithm::HS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_exp = false;
-    validation.validate_aud = false;
-    let decoded = decode::<Payload>(token, &DecodingKey::from_secret(b""), &validation)
-        .map_err(JwtError::Decode)?;
-    CallerId::new(decoded.claims.caller_id)
+    let payload: serde_json::Value = nats_user_jwt::decode_nats_user_payload(token)?;
+    let caller_id = payload
+        .get("caller_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| JwtError::Decode("minted user JWT missing caller_id".into()))?;
+    CallerId::new(caller_id)
 }
 
 pub(crate) fn derive_caller_id(external_sub: &str, tenant: &AccountName) -> Result<CallerId, JwtError> {
@@ -341,132 +273,77 @@ pub(crate) fn external_subject_from_der(prefix: &str, cert_der: &[u8]) -> Result
     ExternalSubject::new(format!("{}|{}", prefix, hex::encode(hasher.finalize())))
 }
 
-fn peek_header_kid(token: &str) -> Result<Option<String>, JwtError> {
-    use jsonwebtoken::decode_header;
-
-    let header = decode_header(token).map_err(JwtError::Decode)?;
-    if header.alg != Algorithm::HS256 {
-        return Err(JwtError::Decode(jsonwebtoken::errors::Error::from(
-            jsonwebtoken::errors::ErrorKind::InvalidAlgorithm,
-        )));
-    }
-    Ok(header.kid)
-}
-
-fn secs_since_unix(t: SystemTime) -> Result<i64, JwtError> {
-    let secs = t.duration_since(UNIX_EPOCH).map_err(JwtError::SystemTime)?.as_secs();
-    i64::try_from(secs).map_err(|_| JwtError::IssuedAtOutOfRange)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-
-    #[derive(Debug, serde::Deserialize)]
-    struct ParsedMinted {
-        sub: String,
-        aud: String,
-        caller_id: String,
-        data: serde_json::Value,
-    }
+    use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
+    use nkeys::KeyPair;
+    use serde_json::json;
 
     #[test]
     fn mint_decodes_expected_claims() {
-        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
-
-        let handle = SigningKeyHandle::new(
+        let issuer = KeyPair::new_account();
+        let issuer_seed = issuer.seed().expect("issuer seed");
+        let user = KeyPair::new_user();
+        let material = MintingMaterial::new(
+            SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
             KeyVersion::new("test").unwrap(),
-            SigningKey::from_secret(b"secret-for-hs256-test"),
         );
         let caller_id = CallerId::new("caller1").unwrap();
         let claims = UserJwtClaims {
-            kid: handle.version().clone(),
+            kid: material.version().clone(),
             sub: ExternalSubject::new("alice").unwrap(),
             aud: AccountName::new("tenant-acme"),
             data: SpiceDbPrincipal(json!({"spicedb_subject": "user/alice"})),
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
+        let subject =
+            UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
         let token = claims
-            .mint_for_test_ttl(&handle, Duration::from_secs(60))
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
             .unwrap();
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        let decoded = decode::<ParsedMinted>(
-            token.as_str(),
-            &DecodingKey::from_secret(b"secret-for-hs256-test"),
-            &validation,
-        )
-        .unwrap();
-        assert_eq!(decoded.claims.sub, "alice");
-        assert_eq!(decoded.claims.aud, "tenant-acme");
-        assert_eq!(decoded.claims.caller_id, "caller1");
-        assert_eq!(
-            decoded.claims.data.get("spicedb_subject"),
-            Some(&json!("user/alice"))
+        let handle = SigningKeyHandle::new(
+            material.version().clone(),
+            SigningKey::from_seed(&issuer_seed).unwrap(),
         );
-    }
-
-    #[test]
-    fn mint_wrong_alg_fails_decode() {
-        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
-
-        let handle = SigningKeyHandle::new(KeyVersion::new("test").unwrap(), SigningKey::from_secret(b"a"));
-        let caller_id = CallerId::new("cid").unwrap();
-        let claims = UserJwtClaims {
-            kid: handle.version().clone(),
-            sub: ExternalSubject::new("alice").unwrap(),
-            aud: AccountName::new("tenant-acme"),
-            data: SpiceDbPrincipal(json!({})),
-            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
-            caller_id,
-        };
-        let token = claims
-            .mint_for_test_ttl(&handle, Duration::from_secs(10))
-            .unwrap();
-        let mut validation = Validation::new(Algorithm::RS384);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        let err =
-            decode::<ParsedMinted>(token.as_str(), &DecodingKey::from_secret(b"a"), &validation).unwrap_err();
-        assert!(
-            matches!(err.kind(), jsonwebtoken::errors::ErrorKind::InvalidAlgorithm)
-                || err.to_string().to_lowercase().contains("algorithm"),
-            "{err:?}"
-        );
+        let decoded = UserJwtClaims::verify_with_handles(token.as_str(), &[handle]).unwrap();
+        assert_eq!(decoded.sub.as_str(), "user/alice");
+        assert_eq!(decoded.aud.as_str(), "tenant-acme");
+        assert_eq!(decoded.caller_id.as_str(), "caller1");
+        assert_eq!(decoded.data.spicedb_subject().unwrap().as_str(), "user/alice");
     }
 
     #[test]
     fn mint_rejects_wrong_verification_key() {
-        use crate::signing_key_source::{KeyVersion, SigningKeyHandle};
-
-        let handle = SigningKeyHandle::new(
+        let issuer_a = KeyPair::new_account();
+        let issuer_a_seed = issuer_a.seed().expect("issuer seed");
+        let issuer_b = KeyPair::new_account();
+        let issuer_b_seed = issuer_b.seed().expect("issuer b seed");
+        let user = KeyPair::new_user();
+        let material = MintingMaterial::new(
+            SigningKey::from_seed(&issuer_a_seed).unwrap().keypair().clone(),
             KeyVersion::new("test").unwrap(),
-            SigningKey::from_secret(b"signer-a------------------------"),
         );
         let caller_id = CallerId::new("cid").unwrap();
         let claims = UserJwtClaims {
-            kid: handle.version().clone(),
+            kid: material.version().clone(),
             sub: ExternalSubject::new("s").unwrap(),
             aud: AudienceAccount::new("a"),
             data: SpiceDbPrincipal(json!({})),
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
+        let subject =
+            UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
         let token = claims
-            .mint_for_test_ttl(&handle, Duration::from_secs(60))
+            .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
             .unwrap();
-        let mut validation = Validation::new(Algorithm::HS256);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        let wrong = decode::<ParsedMinted>(
-            token.as_str(),
-            &DecodingKey::from_secret(b"signer-b------------------------"),
-            &validation,
+        let wrong = SigningKeyHandle::new(
+            KeyVersion::new("test").unwrap(),
+            SigningKey::from_seed(&issuer_b_seed).unwrap(),
         );
-        assert!(wrong.is_err());
+        assert!(UserJwtClaims::verify_with_handles(token.as_str(), &[wrong]).is_err());
     }
 
     #[test]

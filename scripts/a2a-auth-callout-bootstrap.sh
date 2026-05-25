@@ -160,13 +160,9 @@ ensure_signing_key_file() {
         return
     fi
     umask 077
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32 >"${SIGNING_KEY_FILE}"
-    else
-        dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' >"${SIGNING_KEY_FILE}"
-    fi
+    printf '%s\n' "${ISSUER_SEED}" >"${SIGNING_KEY_FILE}"
     chmod 600 "${SIGNING_KEY_FILE}"
-    log "Wrote HS256 signing key bytes to ${SIGNING_KEY_FILE}"
+    log "Wrote Account NKey seed for inner User JWT signing to ${SIGNING_KEY_FILE}"
 }
 
 ensure_auth_callout_password() {
