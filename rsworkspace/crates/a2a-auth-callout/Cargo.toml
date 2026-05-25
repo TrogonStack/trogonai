@@ -39,6 +39,9 @@ nkeys = { workspace = true }
 base64 = { workspace = true }
 data-encoding = "2.6.0"
 
+[features]
+test-support = []
+
 [dev-dependencies]
 tempfile = { workspace = true }
 base64 = { workspace = true }

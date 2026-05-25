@@ -29,6 +29,8 @@ pub enum ClientError {
     StreamClosed,
     /// Returned when deriving a gateway ingress overlay from built-in agent subjects fails (internal invariant).
     InvalidRpcSubjectOverlay,
+    /// Gateway ingress publish attempted with an expired minted User JWT (refresh before retrying).
+    GatewayCallerJwtExpired(String),
 }
 
 impl ClientError {
@@ -65,6 +67,7 @@ impl fmt::Display for ClientError {
             Self::ConsumerSetup(msg) => write!(f, "failed to set up event consumer: {msg}"),
             Self::StreamClosed => write!(f, "event stream closed unexpectedly"),
             Self::InvalidRpcSubjectOverlay => write!(f, "internal error deriving gateway ingress subject"),
+            Self::GatewayCallerJwtExpired(msg) => write!(f, "gateway caller JWT expired: {msg}"),
         }
     }
 }
@@ -231,6 +234,12 @@ mod tests {
                 .to_string()
                 .contains("gateway ingress")
         );
+    }
+
+    #[test]
+    fn display_gateway_caller_jwt_expired() {
+        let err = ClientError::GatewayCallerJwtExpired("user JWT expired".into());
+        assert!(err.to_string().contains("expired"));
     }
 
     #[test]

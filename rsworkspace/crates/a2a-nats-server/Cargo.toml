@@ -12,6 +12,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 a2a-types = { workspace = true }
 async-compat = { workspace = true }
@@ -31,6 +32,7 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 
 [dev-dependencies]
+a2a-auth-callout = { workspace = true, features = ["test-support"] }
 axum = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 tokio = { workspace = true, features = ["test-util"] }
