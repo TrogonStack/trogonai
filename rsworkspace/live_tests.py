@@ -5812,6 +5812,76 @@ async def test_granular_permissions_deny_command():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 115 — Programming cycle: read_file → str_replace → git_diff
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_programming_edit_cycle():
+    print("\n\033[1mTest 115: Programming cycle: read_file → str_replace → git_diff\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # git repo con un archivo Python ya commiteado
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+        code_path = os.path.join(tmpdir, "main.py")
+        with open(code_path, "w") as f:
+            f.write("def calculate():\n    return 1\n")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True)
+
+        def sse(n):
+            if n == 1:   # LLM lee el archivo antes de editar
+                return acp_tool_use_sse("t1", "read_file",
+                    json.dumps({"path": "main.py"}))
+            if n == 2:   # con el contenido en contexto, aplica el cambio
+                return acp_tool_use_sse("t2", "str_replace",
+                    json.dumps({"path": "main.py",
+                                "old_str": "return 1",
+                                "new_str": "return 42"}))
+            if n == 3:   # verifica el cambio con git diff
+                return acp_tool_use_sse("t3", "git_diff",
+                    json.dumps({}))
+            return acp_text_sse("edit complete")  # llamada 4: respuesta final
+
+        mock = MockHttpServer(30115, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30115, 115, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "update the return value", timeout=25)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            content = open(code_path).read()
+            print(f"    main.py: {content!r}", flush=True)
+
+            # La llamada 4 debe contener el tool_result del git_diff
+            diff_in_call4 = False
+            if len(mock.received) >= 4:
+                body4 = json.loads(mock.received[3])
+                msgs4 = json.dumps(body4.get("messages", []))
+                print(f"    call4 msgs preview: {msgs4[:250]!r}", flush=True)
+                diff_in_call4 = "return 42" in msgs4 or "-return 1" in msgs4 or "+return 42" in msgs4
+
+            file_ok  = "return 42" in content and "return 1" not in content
+            loop_ok  = len(mock.received) >= 4
+
+            if file_ok and loop_ok and diff_in_call4:
+                ok("programming cycle: read_file→str_replace→git_diff chain works end-to-end")
+            elif file_ok and loop_ok:
+                fail("programming cycle: file edited and loop complete but git_diff result absent from call 4",
+                     f"calls={len(mock.received)}")
+            elif file_ok:
+                fail("programming cycle: str_replace worked but tool loop stopped early",
+                     f"calls={len(mock.received)} expected >=4")
+            else:
+                fail("programming cycle: str_replace did not modify the file",
+                     f"calls={len(mock.received)} content={content!r}")
+        finally:
+            auto_approve.terminate(); auto_approve.wait(timeout=2)
+            proc.terminate(); proc.wait(timeout=3)
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -5928,6 +5998,7 @@ async def main():
     await test_init_when_trogon_exists()
     await test_granular_permissions_allow_path()
     await test_granular_permissions_deny_command()
+    await test_programming_edit_cycle()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
