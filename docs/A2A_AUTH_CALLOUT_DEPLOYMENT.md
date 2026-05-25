@@ -1,6 +1,6 @@
 # A2A auth callout — deployment reference
 
-Operator runbook for the `a2a-auth-callout` service on NATS `$SYS.REQ.USER.AUTH`. Design context: [A2A auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md). Build tracker: [A2A auth callout TODO](../A2A_AUTH_CALLOUT_TODO.md).
+Operator runbook for the `a2a-auth-callout` service on NATS `$SYS.REQ.USER.AUTH`. Design context: [A2A auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md).
 
 ## Pinned versions
 
@@ -116,4 +116,3 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 ## Related
 
 - Runtime env reference: [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md)
-- Build tracker: [`A2A_AUTH_CALLOUT_TODO.md`](../A2A_AUTH_CALLOUT_TODO.md)

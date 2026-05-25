@@ -25,8 +25,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Phase 3 — push delivery & redaction
 
-- [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`, agent `Bridge` / `message/stream` wiring, gateway-side DLQ mirror (env-gated). **Remaining:** deployed auth-callout mint + gateway `X-A2a-Spicedb-Principal` header forward so the populated caller_id surfaces in DLQ subjects (today's `_` fallback stays active without a principal).
-- [ ] Exactly-once dedup across agent + mirror DLQ paths ([`A2A_PUSH_EXACTLY_ONCE_SKETCH.md`](./docs/A2A_PUSH_EXACTLY_ONCE_SKETCH.md)). **Code wired:** `PushIdempotencyKey::derive_dlq`, in-process LRU (`A2A_PUSH_DLQ_DEDUP_LRU_SIZE`), JetStream `Nats-Msg-Id` + `duplicate_window` (`A2A_PUSH_DLQ_DEDUP_WINDOW_SECS`) on agent + gateway mirror publish paths.
+- [ ] End-to-end principal propagation into push DLQ `caller_id`. **Code shipped:** `PrincipalCarrier`, `CallerId::from_principal` over `SpiceDbPrincipal.spicedb_subject`, agent `Bridge` / `message/stream` wiring, gateway-side DLQ mirror (env-gated), gateway-side `A2a-Caller-Jwt` verification surfacing the `SpiceDbPrincipal` for downstream DLQ subjects. **Remaining:** production signing-key custody + publisher rollout so the populated `caller_id` surfaces in DLQ subjects (today's `_` fallback stays active until production publishers attach the JWT header).
 
 ## Phase 4 — interop & federation
 
@@ -36,7 +35,7 @@ Partial items state the in-tree code surface and what remains before the item is
 
 ## Cross-cutting
 
-- [ ] Gateway request path completeness. **Code shipped:** Tier-1 SpiceDB gate (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`), Tier-2 CEL evaluator (`A2A_GATEWAY_TIER2_CEL_ENABLED`), authoritative Tier-3 redaction (`A2A_GATEWAY_TIER3_REDACTION_ENABLED`), decision-site audit publish (`trace_id`, `rules_fired`, `rewrites`, `refusal_skill`, `stream_consumer`, `zed_token_snapshot`, `caller_id`, `caller_source`), unary `message.send` deadline (`A2A_GATEWAY_UNARY_DEADLINE_SECS`), JWT-data-claim caller resolution with header-trust fallback. **Remaining:** end-to-end auth-callout verifier in the gateway tier.
+- [ ] NATS-native publisher mint carrier. **Gap:** `a2a-nats::Client::routing_via_gateway_ingress` publishes to `{prefix}.gateway.*` via `request_with_headers` with only `X-Req-Id` — it has no `MintedUserJwt` in scope, so the gateway falls back to legacy header-trust for these callers. **Decision needed:** add a `MintedUserJwt` carrier on `Client` (re-mint on demand via the existing `BridgeMintAdapter` surface), or document that NATS-native callers must attach `A2a-Caller-Jwt` themselves and provide a helper. Affects `a2a-nats-server` and any direct `Client` user.
 
 ---
 

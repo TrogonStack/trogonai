@@ -2,7 +2,7 @@
 
 Stable design reference for the **`a2a-auth-callout`** service (`rsworkspace/crates/a2a-auth-callout`). It describes what shipped on the NATS perimeter and how that wiring connects to the rest of the A2A-over-NATS binding.
 
-**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md). **Build tracker:** [`A2A_AUTH_CALLOUT_TODO.md`](../A2A_AUTH_CALLOUT_TODO.md).
+**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
 
 Related decisions: [`A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) (auth callout deployment, subject ACL, push DLQ).
 
@@ -104,7 +104,7 @@ Minted User JWTs (`nats.jwt` in the authorization response) carry enough structu
 }
 ```
 
-**Note:** Production `nats-server` acceptance of `nats.jwt` may require NATS-native User JWTs (nkey-signed `pub`/`sub` permissions) — tracked in `A2A_AUTH_CALLOUT_TODO.md` #4 and integration test #8. The in-tree minter currently produces HS256 `UserJwtClaims` via `SigningKeySource`.
+The in-tree minter emits NATS-native User JWTs (`ed25519-nkey`, `nats.pub` / `nats.sub` from `IssuedPermissions`, `sub` = caller User NKey, Account NKey `iss`) via `SigningKeySource`. Acceptance against a live `nats-server` is exercised by the testcontainer integration suite.
 
 ---
 
