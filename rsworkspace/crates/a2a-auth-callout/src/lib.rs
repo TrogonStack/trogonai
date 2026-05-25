@@ -1,4 +1,5 @@
 pub mod account_resolver;
+pub mod caller_jwt_header;
 pub mod bridge_mint;
 pub mod credentials;
 pub mod denial_category;
@@ -13,6 +14,7 @@ pub mod subscriber;
 pub mod wire;
 
 pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
+pub use caller_jwt_header::{CallerJwtHeaderValue, CALLER_JWT_HEADER_NAME};
 pub use bridge_mint::{
     BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse,
 };
@@ -24,8 +26,9 @@ pub use jwt::{
     SpiceDbSubject, UserJwtClaims, UserJwtSubject,
 };
 pub use signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial,
-    SigningKeyHandle, SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
+    signing_key_source_from_process_env, EnvSigningKeySource, FileSigningKeySource, KeyVersion,
+    KeyVersionError, MintingMaterial, SigningKeyHandle, SigningKeySource, StaticSigningKeySource,
+    VaultSigningKeySource,
 };
 pub use permissions::{IssuedPermissions, SubjectPattern, SubjectPatternError};
 pub use subscriber::Subscriber;
