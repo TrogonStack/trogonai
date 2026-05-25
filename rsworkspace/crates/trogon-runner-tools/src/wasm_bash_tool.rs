@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,8 +34,14 @@ fn session_creation_lock(session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const START_MARKER_PREFIX: &str = "__START_";
+const START_MARKER_SUFFIX: &str = "__";
 const EXIT_MARKER_PREFIX: &str = "__EXIT_";
 const EXIT_MARKER_SUFFIX: &str = "__";
+
+/// Monotonically increasing counter used to generate unique start-marker IDs
+/// for each bash command invocation. No external dep needed.
+static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Implements the `bash` tool by delegating execution to a running `trogon-wasm-runtime`
 /// instance discovered via the agent registry.
@@ -159,34 +166,19 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                 }
             };
 
-            // ── Snapshot baseline output length ───────────────────────────────
-            // baseline_len is a *byte* offset into the raw UTF-8 string that the
-            // wasm-runtime returns. We must only slice at char boundaries, so we
-            // record the byte length of the string as-is (always a valid boundary).
-            let baseline_len = {
-                let req = TerminalOutputRequest::new(
-                    session_id.clone(),
-                    terminal_id.clone(),
-                );
-                let payload = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
-                let msg = nats
-                    .request(format!("{term_base}.output"), payload.into())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp: serde_json::Value =
-                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-                // Use lossy conversion to guarantee valid UTF-8, then take byte length.
-                // The byte length of a valid UTF-8 string is always a char boundary.
-                String::from_utf8_lossy(
-                    resp["output"].as_str().unwrap_or("").as_bytes()
-                ).len()
-            };
-
-            // ── Write command with demarcation marker ─────────────────────────
-            let cmd_with_marker = format!("{command}; echo \"{EXIT_MARKER_PREFIX}$?{EXIT_MARKER_SUFFIX}\"\n");
+            // ── Write command wrapped with unique start + exit markers ────────
+            // HIGH-21: Instead of snapshotting baseline output length (which can
+            // shrink when a partial UTF-8 sequence at snapshot time completes later),
+            // we bracket each command with a unique start marker so we can locate
+            // this invocation's output regardless of the total buffer size.
+            let start_id = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let start_marker = format!("{START_MARKER_PREFIX}{start_id}{START_MARKER_SUFFIX}");
+            let cmd_with_markers = format!(
+                "echo \"{start_marker}\"; {command}; echo \"{EXIT_MARKER_PREFIX}$?{EXIT_MARKER_SUFFIX}\"\n"
+            );
             let write_req = serde_json::json!({
                 "terminal_id": terminal_id,
-                "data": cmd_with_marker.as_bytes()
+                "data": cmd_with_markers.as_bytes()
             });
             let payload = serde_json::to_vec(&write_req).map_err(|e| e.to_string())?;
             nats.request(
@@ -213,26 +205,18 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     .map_err(|e| e.to_string())?;
                 let resp: serde_json::Value =
                     serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-                let full_output = resp["output"].as_str().unwrap_or("").to_string();
+                let full_output = terminal_output_from_response(&resp)?;
 
-                if full_output.len() > baseline_len {
-                    // floor_char_boundary ensures we never split a multi-byte character.
-                    let safe_start = full_output.floor_char_boundary(baseline_len);
-                    let new_output = &full_output[safe_start..];
-                    if let Some(output) = extract_before_marker(new_output) {
-                        return Ok(output);
-                    }
+                if let Some(output) = extract_output(&full_output, &start_marker) {
+                    return Ok(output);
                 }
 
                 if tokio::time::Instant::now() >= deadline {
-                    let new_output = if full_output.len() > baseline_len {
-                        let safe_start = full_output.floor_char_boundary(baseline_len);
-                        full_output[safe_start..].to_string()
-                    } else {
-                        String::new()
-                    };
+                    // Return whatever comes after the start marker (if present), or empty.
+                    let partial = extract_after_start_marker(&full_output, &start_marker)
+                        .unwrap_or_default();
                     return Err(format!(
-                        "timeout after {}s. Partial output:\n{new_output}",
+                        "timeout after {}s. Partial output:\n{partial}",
                         timeout.as_secs()
                     ));
                 }
@@ -241,9 +225,67 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
     }
 }
 
-/// Searches `output` for `__EXIT_N__`, returns everything before the marker.
-/// Returns `None` if the marker is not yet present.
-fn extract_before_marker(output: &str) -> Option<String> {
+
+/// Parses a `terminal.output` NATS reply. Returns an error immediately when the
+/// wasm-runtime dispatcher published a JSON-RPC error (e.g. reply exceeded
+/// `max_payload`) instead of leaving the poll loop to time out on empty output.
+fn terminal_output_from_response(resp: &Value) -> Result<String, String> {
+    if let Some(err) = resp.get("error") {
+        let message = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| err.to_string());
+        return Err(message);
+    }
+    if let Some(status) = resp.get("status").and_then(|s| s.as_str()) {
+        if status != "success" && status != "ok" {
+            return Err(format!("terminal.output status: {status}"));
+        }
+    }
+    let output = resp
+        .get("output")
+        .or_else(|| resp.get("result").and_then(|r| r.get("output")))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Ok(output.to_string())
+}
+
+/// Returns the text between the start marker line and the exit marker.
+///
+/// 1. Locate `start_marker` in `output`. If absent → `None` (still buffering).
+/// 2. Skip past the rest of that line (the echo of the start marker itself).
+/// 3. In the remaining text, find the last valid `__EXIT_N__` marker and
+///    return everything before it (trailing newline stripped).
+///
+/// This eliminates the baseline-length approach (HIGH-21): the start marker
+/// uniquely identifies this invocation's output regardless of buffer size,
+/// so a partial UTF-8 sequence completing between snapshot and poll can never
+/// cause the guard to stall.
+fn extract_output(output: &str, start_marker: &str) -> Option<String> {
+    let after_start = extract_after_start_marker(output, start_marker)?;
+    // Now search for the exit marker within the portion after the start marker.
+    find_before_exit_marker(after_start)
+}
+
+/// Returns the text that follows the start-marker line, or `None` if the
+/// start marker has not appeared yet.
+fn extract_after_start_marker<'a>(output: &'a str, start_marker: &str) -> Option<&'a str> {
+    let marker_pos = output.find(start_marker)?;
+    // Advance past the marker token itself.
+    let after_marker = &output[marker_pos + start_marker.len()..];
+    // Skip the rest of the line on which the marker was echoed
+    // (there may be a trailing '\r' before '\n' in some terminal modes).
+    let after_line = match after_marker.find('\n') {
+        Some(nl) => &after_marker[nl + 1..],
+        None => after_marker,
+    };
+    Some(after_line)
+}
+
+/// Searches `output` for `__EXIT_N__`, returns everything before the last
+/// valid marker. Returns `None` if no complete exit marker is present yet.
+fn find_before_exit_marker(output: &str) -> Option<String> {
     // Find the last occurrence so partial writes don't confuse us.
     let mut last_match: Option<usize> = None;
     let mut search = output;
@@ -270,41 +312,130 @@ fn extract_before_marker(output: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    // ── terminal_output_from_response ─────────────────────────────────────────
+
     #[test]
-    fn extract_before_marker_finds_exit_zero() {
+    fn terminal_output_from_response_returns_output_field() {
+        let resp = serde_json::json!({ "output": "hello" });
+        assert_eq!(
+            terminal_output_from_response(&resp).unwrap(),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn terminal_output_from_response_errors_on_jsonrpc_error() {
+        let resp = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": "Terminal output too large (1048577 bytes)"
+            }
+        });
+        let err = terminal_output_from_response(&resp).unwrap_err();
+        assert!(err.contains("too large"), "got: {err}");
+    }
+
+    #[test]
+    fn terminal_output_from_response_errors_on_non_success_status() {
+        let resp = serde_json::json!({ "status": "failed", "output": "" });
+        let err = terminal_output_from_response(&resp).unwrap_err();
+        assert!(err.contains("failed"), "got: {err}");
+    }
+
+    // ── find_before_exit_marker (low-level helper) ────────────────────────────
+
+    #[test]
+    fn find_before_exit_marker_finds_exit_zero() {
         let output = "hello\nworld\n__EXIT_0__\n";
         assert_eq!(
-            extract_before_marker(output),
+            find_before_exit_marker(output),
             Some("hello\nworld".to_string())
         );
     }
 
     #[test]
-    fn extract_before_marker_finds_nonzero_exit_code() {
+    fn find_before_exit_marker_finds_nonzero_exit_code() {
         let output = "error output\n__EXIT_1__\n";
         assert_eq!(
-            extract_before_marker(output),
+            find_before_exit_marker(output),
             Some("error output".to_string())
         );
     }
 
     #[test]
-    fn extract_before_marker_returns_none_when_absent() {
-        assert_eq!(extract_before_marker("no marker here"), None);
+    fn find_before_exit_marker_returns_none_when_absent() {
+        assert_eq!(find_before_exit_marker("no marker here"), None);
     }
 
     #[test]
-    fn extract_before_marker_uses_last_marker() {
+    fn find_before_exit_marker_uses_last_marker() {
         let output = "__EXIT_0__\nmore output\n__EXIT_1__\n";
-        let result = extract_before_marker(output).unwrap();
+        let result = find_before_exit_marker(output).unwrap();
         assert!(result.contains("more output"), "got: {result}");
     }
 
     #[test]
-    fn extract_before_marker_ignores_non_numeric_codes() {
+    fn find_before_exit_marker_ignores_non_numeric_codes() {
         let output = "__EXIT_abc__\nreal output\n__EXIT_0__\n";
-        let result = extract_before_marker(output).unwrap();
+        let result = find_before_exit_marker(output).unwrap();
         assert!(result.contains("real output"), "got: {result}");
+    }
+
+    // ── extract_output (start marker + exit marker) ───────────────────────────
+
+    #[test]
+    fn extract_output_returns_none_when_start_marker_absent() {
+        let output = "some prior output\nhello\n__EXIT_0__\n";
+        assert_eq!(extract_output(output, "__START_42__"), None);
+    }
+
+    #[test]
+    fn extract_output_returns_none_when_exit_marker_not_yet_present() {
+        let output = "prior\n__START_1__\ncommand running...\n";
+        assert_eq!(extract_output(output, "__START_1__"), None);
+    }
+
+    #[test]
+    fn extract_output_returns_text_between_markers() {
+        let output = "old stuff\n__START_7__\nhello\nworld\n__EXIT_0__\n";
+        assert_eq!(
+            extract_output(output, "__START_7__"),
+            Some("hello\nworld".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_output_ignores_exit_marker_before_start() {
+        // An __EXIT__ from a previous command must not be picked up.
+        let output = "__EXIT_0__\n__START_3__\nnew cmd\n__EXIT_0__\n";
+        assert_eq!(
+            extract_output(output, "__START_3__"),
+            Some("new cmd".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_output_handles_nonzero_exit() {
+        let output = "__START_5__\nerror here\n__EXIT_2__\n";
+        assert_eq!(
+            extract_output(output, "__START_5__"),
+            Some("error here".to_string())
+        );
+    }
+
+    /// HIGH-21 regression: if a partial UTF-8 sequence (\xc3) at baseline time
+    /// completes (\xc3\xa9 = 'é') on the next poll, the total byte count can
+    /// shrink. With the start-marker approach the poll loop never uses byte
+    /// offsets into the full buffer, so this is a non-issue.
+    #[test]
+    fn extract_output_works_with_multibyte_chars_before_start() {
+        // Simulate "é" (U+00E9, 2 bytes in UTF-8) appearing before the start marker.
+        let output = "caf\u{00e9}\n__START_9__\nresult\n__EXIT_0__\n";
+        assert_eq!(
+            extract_output(output, "__START_9__"),
+            Some("result".to_string())
+        );
     }
 
     // ── tool_def ──────────────────────────────────────────────────────────────
