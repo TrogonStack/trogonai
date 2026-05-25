@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
-use agent_client_protocol::{Agent as _, ExtRequest, NewSessionRequest};
+use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest};
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
 
@@ -102,10 +102,18 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         .map_err(|e| e.to_string())?;
         {
             let bridge = self.bridges.get(&target_prefix).unwrap();
-            bridge
+            if let Err(import_err) = bridge
                 .ext_method(ExtRequest::new("session/import", import_params.into()))
                 .await
-                .map_err(|e| e.to_string())?;
+            {
+                // MED-26: the target runner already opened new_session_id. If import
+                // fails we'd otherwise leak that empty session until LRU eviction —
+                // best-effort close it before surfacing the original error.
+                let _ = bridge
+                    .close_session(CloseSessionRequest::new(new_session_id.as_str()))
+                    .await;
+                return Err(import_err.to_string());
+            }
         }
 
         Ok((target_prefix, new_session_id))
