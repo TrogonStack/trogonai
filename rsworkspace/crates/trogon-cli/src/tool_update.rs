@@ -210,6 +210,19 @@ mod tests {
     }
 
     #[test]
+    fn truncate_output_multibyte_boundary_does_not_panic() {
+        // CRIT-3: a multibyte UTF-8 char straddling OUTPUT_TRUNCATE must not panic.
+        // "é" is 2 bytes and starts at odd offsets, so byte 2048 lands mid-char.
+        let input = format!("a{}", "é".repeat(2000));
+        assert!(input.len() > OUTPUT_TRUNCATE);
+        let out = truncate_output(input);
+        assert!(out.ends_with("… [truncated]"), "got: {out}");
+        // Result is valid UTF-8 by construction (it's a String); the prefix must
+        // have been cut on a char boundary.
+        assert!(out.len() <= OUTPUT_TRUNCATE + "… [truncated]".len());
+    }
+
+    #[test]
     fn failed_has_no_exit_code() {
         let update = ToolCallUpdate::new(
             ToolCallId::new("tc1"),

@@ -120,7 +120,24 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
                 match resolve_path(&cwd_str, path_str) {
                     Ok(full_path) => match fs.read_to_string(&full_path) {
                         Ok(content) => {
-                            result.push_str(&format!("`{path_str}`:\n```\n{content}\n```"));
+                            // MED-37: Cap file expansions to 200 KB to protect the context window.
+                            const MAX_MENTION_BYTES: usize = 204_800;
+                            let body = if content.len() > MAX_MENTION_BYTES {
+                                eprintln!(
+                                    "warning: @{path_str}: file too large ({} bytes), \
+                                     showing first {MAX_MENTION_BYTES} bytes",
+                                    content.len()
+                                );
+                                let boundary = content.floor_char_boundary(MAX_MENTION_BYTES);
+                                format!(
+                                    "[File truncated: {} bytes, showing first {MAX_MENTION_BYTES}]\n{}",
+                                    content.len(),
+                                    &content[..boundary]
+                                )
+                            } else {
+                                content
+                            };
+                            result.push_str(&format!("`{path_str}`:\n```\n{body}\n```"));
                         }
                         Err(_) => {
                             eprintln!("warning: @{path_str}: file not found or not readable");

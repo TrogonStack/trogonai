@@ -238,10 +238,11 @@ fn terminal_output_from_response(resp: &Value) -> Result<String, String> {
             .unwrap_or_else(|| err.to_string());
         return Err(message);
     }
-    if let Some(status) = resp.get("status").and_then(|s| s.as_str()) {
-        if status != "success" && status != "ok" {
-            return Err(format!("terminal.output status: {status}"));
-        }
+    if let Some(status) = resp.get("status").and_then(|s| s.as_str())
+        && status != "success"
+        && status != "ok"
+    {
+        return Err(format!("terminal.output status: {status}"));
     }
     let output = resp
         .get("output")

@@ -931,14 +931,14 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                 // If change_directory succeeded, update the local context so
                 // subsequent tools in this turn see the new working directory.
                 const CD_PREFIX: &str = "Working directory is now ";
-                if name == "change_directory" {
-                    if let Some(new_path) = output.strip_prefix(CD_PREFIX) {
-                        current_ctx = Arc::new(ToolContext {
-                            proxy_url: current_ctx.proxy_url.clone(),
-                            cwd: new_path.to_string(),
-                            http_client: current_ctx.http_client.clone(),
-                        });
-                    }
+                if name == "change_directory"
+                    && let Some(new_path) = output.strip_prefix(CD_PREFIX)
+                {
+                    current_ctx = Arc::new(ToolContext {
+                        proxy_url: current_ctx.proxy_url.clone(),
+                        cwd: new_path.to_string(),
+                        http_client: current_ctx.http_client.clone(),
+                    });
                 }
 
                 let _ = event_tx

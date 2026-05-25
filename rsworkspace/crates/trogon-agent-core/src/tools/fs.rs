@@ -284,11 +284,12 @@ pub async fn notebook_edit(ctx: &ToolContext, input: &Value) -> String {
     }
 
     let cell = &mut cells[cell_index];
+    let total_lines = content.lines().count();
     let source_lines: Vec<String> = content
         .lines()
         .enumerate()
         .map(|(i, line)| {
-            if i == content.lines().count() - 1 {
+            if i == total_lines - 1 {
                 line.to_string()
             } else {
                 format!("{line}\n")

@@ -108,7 +108,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cwd = std::env::current_dir()?;
 
-    let (nats, _child) = connect_or_start_nats(&args.nats_url, Duration::from_secs(3)).await?;
+    // MED-40: keep `nats_server` in a named binding (not `_child`) so Drop is
+    // visible and we can call `drop()` explicitly before `process::exit`.
+    let (nats, nats_server) = connect_or_start_nats(&args.nats_url, Duration::from_secs(3)).await?;
 
     if let Some(prompt_arg) = &args.print {
         let prompt = if prompt_arg == "-" {
@@ -121,6 +123,8 @@ async fn main() -> anyhow::Result<()> {
         };
         if prompt.is_empty() {
             eprintln!("error: prompt is empty — pass a string or pipe text to stdin");
+            // MED-40: drop KillOnDrop guard so the autostarted NATS server is killed.
+            drop(nats_server);
             std::process::exit(1);
         }
         let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
@@ -135,10 +139,15 @@ async fn main() -> anyhow::Result<()> {
             let model_id = resolve_model_alias(model);
             if let Err(e) = session.set_model(&model_id).await {
                 eprintln!("error: could not set model: {e}");
+                // MED-40: drop KillOnDrop guard before exit.
+                drop(nats_server);
                 std::process::exit(1);
             }
         }
         let code = trogon_cli::print::run(session, &prompt, format, options).await;
+        // MED-40: explicitly drop the KillOnDrop guard so the auto-started NATS
+        // server process is killed before process::exit bypasses normal Drop.
+        drop(nats_server);
         std::process::exit(code as i32);
     } else {
         let acp_prefix = AcpPrefix::new(&args.prefix)
@@ -155,7 +164,15 @@ async fn main() -> anyhow::Result<()> {
 
         let resume = if args.continue_session {
             let index = SessionIndex::load(&RealFs);
-            let canon = cwd.canonicalize().unwrap_or(cwd.clone());
+            let canon = match cwd.canonicalize() {
+                Ok(c) => c,
+                Err(e) => {
+                    // LOW-21: warn when the working directory can no longer be resolved
+                    // (e.g. deleted between sessions) so the user knows why lookup may fail.
+                    eprintln!("warning: current directory could not be resolved ({e}), session lookup may fail");
+                    cwd.clone()
+                }
+            };
             index.get_last(&canon).cloned()
         } else if let Some(id) = &args.session_id {
             Some(SessionEntry {

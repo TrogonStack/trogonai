@@ -5,6 +5,11 @@ pub trait Fs: Send + Sync + 'static {
     fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
     fn write(&self, path: &Path, contents: &[u8]) -> std::io::Result<()>;
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    /// Write `contents` to `path` atomically (write to a temp file then rename).
+    /// The default implementation falls back to a plain write; override for durability.
+    fn write_atomic(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
+        self.write(path, contents)
+    }
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -20,6 +25,13 @@ impl Fs for RealFs {
     }
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(path)
+    }
+    /// LOW-18: Atomic write — write to a `.tmp` sibling then rename, preventing partial-write
+    /// corruption when two concurrent CLI instances flush sessions.json simultaneously.
+    fn write_atomic(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, contents)?;
+        std::fs::rename(&tmp, path)
     }
 }
 

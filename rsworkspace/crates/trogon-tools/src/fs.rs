@@ -33,7 +33,7 @@ pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathB
         })
 }
 
-pub(crate) fn resolve_path(
+pub fn resolve_path(
     cwd: &str,
     path: &str,
 ) -> Result<std::path::PathBuf, String> {
@@ -403,6 +403,38 @@ mod tests {
         let cwd = dir.path().to_string_lossy().into_owned();
         let err = resolve_path(&cwd, "/etc/passwd").unwrap_err();
         assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_path_symlink_escaping_cwd_rejected() {
+        // CRIT-2: a symlink inside cwd that points outside it must be rejected.
+        // Lexical normalization alone passes the starts_with check; only
+        // canonicalize catches the escape.
+        let cwd_dir = TempDir::new().unwrap();
+        let outside_dir = TempDir::new().unwrap();
+        std::fs::write(outside_dir.path().join("secret.txt"), b"top secret").unwrap();
+        std::os::unix::fs::symlink(outside_dir.path(), cwd_dir.path().join("evil")).unwrap();
+
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+        let err = resolve_path(&cwd, "evil/secret.txt").unwrap_err();
+        assert!(err.contains("outside"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_path_symlink_within_cwd_allowed() {
+        // A symlink that stays inside cwd must still resolve successfully.
+        let cwd_dir = TempDir::new().unwrap();
+        std::fs::create_dir(cwd_dir.path().join("real")).unwrap();
+        std::fs::write(cwd_dir.path().join("real/file.txt"), b"ok").unwrap();
+        std::os::unix::fs::symlink(cwd_dir.path().join("real"), cwd_dir.path().join("link"))
+            .unwrap();
+
+        let cwd = cwd_dir.path().to_string_lossy().into_owned();
+        let resolved = resolve_path(&cwd, "link/file.txt").unwrap();
+        // canonicalize() resolves the symlink to the real path inside cwd.
+        assert!(resolved.starts_with(cwd_dir.path().canonicalize().unwrap()));
     }
 
     #[test]
