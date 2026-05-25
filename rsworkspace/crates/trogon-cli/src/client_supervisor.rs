@@ -81,6 +81,11 @@ impl AcpClientSupervisor {
         Ok(())
     }
 
+    /// The NATS URL this CLI actually connected to (honors `--nats-url`).
+    pub fn nats_url(&self) -> &str {
+        &self.nats_url
+    }
+
     pub fn set_session(&self, session_id: &str) {
         if let Ok(mut st) = self.state.lock() {
             st.session_id = Some(session_id.to_string());

@@ -414,8 +414,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         .await;
                         println!("{text}");
                     } else if cmd == "/doctor" {
-                        let url = std::env::var("NATS_URL")
-                            .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+                        // MED-4: use the URL the CLI actually connected to (which
+                        // honors --nats-url / TROGON_NATS_URL) instead of the
+                        // unrelated NATS_URL env var that was silently read before.
+                        let url = client_supervisor
+                            .as_ref()
+                            .map(|sup| sup.nats_url().to_string())
+                            .or_else(|| std::env::var("TROGON_NATS_URL").ok())
+                            .unwrap_or_else(|| "nats://localhost:4222".to_string());
                         crate::doctor::print_checks(&url).await;
                     } else if cmd == "/model" && !arg.is_empty() {
                         let model_id = resolve_model_alias(arg.trim());
@@ -455,6 +461,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
+                                    // MED-5: the new runner starts a session with mode
+                                    // initialized from TROGON_MODE; keep the REPL's tracked
+                                    // mode in sync so /status and permission prompts match.
+                                    session_mode = std::env::var("TROGON_MODE")
+                                        .unwrap_or_else(|_| "default".into());
                                     if let Some(ref sup) = client_supervisor {
                                         if let Err(e) = sup
                                             .rebind(&outcome.new_prefix, session.session_id())
