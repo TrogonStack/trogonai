@@ -71,7 +71,17 @@ pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
         .expect("failed to subscribe to agent.spawn");
     while let Some(msg) = sub.next().await {
         let Some(reply) = msg.reply else { continue };
-        let Ok(req) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else { continue };
+        // MED-33: a malformed payload must still send a reply, otherwise the
+        // requester blocks on its NATS request-reply until the spawn timeout.
+        let req = match serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+            Ok(req) => req,
+            Err(e) => {
+                nats.publish(reply, format!("error: invalid spawn request: {e}").into())
+                    .await
+                    .ok();
+                continue;
+            }
+        };
         let prompt = req["prompt"].as_str().unwrap_or("").to_string();
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
         let nats2 = nats.clone();

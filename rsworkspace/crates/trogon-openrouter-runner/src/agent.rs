@@ -146,6 +146,10 @@ fn context_window_tokens(model_id: &str) -> Option<u64> {
 struct OpenRouterSession {
     cwd: String,
     model: Option<String>,
+    // MED-25: never serialize the API key — session/get_state would otherwise
+    // return it in plaintext to any ACP client, and it would be persisted to KV.
+    // A restored/forked session falls back to the agent-wide global key.
+    #[serde(skip)]
     api_key: Option<String>,
     history: Vec<Message>,
     system_prompt: Option<String>,
@@ -586,6 +590,7 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
 
     let mut text_parts = Vec::new();
     let mut tool_calls = Vec::new();
+    let mut tool_results = Vec::new();
     for block in m.content {
         match block {
             WireContentBlock::Text { text } => text_parts.push(text),
@@ -600,31 +605,36 @@ fn openrouter_wire_message_to_local(m: WireMessage) -> Vec<Message> {
                 tool_use_id,
                 content,
             } => {
-                return vec![Message::tool_result(tool_use_id, content)];
+                // MED-19: don't early-return here — that discarded any text and
+                // tool_calls accumulated before this block in a mixed-content
+                // message. Collect tool results and emit them after the role
+                // message so the text portion is preserved.
+                tool_results.push(Message::tool_result(tool_use_id, content));
             }
             _ => {}
         }
     }
 
-    if m.role == "assistant" && !tool_calls.is_empty() {
-        vec![Message {
-            role: m.role,
+    let mut out = Vec::new();
+    // Emit the role message (text + optional tool_calls) when it carries text or
+    // tool calls, or when there are no tool results (preserving prior behavior of
+    // always producing one message in that case).
+    if !text_parts.is_empty() || !tool_calls.is_empty() || tool_results.is_empty() {
+        out.push(Message {
+            role: m.role.clone(),
             content: text_parts.join("\n"),
             prompt_tokens: None,
             completion_tokens: None,
-            tool_calls: Some(tool_calls),
+            tool_calls: if m.role == "assistant" && !tool_calls.is_empty() {
+                Some(tool_calls)
+            } else {
+                None
+            },
             tool_call_id: None,
-        }]
-    } else {
-        vec![Message {
-            role: m.role,
-            content: text_parts.join("\n"),
-            prompt_tokens: None,
-            completion_tokens: None,
-            tool_calls: None,
-            tool_call_id: None,
-        }]
+        });
     }
+    out.extend(tool_results);
+    out
 }
 
 async fn compact_or_trim_openrouter_history(
@@ -1622,6 +1632,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 };
                 compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
                     .await;
+                // MED-20: persist the imported (and compacted) history to KV so a
+                // runner restart before the next prompt doesn't revert /compact.
+                if let Some(store) = &self.session_store {
+                    let snapshot = self.build_snapshot(session_id, s);
+                    store.save(&snapshot).await;
+                }
                 let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
                 Ok(ExtResponse::new(raw.into()))
             }

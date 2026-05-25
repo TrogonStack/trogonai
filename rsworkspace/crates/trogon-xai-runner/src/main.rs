@@ -15,7 +15,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
+    // MED-34: default to a runner-specific prefix so the spawn subscriber does not
+    // share `acp.agent.spawn` with the openrouter runner (which would round-robin
+    // spawn requests to the wrong backend). The dev script still overrides this.
+    let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.grok".to_string());
     let default_model = std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-4".to_string());
     let api_key = std::env::var("XAI_API_KEY").unwrap_or_else(|_| {
         info!("XAI_API_KEY not set; users must authenticate with their own key via 'xai-api-key'");

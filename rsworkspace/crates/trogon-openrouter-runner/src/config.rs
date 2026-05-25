@@ -22,8 +22,11 @@ impl RunnerConfig {
         let nats_url = std::env::var("NATS_URL")
             .unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
+        // MED-34: default to a runner-specific prefix so the spawn subscriber does
+        // not share `acp.agent.spawn` with the xai runner (which would round-robin
+        // spawn requests to the wrong backend). The dev script still overrides this.
         let prefix = std::env::var("ACP_PREFIX")
-            .unwrap_or_else(|_| "acp".to_string());
+            .unwrap_or_else(|_| "acp.openrouter".to_string());
 
         let default_model = std::env::var("OPENROUTER_DEFAULT_MODEL")
             .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string());
@@ -106,7 +109,7 @@ mod tests {
         clear_runner_env();
         let cfg = RunnerConfig::from_env();
         assert_eq!(cfg.nats_url, "nats://localhost:4222");
-        assert_eq!(cfg.prefix, "acp");
+        assert_eq!(cfg.prefix, "acp.openrouter");
         assert_eq!(cfg.default_model, "anthropic/claude-sonnet-4-6");
         assert!(cfg.api_key.is_none());
         assert_eq!(cfg.agent_type, "openrouter");
