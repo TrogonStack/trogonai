@@ -156,6 +156,9 @@ struct OpenRouterSession {
     enabled_tools: Vec<String>,
     #[serde(skip)]
     created_at: Instant,
+    /// MED-32: wall-clock time of the most recent access; eviction is LRU, not FIFO.
+    #[serde(skip)]
+    last_used_at: Instant,
     created_at_iso: String,
     parent_session_id: Option<String>,
     branched_at_index: Option<usize>,
@@ -500,11 +503,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         }
         if let Some(oldest_id) = sessions
             .iter()
-            .min_by_key(|(_, s)| s.created_at)
+            // MED-32: evict least-recently-used, not oldest-created (created_at
+            // breaks ties between sessions last used at the same instant).
+            .min_by_key(|(_, s)| (s.last_used_at, s.created_at))
             .map(|(id, _)| id.clone())
         {
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
-                  "openrouter: session limit reached — evicting oldest session");
+                  "openrouter: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
         }
     }
@@ -801,6 +806,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 system_prompt,
                 enabled_tools: enabled_tools.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
@@ -886,6 +892,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         system_prompt,
                         enabled_tools: enabled_tools.clone(),
                         created_at: Instant::now(),
+                        last_used_at: Instant::now(),
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
@@ -978,6 +985,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 system_prompt: inherited_system_prompt,
                 enabled_tools: inherited_tools.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
@@ -1155,10 +1163,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
 
         let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode, session_tool_policies) = {
-            let sessions = self.sessions.lock().await;
+            let mut sessions = self.sessions.lock().await;
             let s = sessions
-                .get(&session_id)
+                .get_mut(&session_id)
                 .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+            // MED-32: mark used at turn start so an active long prompt isn't evicted.
+            s.last_used_at = Instant::now();
             (
                 s.model.clone(),
                 s.api_key.clone(),
@@ -1749,6 +1759,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             system_prompt: None,
             enabled_tools: vec![],
             created_at: std::time::Instant::now(),
+            last_used_at: std::time::Instant::now(),
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
@@ -1955,6 +1966,7 @@ mod tests {
             system_prompt: None,
             enabled_tools: vec![],
             created_at: Instant::now(),
+            last_used_at: Instant::now(),
             created_at_iso: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,

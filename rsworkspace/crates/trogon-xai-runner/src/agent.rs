@@ -122,10 +122,13 @@ struct XaiSession {
     /// Optional system prompt prepended to every conversation.
     /// Copied from the agent-wide `system_prompt` at session creation time.
     system_prompt: Option<String>,
-    /// Wall-clock time at which this session was created. Used for LRU eviction
-    /// when the session count reaches `MAX_SESSIONS`.
+    /// Wall-clock time at which this session was created.
     #[serde(skip)]
     created_at: Instant,
+    /// MED-32: wall-clock time of the most recent access (prompt/cancel/set_*).
+    /// Eviction picks the least-recently-used session, not the oldest-created.
+    #[serde(skip)]
+    last_used_at: Instant,
     /// ISO 8601 timestamp captured at session creation, written to the SESSIONS KV bucket.
     created_at_iso: String,
     /// Session this was branched from. None for root sessions.
@@ -546,11 +549,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         }
         if let Some(oldest_id) = sessions
             .iter()
-            .min_by_key(|(_, s)| s.created_at)
+            // MED-32: evict least-recently-used, not oldest-created, so an active
+            // long-running session isn't evicted in favor of a newer idle one.
+            // created_at breaks ties between equal last-used instants.
+            .min_by_key(|(_, s)| (s.last_used_at, s.created_at))
             .map(|(id, _)| id.clone())
         {
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
-                  "xai: session limit reached — evicting oldest session");
+                  "xai: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
         }
     }
@@ -718,6 +724,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     .collect(),
                 system_prompt,
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
@@ -809,6 +816,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         enabled_tools: enabled_tools.clone(),
                         system_prompt,
                         created_at: Instant::now(),
+                        last_used_at: Instant::now(),
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
@@ -900,6 +908,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 enabled_tools: inherited_tools.clone(),
                 system_prompt: inherited_system_prompt,
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
@@ -1104,10 +1113,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Snapshot session state — release lock before streaming.
         let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies) = {
-            let sessions = self.sessions.lock().await;
+            let mut sessions = self.sessions.lock().await;
             let s = sessions
-                .get(&session_id)
+                .get_mut(&session_id)
                 .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+            // MED-32: mark the session used at the start of the turn so a long-running
+            // prompt isn't evicted as "least recently used" while it's still active.
+            s.last_used_at = Instant::now();
             (
                 s.model.clone(),
                 s.api_key.clone(),
@@ -2083,6 +2095,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
@@ -2104,6 +2117,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 enabled_tools: tools.into_iter().map(|t| t.to_string()).collect(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
@@ -2170,6 +2184,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
@@ -2191,6 +2206,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
@@ -2212,6 +2228,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 enabled_tools: Vec::new(),
                 system_prompt: self.system_prompt.clone(),
                 created_at: Instant::now(),
+                last_used_at: Instant::now(),
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
