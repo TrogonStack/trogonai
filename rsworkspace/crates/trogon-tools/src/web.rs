@@ -184,4 +184,19 @@ mod tests {
         assert!(result.contains("truncated at 8KB"), "got: {result}");
         assert!(result.len() < MAX_RESPONSE + 50);
     }
+
+    #[tokio::test]
+    async fn fetch_url_truncates_multibyte_boundary_without_panic() {
+        // CRIT-4: a multibyte UTF-8 char straddling MAX_RESPONSE must not panic.
+        // "é" is 2 bytes and starts at odd offsets, so byte 8192 lands mid-char.
+        let server = MockServer::start();
+        let big_body = format!("a{}", "é".repeat(MAX_RESPONSE));
+        assert!(big_body.len() > MAX_RESPONSE);
+        server.mock(|when, then| {
+            when.method(GET).path("/mb");
+            then.status(200).body(big_body);
+        });
+        let result = fetch_url(&ctx(), &json!({"url": server.url("/mb"), "raw": true})).await;
+        assert!(result.contains("truncated at 8KB"), "got: {result}");
+    }
 }

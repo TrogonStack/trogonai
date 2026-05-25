@@ -249,7 +249,16 @@ pub struct TrogonSession<N: NatsClient> {
     session_id: String,
     prefix: String,
     model: std::sync::Arc<std::sync::Mutex<String>>,
+    /// Cap on how long `prompt()` waits for the runner before emitting an error.
+    /// Defaults to 180s; overridable (tests use a short value to exercise the
+    /// runner-down guard without a 3-minute wait).
+    prompt_timeout: Duration,
 }
+
+/// Runner-down guard window: if the runner deregisters during compaction
+/// (registry TTL 30s vs compaction up to 120s), the prompt publish succeeds
+/// but nobody reads it. Cap the wait so the UI unblocks.
+const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(180);
 
 impl<N: NatsClient> std::fmt::Debug for TrogonSession<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -267,7 +276,15 @@ impl<N: NatsClient> TrogonSession<N> {
             session_id,
             prefix: prefix.to_string(),
             model: std::sync::Arc::new(std::sync::Mutex::new(default_model_for_prefix(prefix))),
+            prompt_timeout: DEFAULT_PROMPT_TIMEOUT,
         }
+    }
+
+    /// Override the per-prompt runner-down timeout. Test-only.
+    #[cfg(test)]
+    pub fn with_prompt_timeout(mut self, timeout: Duration) -> Self {
+        self.prompt_timeout = timeout;
+        self
     }
 
     pub async fn new(
@@ -306,6 +323,7 @@ impl<N: NatsClient> TrogonSession<N> {
             session_id,
             prefix: prefix.to_string(),
             model: std::sync::Arc::new(std::sync::Mutex::new(model)),
+            prompt_timeout: DEFAULT_PROMPT_TIMEOUT,
         };
         let mode = std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
         if let Err(e) = session.set_mode(&mode).await {
@@ -334,6 +352,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let nats = &self.nats;
         let session_id = self.session_id.clone();
         let prefix = self.prefix.clone();
+        let prompt_timeout = self.prompt_timeout;
         async move {
             let req_id = Uuid::now_v7().to_string();
             let notif_subject =
@@ -365,12 +384,8 @@ impl<N: NatsClient> Session for TrogonSession<N> {
 
             let (tx, rx) = mpsc::channel(64);
 
-            // Runner-down guard: if the runner deregisters during compaction
-            // (registry TTL 30s vs compaction up to 120s), the prompt publish
-            // succeeds but nobody reads it. Cap the wait so the UI unblocks.
-            const PROMPT_TIMEOUT: Duration = Duration::from_secs(180);
             tokio::spawn(async move {
-                let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
+                let deadline = tokio::time::Instant::now() + prompt_timeout;
                 loop {
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
@@ -612,12 +627,17 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             })?
             .map_err(|e| anyhow::anyhow!("NATS error calling compactor: {e}"))?;
 
-            if let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes) {
-                return Err(anyhow::anyhow!("compactor error: {}", err.error));
-            }
-
+            // Parse as the success type first. Only treat it as an error when `compacted` is
+            // absent/false AND an `error` field is present — a successful CompactResponse may
+            // also contain an `error` key and must not be misread as a failure.
             let resp: CompactResponse = serde_json::from_slice(&bytes)
                 .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
+
+            if !resp.compacted {
+                if let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes) {
+                    return Err(anyhow::anyhow!("compactor error: {}", err.error));
+                }
+            }
 
             let result = CompactResult {
                 compacted: resp.compacted,
@@ -739,11 +759,15 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         async move {
             let req_id = Uuid::now_v7().to_string();
             let resp_subject = format!("{prefix}.session.{session_id}.agent.close.response.{req_id}");
-            // Subscribe before publishing so the runner's response is accepted (even though we ignore it).
-            let _resp_rx = self.nats.subscribe_bytes(resp_subject).await;
+            // Subscribe before publishing so the runner's response is captured, then hold the
+            // receiver alive until after publish so the subscription is not torn down before
+            // the runner can respond.
+            let resp_rx = self.nats.subscribe_bytes(resp_subject).await;
             if let Ok(payload) = serde_json::to_vec(&serde_json::json!({ "sessionId": session_id })) {
                 let _ = self.nats.publish_with_req_id_bytes(subject, req_id, payload.into()).await;
             }
+            // Drop explicitly after publish — keeps the subscription alive long enough.
+            drop(resp_rx);
         }
     }
 }
@@ -1464,6 +1488,39 @@ mod tests {
         }
         assert!(got_text, "expected Text event");
         assert!(got_done, "expected Done event");
+    }
+
+    /// CRIT-7: when the runner deregisters (e.g. during long compaction) the prompt
+    /// publish succeeds but no response or notification ever arrives. The prompt must
+    /// not hang forever — after `prompt_timeout` it emits a StreamEvent::Error so the
+    /// UI unblocks.
+    #[tokio::test]
+    async fn prompt_emits_error_when_runner_never_responds() {
+        let nats = MockNatsClient::new();
+
+        // Two subscriptions (notif + reply). Keep the senders alive so the receivers
+        // pend forever (simulating "runner down" rather than channel-closed): if the
+        // senders dropped, recv() would yield None and break the loop without error.
+        let (_notif_tx, notif_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        let (_reply_tx, reply_rx) = tokio::sync::mpsc::channel::<Bytes>(8);
+        nats.add_subscription(notif_rx);
+        nats.add_subscription(reply_rx);
+
+        let session = TrogonSession::from_existing(nats, "acp", "s1".to_string())
+            .with_prompt_timeout(Duration::from_millis(50));
+
+        let mut events_rx = session.prompt("hello").await.unwrap();
+
+        let ev = tokio::time::timeout(Duration::from_secs(5), events_rx.recv())
+            .await
+            .expect("prompt should emit an error well before the test timeout")
+            .expect("channel should yield an error event, not close");
+        match ev {
+            StreamEvent::Error(msg) => {
+                assert!(msg.contains("runner did not respond"), "got: {msg}");
+            }
+            other => panic!("expected StreamEvent::Error, got {other:?}"),
+        }
     }
 
     // ── MockSession ───────────────────────────────────────────────────────────

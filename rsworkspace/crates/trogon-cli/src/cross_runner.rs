@@ -89,9 +89,15 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
 
         // 5. Import: pipe export JSON directly without re-serialization.
         // CrossRunnerSwitcher is agnostic to the message format — no deserialization needed.
+
+        // LOW-6: Guard against null export — {"messages":null} would corrupt the target session.
+        let raw_messages = messages_json.get();
+        if raw_messages.trim() == "null" || raw_messages.trim().is_empty() {
+            return Err("session/export returned null — cannot import into new session".into());
+        }
+
         let import_params = serde_json::value::RawValue::from_string(format!(
-            r#"{{"sessionId":"{new_session_id}","messages":{}}}"#,
-            messages_json.get()
+            r#"{{"sessionId":"{new_session_id}","messages":{raw_messages}}}"#
         ))
         .map_err(|e| e.to_string())?;
         {
@@ -112,9 +118,10 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         let acp_prefix = AcpPrefix::new(prefix).map_err(|e| e.to_string())?;
         let config = self.base_config.for_prefix(acp_prefix);
         let js = NatsJetStreamClient::new(async_nats::jetstream::new(self.nats.clone()));
-        // Receiver dropped immediately: notification_sender is only used in prompt.rs,
-        // never called by new_session or ext_method.
-        let (notification_tx, _rx) = tokio::sync::mpsc::channel(1);
+        // LOW-7: The notification receiver is intentionally dropped here. The Bridge only sends
+        // notifications during an active prompt stream; new_session and ext_method never
+        // trigger notifications, so dropping the receiver is safe for this use-case.
+        let (notification_tx, _notification_rx_intentionally_dropped) = tokio::sync::mpsc::channel(1);
         let bridge = Bridge::new(
             self.nats.clone(),
             js,

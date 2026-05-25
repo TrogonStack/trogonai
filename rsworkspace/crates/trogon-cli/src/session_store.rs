@@ -43,7 +43,14 @@ impl SessionIndex {
         let path = Self::path();
         match fs.read_to_string(&path) {
             Ok(raw) if !raw.trim().is_empty() => {
-                serde_json::from_str(&raw).unwrap_or_default()
+                match serde_json::from_str(&raw) {
+                    Ok(index) => index,
+                    Err(e) => {
+                        // LOW-19: warn instead of silently discarding corrupt data.
+                        eprintln!("warning: sessions.json is corrupt ({e}), starting fresh");
+                        Self::default()
+                    }
+                }
             }
             _ => Self::default(),
         }
@@ -55,7 +62,9 @@ impl SessionIndex {
             fs.create_dir_all(dir)?;
         }
         let raw = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
-        fs.write(&path, raw.as_bytes())
+        // LOW-18: atomic write (temp file + rename) prevents partial-write corruption
+        // when two concurrent CLI instances flush sessions.json simultaneously.
+        fs.write_atomic(&path, raw.as_bytes())
     }
 
     pub fn get_last(&self, project: &Path) -> Option<&SessionEntry> {

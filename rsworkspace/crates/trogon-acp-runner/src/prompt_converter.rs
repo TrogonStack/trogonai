@@ -183,16 +183,14 @@ impl PromptEventConverter {
                     ToolCallStatus::Failed
                 };
 
-                let (content, locations) = if let Some((name, input)) = self.tool_cache.get(&id) {
-                    tool_result_content(name, input, &output, status)
-                } else {
-                    (vec![], vec![])
+                let Some((name, input)) = self.tool_cache.get(&id) else {
+                    // Unknown tool ID — no cached context to build a meaningful update from.
+                    // Skip emitting rather than sending an empty-content notification.
+                    return (vec![], None);
                 };
 
-                let meta = self
-                    .tool_cache
-                    .get(&id)
-                    .and_then(|(name, _)| build_tool_call_meta(name, None));
+                let (content, locations) = tool_result_content(name, input, &output, status);
+                let meta = build_tool_call_meta(name, None);
 
                 let fields = ToolCallUpdateFields::new()
                     .status(status)
