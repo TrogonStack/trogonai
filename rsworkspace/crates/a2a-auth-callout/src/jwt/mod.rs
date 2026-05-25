@@ -125,6 +125,28 @@ impl MintedUserJwt {
     pub fn into_string(self) -> String {
         self.0
     }
+
+    pub fn ensure_fresh(&self) -> Result<(), JwtError> {
+        let payload = decode_nats_user_payload(self.as_str())?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(JwtError::SystemTime)?
+            .as_secs();
+        let now_i64 = i64::try_from(now).map_err(|_| JwtError::IssuedAtOutOfRange)?;
+        let exp = payload
+            .get("exp")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| JwtError::Decode("user JWT missing exp".into()))?;
+        if exp <= now_i64 {
+            return Err(JwtError::Decode("user JWT expired".into()));
+        }
+        if let Some(nbf) = payload.get("nbf").and_then(Value::as_i64)
+            && nbf > now_i64
+        {
+            return Err(JwtError::Decode("user JWT not yet valid".into()));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]

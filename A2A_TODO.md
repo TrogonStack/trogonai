@@ -33,12 +33,6 @@ Partial items state the in-tree code surface and what remains before the item is
 - [ ] Operator-signed Account export/import deployment for `a2a.discover.>` cross-Account federation. **Code shipped:** `SpiceDbImportGate` at the SpiceDB-tier import boundary; `SignedDiscoveryExport` envelope + `RealOperatorSignatureGate` keyed by `A2A_DISCOVERY_OPERATOR_KEYS` (with `A2A_DISCOVERY_SIGNATURE_MAX_AGE_SECS` staleness window) running ahead of SpiceDB; `AllowAllOperatorSignatureGate` for labs; reference signer helper. **Remaining:** operator key custody + signed-export distribution pipeline across Accounts.
 - [ ] Cross-binding collaboration tests against a live NATS + gateway + bridge. **Remaining:** depends on validating `A2A_BRIDGE_TRANSPORT=nats` + Tier 1 + deployed auth-callout mint.
 
-## Cross-cutting
-
-- [ ] NATS-native publisher mint carrier. **Gap:** `a2a-nats::Client::routing_via_gateway_ingress` publishes to `{prefix}.gateway.*` via `request_with_headers` with only `X-Req-Id` — it has no `MintedUserJwt` in scope, so the gateway falls back to legacy header-trust for these callers. **Decision needed:** add a `MintedUserJwt` carrier on `Client` (re-mint on demand via the existing `BridgeMintAdapter` surface), or document that NATS-native callers must attach `A2a-Caller-Jwt` themselves and provide a helper. Affects `a2a-nats-server` and any direct `Client` user.
-
----
-
 ## Suggested ordering
 
 1. Deploy the auth-callout subscriber on `$SYS.REQ.USER.AUTH` (verifier crate shipped; operator wiring + NSC pipelines remain). Unblocks live JWT-derived `caller_id` population on gateway audits and push DLQ subjects.

@@ -12,6 +12,9 @@ pub mod signing_key_source;
 pub mod subscriber;
 pub mod wire;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
 pub use caller_jwt_header::{CallerJwtHeaderValue, CALLER_JWT_HEADER_NAME};
 pub use bridge_mint::{

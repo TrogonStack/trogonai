@@ -25,6 +25,7 @@ cargo run -p a2a-nats-server
 | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** | no | **`256`** | `Bridge` concurrent streaming task semaphore (`apply_timeout_overrides`). **`0`** normalizes to **`1`**. |
 | **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | no | **`_`** | Push DLQ **`{caller_id}`** subject segment (`apply_timeout_overrides`). |
 | **`A2A_USE_GATEWAY`** | no | off | Truthy (**`1`**, **`true`**, **`yes`**, **`on`**) ⇒ unary / bootstrap publishes on **`{prefix}.gateway.{agent_id}.{method}`** for **`a2a-gateway`** to forward. Tenancy follows the NATS **`Connection`/`Account`** (see [`A2A_PENDING_DECISION.md`](../../../A2A_PENDING_DECISION.md)); there is **no `A2A_TENANT` subject knob**. |
+| **`A2A_GATEWAY_CALLER_JWT`** | when gateway on | — | Auth-callout-minted User JWT for **`A2a-Caller-Jwt`** on gateway publishes (usually the same JWT as **`NATS_CREDS`**). |
 
 Ingress auth/policy/audit hooks are **`[P]`** (`A2A_PENDING_DECISION.md`).
 

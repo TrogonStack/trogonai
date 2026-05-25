@@ -77,6 +77,7 @@ HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run in
 | `A2A_PREFIX` | no | `a2a` | Subject prefix |
 | `A2A_HTTP_BIND` | no | `0.0.0.0:8080` | TCP listen address (`ENV_HTTP_BIND` in server runtime) |
 | `A2A_USE_GATEWAY` | no | off | Truthy (`1`, `true`, `yes`, `on`) routes unary traffic via `{prefix}.gateway.{agent_id}.*` for `a2a-gateway` |
+| `A2A_GATEWAY_CALLER_JWT` | when gateway on | — | Auth-callout-minted User JWT attached as [`A2a-Caller-Jwt`](../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) on every `{prefix}.gateway.*` publish (typically the same JWT as the NATS connection credential) |
 | `NATS_URL` | no | `localhost:4222` | NATS servers |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth |
 | `A2A_OPERATION_TIMEOUT_SECS` | no | 30 | Via `apply_timeout_overrides` |
@@ -170,7 +171,7 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | Gateway JWT verification uses the same signing-key custody as `a2a-auth-callout` (`env` \| `file`; see auth-callout section) |
 | `A2A_GATEWAY_TRUST_CALLER_HEADERS` | no | off | **Deprecated.** Labs-only fallback: honor [`GATEWAY_PRINCIPAL_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) / [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) only when no verified `A2a-Caller-Jwt` is present. Scheduled for removal once all publishers attach the JWT header. |
 
-Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token).
+Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token). In-tree **`a2a-nats::Client`** carries a `MintedUserJwt` when [`routing_via_gateway_ingress`](../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is enabled (`a2a-nats-server` supplies it via `A2A_GATEWAY_CALLER_JWT` when `A2A_USE_GATEWAY` is on). External NATS-native publishers that bypass `a2a-nats::Client` must attach the header themselves; until they do, `A2A_GATEWAY_TRUST_CALLER_HEADERS` remains the labs-only fallback.
 
 CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
 

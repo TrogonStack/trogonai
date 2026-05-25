@@ -166,6 +166,7 @@ dependencies = [
 name = "a2a-nats-server"
 version = "0.1.0"
 dependencies = [
+ "a2a-auth-callout",
  "a2a-nats",
  "a2a-types",
  "async-compat",
