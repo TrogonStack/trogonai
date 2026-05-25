@@ -19,6 +19,7 @@
 //! Compile-only roadmap scaffolding for future seams lives in **`planned`** (**`planned::`** first-wave stubs and **`planned::batch2`** one-file-per-`A2A_TODO` lane through Phase&nbsp;4).
 
 pub mod agent_card_surface;
+pub mod caller_jwt_header;
 pub mod config;
 pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;
