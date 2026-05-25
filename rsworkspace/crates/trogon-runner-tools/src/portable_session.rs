@@ -172,7 +172,11 @@ pub fn messages_to_v1(messages: &[Message]) -> Vec<PortableMessage> {
                     ContentBlock::Text { text } => Some(text.as_str()),
                     ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
                     ContentBlock::Thinking { thinking } => Some(thinking.as_str()),
-                    ContentBlock::ToolUse { name, .. } => Some(name.as_str()),
+                    // MED-18: the text-only V1 format cannot represent a tool call
+                    // (no id/input/result pairing). Emitting the bare tool name as
+                    // prose corrupted the message and broke API round-trips, so drop
+                    // ToolUse blocks — matching the documented "V1 drops tool_use".
+                    ContentBlock::ToolUse { .. } => None,
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -283,6 +287,29 @@ mod tests {
             }
             ParsedExport::V1(_) => panic!("expected v2 export"),
         }
+    }
+
+    #[test]
+    fn messages_to_v1_drops_tool_use_keeps_text() {
+        // MED-18: a tool_use block must not leak its name into the V1 text; text
+        // and tool_result content are preserved, tool_use is dropped.
+        let msgs = vec![Message {
+            role: "assistant".into(),
+            content: vec![
+                ContentBlock::Text { text: "before".into() },
+                ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "ls"}),
+                    parent_tool_use_id: None,
+                },
+                ContentBlock::Text { text: "after".into() },
+            ],
+        }];
+        let v1 = messages_to_v1(&msgs);
+        assert_eq!(v1.len(), 1);
+        assert_eq!(v1[0].text, "before\nafter");
+        assert!(!v1[0].text.contains("bash"), "tool name must not leak: {}", v1[0].text);
     }
 
     #[test]

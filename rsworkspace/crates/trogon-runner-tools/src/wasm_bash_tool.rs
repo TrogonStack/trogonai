@@ -171,10 +171,20 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             // shrink when a partial UTF-8 sequence at snapshot time completes later),
             // we bracket each command with a unique start marker so we can locate
             // this invocation's output regardless of the total buffer size.
-            let start_id = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let start_marker = format!("{START_MARKER_PREFIX}{start_id}{START_MARKER_SUFFIX}");
+            // MED-28: derive an unguessable per-invocation nonce so a command that
+            // echoes a literal "__START_5__" / "__EXIT_0__" cannot be mistaken for
+            // our markers. The model never sees these tool-execution-time values
+            // (pid / nanoseconds / counter), so it cannot reproduce the nonce.
+            let seq = INVOCATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let nonce = format!("{:x}{:x}{:x}", std::process::id(), nanos, seq);
+            let start_marker = format!("{START_MARKER_PREFIX}{nonce}{START_MARKER_SUFFIX}");
+            let exit_marker_prefix = format!("{EXIT_MARKER_PREFIX}{nonce}_");
             let cmd_with_markers = format!(
-                "echo \"{start_marker}\"; {command}; echo \"{EXIT_MARKER_PREFIX}$?{EXIT_MARKER_SUFFIX}\"\n"
+                "echo \"{start_marker}\"; {command}; echo \"{exit_marker_prefix}$?{EXIT_MARKER_SUFFIX}\"\n"
             );
             let write_req = serde_json::json!({
                 "terminal_id": terminal_id,
@@ -207,7 +217,7 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
                 let full_output = terminal_output_from_response(&resp)?;
 
-                if let Some(output) = extract_output(&full_output, &start_marker) {
+                if let Some(output) = extract_output(&full_output, &start_marker, &exit_marker_prefix) {
                     return Ok(output);
                 }
 
@@ -263,10 +273,11 @@ fn terminal_output_from_response(resp: &Value) -> Result<String, String> {
 /// uniquely identifies this invocation's output regardless of buffer size,
 /// so a partial UTF-8 sequence completing between snapshot and poll can never
 /// cause the guard to stall.
-fn extract_output(output: &str, start_marker: &str) -> Option<String> {
+fn extract_output(output: &str, start_marker: &str, exit_prefix: &str) -> Option<String> {
     let after_start = extract_after_start_marker(output, start_marker)?;
-    // Now search for the exit marker within the portion after the start marker.
-    find_before_exit_marker(after_start)
+    // Now search for the (nonce-scoped) exit marker within the portion after the
+    // start marker.
+    find_before_exit_marker(after_start, exit_prefix)
 }
 
 /// Returns the text that follows the start-marker line, or `None` if the
@@ -286,21 +297,21 @@ fn extract_after_start_marker<'a>(output: &'a str, start_marker: &str) -> Option
 
 /// Searches `output` for `__EXIT_N__`, returns everything before the last
 /// valid marker. Returns `None` if no complete exit marker is present yet.
-fn find_before_exit_marker(output: &str) -> Option<String> {
+fn find_before_exit_marker(output: &str, exit_prefix: &str) -> Option<String> {
     // Find the last occurrence so partial writes don't confuse us.
     let mut last_match: Option<usize> = None;
     let mut search = output;
     let mut offset = 0;
-    while let Some(pos) = search.find(EXIT_MARKER_PREFIX) {
+    while let Some(pos) = search.find(exit_prefix) {
         let abs = offset + pos;
-        let after = &output[abs + EXIT_MARKER_PREFIX.len()..];
+        let after = &output[abs + exit_prefix.len()..];
         if let Some(end) = after.find(EXIT_MARKER_SUFFIX) {
             let code_str = &after[..end];
             if code_str.chars().all(|c| c.is_ascii_digit()) {
                 last_match = Some(abs);
             }
         }
-        offset = abs + EXIT_MARKER_PREFIX.len();
+        offset = abs + exit_prefix.len();
         search = &output[offset..];
     }
     last_match.map(|pos| {
@@ -350,7 +361,7 @@ mod tests {
     fn find_before_exit_marker_finds_exit_zero() {
         let output = "hello\nworld\n__EXIT_0__\n";
         assert_eq!(
-            find_before_exit_marker(output),
+            find_before_exit_marker(output, EXIT_MARKER_PREFIX),
             Some("hello\nworld".to_string())
         );
     }
@@ -359,27 +370,27 @@ mod tests {
     fn find_before_exit_marker_finds_nonzero_exit_code() {
         let output = "error output\n__EXIT_1__\n";
         assert_eq!(
-            find_before_exit_marker(output),
+            find_before_exit_marker(output, EXIT_MARKER_PREFIX),
             Some("error output".to_string())
         );
     }
 
     #[test]
     fn find_before_exit_marker_returns_none_when_absent() {
-        assert_eq!(find_before_exit_marker("no marker here"), None);
+        assert_eq!(find_before_exit_marker("no marker here", EXIT_MARKER_PREFIX), None);
     }
 
     #[test]
     fn find_before_exit_marker_uses_last_marker() {
         let output = "__EXIT_0__\nmore output\n__EXIT_1__\n";
-        let result = find_before_exit_marker(output).unwrap();
+        let result = find_before_exit_marker(output, EXIT_MARKER_PREFIX).unwrap();
         assert!(result.contains("more output"), "got: {result}");
     }
 
     #[test]
     fn find_before_exit_marker_ignores_non_numeric_codes() {
         let output = "__EXIT_abc__\nreal output\n__EXIT_0__\n";
-        let result = find_before_exit_marker(output).unwrap();
+        let result = find_before_exit_marker(output, EXIT_MARKER_PREFIX).unwrap();
         assert!(result.contains("real output"), "got: {result}");
     }
 
@@ -388,20 +399,20 @@ mod tests {
     #[test]
     fn extract_output_returns_none_when_start_marker_absent() {
         let output = "some prior output\nhello\n__EXIT_0__\n";
-        assert_eq!(extract_output(output, "__START_42__"), None);
+        assert_eq!(extract_output(output, "__START_42__", EXIT_MARKER_PREFIX), None);
     }
 
     #[test]
     fn extract_output_returns_none_when_exit_marker_not_yet_present() {
         let output = "prior\n__START_1__\ncommand running...\n";
-        assert_eq!(extract_output(output, "__START_1__"), None);
+        assert_eq!(extract_output(output, "__START_1__", EXIT_MARKER_PREFIX), None);
     }
 
     #[test]
     fn extract_output_returns_text_between_markers() {
         let output = "old stuff\n__START_7__\nhello\nworld\n__EXIT_0__\n";
         assert_eq!(
-            extract_output(output, "__START_7__"),
+            extract_output(output, "__START_7__", EXIT_MARKER_PREFIX),
             Some("hello\nworld".to_string())
         );
     }
@@ -411,7 +422,7 @@ mod tests {
         // An __EXIT__ from a previous command must not be picked up.
         let output = "__EXIT_0__\n__START_3__\nnew cmd\n__EXIT_0__\n";
         assert_eq!(
-            extract_output(output, "__START_3__"),
+            extract_output(output, "__START_3__", EXIT_MARKER_PREFIX),
             Some("new cmd".to_string())
         );
     }
@@ -420,7 +431,7 @@ mod tests {
     fn extract_output_handles_nonzero_exit() {
         let output = "__START_5__\nerror here\n__EXIT_2__\n";
         assert_eq!(
-            extract_output(output, "__START_5__"),
+            extract_output(output, "__START_5__", EXIT_MARKER_PREFIX),
             Some("error here".to_string())
         );
     }
@@ -434,8 +445,23 @@ mod tests {
         // Simulate "é" (U+00E9, 2 bytes in UTF-8) appearing before the start marker.
         let output = "caf\u{00e9}\n__START_9__\nresult\n__EXIT_0__\n";
         assert_eq!(
-            extract_output(output, "__START_9__"),
+            extract_output(output, "__START_9__", EXIT_MARKER_PREFIX),
             Some("result".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_output_ignores_spoofed_exit_marker_with_nonce() {
+        // MED-28: a command that prints a literal __EXIT_0__ must not be mistaken
+        // for the real, nonce-scoped exit marker. Only the nonce prefix matches.
+        let start = "__START_deadbeef__";
+        let exit_prefix = "__EXIT_deadbeef_";
+        let output = format!(
+            "old\n{start}\nfake __EXIT_0__ printed by user\nreal output\n{exit_prefix}0__\n"
+        );
+        assert_eq!(
+            extract_output(&output, start, exit_prefix),
+            Some("fake __EXIT_0__ printed by user\nreal output".to_string())
         );
     }
 
