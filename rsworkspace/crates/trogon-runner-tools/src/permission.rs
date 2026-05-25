@@ -139,8 +139,19 @@ fn eval_tool_policies(
     tool_name: &str,
     tool_input: &Value,
 ) -> Option<PolicyAction> {
-    let path = extract_path_from_input(tool_input).unwrap_or("");
     let normalized = normalize_tool_name(tool_name);
+    // MED-10: bash calls carry no path/file_path/notebook_path, so matching an
+    // empty string made every path-scoped policy silently ineffective for bash.
+    // Fall back to the command text so policy globs can match bash commands.
+    let path = extract_path_from_input(tool_input)
+        .or_else(|| {
+            if normalized == "bash" {
+                tool_input.get("command").and_then(|v| v.as_str())
+            } else {
+                None
+            }
+        })
+        .unwrap_or("");
 
     let matching: Vec<&PolicyAction> = policies
         .iter()
