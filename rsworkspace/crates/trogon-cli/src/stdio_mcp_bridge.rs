@@ -9,8 +9,8 @@
 //! * Call [`StdioMcpBridge::spawn`] to create the bridge and get the URL.
 //! * Call [`StdioMcpBridge::shutdown`] for a clean teardown (kills the child,
 //!   stops the HTTP server).
-//! * Dropping the bridge without calling `shutdown` aborts the HTTP server task;
-//!   the child process is detached and will be reaped by the OS on process exit.
+//! * Dropping the bridge without calling `shutdown` aborts the HTTP server task
+//!   and kills the child process (via `kill_on_drop`), so neither is leaked.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -82,6 +82,9 @@ impl StdioMcpBridge {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
+            // MED-41: ensure the child is killed when the bridge is dropped, even
+            // on an early-error exit path where shutdown() is never called.
+            .kill_on_drop(true)
             .spawn()
             .map_err(BridgeError::Spawn)?;
 
@@ -118,6 +121,10 @@ impl StdioMcpBridge {
                     _ => break,
                 }
             }
+            // MED-42: the child's stdout closed (process exited/crashed). Drop every
+            // pending sender so each in-flight HTTP handler resolves immediately with
+            // a 502 instead of blocking for the full 30-second timeout.
+            reader_inner.pending.lock().await.clear();
         });
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -148,7 +155,8 @@ impl StdioMcpBridge {
 
 impl Drop for StdioMcpBridge {
     fn drop(&mut self) {
-        // Abort the axum task; child is detached and will be reaped on process exit.
+        // Abort the axum task. The child is killed via kill_on_drop(true) when
+        // `child` is dropped, so it is not leaked even on early-error paths.
         self.server_abort.abort();
     }
 }
@@ -501,6 +509,38 @@ mod tests {
         let resp = proxy_handler(State(inner), body).await;
         assert_eq!(resp.status(), StatusCode::BAD_GATEWAY, "dropped sender must return 502");
         let _ = child.kill().await;
+    }
+
+    #[tokio::test]
+    async fn bridge_fails_pending_when_child_exits() {
+        // MED-42: when the child closes stdout (exit/crash), an in-flight request
+        // must fail fast (502) instead of waiting out the 30-second timeout.
+        let path = std::env::temp_dir()
+            .join(format!("trogon_cli_dying_mcp_{}.sh", std::process::id()));
+        tokio::fs::write(&path, b"#!/bin/sh\nread line\nexit 0\n").await.unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = tokio::fs::metadata(&path).await.unwrap().permissions();
+        perms.set_mode(0o755);
+        tokio::fs::set_permissions(&path, perms).await.unwrap();
+
+        let bridge = StdioMcpBridge::spawn(path.to_str().unwrap(), &[], &[])
+            .await
+            .expect("spawn must succeed");
+        let client = reqwest::Client::new();
+        let body = serde_json::json!({ "jsonrpc": "2.0", "id": 5, "method": "m" });
+        let resp = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.post(&bridge.url).json(&body).send(),
+        )
+        .await
+        .expect("must not block for the full 30s timeout")
+        .expect("HTTP request must complete");
+        assert_eq!(
+            resp.status().as_u16(),
+            502,
+            "child exit must fail the pending request fast"
+        );
+        bridge.shutdown().await;
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
