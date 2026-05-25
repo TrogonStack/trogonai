@@ -299,13 +299,23 @@ mod tests {
         assert!(audit_subject.is_some(), "expected resubscribe audit publish");
     }
 
-    /// Live NATS smoke — run with `cargo test -p a2a-bridge -- --ignored nats_transport_live`.
+    /// Live NATS smoke — run with `A2A_SMOKE_COMPOSE=1 cargo test -p a2a-bridge -- --ignored nats_transport_live`.
     #[tokio::test]
-    #[ignore = "requires nats-server on NATS_URL (default nats://127.0.0.1:4222)"]
+    #[ignore = "requires compose stack: A2A_SMOKE_COMPOSE=1 and NATS_URL (see devops/docker/compose/compose.a2a.smoke.yml)"]
     async fn nats_transport_live_requires_nats_server() {
-        let _transport = std::env::var("A2A_BRIDGE_TRANSPORT").unwrap_or_else(|_| "nats".into());
+        if std::env::var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
+            panic!("set A2A_SMOKE_COMPOSE=1 to run live compose-network bridge smoke");
+        }
         let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
         let client = async_nats::connect(url).await.expect("live NATS connect");
         let _ = client;
+        let bridge_addr = std::env::var("BRIDGE_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:7443".into());
+        let response = reqwest::get(format!("http://{bridge_addr}/"))
+            .await
+            .expect("bridge HTTP reachable");
+        assert!(
+            response.status().is_client_error() || response.status().is_success(),
+            "bridge HTTP should respond on {bridge_addr}"
+        );
     }
 }
