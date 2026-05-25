@@ -82,8 +82,8 @@ impl AcpClientSupervisor {
     }
 
     /// The NATS URL this CLI actually connected to (honors `--nats-url`).
-    pub fn nats_url(&self) -> &str {
-        &self.nats_url
+    pub fn nats_url(&self) -> String {
+        self.inner.borrow().nats_url.clone()
     }
 
     pub fn set_session(&self, session_id: &str) {
