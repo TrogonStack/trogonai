@@ -110,7 +110,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 // fails we'd otherwise leak that empty session until LRU eviction —
                 // best-effort close it before surfacing the original error.
                 let _ = bridge
-                    .close_session(CloseSessionRequest::new(new_session_id.as_str()))
+                    .close_session(CloseSessionRequest::new(new_session_id.clone()))
                     .await;
                 return Err(import_err.to_string());
             }
