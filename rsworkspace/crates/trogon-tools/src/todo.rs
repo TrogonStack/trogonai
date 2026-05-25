@@ -32,7 +32,8 @@ async fn save_store(cwd: &str, store: &TodoStore) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let path = dir.join("todos.json");
-    let tmp = path.with_extension("tmp");
+    // MED-12: unique temp name so concurrent saves don't clobber each other.
+    let tmp = crate::fs::unique_tmp_path(&path);
     let json = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
     let mut file = tokio::fs::File::create(&tmp)
         .await
