@@ -17,7 +17,7 @@ use crate::client_supervisor::AcpClientSupervisor;
 use crate::terminal::{print_tool_output, reset_display};
 use crate::tui_client::PermissionCoordinator;
 use trogon_registry::{Registry, RegistryStore};
-use trogon_tools::fs::resolve_directory_target;
+use trogon_tools::fs::{resolve_directory_target, resolve_path};
 
 const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
@@ -99,6 +99,7 @@ fn input_needs_continuation(input: &str) -> bool {
 // ── @mention expansion ────────────────────────────────────────────────────────
 
 fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
+    let cwd_str = cwd.to_string_lossy();
     let mut result = String::with_capacity(text.len());
     let mut chars = text.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -116,24 +117,8 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
             if path_str.is_empty() {
                 result.push('@');
             } else {
-                let full_path = cwd.join(path_str);
-                let contained = {
-                    let mut norm = std::path::PathBuf::new();
-                    for comp in full_path.components() {
-                        match comp {
-                            std::path::Component::ParentDir => { norm.pop(); }
-                            std::path::Component::CurDir => {}
-                            c => norm.push(c),
-                        }
-                    }
-                    norm.starts_with(cwd)
-                };
-                if !contained {
-                    eprintln!("warning: @{path_str}: path escapes working directory — ignored");
-                    result.push('@');
-                    result.push_str(path_str);
-                } else {
-                    match fs.read_to_string(&full_path) {
+                match resolve_path(&cwd_str, path_str) {
+                    Ok(full_path) => match fs.read_to_string(&full_path) {
                         Ok(content) => {
                             result.push_str(&format!("`{path_str}`:\n```\n{content}\n```"));
                         }
@@ -142,6 +127,11 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
                             result.push('@');
                             result.push_str(path_str);
                         }
+                    },
+                    Err(_) => {
+                        eprintln!("warning: @{path_str}: path escapes working directory — ignored");
+                        result.push('@');
+                        result.push_str(path_str);
                     }
                 }
             }
@@ -174,7 +164,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
-    let mut project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+    let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
 
     let mut mcp_manager = McpManager::load(&fs);
     let resumed = resume.is_some();
@@ -252,7 +242,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         &session,
                         &fs,
                         &mut cwd,
-                        &mut project_dir,
+                        &project_dir,
                         &prefix,
                         &session.current_model(),
                         arg,
@@ -279,7 +269,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             &session,
                             &fs,
                             &mut cwd,
-                            &mut project_dir,
+                            &project_dir,
                             &prefix,
                             &session.current_model(),
                             arg,
@@ -918,7 +908,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
     session: &S,
     fs: &F,
     cwd: &mut PathBuf,
-    project_dir: &mut PathBuf,
+    project_dir: &Path,
     prefix: &str,
     model: &str,
     arg: &str,
@@ -928,7 +918,6 @@ async fn apply_repl_cd<S: Session, F: Fs>(
             *cwd = resolved.clone();
             match session.set_cwd(&resolved).await {
                 Ok(()) => {
-                    *project_dir = resolved.clone();
                     persist_session_index(fs, project_dir, prefix, session.session_id(), model);
                     reset_display();
                     eprintln!("{}", resolved.display());
@@ -1580,6 +1569,30 @@ mod tests {
         let result = expand_mentions(&input, &dir, &RealFs);
         assert!(result.contains("real content"), "got: {result}");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn expand_mentions_symlink_outside_cwd_is_rejected() {
+        let dir = std::env::temp_dir().join("trogon_mention_symlink");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let outside = std::env::temp_dir().join("trogon_mention_outside_secret.txt");
+        std::fs::write(&outside, "secret").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(&outside, dir.join("leak.txt")).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            return;
+        }
+        let cwd = dir.canonicalize().unwrap();
+        let result = expand_mentions("see @leak.txt", &cwd, &RealFs);
+        assert!(result.contains("@leak.txt"), "token should be preserved: {result}");
+        assert!(!result.contains("secret"), "must not read through symlink: {result}");
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── FileAtHelper tab-completion (uses real fs directly — no Fs trait) ─────
