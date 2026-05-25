@@ -54,3 +54,4 @@ futures                 = { workspace = true }
 tempfile               = "3"
 testcontainers-modules = { workspace = true }
 trogon-nats             = { workspace = true, features = ["test-support"] }
+trogon-registry         = { workspace = true, features = ["test-support"] }

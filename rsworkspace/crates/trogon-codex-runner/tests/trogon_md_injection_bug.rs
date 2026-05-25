@@ -1,15 +1,14 @@
-//! Regression test documenting the known TROGON.md injection bug in codex-runner.
+//! Regression test for the TROGON.md injection fix in codex-runner.
 //!
-//! The bug: in `CodexAgent::prompt()`, `s.first_turn` is set to `false` before
-//! its value is captured into the destructured tuple. The cwd is also not
-//! captured in the same block. Therefore the `else if first_turn` branch that
-//! would call `trogon_runner_tools::trogon_md::load_trogon_md(&cwd)` never
-//! runs — no TROGON.md content is injected on the first prompt.
+//! The original bug: `s.first_turn` was set to `false` before being captured,
+//! and `s.cwd` was never captured. As a result the `else if first_turn` branch
+//! that calls `load_trogon_md` never ran.
 //!
-//! This test verifies the current (broken) behavior. When the bug is fixed, this
-//! test must be updated to assert that TROGON.md IS injected.
+//! The fix captures both `ft = s.first_turn` and `cwd = s.cwd.clone()` before
+//! `s.first_turn = false`, and adds the `else if first_turn` arm.
 //!
-//! See: docs/programming-imple.md §"Gap PR 4"
+//! This test verifies the fix: TROGON.md content MUST appear in the
+//! `userInput` sent to the Codex subprocess on the first turn.
 //!
 //! Run with:
 //!   cargo test -p trogon-codex-runner --test trogon_md_injection_bug
@@ -18,7 +17,7 @@ use std::sync::OnceLock;
 use tokio::sync::Mutex;
 
 use acp_nats::acp_prefix::AcpPrefix;
-use agent_client_protocol::{Agent, ContentBlock, NewSessionRequest, PromptRequest};
+use agent_client_protocol::{Agent, ContentBlock, NewSessionRequest, PromptRequest, TextContent};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::LocalSet;
@@ -58,75 +57,145 @@ async fn fake_nats() -> async_nats::Client {
     async_nats::connect(format!("nats://127.0.0.1:{port}")).await.unwrap()
 }
 
-// ── tests ─────────────────────────────────────────────────────────────────────
-
-/// Documents the known bug: TROGON.md is NOT injected on the first prompt.
+/// TROGON.md content MUST be prepended to the `userInput` sent to the Codex
+/// subprocess on the first turn of a fresh session.
 ///
-/// The expected behavior (after fixing the bug) would be that the text sent
-/// to the Codex process on the first turn includes the TROGON.md content.
-///
-/// Currently, `first_turn` is set to `false` before being captured, so the
-/// injection branch never executes.
-///
-/// NOTE: This test passes with the CURRENT (broken) code. When the bug is
-/// fixed, the assertion must be inverted: assert that the session can complete
-/// a first-turn prompt with TROGON.md content injected.
+/// Verified by setting `MOCK_RECORD_TURN_INPUT_FILE` so the mock binary writes
+/// the received `userInput` to a temp file that we inspect after the prompt.
 #[tokio::test(flavor = "current_thread")]
-async fn codex_first_turn_captures_first_turn_after_set_to_false_known_bug() {
+async fn codex_first_turn_injects_trogon_md_content_into_subprocess_input() {
     let _guard = bin_env_lock().lock().await;
 
     let dir = tempfile::TempDir::new().unwrap();
-    // Write a TROGON.md in the session cwd so it would be injected if the bug were fixed.
     std::fs::write(
         dir.path().join("TROGON.md"),
         "# Project rules\nAlways use Rust.\n",
     )
     .unwrap();
 
+    let record_file = tempfile::NamedTempFile::new().unwrap();
+    let record_path = record_file.path().to_str().unwrap().to_string();
+    unsafe {
+        std::env::set_var("CODEX_BIN", MOCK_BIN);
+        std::env::set_var("MOCK_RECORD_TURN_INPUT_FILE", &record_path);
+    }
+
     let local = LocalSet::new();
     local
         .run_until(async {
-            // Check if the DefaultCodexAgent has with_nats_and_cwd — if not, use
-            // new_session to set the cwd. Try new_session approach since the API
-            // may not have with_nats_and_cwd.
-            unsafe { std::env::set_var("CODEX_BIN", MOCK_BIN) };
             let agent = DefaultCodexAgent::with_nats(
                 fake_nats().await,
-                AcpPrefix::new("test-trogon-md").unwrap(),
+                AcpPrefix::new("test-trogon-md-fix").unwrap(),
                 "o4-mini",
             );
 
-            // Create a session in the directory containing TROGON.md
-            let cwd = dir.path().to_string_lossy().to_string();
             let new_resp = agent
-                .new_session(NewSessionRequest::new(cwd))
+                .new_session(NewSessionRequest::new(dir.path()))
                 .await
                 .unwrap();
-            let sid = new_resp.session_id;
 
-            // After new_session, first_turn must be true (session is fresh).
-            // The bug occurs during prompt: first_turn is set to false before capture.
-            // We verify the prompt completes without panic — the TROGON.md content
-            // will NOT be injected due to the bug, but the prompt still succeeds.
-            let prompt_result = agent
+            agent
                 .prompt(PromptRequest::new(
-                    sid.clone(),
-                    vec![ContentBlock::from("first prompt")],
+                    new_resp.session_id,
+                    vec![ContentBlock::Text(TextContent::new("first prompt"))],
                 ))
-                .await;
-
-            // The prompt should complete (mock codex server handles any input).
-            assert!(
-                prompt_result.is_ok(),
-                "first prompt must not error even with TROGON.md present: {:?}",
-                prompt_result.err()
-            );
-
-            // BUG DOCUMENTED: If the bug were fixed, the text sent to the Codex
-            // process on this first turn would include "# Project rules" from TROGON.md.
-            // Currently it does not. There is no assert here for the injection content
-            // because the mock_codex_server does not expose what text it received —
-            // the behavioral gap is documented in docs/programming-imple.md §"Gap PR 4".
+                .await
+                .expect("first prompt must not error");
         })
         .await;
+
+    unsafe { std::env::remove_var("MOCK_RECORD_TURN_INPUT_FILE") };
+
+    let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
+    assert!(
+        recorded.contains("# Project rules"),
+        "TROGON.md content must be prepended to userInput on first turn; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("Always use Rust"),
+        "TROGON.md body must appear in subprocess userInput; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("first prompt"),
+        "original user message must also be present; got: {recorded:?}"
+    );
+}
+
+/// TROGON.md content must NOT be injected on the second turn of a session.
+///
+/// `first_turn` is set to `false` after the first prompt, so subsequent prompts
+/// must send only the raw user message to the subprocess. Verified by running
+/// two prompts and checking that the recorded userInput from the second turn
+/// does not contain TROGON.md content.
+#[tokio::test(flavor = "current_thread")]
+async fn codex_second_turn_does_not_inject_trogon_md() {
+    let _guard = bin_env_lock().lock().await;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("TROGON.md"),
+        "# Project rules\nAlways use Rust.\n",
+    )
+    .unwrap();
+
+    let record_file = tempfile::NamedTempFile::new().unwrap();
+    let record_path = record_file.path().to_str().unwrap().to_string();
+    unsafe {
+        std::env::set_var("CODEX_BIN", MOCK_BIN);
+        std::env::set_var("MOCK_RECORD_TURN_INPUT_FILE", &record_path);
+    }
+
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            let agent = DefaultCodexAgent::with_nats(
+                fake_nats().await,
+                AcpPrefix::new("test-trogon-md-second-turn").unwrap(),
+                "o4-mini",
+            );
+
+            let new_resp = agent
+                .new_session(NewSessionRequest::new(dir.path()))
+                .await
+                .unwrap();
+            let session_id = new_resp.session_id;
+
+            // First prompt: TROGON.md is injected (first_turn = true).
+            agent
+                .prompt(PromptRequest::new(
+                    session_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("first message"))],
+                ))
+                .await
+                .expect("first prompt must not error");
+
+            // Second prompt: first_turn = false, TROGON.md must NOT be injected.
+            // The mock overwrites the record file each turn/start, so after this
+            // call the file contains only the second turn's userInput.
+            agent
+                .prompt(PromptRequest::new(
+                    session_id,
+                    vec![ContentBlock::Text(TextContent::new("second message"))],
+                ))
+                .await
+                .expect("second prompt must not error");
+        })
+        .await;
+
+    unsafe { std::env::remove_var("MOCK_RECORD_TURN_INPUT_FILE") };
+
+    let recorded = std::fs::read_to_string(&record_path).unwrap_or_default();
+
+    assert!(
+        !recorded.contains("# Project rules"),
+        "TROGON.md must NOT be injected on the second turn; got: {recorded:?}"
+    );
+    assert!(
+        !recorded.contains("Always use Rust"),
+        "TROGON.md body must NOT appear in second turn userInput; got: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("second message"),
+        "second turn userInput must contain the user message; got: {recorded:?}"
+    );
 }

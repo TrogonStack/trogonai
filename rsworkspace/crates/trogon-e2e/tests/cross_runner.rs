@@ -682,6 +682,177 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
 
 // ── PortableBlock backward compat via import flow ─────────────────────────────
 
+// ── codex-style export into xai import ───────────────────────────────────────
+
+/// Import codex-style export (PortableBlock::ToolCall + PortableBlock::ToolResult
+/// with role:"user") into xai-runner.  XAI converts structured blocks to
+/// plain text: ToolCall → "[called: {name}]" and ToolResult → content.
+/// This exercises the codex→xai cross-runner direction.
+#[tokio::test]
+async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text() {
+    local()
+        .run_until(async move {
+            let messages = vec![
+                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
+                PortableMessage {
+                    role: "assistant".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolCall {
+                        id: "c1".to_string(),
+                        name: "str_replace".to_string(),
+                        input: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}),
+                    }],
+                },
+                PortableMessage {
+                    role: "user".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolResult {
+                        tool_call_id: "c1".to_string(),
+                        content: "edit-applied".to_string(),
+                    }],
+                },
+                PortableMessage { role: "assistant".to_string(), text: "done".to_string(), blocks: vec![] },
+            ];
+            let exported_json = serde_json::to_string(&messages).unwrap();
+
+            let xai_http = Arc::new(MockXaiHttpClient::new());
+            let xai_notifier = Arc::new(XaiMockNotifier::new());
+            let xai_agent = XaiAgent::with_deps(xai_notifier, "grok-3", "test-key", xai_http);
+            xai_agent
+                .test_insert_session_with_history("xai-codex-s1", "/tmp", vec![])
+                .await;
+
+            let import_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"xai-codex-s1","messages":{exported_json}}}"#),
+                )
+                .unwrap()
+                .into();
+            xai_agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .expect("xai session/import of codex-style messages must succeed");
+
+            let xai_export_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": "xai-codex-s1" }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let xai_export = xai_agent
+                .ext_method(ExtRequest::new("session/export", xai_export_params))
+                .await
+                .expect("xai session/export must succeed");
+
+            let xai_portable: Vec<PortableMessage> =
+                serde_json::from_str(xai_export.0.get())
+                    .expect("xai export must be valid JSON");
+
+            let has_tool_call_text = xai_portable
+                .iter()
+                .any(|m| m.text.contains("[called: str_replace]"));
+            assert!(
+                has_tool_call_text,
+                "XAI must convert ToolCall block to '[called: str_replace]' text; got: {xai_portable:?}"
+            );
+
+            let has_tool_result_text = xai_portable
+                .iter()
+                .any(|m| m.text.contains("edit-applied"));
+            assert!(
+                has_tool_result_text,
+                "XAI must convert ToolResult block to its content text; got: {xai_portable:?}"
+            );
+        })
+        .await;
+}
+
+// ── openrouter-style export into xai import ──────────────────────────────────
+
+/// Import OpenRouter-style export (role:"tool" ToolResult messages) into
+/// xai-runner.  XAI converts structured blocks to plain text regardless of
+/// role, preserving ToolCall → "[called: {name}]" and ToolResult → content.
+/// This exercises the openrouter→xai cross-runner direction.
+#[tokio::test]
+async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to_text() {
+    local()
+        .run_until(async move {
+            // OR-style: role:"tool" for ToolResult messages.
+            let messages = vec![
+                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
+                PortableMessage {
+                    role: "assistant".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolCall {
+                        id: "c1".to_string(),
+                        name: "glob".to_string(),
+                        input: serde_json::json!({"pattern": "**/*.rs"}),
+                    }],
+                },
+                PortableMessage {
+                    role: "tool".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolResult {
+                        tool_call_id: "c1".to_string(),
+                        content: "found: main.rs".to_string(),
+                    }],
+                },
+                PortableMessage { role: "assistant".to_string(), text: "found it".to_string(), blocks: vec![] },
+            ];
+            let exported_json = serde_json::to_string(&messages).unwrap();
+
+            let xai_http = Arc::new(MockXaiHttpClient::new());
+            let xai_notifier = Arc::new(XaiMockNotifier::new());
+            let xai_agent = XaiAgent::with_deps(xai_notifier, "grok-3", "test-key", xai_http);
+            xai_agent
+                .test_insert_session_with_history("xai-or-s1", "/tmp", vec![])
+                .await;
+
+            let import_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"xai-or-s1","messages":{exported_json}}}"#),
+                )
+                .unwrap()
+                .into();
+            xai_agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .expect("xai session/import of OR-style messages must succeed");
+
+            let xai_export_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": "xai-or-s1" }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let xai_export = xai_agent
+                .ext_method(ExtRequest::new("session/export", xai_export_params))
+                .await
+                .expect("xai session/export must succeed");
+
+            let xai_portable: Vec<PortableMessage> =
+                serde_json::from_str(xai_export.0.get())
+                    .expect("xai export must be valid JSON");
+
+            let has_tool_call_text = xai_portable
+                .iter()
+                .any(|m| m.text.contains("[called: glob]"));
+            assert!(
+                has_tool_call_text,
+                "XAI must convert OR ToolCall block to '[called: glob]' text; got: {xai_portable:?}"
+            );
+
+            let has_tool_result_text = xai_portable
+                .iter()
+                .any(|m| m.text.contains("found: main.rs"));
+            assert!(
+                has_tool_result_text,
+                "XAI must convert OR ToolResult block to its content text; got: {xai_portable:?}"
+            );
+        })
+        .await;
+}
+
 /// Old-format export JSON (no `blocks` field) must be importable by the OR
 /// runner — verifying that `#[serde(default)]` on `blocks` works end-to-end
 /// through the actual import ACP endpoint, not just unit-level serde.

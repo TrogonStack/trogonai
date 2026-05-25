@@ -356,3 +356,208 @@ async fn str_replace_applies_edit_via_dispatch() {
         "file must not contain old text; got: {on_disk}"
     );
 }
+
+// ── write_file: intermediate directory creation ───────────────────────────────
+
+/// `write_file` must create all intermediate directories when the target path
+/// contains subdirectories that do not yet exist (spec: `create_dir_all`).
+#[tokio::test]
+async fn write_file_creates_intermediate_directories_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+
+    let result = dispatch_tool(
+        &ctx(&dir),
+        "write_file",
+        &json!({"path": "a/b/c/nested.rs", "content": "fn main() {}\n"}),
+    )
+    .await;
+
+    assert_eq!(result, "OK", "write_file must return 'OK' for nested path; got: {result}");
+
+    let on_disk = tokio::fs::read_to_string(dir.path().join("a/b/c/nested.rs"))
+        .await
+        .expect("file at nested path must exist after write_file with create_dir_all");
+    assert_eq!(on_disk, "fn main() {}\n");
+}
+
+// ── list_dir: 500-entry truncation ────────────────────────────────────────────
+
+/// `list_dir` must truncate output when the directory contains more than 500
+/// entries and include the truncation notice in the returned string.
+#[tokio::test]
+async fn list_dir_truncates_at_500_entries_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+
+    for i in 0u32..502 {
+        tokio::fs::write(dir.path().join(format!("f{i:04}.txt")), "").await.unwrap();
+    }
+
+    let result = dispatch_tool(&ctx(&dir), "list_dir", &json!({})).await;
+
+    assert!(
+        result.contains("truncated at 500 entries"),
+        "list_dir must include truncation notice when >500 entries; got: {result}"
+    );
+}
+
+// ── glob ──────────────────────────────────────────────────────────────────────
+
+/// `glob` via `dispatch_tool` matches files recursively across subdirectories
+/// and excludes files that do not match the pattern.
+#[tokio::test]
+async fn glob_matches_files_recursively_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+
+    tokio::fs::create_dir_all(dir.path().join("src/nested")).await.unwrap();
+    tokio::fs::write(dir.path().join("src/main.rs"), "fn main() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("src/nested/util.rs"), "fn util() {}").await.unwrap();
+    tokio::fs::write(dir.path().join("build.sh"), "#!/bin/sh").await.unwrap();
+
+    let result = dispatch_tool(&ctx(&dir), "glob", &json!({"pattern": "**/*.rs"})).await;
+
+    assert!(
+        result.contains("main.rs"),
+        "glob must find main.rs recursively; got: {result}"
+    );
+    assert!(
+        result.contains("util.rs"),
+        "glob must find nested util.rs; got: {result}"
+    );
+    assert!(
+        !result.contains("build.sh"),
+        "glob must not include build.sh (wrong extension); got: {result}"
+    );
+}
+
+// ── git_status ────────────────────────────────────────────────────────────────
+
+/// `git_status` via `dispatch_tool` lists untracked files present in the repo.
+#[tokio::test]
+async fn git_status_shows_untracked_file_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+    git_init(&dir).await;
+
+    tokio::fs::write(dir.path().join("status_sentinel.rs"), "fn main() {}").await.unwrap();
+
+    let result = dispatch_tool(&ctx(&dir), "git_status", &json!({})).await;
+
+    assert!(
+        result.contains("status_sentinel.rs"),
+        "git_status must list status_sentinel.rs as untracked; got: {result}"
+    );
+}
+
+// ── git_log ───────────────────────────────────────────────────────────────────
+
+/// `git_log` via `dispatch_tool` returns the commit message of the most recent commit.
+#[tokio::test]
+async fn git_log_shows_commit_message_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+    git_init(&dir).await;
+
+    tokio::fs::write(dir.path().join("README.md"), "# project\n").await.unwrap();
+    tokio::process::Command::new("git")
+        .args(["add", "README.md"])
+        .current_dir(dir.path())
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["commit", "-m", "log-sentinel-commit-abc123"])
+        .current_dir(dir.path())
+        .output()
+        .await
+        .unwrap();
+
+    let result = dispatch_tool(&ctx(&dir), "git_log", &json!({})).await;
+
+    assert!(
+        result.contains("log-sentinel-commit-abc123"),
+        "git_log must include the commit message; got: {result}"
+    );
+}
+
+// ── notebook_edit ─────────────────────────────────────────────────────────────
+
+/// `notebook_edit` via `dispatch_tool` writes the updated cell source back to
+/// disk — verified by reading the `.ipynb` file after the edit completes.
+#[tokio::test]
+async fn notebook_edit_writes_new_cell_source_to_disk_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+    let nb = serde_json::json!({
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": ["print('original')"],
+                "metadata": {},
+                "outputs": [],
+                "execution_count": null
+            }
+        ]
+    });
+    tokio::fs::write(
+        dir.path().join("notebook.ipynb"),
+        serde_json::to_string(&nb).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let result = dispatch_tool(
+        &ctx(&dir),
+        "notebook_edit",
+        &json!({"path": "notebook.ipynb", "cell_index": 0, "content": "print('edited-sentinel')"}),
+    )
+    .await;
+
+    assert_eq!(result, "OK", "notebook_edit must return 'OK'; got: {result}");
+
+    let raw = tokio::fs::read_to_string(dir.path().join("notebook.ipynb")).await.unwrap();
+    let on_disk: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let source = on_disk["cells"][0]["source"].to_string();
+    assert!(
+        source.contains("edited-sentinel"),
+        "edited cell source must be written to disk; got: {source}"
+    );
+    assert!(
+        !source.contains("original"),
+        "old cell source must be gone after notebook_edit; got: {source}"
+    );
+}
+
+// ── search_files ──────────────────────────────────────────────────────────────
+
+/// `search_files` via `dispatch_tool` returns the file paths that contain the
+/// search pattern and excludes files without a match.
+#[tokio::test]
+async fn search_files_returns_matching_lines_via_dispatch() {
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(
+        dir.path().join("haystack.rs"),
+        "fn search_needle_sentinel() {}\nfn other() {}\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(dir.path().join("empty.rs"), "fn no_match() {}\n")
+        .await
+        .unwrap();
+
+    let result =
+        dispatch_tool(&ctx(&dir), "search_files", &json!({"pattern": "search_needle_sentinel"}))
+            .await;
+
+    assert!(
+        result.contains("haystack.rs"),
+        "search_files must report haystack.rs; got: {result}"
+    );
+    assert!(
+        !result.contains("empty.rs"),
+        "search_files must not report empty.rs (no match); got: {result}"
+    );
+    assert!(
+        result.contains("search_needle_sentinel"),
+        "search_files must include the matching text in output; got: {result}"
+    );
+}

@@ -895,3 +895,215 @@ async fn acp_fetch_url_tool_dispatched_via_wire_format() {
         "tool_result with fetched content must appear in second Anthropic API call"
     );
 }
+
+// ── session/export → PortableBlock ───────────────────────────────────────────
+
+/// After a complete tool_use cycle via the ACP wire format, calling
+/// `session/export` via NATS must return PortableBlocks containing:
+/// - A `PortableBlock::ToolCall` for the dispatched tool (read_file)
+/// - A `PortableBlock::ToolResult` carrying the tool output (file content)
+///
+/// This test closes the gap between the unit tests that manually seed session
+/// state and the real production path where the agent loop populates history
+/// from actual API responses.
+#[tokio::test]
+async fn acp_tool_use_cycle_exported_as_portable_blocks_via_wire() {
+    use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("sentinel.txt"), "sentinel-export-content-xyz\n").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-acp-export-blocks";
+    let session_id = "sess-export-blocks-1";
+    let cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+
+    // Second API call: tool_result with file content → end_turn
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("sentinel-export-content-xyz");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("read complete"));
+    });
+    // First API call: returns read_file tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_export_001",
+                "read_file",
+                serde_json::json!({"path": "sentinel.txt"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, make_agent(&server.base_url(), &cwd)).await;
+
+            let resp = prompt_and_wait(&nats, prefix, session_id, "read the sentinel file", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after read_file dispatch; got: {resp}"
+            );
+
+            // Call session/export via NATS. The method name is encoded in the subject;
+            // the payload is just the ExtRequest params (ExtRequest is transparent over params).
+            let export_params = serde_json::json!({"sessionId": session_id});
+            let inbox = nats.new_inbox();
+            let mut resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
+            nats.publish_with_reply(
+                format!("{prefix}.agent.ext.session/export"),
+                inbox,
+                Bytes::from(serde_json::to_vec(&export_params).unwrap()),
+            )
+            .await
+            .unwrap();
+
+            let export_msg = tokio::time::timeout(
+                Duration::from_secs(5),
+                resp_sub.next(),
+            )
+            .await
+            .expect("timed out waiting for session/export response")
+            .expect("no session/export response");
+
+            let messages: Vec<PortableMessage> =
+                serde_json::from_slice(&export_msg.payload)
+                    .expect("response must be a PortableMessage array");
+
+            assert!(
+                !messages.is_empty(),
+                "exported messages must not be empty"
+            );
+
+            let has_tool_call = messages.iter().any(|m| {
+                m.blocks.iter().any(|b| {
+                    matches!(b, PortableBlock::ToolCall { name, .. } if name == "read_file")
+                })
+            });
+            assert!(
+                has_tool_call,
+                "exported messages must contain PortableBlock::ToolCall for read_file; got: {messages:?}"
+            );
+
+            let has_tool_result = messages.iter().any(|m| {
+                m.blocks.iter().any(|b| {
+                    matches!(b, PortableBlock::ToolResult { content, .. }
+                        if content.contains("sentinel-export-content-xyz"))
+                })
+            });
+            assert!(
+                has_tool_result,
+                "exported messages must contain PortableBlock::ToolResult with file content; got: {messages:?}"
+            );
+        })
+        .await;
+
+    assert_eq!(second_mock.hits(), 1, "second mock (tool_result) must be hit once");
+}
+
+// ── new_session(cwd) → ToolContext.cwd propagation ───────────────────────────
+
+/// When `new_session` is called via NATS with a real directory as the cwd,
+/// that cwd must flow through `state.cwd → agent.set_cwd → ToolContext.cwd`
+/// so that a subsequent `read_file` tool call reads from the session's directory,
+/// NOT from the ToolContext.cwd baked in at agent construction time.
+///
+/// The agent is started with an INTENTIONALLY WRONG initial cwd (`/no-such-path`).
+/// Only after `new_session(correct_tempdir)` is the ToolContext updated via
+/// `set_cwd(state.cwd)`. If the propagation works, read_file returns the file
+/// content from the correct tempdir; if not, it returns an error (file not found).
+#[tokio::test]
+async fn new_session_cwd_overrides_agent_initial_cwd_for_file_tool_dispatch() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("sentinel.txt"), "cwd-propagation-sentinel-xyz").unwrap();
+
+    let (_c, nats, js) = start_nats().await;
+    let prefix = "test-cwd-propagation";
+    let correct_cwd = dir.path().to_string_lossy().into_owned();
+
+    let server = MockServer::start();
+
+    // Second call: tool_result sent back → end_turn.
+    let second_mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("cwd-propagation-sentinel-xyz");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("file read ok"));
+    });
+
+    // First call: read_file tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_cwd_001",
+                "read_file",
+                serde_json::json!({"path": "sentinel.txt"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // Agent is started with a WRONG initial cwd — set_cwd must override it.
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url(), "/no-such-path"),
+            )
+            .await;
+
+            // new_session sends the correct cwd → agent stores it in state.cwd.
+            let session_id = {
+                let req = NewSessionRequest::new(std::path::PathBuf::from(&correct_cwd));
+                let inbox = nats.new_inbox();
+                let mut resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
+                nats.publish_with_reply(
+                    format!("{prefix}.agent.session.new"),
+                    inbox,
+                    Bytes::from(serde_json::to_vec(&req).unwrap()),
+                )
+                .await
+                .unwrap();
+                let msg = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    resp_sub.next(),
+                )
+                .await
+                .expect("timed out waiting for new_session")
+                .expect("no new_session response");
+                let v: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+                v["sessionId"].as_str().unwrap().to_string()
+            };
+
+            // Prompt triggers read_file — the agent must apply set_cwd(state.cwd)
+            // before dispatching, so the file is found in the correct tempdir.
+            let resp = prompt_and_wait(&nats, prefix, &session_id, "read the sentinel", 15).await;
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after cwd-propagated read_file; got: {resp}"
+            );
+        })
+        .await;
+
+    assert_eq!(
+        second_mock.hits(),
+        1,
+        "second mock (tool_result with sentinel) must be hit — cwd was propagated correctly"
+    );
+}

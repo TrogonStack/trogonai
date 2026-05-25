@@ -525,17 +525,19 @@ where
             );
         }
 
-        let (thread_id, model, pending_history) = {
+        let (thread_id, model, pending_history, first_turn, cwd) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
             let ph = s.pending_history.take();
+            let ft = s.first_turn;
+            let cwd = s.cwd.clone();
             s.first_turn = false;
             s.history.push(trogon_runner_tools::portable_session::PortableMessage::text_only(
                 "user", user_input.clone(),
             ));
-            (s.thread_id.clone(), s.model.clone().or_else(|| Some(self.default_model.clone())), ph)
+            (s.thread_id.clone(), s.model.clone().or_else(|| Some(self.default_model.clone())), ph, ft, cwd)
         };
 
         let user_input = if let Some(prior) = pending_history {
@@ -545,6 +547,11 @@ where
                 .collect::<Vec<_>>()
                 .join("\n");
             format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
+        } else if first_turn {
+            match trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
+                Some(md) => format!("{md}\n\n{user_input}"),
+                None => user_input,
+            }
         } else {
             user_input
         };

@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use trogon_codex_runner::DefaultCodexAgent;
-use trogon_runner_tools::portable_session::PortableMessage;
+use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
 
 use trogon_openrouter_runner::{MockOpenRouterHttpClient, MockSessionNotifier as OrMockNotifier, OpenRouterAgent};
 use trogon_xai_runner::{Message as XaiMessage, MockSessionNotifier as XaiMockNotifier, MockXaiHttpClient, XaiAgent};
@@ -273,6 +273,177 @@ async fn cross_runner_xai_export_into_codex_import() {
                     "text mismatch in xai→codex round-trip"
                 );
             }
+        })
+        .await;
+}
+
+// ── acp-style export into codex import ───────────────────────────────────────
+
+/// Import ACP-style export (containing PortableBlock::ToolCall and
+/// PortableBlock::ToolResult blocks) into codex-runner.  Codex stores
+/// PortableMessages verbatim in its history, so structured blocks must survive
+/// a re-export unchanged.
+#[tokio::test(flavor = "current_thread")]
+async fn cross_runner_acp_style_export_into_codex_import() {
+    let _guard = bin_env_lock().lock().await;
+
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            // Synthetic ACP-style messages: ToolCall (assistant) + ToolResult (user)
+            let messages = vec![
+                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
+                PortableMessage {
+                    role: "assistant".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolCall {
+                        id: "c1".to_string(),
+                        name: "str_replace".to_string(),
+                        input: serde_json::json!({"path": "f.rs", "old_str": "x", "new_str": "y"}),
+                    }],
+                },
+                PortableMessage {
+                    role: "user".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolResult {
+                        tool_call_id: "c1".to_string(),
+                        content: "OK".to_string(),
+                    }],
+                },
+                PortableMessage { role: "assistant".to_string(), text: "done".to_string(), blocks: vec![] },
+            ];
+            let exported_json = serde_json::to_string(&messages).unwrap();
+
+            let codex_agent = make_codex_agent().await;
+            let dst = codex_agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let dst_id = dst.session_id.to_string();
+
+            let import_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"{}","messages":{}}}"#, dst_id, exported_json),
+                )
+                .unwrap()
+                .into();
+            codex_agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .expect("codex session/import of ACP-style messages must succeed");
+
+            // Re-export from codex and verify blocks survive verbatim.
+            let export_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": dst_id }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let codex_export = codex_agent
+                .ext_method(ExtRequest::new("session/export", export_params))
+                .await
+                .expect("codex session/export must succeed");
+
+            let codex_portable: Vec<PortableMessage> =
+                serde_json::from_str(codex_export.0.get())
+                    .expect("codex export must be valid JSON");
+
+            assert_eq!(codex_portable.len(), 4, "must have 4 messages after codex import");
+
+            let has_tool_call = codex_portable
+                .iter()
+                .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolCall { .. })));
+            assert!(has_tool_call, "ToolCall block must survive codex import/export round-trip");
+
+            let has_tool_result = codex_portable
+                .iter()
+                .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })));
+            assert!(has_tool_result, "ToolResult block must survive codex import/export round-trip");
+        })
+        .await;
+}
+
+// ── openrouter-style export into codex import ─────────────────────────────────
+
+/// Import OpenRouter-style export (role:"tool" ToolResult messages) into
+/// codex-runner.  Codex stores PortableMessages verbatim in its history:
+/// the role and blocks must be preserved unchanged after a re-export.
+#[tokio::test(flavor = "current_thread")]
+async fn cross_runner_openrouter_style_export_into_codex_import() {
+    let _guard = bin_env_lock().lock().await;
+
+    let local = LocalSet::new();
+    local
+        .run_until(async {
+            // OR-style: role:"tool" for ToolResult messages.
+            let messages = vec![
+                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
+                PortableMessage {
+                    role: "assistant".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolCall {
+                        id: "c2".to_string(),
+                        name: "read_file".to_string(),
+                        input: serde_json::json!({"path": "test.txt"}),
+                    }],
+                },
+                PortableMessage {
+                    role: "tool".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolResult {
+                        tool_call_id: "c2".to_string(),
+                        content: "file contents".to_string(),
+                    }],
+                },
+                PortableMessage { role: "assistant".to_string(), text: "I read the file".to_string(), blocks: vec![] },
+            ];
+            let exported_json = serde_json::to_string(&messages).unwrap();
+
+            let codex_agent = make_codex_agent().await;
+            let dst = codex_agent
+                .new_session(NewSessionRequest::new("/tmp"))
+                .await
+                .unwrap();
+            let dst_id = dst.session_id.to_string();
+
+            let import_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"{}","messages":{}}}"#, dst_id, exported_json),
+                )
+                .unwrap()
+                .into();
+            codex_agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .expect("codex session/import of OR-style messages must succeed");
+
+            // Re-export: role:"tool" and ToolResult block must be preserved verbatim.
+            let export_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({ "sessionId": dst_id }).to_string(),
+                )
+                .unwrap()
+                .into();
+            let codex_export = codex_agent
+                .ext_method(ExtRequest::new("session/export", export_params))
+                .await
+                .expect("codex session/export must succeed");
+
+            let codex_portable: Vec<PortableMessage> =
+                serde_json::from_str(codex_export.0.get())
+                    .expect("codex export must be valid JSON");
+
+            assert_eq!(codex_portable.len(), 4, "must have 4 messages after codex import");
+
+            let tool_result_msg = codex_portable
+                .iter()
+                .find(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })))
+                .expect("ToolResult block must survive codex import/export round-trip");
+            assert_eq!(
+                tool_result_msg.role, "tool",
+                "OR role:'tool' must be preserved verbatim by codex (no normalization); got: {}",
+                tool_result_msg.role
+            );
         })
         .await;
 }
