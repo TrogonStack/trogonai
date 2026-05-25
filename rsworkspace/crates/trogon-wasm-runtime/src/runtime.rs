@@ -654,13 +654,13 @@ where
     ) -> agent_client_protocol::Result<KillTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
         self.tick_last_activity_for_terminal(&terminal_id);
-        // Remove the terminal from the map so the borrow is dropped before the await.
-        let t = self.terminals.borrow_mut().remove(&terminal_id);
-        match t {
-            Some(mut terminal) => {
-                terminal.kill().await;
-                // Put the terminal back so it can still be waited on / released.
-                self.terminals.borrow_mut().insert(terminal_id, terminal);
+        // Signal kill while holding the borrow (start_kill is sync, no await needed).
+        // The terminal stays in the map the entire time so concurrent writes never see
+        // a phantom "Unknown terminal" during the kill window (HIGH-26).
+        let mut terminals = self.terminals.borrow_mut();
+        match terminals.get_mut(&terminal_id) {
+            Some(t) => {
+                t.start_kill();
                 Ok(KillTerminalResponse::new())
             }
             None => Err(agent_client_protocol::Error::new(
@@ -1101,6 +1101,21 @@ where
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }
+        // Headless fallback: `WASM_AUTO_ALLOW_PERMISSIONS` is read at startup into
+        // `auto_allow_permissions` above; `TROGON_NON_INTERACTIVE=1` can also opt in at runtime.
+        if std::env::var("TROGON_NON_INTERACTIVE").as_deref() == Ok("1") {
+            if let Some(first) = req.options.first() {
+                tracing::info!(
+                    option = %first.option_id.0,
+                    "TROGON_NON_INTERACTIVE=1 — auto-selecting first permission option (no NATS)"
+                );
+                let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    first.option_id.clone(),
+                ));
+                return Ok(RequestPermissionResponse::new(outcome));
+            }
+        }
+
         // Forward to the CLI via NATS so the user can approve or deny.
         if let Some(ref nats) = self.nats_client {
             let session_id = req.session_id.0.as_ref();
@@ -1130,9 +1145,16 @@ where
                         tracing::warn!("NATS permission request timed out after 60s — cancelling");
                     }
                 }
+            } else {
+                tracing::warn!("Failed to serialize permission request — cancelling");
             }
+        } else {
+            tracing::warn!(
+                session_id = %req.session_id.0,
+                "no NATS client for permission request — cancelling; set WASM_AUTO_ALLOW_PERMISSIONS=1 \
+                 at startup or TROGON_NON_INTERACTIVE=1 for headless auto-approve"
+            );
         }
-        // No NATS client or all paths above fell through → cancel.
         Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
     }
 
@@ -1449,6 +1471,9 @@ mod tests {
             panic!("NeverHandle used in test")
         }
         async fn kill(&mut self) -> io::Result<()> {
+            panic!("NeverHandle used in test")
+        }
+        fn start_kill(&mut self) -> io::Result<()> {
             panic!("NeverHandle used in test")
         }
     }

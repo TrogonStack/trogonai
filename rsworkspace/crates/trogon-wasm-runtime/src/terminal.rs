@@ -75,6 +75,34 @@ impl<H: ChildProcessHandle> WasmTerminal<H> {
         }
     }
 
+    /// Sends a kill signal (native) or aborts the task (WASM) without awaiting exit.
+    /// The terminal stays in the map so concurrent writes never see "Unknown terminal"
+    /// during the kill window (HIGH-26). Returns `true` if a signal was sent.
+    pub fn start_kill(&mut self) -> bool {
+        match self.kind {
+            TerminalKind::Native { ref mut child, .. } => {
+                if let Some(c) = child {
+                    if let Err(e) = c.start_kill() {
+                        warn!(error = %e, "Failed to send kill signal to terminal process");
+                        return false;
+                    }
+                    return true;
+                }
+                false
+            }
+            TerminalKind::Wasm { ref exit_arc } => {
+                if let Some(ref c) = self.output_collector {
+                    c.abort();
+                    let _ = exit_arc
+                        .set(TerminalExitStatus::new().signal(Some("SIGKILL".to_string())));
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     /// Kills the underlying process or aborts the WASM background task.
     /// Returns `true` if a kill signal was sent (native) or the task was aborted (WASM).
     pub async fn kill(&mut self) -> bool {
