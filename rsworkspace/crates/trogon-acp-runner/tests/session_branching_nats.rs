@@ -38,7 +38,7 @@ use trogon_acp_runner::{
     session_notifier::mock::MockSessionNotifier,
 };
 use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message};
-use trogon_runner_tools::portable_session::PortableMessage;
+use trogon_runner_tools::portable_session::{PortableBlock, PortableMessage};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -898,6 +898,85 @@ async fn ext_list_children_null_session_id_returns_empty_children() {
                 v["children"].as_array().map(Vec::len),
                 Some(0),
                 "null sessionId must yield an empty children array"
+            );
+        })
+        .await;
+}
+
+// ── codex-style export into acp import ───────────────────────────────────────
+
+/// Import codex-style export (PortableBlock::ToolCall + PortableBlock::ToolResult
+/// with role:"user") into acp-runner backed by a real NATS KV store.  Verifies
+/// that ACP correctly converts PortableBlock::ToolCall → AgentContentBlock::ToolUse
+/// and PortableBlock::ToolResult → AgentContentBlock::ToolResult.
+#[tokio::test]
+async fn ext_method_codex_style_import_converts_blocks_in_nats_kv() {
+    let (_c, port) = start_nats().await;
+    let (_, js) = make_js(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            store.save("codex-acp-1", &SessionState::default()).await.unwrap();
+
+            let agent = make_agent(store.clone());
+
+            // Synthetic codex/ACP-style messages: ToolCall (assistant) + ToolResult (user)
+            let messages = vec![
+                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
+                PortableMessage {
+                    role: "assistant".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolCall {
+                        id: "c1".to_string(),
+                        name: "read_file".to_string(),
+                        input: serde_json::json!({"path": "test.txt"}),
+                    }],
+                },
+                PortableMessage {
+                    role: "user".to_string(),
+                    text: String::new(),
+                    blocks: vec![PortableBlock::ToolResult {
+                        tool_call_id: "c1".to_string(),
+                        content: "file contents".to_string(),
+                    }],
+                },
+            ];
+            let messages_json = serde_json::to_string(&messages).unwrap();
+
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    format!(r#"{{"sessionId":"codex-acp-1","messages":{messages_json}}}"#),
+                )
+                .unwrap()
+                .into();
+            agent
+                .ext_method(ExtRequest::new("session/import", params))
+                .await
+                .expect("session/import of codex-style ToolCall/ToolResult messages must succeed");
+
+            let loaded = store.load("codex-acp-1").await.unwrap();
+            assert_eq!(loaded.messages.len(), 3, "must have 3 messages after import");
+
+            // PortableBlock::ToolCall → AgentContentBlock::ToolUse
+            assert!(
+                matches!(
+                    &loaded.messages[1].content[0],
+                    AgentContentBlock::ToolUse { name, .. } if name == "read_file"
+                ),
+                "PortableBlock::ToolCall must be converted to AgentContentBlock::ToolUse(read_file); got: {:?}",
+                loaded.messages[1].content[0]
+            );
+
+            // PortableBlock::ToolResult → AgentContentBlock::ToolResult
+            assert!(
+                matches!(
+                    &loaded.messages[2].content[0],
+                    AgentContentBlock::ToolResult { content, .. } if content == "file contents"
+                ),
+                "PortableBlock::ToolResult must be converted to AgentContentBlock::ToolResult; got: {:?}",
+                loaded.messages[2].content[0]
             );
         })
         .await;

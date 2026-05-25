@@ -44,3 +44,4 @@ tempfile                 = { workspace = true }
 testcontainers-modules   = { workspace = true }
 trogon-xai-runner        = { path = "../trogon-xai-runner", features = ["test-helpers"] }
 trogon-openrouter-runner = { path = "../trogon-openrouter-runner", features = ["test-helpers"] }
+trogon-registry          = { workspace = true, features = ["test-support"] }

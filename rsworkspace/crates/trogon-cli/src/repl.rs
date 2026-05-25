@@ -89,7 +89,7 @@ fn input_needs_continuation(input: &str) -> bool {
 
 // ── @mention expansion ────────────────────────────────────────────────────────
 
-fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
+pub fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -336,7 +336,7 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     })
 }
 
-fn handle_slash_command<F: Fs>(
+pub fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
     used_tokens: u64,
@@ -402,7 +402,7 @@ Ctrl+D    quit"
 
 // ── /compact and /init command handlers ──────────────────────────────────────
 
-pub(crate) enum InitResult {
+pub enum InitResult {
     Written(PathBuf),
     AlreadyExists(PathBuf),
 }
@@ -426,7 +426,7 @@ pub(crate) async fn do_compact<S: Session>(
     }
 }
 
-pub(crate) async fn do_init<S: Session, F: Fs>(
+pub async fn do_init<S: Session, F: Fs>(
     session: &S,
     cwd: &Path,
     fs: &F,
@@ -504,7 +504,10 @@ fn handle_config_cmd<F: Fs>(arg: &str, fs: &F) -> String {
             }
             let cfg = read_config(fs);
             match cfg.get(key) {
-                Some(v) => format!("{key} = {v}"),
+                Some(v) => {
+                    let s = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
+                    format!("{key} = {s}")
+                }
                 None => format!("{key} is not set"),
             }
         }
