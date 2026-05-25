@@ -1,5 +1,5 @@
 use tracing::info;
-use trogon_nats::jetstream::JetStreamContext;
+use trogon_nats::jetstream::{JetStreamContext, JetStreamStreamUpdater};
 
 use super::streams;
 
@@ -14,13 +14,19 @@ impl std::fmt::Display for ProvisionError {
 
 impl std::error::Error for ProvisionError {}
 
-pub async fn provision_streams<J: JetStreamContext>(
+pub async fn provision_streams<J>(
     js: &J,
     prefix: &crate::acp_prefix::AcpPrefix,
-) -> Result<(), ProvisionError> {
+) -> Result<(), ProvisionError>
+where
+    J: JetStreamContext + JetStreamStreamUpdater,
+{
     for config in streams::all_configs(prefix) {
         let name = config.name.clone();
-        js.get_or_create_stream(config)
+        js.get_or_create_stream(config.clone())
+            .await
+            .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
+        js.update_stream(config)
             .await
             .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
         info!(stream = %name, "Provisioned JetStream stream");
@@ -43,6 +49,13 @@ mod tests {
         let ctx = MockJetStreamContext::new();
         provision_streams(&ctx, &p("acp")).await.unwrap();
         assert_eq!(ctx.created_streams().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn provision_updates_six_streams() {
+        let ctx = MockJetStreamContext::new();
+        provision_streams(&ctx, &p("acp")).await.unwrap();
+        assert_eq!(ctx.updated_streams().len(), 6);
     }
 
     #[tokio::test]
@@ -81,5 +94,6 @@ mod tests {
         provision_streams(&ctx, &p("acp")).await.unwrap();
         provision_streams(&ctx, &p("acp")).await.unwrap();
         assert_eq!(ctx.created_streams().len(), 12);
+        assert_eq!(ctx.updated_streams().len(), 12);
     }
 }

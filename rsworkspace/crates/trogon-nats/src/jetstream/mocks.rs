@@ -19,7 +19,7 @@ use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
-    JetStreamKeyValueUpdate, JetStreamPublisher,
+    JetStreamKeyValueUpdate, JetStreamPublisher, JetStreamStreamUpdater,
 };
 use crate::mocks::MockError;
 
@@ -145,6 +145,7 @@ impl JsDoubleAckWith for MockJsMessage {
 #[derive(Clone, Debug)]
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
+    updated_streams: Arc<Mutex<Vec<stream::Config>>>,
     should_fail: Arc<Mutex<bool>>,
 }
 
@@ -152,12 +153,17 @@ impl MockJetStreamContext {
     pub fn new() -> Self {
         Self {
             created_streams: Arc::new(Mutex::new(Vec::new())),
+            updated_streams: Arc::new(Mutex::new(Vec::new())),
             should_fail: Arc::new(Mutex::new(false)),
         }
     }
 
     pub fn created_streams(&self) -> Vec<stream::Config> {
         self.created_streams.lock().unwrap().clone()
+    }
+
+    pub fn updated_streams(&self) -> Vec<stream::Config> {
+        self.updated_streams.lock().unwrap().clone()
     }
 
     pub fn fail_next(&self) {
@@ -190,6 +196,15 @@ impl JetStreamContext for MockJetStreamContext {
             return Err(MockError("simulated stream creation failure".to_string()));
         }
         self.created_streams.lock().unwrap().push(config);
+        Ok(())
+    }
+}
+
+impl JetStreamStreamUpdater for MockJetStreamContext {
+    type UpdateError = MockError;
+
+    async fn update_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
+        self.updated_streams.lock().unwrap().push(config.into());
         Ok(())
     }
 }
