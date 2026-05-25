@@ -28,21 +28,17 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 
 ## Remaining work
 
-### Gateway per-message caller identity
+### Gateway per-message caller identity — signed-header convention
 
 The NATS protocol authenticates the publishing **connection** at connect time but does not stamp publisher identity onto MSG / HMSG frames delivered to subscribers. A client library can only surface what the server sends; there is no per-message principal field to expose. The gap is structural — no client-side change can close it.
 
-The current seam — `ConnectionCallerIdentitySource` trait + `UnavailableConnectionCallerIdentity` stand-in at `rsworkspace/crates/a2a-gateway/src/runtime.rs:292`, with the connection-wins branch in `resolve_gateway_caller_identity` (`rsworkspace/crates/a2a-gateway/src/jwt_caller_identity.rs:129`) — encodes an abstraction that cannot be satisfied. It needs to be deleted or repurposed.
+**Decision (landed).** Publishers attach the auth-callout-minted User JWT (already operator-signed, short-lived, audience-bound, carries `SpiceDbPrincipal` in `data`) as a NATS header on every publish to `a2a.gateway.>`. Gateway verifies signature + expiry + audience against the same `kid`-aware `SigningKeySource` rotation the callout uses. Rejected alternatives: a trusted-ingress rebroadcaster (doesn't cover NATS-native publishers), and request/reply-only routing (loses `message/stream` + `tasks/resubscribe`).
 
-**Decision needed.** Pick one:
-
-1. **Signed-header convention (recommended).** Publishers include the auth-callout-minted User JWT (already operator-signed, short-lived, audience-bound, carries `SpiceDbPrincipal` in `data`) as a NATS header on every publish to `a2a.gateway.>`. Gateway verifies signature + expiry + audience against the same `kid`-aware `SigningKeySource` rotation the callout uses. No new signing surface; reuses the verifier + key source already in `a2a-auth-callout`. The trait gets repurposed to `MessageCallerIdentitySource` — "verify the JWT header on this `async_nats::Message`."
-2. **Trusted ingress hop.** Keep the `A2A_GATEWAY_TRUST_CALLER_HEADERS` path behind an auth-callout-bound rebroadcaster process; subject ACL limits header-bearing publishes to that User. Doesn't cover NATS-native clients that publish to `a2a.gateway.>` directly.
-3. **Request/reply only.** Route through the callout in the request path; correlate via `client_id` at connect time. Loses `message/stream` and `tasks/resubscribe`.
-
-**Once decided:**
-- [ ] Implement the chosen scheme; verifier lives in the gateway crate; signing-key material reuses `a2a-auth-callout`'s `SigningKeySource`.
-- [ ] Delete `ConnectionCallerIdentitySource` + `UnavailableConnectionCallerIdentity`, or rename the trait to match the new abstraction.
+**Work:**
+- [ ] Define the signed-header contract: header name, JWT shape (reuse `MintedUserJwt`), gateway-side verifier crate boundary.
+- [ ] Implement `MessageCallerIdentitySource` (rename of `ConnectionCallerIdentitySource`): "verify the JWT header on this `async_nats::Message`." Verifier lives in the gateway crate; signing-key material reuses `a2a-auth-callout`'s `SigningKeySource`.
+- [ ] Wire the new source into `resolve_gateway_caller_identity` (`rsworkspace/crates/a2a-gateway/src/jwt_caller_identity.rs:129`); delete `UnavailableConnectionCallerIdentity` (`rsworkspace/crates/a2a-gateway/src/runtime.rs:292`) and the connection-wins branch.
+- [ ] Update the bridge / agent publish paths to attach the header on outbound publishes to `a2a.gateway.>`.
 - [ ] Retire `A2A_GATEWAY_TRUST_CALLER_HEADERS` from production env once the new path is live.
 
 ## Out of scope
