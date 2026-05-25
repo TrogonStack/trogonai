@@ -1694,42 +1694,62 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // On resuming: user message is already in history — skip the push to avoid duplicates.
         // On timeout or success: push user + optional assistant, then trim.
         if !canceled {
-            let mut sessions = self.sessions.lock().await;
-            if let Some(s) = sessions.get_mut(&session_id) {
-                // If pre-turn compaction ran, the stored history should be based on
-                // the compacted snapshot to stay consistent with what was sent to xAI.
-                if pre_turn_compacted {
-                    s.history = history;
-                }
-                if !resuming {
-                    s.history.push(Message::user(user_input));
-                }
-                if !assistant_text.is_empty() {
-                    let assistant_msg = match current_turn_usage {
-                        Some((pt, ct)) => Message::assistant_with_usage(assistant_text, pt, ct),
-                        None => Message::assistant_text(assistant_text),
-                    };
-                    s.history.push(assistant_msg);
-                }
-                s.cwd = cwd.clone();
-                compact_or_trim_xai_history(&self.execution_nats, &mut s.history, self.max_history)
+            // MED-21: don't hold the global sessions mutex across the compaction
+            // NATS round-trip (which can take up to the compaction timeout and
+            // would block every other session). Assemble under the lock, clone the
+            // history, compact unlocked, then re-acquire only to write back + save.
+            let history_for_compaction = {
+                let mut sessions = self.sessions.lock().await;
+                sessions.get_mut(&session_id).map(|s| {
+                    // If pre-turn compaction ran, the stored history should be based
+                    // on the compacted snapshot to match what was sent to xAI.
+                    if pre_turn_compacted {
+                        s.history = history;
+                    }
+                    if !resuming {
+                        s.history.push(Message::user(user_input));
+                    }
+                    if !assistant_text.is_empty() {
+                        let assistant_msg = match current_turn_usage {
+                            Some((pt, ct)) => Message::assistant_with_usage(assistant_text, pt, ct),
+                            None => Message::assistant_text(assistant_text),
+                        };
+                        s.history.push(assistant_msg);
+                    }
+                    s.cwd = cwd.clone();
+                    // Update the stored response ID from this turn. On timeout, clear
+                    // it — the truncated response's ID must not become previous_response_id.
+                    // If bash rounds ran but the final round returned no ID, also clear it.
+                    if timed_out {
+                        s.last_response_id = None;
+                    } else if let Some(resp_id) = current_response_id {
+                        s.last_response_id = Some(resp_id);
+                    } else if tool_rounds > 0 {
+                        s.last_response_id = None;
+                    }
+                    s.history.clone()
+                })
+            };
+
+            if let Some(mut compacted) = history_for_compaction {
+                compact_or_trim_xai_history(&self.execution_nats, &mut compacted, self.max_history)
                     .await;
-                // Update the stored response ID from this turn.
-                // On timeout, clear last_response_id — the timed-out response may be
-                // incomplete and its ID must not be used as previous_response_id.
-                // If bash rounds ran but the final round returned no ID, also clear it.
-                if timed_out {
-                    s.last_response_id = None;
-                } else if let Some(resp_id) = current_response_id {
-                    s.last_response_id = Some(resp_id);
-                } else if tool_rounds > 0 {
-                    s.last_response_id = None;
+                let snapshot = {
+                    let mut sessions = self.sessions.lock().await;
+                    match sessions.get_mut(&session_id) {
+                        Some(s) => {
+                            s.history = compacted;
+                            self.session_store
+                                .as_ref()
+                                .map(|_| self.build_snapshot(&session_id, s))
+                        }
+                        // Session closed/evicted during the turn — discard the update.
+                        None => None,
+                    }
+                };
+                if let (Some(store), Some(snapshot)) = (&self.session_store, snapshot) {
+                    store.save(&snapshot).await;
                 }
-            }
-            // If session was closed during streaming, silently discard history update.
-            if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
-                let snapshot = self.build_snapshot(&session_id, s);
-                store.save(&snapshot).await;
             }
         }
 
