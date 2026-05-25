@@ -1901,7 +1901,11 @@ async def test_unknown_stop_reason():
             sid, done, _ = await runner_session_prompt(
                 NATS_JS, prefix, tmpdir, "test unknown stop", timeout=15)
             print(f"    done={done} calls={len(mock.received)}", flush=True)
-            ok("unknown stop_reason: session completed without hang (runner is robust)")
+            if done and (done.get("stopReason") or done.get("code") is not None):
+                ok("unknown stop_reason: session completed without hang (runner is robust)")
+            else:
+                fail("unknown stop_reason: no response delivered to client",
+                     f"done={done!r}")
         except asyncio.TimeoutError:
             fail("unknown stop_reason: session timed out — runner may be stuck")
         except Exception as e:
@@ -1989,11 +1993,13 @@ async def test_malformed_tool_use_json():
                 NATS_JS, prefix, tmpdir, "test malformed tool json", timeout=20)
             print(f"    done={done} calls={len(mock.received)}", flush=True)
 
-            # The runner should either: return an error tool_result, or skip
-            # the tool and complete. Either way it must not hang or crash.
             tool_result = get_tool_result_content(mock.received)
-            print(f"    tool_result: {tool_result!r}", flush=True)
-            ok("malformed tool_use JSON: session completed without hang or crash")
+            print(f"    done={done} calls={len(mock.received)} tool_result={tool_result!r}", flush=True)
+            if len(mock.received) >= 2:
+                ok("malformed tool_use JSON: session completed without hang or crash")
+            else:
+                fail("malformed tool_use JSON: runner did not send error back to LLM (only 1 HTTP call)",
+                     f"calls={len(mock.received)} done={done!r}")
         except asyncio.TimeoutError:
             fail("malformed tool_use JSON: session timed out — runner may be stuck")
         except Exception as e:
