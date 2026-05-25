@@ -1658,8 +1658,13 @@ mod tests {
     // ── prompt ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn prompt_with_no_events_returns_end_turn() {
-        let agent = make_agent().await;
+    async fn prompt_with_turn_completed_returns_end_turn() {
+        // A process that emits only TurnCompleted (no text) should yield EndTurn.
+        let agent = CodexAgent::new(
+            MockNotifierFactory::new(),
+            MockProcessSpawner { events: vec![CodexEvent::TurnCompleted] },
+            "o4-mini",
+        );
         agent.test_insert_session("p1", "/tmp", None).await;
         let resp = agent
             .prompt(PromptRequest::new("p1", vec![ContentBlock::from("hello")]))

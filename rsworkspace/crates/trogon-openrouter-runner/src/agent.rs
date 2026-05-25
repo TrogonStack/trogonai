@@ -3951,25 +3951,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_stream_timeout_breaks_loop_and_returns_end_turn() {
+    async fn prompt_stream_timeout_returns_error() {
         // A stream that never produces any event triggers the per-chunk timeout,
-        // emitting an Error event internally and breaking the loop.
+        // which surfaces as an Err so the caller knows the request failed.
         let agent = make_agent_with_key("k")
             .with_prompt_timeout(Duration::from_millis(10));
         agent.client.push_pending_response();
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
-            let resp = agent.prompt(PromptRequest::new(
+            let result = agent.prompt(PromptRequest::new(
                 sid.clone(),
                 vec![ContentBlock::from("q".to_string())],
-            )).await.unwrap();
-            // Timeout → Error event → breaks loop → EndTurn
-            assert!(matches!(resp.stop_reason, StopReason::EndTurn));
-            // No assistant text was accumulated, so history has only the user message.
-            let sessions = agent.sessions.lock().await;
-            let s = sessions.get(&sid.to_string()).unwrap();
-            assert_eq!(s.history.len(), 1, "timeout must not write empty assistant message");
-            assert_eq!(s.history[0].role, "user");
+            )).await;
+            assert!(result.is_err(), "stream timeout must return Err");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("stream timed out"), "got: {}", err.message);
         }).await;
     }
 
@@ -4293,7 +4289,7 @@ mod tests {
     // ── stream event edge cases ───────────────────────────────────────────────
 
     #[tokio::test]
-    async fn prompt_error_event_breaks_stream_and_saves_partial_text() {
+    async fn prompt_error_event_returns_err() {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "partial".to_string() },
@@ -4301,17 +4297,14 @@ mod tests {
         ]);
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
-            let resp = agent.prompt(PromptRequest::new(
+            let result = agent.prompt(PromptRequest::new(
                 sid.clone(),
                 vec![ContentBlock::from("q".to_string())],
-            )).await.unwrap();
-            // Error event breaks the loop; still returns EndTurn.
-            assert!(matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn));
-            // Partial text collected before the error must be saved.
-            let sessions = agent.sessions.lock().await;
-            let s = sessions.get(&sid.to_string()).unwrap();
-            assert_eq!(s.history[1].role, "assistant");
-            assert_eq!(s.history[1].content, "partial");
+            )).await;
+            // Error event must surface as Err so the caller can handle it.
+            assert!(result.is_err(), "stream error must return Err");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("something went wrong"), "got: {}", err.message);
         }).await;
     }
 
@@ -4950,7 +4943,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_without_trogon_md_sends_no_system_message() {
+    async fn prompt_without_trogon_md_sends_cwd_header_only() {
+        // When there is no TROGON.md and no session system prompt, a minimal
+        // system message containing cwd + permission mode is still injected.
         let agent = make_agent_with_key("k")
             .with_md_loader(MockTrogonMdLoader(None));
         agent.client.push_response(vec![]);
@@ -4967,8 +4962,10 @@ mod tests {
 
             let calls = agent.client.calls.lock().unwrap();
             let messages = &calls.last().unwrap().messages;
-            let has_system = messages.iter().any(|m| m.role == "system");
-            assert!(!has_system, "no system message expected when no TROGON.md and no session prompt");
+            let system_msg = messages.iter().find(|m| m.role == "system")
+                .expect("cwd+mode header system message must always be present");
+            assert!(system_msg.content.contains("Current working directory"), "got: {}", system_msg.content);
+            assert!(!system_msg.content.contains("TROGON.md content"), "TROGON.md content must be absent");
         }).await;
     }
 
