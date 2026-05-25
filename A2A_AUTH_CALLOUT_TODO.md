@@ -18,7 +18,7 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 - `rsworkspace/crates/a2a-auth-callout/src/subscriber.rs` — NATS subscriber loop on `$SYS.REQ.USER.AUTH`; decodes the server-signed authorization request, delegates to `CalloutDispatcher`, publishes a signed authorization response (success or denial) via `AuthCalloutWireCodec`.
 - `rsworkspace/crates/a2a-auth-callout/src/wire/` — pinned NATS auth-callout wire format: NKey-signed request/response JWTs, optional XKey envelope encryption, in-process `BridgeMintAdapter`.
 - `rsworkspace/crates/a2a-auth-callout/src/credentials/{oidc,mtls,api_key}.rs` — OIDC JWKS, mTLS x509 chain, HMAC-SHA256 API-key verifiers.
-- `rsworkspace/crates/a2a-auth-callout/src/jwt/` — NATS User JWT minter (`ed25519-nkey`, `nats.pub` / `nats.sub` from `IssuedPermissions`, `sub` = caller User NKey, Account NKey `iss`) producing a `MintedUserJwt` newtype; carries `aud`, `caller_id`, `kid`, SpiceDB `data`.
+- `rsworkspace/crates/a2a-auth-callout/src/jwt/` — NATS User JWT minter (`ed25519-nkey`, `nats.pub`/`nats.sub` from `IssuedPermissions`, `sub` = caller User NKey, Account NKey `iss`) producing a `MintedUserJwt` newtype; carries `aud`, `caller_id`, `kid`, SpiceDB `data`.
 - `rsworkspace/crates/a2a-auth-callout/src/dispatcher.rs` — `CalloutDispatcher` routes OIDC bearer / mTLS client cert / API-key credential off `ServerAuthRequestClaims`, resolves the tenant Account, mints via the active `SigningKeySource` handle.
 - `rsworkspace/crates/a2a-auth-callout/src/account_resolver.rs` — `AccountResolver` trait + env-driven `StaticAccountResolver` (`AUTH_CALLOUT_ALLOWED_ACCOUNTS`).
 - `rsworkspace/crates/a2a-auth-callout/src/permissions.rs` — `IssuedPermissions::default_for_caller` mirrors `scripts/acl-templates/caller.acl`.
@@ -28,7 +28,12 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 
 ## Remaining work
 
-### 9. Gateway per-message caller identity
+### 8. Integration test against a real `nats-server`
+- [x] Testcontainer-backed `nats-server` (pinned to 2.14.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
+- [x] Mock OIDC issuer (inline JWKS endpoint).
+- [x] Connect a NATS client with an OIDC bearer token; assert the minted User JWT carries the expected `aud`, stable `caller_id`, and `IssuedPermissions` matching `scripts/acl-templates/caller.acl`, and that connect admission succeeds against the testcontainer.
+- [x] Repeat for the mTLS and API-key credential paths.
+- [x] Mark live tests `#[ignore = "requires Docker (task #8)"]` so CI can skip without infra.
 
 **Status:** architectural decision needed; previously framed as "blocked on async-nats" — that framing was incorrect.
 
@@ -49,7 +54,8 @@ Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `
 
 ## Suggested ordering
 
-1. **#9** — design decision, then gateway-side implementation.
+1. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
+2. **#9** — once `async-nats` exposes the verified JWT on the connection, bind a real `ConnectionCallerIdentitySource` and retire the header-trust default. (Tracking item only; no code work until upstream lands.)
 
 ## Out of scope
 

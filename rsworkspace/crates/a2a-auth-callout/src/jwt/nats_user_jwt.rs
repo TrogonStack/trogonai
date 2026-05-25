@@ -1,19 +1,20 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use data_encoding::BASE32_NOPAD;
-use nats_jwt_rs::ClaimType;
 use nats_jwt_rs::types::{GenericFields, NatsLimits};
 use nats_jwt_rs::user::User;
+use nats_jwt_rs::ClaimType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha512_256};
 
-use super::nats_permission_claims::NatsPermissionClaims;
 use super::{
-    AccountName, CallerId, ExternalSubject, JwtError, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims, UserJwtSubject,
+    AccountName, CallerId, ExternalSubject, JwtError, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims,
+    UserJwtSubject,
 };
+use super::nats_permission_claims::NatsPermissionClaims;
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{MintingMaterial, SigningKeyHandle, SigningKeySource};
 
@@ -43,10 +44,6 @@ struct NatsUserJwtPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     nbf: Option<i64>,
     caller_id: &'a str,
-    /// Caller-asserted external subject (Stytch/OIDC sub, mTLS DN, etc.).
-    /// `sub` above is the NATS user NKey identity for the connection; this
-    /// field preserves the input subject so verify can return what was minted.
-    ext_sub: &'a str,
     kid: &'a str,
     data: &'a Value,
     nats: Value,
@@ -60,11 +57,6 @@ struct VerifiedPayload {
     #[allow(dead_code)]
     sub: String,
     caller_id: String,
-    /// Caller-asserted external subject; preserved separately from `sub` (which
-    /// is the NATS user NKey for the connection). Older tokens minted before
-    /// this field existed fall back to `data.spicedb_subject`.
-    #[serde(default)]
-    ext_sub: Option<String>,
     kid: String,
     data: Value,
     nats: VerifiedNatsBlock,
@@ -98,15 +90,13 @@ pub(crate) fn mint_nats_user_jwt(
     let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
     let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
 
-    let mut user = User {
-        generic_fields: GenericFields {
-            claim_type: ClaimType::User,
-            version: 2,
-            tags: None,
-        },
-        issuer_account: Some(material.issuer_public()),
-        ..Default::default()
+    let mut user = User::default();
+    user.generic_fields = GenericFields {
+        claim_type: ClaimType::User,
+        version: 2,
+        tags: None,
     };
+    user.issuer_account = Some(material.issuer_public());
     let perm_claims = NatsPermissionClaims::from(&claims.nats_permissions);
     user.permissions.permissions.publish.allow = perm_claims.publish.allow.clone();
     user.permissions.permissions.subscribe.allow = perm_claims.subscribe.allow.clone();
@@ -119,28 +109,15 @@ pub(crate) fn mint_nats_user_jwt(
 
     let nats_value = serde_json::to_value(&user).map_err(|e| JwtError::Encode(e.to_string()))?;
 
-    // NATS-style JWTs hash the *final* claim body to derive `jti`: the body
-    // already has the real `iss` set and `jti` left empty, so plug `iss` in
-    // first, then hash, then fill `jti` for the signed payload. Hashing
-    // before setting `iss` would yield a `jti` that downstream NATS JWT
-    // validators reject even though our local signature check would pass.
-    // Reject empty audience up front rather than emitting `aud=""` that
-    // verify_with_material would then refuse — a mint that can't verify is
-    // worse than a mint that fails loud.
-    if claims.aud.as_str().is_empty() {
-        return Err(JwtError::Decode("account name must be non-empty".into()));
-    }
-    let issuer_public = material.issuer_public();
     let payload_template = NatsUserJwtPayload {
         aud: Some(claims.aud.as_str()),
         exp: Some(exp_secs),
         iat: iat_secs as u64,
-        iss: issuer_public.clone(),
+        iss: String::new(),
         jti: String::new(),
         sub: user_subject.as_str(),
         nbf: Some(iat_secs),
         caller_id: claims.caller_id.as_str(),
-        ext_sub: claims.sub.as_str(),
         kid: material.version().as_str(),
         data: &claims.data.0,
         nats: nats_value,
@@ -152,6 +129,7 @@ pub(crate) fn mint_nats_user_jwt(
     let jti = BASE32_NOPAD.encode(&hasher.finalize());
 
     let payload = NatsUserJwtPayload {
+        iss: material.issuer_public(),
         jti,
         ..payload_template
     };
@@ -170,10 +148,13 @@ pub(crate) fn mint_nats_user_jwt(
         .sign(signing_input.as_bytes())
         .map_err(|e| JwtError::Encode(e.to_string()))?;
     let signature = URL_SAFE_NO_PAD.encode(sig);
-    MintedUserJwt::new(format!("{signing_input}.{signature}"))
+    Ok(MintedUserJwt::new(format!("{signing_input}.{signature}")))
 }
 
-pub(crate) fn verify_nats_user_jwt(token: &str, handles: &[SigningKeyHandle]) -> Result<UserJwtClaims, JwtError> {
+pub(crate) fn verify_nats_user_jwt(
+    token: &str,
+    handles: &[SigningKeyHandle],
+) -> Result<UserJwtClaims, JwtError> {
     if handles.is_empty() {
         return Err(JwtError::NoSigningKeyForKid);
     }
@@ -217,7 +198,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
     let decoded_sig = URL_SAFE_NO_PAD
         .decode(parts[2].as_bytes())
         .map_err(|e| JwtError::Decode(e.to_string()))?;
-    let signing_input = &token.as_bytes()[0..token.len() - parts[2].len() - 1];
+    let signing_input = token[0..token.len() - parts[2].len() - 1].as_bytes();
     material
         .issuer_keypair()
         .verify(signing_input, &decoded_sig)
@@ -229,17 +210,14 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
     }
 
     let data = SpiceDbPrincipal(payload.data);
-    // Prefer the dedicated `ext_sub` claim (preserves the caller-supplied
-    // ExternalSubject across mint→verify); fall back to `data.spicedb_subject`
-    // for tokens minted before the dedicated field existed.
-    let external_sub = match payload.ext_sub {
-        Some(s) => ExternalSubject::new(s),
-        None => data
-            .spicedb_subject()
-            .map(|s| ExternalSubject::new(s.as_str()))
-            .transpose()?
-            .ok_or_else(|| JwtError::Decode("minted user JWT missing ext_sub / spicedb_subject".into())),
-    }?;
+    let external_sub = data
+        .spicedb_subject()
+        .map(|s| ExternalSubject::new(s.as_str()))
+        .transpose()
+        .map_err(|e| JwtError::Decode(e.to_string()))?
+        .ok_or_else(|| {
+            JwtError::Decode("minted user JWT data missing spicedb_subject".into())
+        })?;
     let caller_id = CallerId::new(payload.caller_id)?;
     let aud = AccountName::new(
         payload
@@ -247,7 +225,8 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .filter(|s| !s.is_empty())
             .ok_or_else(|| JwtError::Decode("user JWT missing aud".into()))?,
     );
-    let kid = crate::signing_key_source::KeyVersion::new(payload.kid).map_err(|e| JwtError::Decode(e.to_string()))?;
+    let kid = crate::signing_key_source::KeyVersion::new(payload.kid)
+        .map_err(|e| JwtError::Decode(e.to_string()))?;
 
     let nats_permissions = IssuedPermissions {
         publish_allow: payload
@@ -255,7 +234,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .publish
             .allow
             .into_iter()
-            .map(crate::permissions::SubjectPattern::new)
+            .map(|s| crate::permissions::SubjectPattern::new(s))
             .collect::<Result<_, _>>()
             .map_err(|e| JwtError::Decode(e.to_string()))?,
         subscribe_allow: payload
@@ -263,7 +242,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .subscribe
             .allow
             .into_iter()
-            .map(crate::permissions::SubjectPattern::new)
+            .map(|s| crate::permissions::SubjectPattern::new(s))
             .collect::<Result<_, _>>()
             .map_err(|e| JwtError::Decode(e.to_string()))?,
     };
@@ -303,7 +282,10 @@ fn decode_segment<T: for<'de> Deserialize<'de>>(input: &str) -> Result<T, JwtErr
 }
 
 fn secs_since_unix(t: SystemTime) -> Result<i64, JwtError> {
-    let secs = t.duration_since(UNIX_EPOCH).map_err(JwtError::SystemTime)?.as_secs();
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map_err(JwtError::SystemTime)?
+        .as_secs();
     i64::try_from(secs).map_err(|_| JwtError::IssuedAtOutOfRange)
 }
 
@@ -346,7 +328,9 @@ mod tests {
             nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
             caller_id,
         };
-        let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+        let subject = UserJwtSubject::from_user_nkey(
+            crate::wire::NkeyPublic::parse(user.public_key()).unwrap(),
+        );
         let token = mint_nats_user_jwt(
             &claims,
             &material,
