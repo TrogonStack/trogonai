@@ -5885,6 +5885,123 @@ async def test_programming_edit_cycle():
             mock.stop()
 
 
+def test_sse_helpers():
+    """Unit tests for SSE helpers — verify each produces parseable JSON with correct content fields."""
+    print("\n\033[1mSSE Helper Unit Tests\033[0m")
+
+    def parse_data_lines(sse_str):
+        """Return list of parsed JSON objects from 'data: ...' lines, skipping [DONE]."""
+        result = []
+        for line in sse_str.splitlines():
+            if line.startswith("data: ") and line[6:].strip() != "[DONE]":
+                try:
+                    result.append(json.loads(line[6:]))
+                except json.JSONDecodeError as e:
+                    result.append({"_parse_error": str(e), "_raw": line[6:80]})
+        return result
+
+    # acp_text_sse: delta chunk must have type=text_delta and text=input
+    chunks = parse_data_lines(acp_text_sse("acp-hello"))
+    errs = [c for c in chunks if "_parse_error" in c]
+    delta = next((c for c in chunks if c.get("type") == "content_block_delta"), None)
+    if errs:
+        fail("acp_text_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not delta or delta.get("delta", {}).get("text") != "acp-hello":
+        fail("acp_text_sse: delta.text field missing or wrong", f"delta={delta!r}")
+    else:
+        ok("acp_text_sse: valid JSON, delta.text='acp-hello'")
+
+    # acp_tool_use_sse: content_block_start.name correct, partial_json parseable
+    chunks = parse_data_lines(acp_tool_use_sse("t0", "read_file", json.dumps({"path": "x.py"})))
+    errs = [c for c in chunks if "_parse_error" in c]
+    start = next((c for c in chunks if c.get("type") == "content_block_start"), None)
+    delta = next((c for c in chunks if c.get("type") == "content_block_delta"), None)
+    if errs:
+        fail("acp_tool_use_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not start or start.get("content_block", {}).get("name") != "read_file":
+        fail("acp_tool_use_sse: content_block.name missing or wrong", f"start={start!r}")
+    else:
+        partial = delta.get("delta", {}).get("partial_json", "") if delta else ""
+        try:
+            args = json.loads(partial)
+            if args.get("path") == "x.py":
+                ok("acp_tool_use_sse: valid JSON, name and partial_json correct")
+            else:
+                fail("acp_tool_use_sse: partial_json parsed but path wrong", f"args={args!r}")
+        except json.JSONDecodeError as e:
+            fail("acp_tool_use_sse: partial_json not valid JSON", f"{partial!r} — {e}")
+
+    # xai_text_sse: message.delta chunk must have delta.text=input
+    chunks = parse_data_lines(xai_text_sse("xai-hello"))
+    errs = [c for c in chunks if "_parse_error" in c]
+    delta = next((c for c in chunks if c.get("type") == "message.delta"), None)
+    if errs:
+        fail("xai_text_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not delta or delta.get("delta", {}).get("text") != "xai-hello":
+        fail("xai_text_sse: delta.text field missing or wrong", f"delta={delta!r}")
+    else:
+        ok("xai_text_sse: valid JSON, delta.text='xai-hello'")
+
+    # or_text_sse: first chunk must have choices[0].delta.content=input
+    chunks = parse_data_lines(or_text_sse("or-hello"))
+    errs = [c for c in chunks if "_parse_error" in c]
+    content_chunk = next(
+        (c for c in chunks if c.get("choices") and c["choices"][0].get("delta", {}).get("content")),
+        None)
+    if errs:
+        fail("or_text_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not content_chunk or content_chunk["choices"][0]["delta"]["content"] != "or-hello":
+        fail("or_text_sse: choices[0].delta.content missing or wrong", f"chunks={chunks!r}")
+    else:
+        ok("or_text_sse: valid JSON, choices[0].delta.content='or-hello'")
+
+    # xai_function_call_sse: type=function_call, name correct, arguments parseable
+    chunks = parse_data_lines(xai_function_call_sse("c1", "write_file",
+                                                     json.dumps({"path": "out.py", "content": "x"})))
+    errs = [c for c in chunks if "_parse_error" in c]
+    fc = next((c for c in chunks if c.get("type") == "function_call"), None)
+    if errs:
+        fail("xai_function_call_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not fc or fc.get("function_call", {}).get("name") != "write_file":
+        fail("xai_function_call_sse: function_call.name missing or wrong", f"fc={fc!r}")
+    else:
+        args_str = fc.get("function_call", {}).get("arguments", "")
+        try:
+            args = json.loads(args_str)
+            if args.get("path") == "out.py":
+                ok("xai_function_call_sse: valid JSON, name and arguments correct")
+            else:
+                fail("xai_function_call_sse: arguments parsed but path wrong", f"args={args!r}")
+        except json.JSONDecodeError as e:
+            fail("xai_function_call_sse: arguments not valid JSON", f"{args_str!r} — {e}")
+
+    # or_tool_calls_sse: choices[0].delta.tool_calls[0].function.name correct, arguments parseable
+    chunks = parse_data_lines(or_tool_calls_sse("c2", "str_replace",
+                                                 json.dumps({"path": "f.py", "old_str": "a", "new_str": "b"})))
+    errs = [c for c in chunks if "_parse_error" in c]
+    tc_chunk = next(
+        (c for c in chunks if c.get("choices") and c["choices"][0].get("delta", {}).get("tool_calls")),
+        None)
+    if errs:
+        fail("or_tool_calls_sse: invalid JSON in SSE output", str(errs[0]))
+    elif not tc_chunk:
+        fail("or_tool_calls_sse: no tool_calls delta chunk found", f"chunks={chunks!r}")
+    else:
+        tc = tc_chunk["choices"][0]["delta"]["tool_calls"][0]
+        fn = tc.get("function", {})
+        if fn.get("name") != "str_replace":
+            fail("or_tool_calls_sse: function.name wrong", f"fn={fn!r}")
+        else:
+            try:
+                args = json.loads(fn.get("arguments", ""))
+                if args.get("path") == "f.py":
+                    ok("or_tool_calls_sse: valid JSON, name and arguments correct")
+                else:
+                    fail("or_tool_calls_sse: arguments parsed but path wrong", f"args={args!r}")
+            except json.JSONDecodeError as e:
+                fail("or_tool_calls_sse: arguments not valid JSON", f"{fn.get('arguments','')!r} — {e}")
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -5894,6 +6011,7 @@ async def main():
         shell=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
     await asyncio.sleep(0.5)
     print("\033[1m=== Trogon Live Tests ===\033[0m")
+    test_sse_helpers()
     await test_print_text()
     await test_print_json()
     await test_stdin_pipe()
