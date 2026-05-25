@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::ToolContext;
-use crate::fs::resolve_path;
+use crate::fs::{resolve_path, unique_tmp_path};
 
 pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
     let path = match input.get("path").and_then(|v| v.as_str()) {
@@ -41,13 +41,7 @@ pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
 
     let updated = content.replacen(old_str, new_str, 1);
 
-    let tmp = full_path.with_extension(format!(
-        "{}.tmp",
-        full_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("tmp")
-    ));
+    let tmp = unique_tmp_path(&full_path);
     if let Err(e) = tokio::fs::write(&tmp, &updated).await {
         return format!("Error writing file: {e}");
     }
@@ -64,32 +58,45 @@ pub async fn str_replace(ctx: &ToolContext, input: &Value) -> String {
 }
 
 fn diff_context(old: &[&str], new: &[&str], context: usize) -> String {
-    let max_len = old.len().max(new.len());
-    let changed: Vec<usize> = (0..max_len)
-        .filter(|&i| old.get(i).copied().unwrap_or("") != new.get(i).copied().unwrap_or(""))
-        .collect();
+    // MED-14: a positional `old[i] vs new[i]` comparison misaligns every line
+    // after an insertion or deletion, so unchanged lines show up as edits.
+    // str_replace always rewrites one contiguous block, so the real diff is a
+    // common prefix, a changed middle, and a common suffix. Find those instead.
+    let mut prefix = 0;
+    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < old.len() - prefix
+        && suffix < new.len() - prefix
+        && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
 
-    if changed.is_empty() {
+    if prefix == old.len() && prefix == new.len() {
         return "No changes".to_string();
     }
 
-    let first = changed[0].saturating_sub(context);
-    let last = (changed[changed.len() - 1] + context + 1).min(max_len);
+    let old_changed_end = old.len() - suffix; // exclusive
+    let new_changed_end = new.len() - suffix; // exclusive
 
     let mut out = Vec::new();
-    for i in first..last {
-        let o = old.get(i).copied().unwrap_or("");
-        let n = new.get(i).copied().unwrap_or("");
-        if i >= old.len() {
-            out.push(format!("+ {n}"));
-        } else if i >= new.len() {
-            out.push(format!("- {o}"));
-        } else if o != n {
-            out.push(format!("- {o}"));
-            out.push(format!("+ {n}"));
-        } else {
-            out.push(format!("  {o}"));
-        }
+    // Leading context (identical in old and new).
+    for line in old.iter().take(prefix).skip(prefix.saturating_sub(context)) {
+        out.push(format!("  {line}"));
+    }
+    // Removed then added lines for the changed block.
+    for line in old.iter().take(old_changed_end).skip(prefix) {
+        out.push(format!("- {line}"));
+    }
+    for line in new.iter().take(new_changed_end).skip(prefix) {
+        out.push(format!("+ {line}"));
+    }
+    // Trailing context (identical in old and new).
+    let trail_end = (old_changed_end + context).min(old.len());
+    for line in old.iter().take(trail_end).skip(old_changed_end) {
+        out.push(format!("  {line}"));
     }
 
     out.join("\n")
@@ -221,5 +228,25 @@ mod tests {
         .await;
         assert!(result.contains("- bbb"), "expected removal marker, got: {result}");
         assert!(result.contains("+ BBB"), "expected addition marker, got: {result}");
+    }
+
+    #[tokio::test]
+    async fn str_replace_diff_handles_line_count_change() {
+        // MED-14: replacing one line with two must not mark the unchanged
+        // trailing lines as modified.
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc\nd\n")
+            .await
+            .unwrap();
+        let ctx = ctx(&dir);
+        let result = str_replace(
+            &ctx,
+            &json!({"path": "f.txt", "old_str": "b", "new_str": "b1\nb2"}),
+        )
+        .await;
+        assert!(result.contains("- b"), "got: {result}");
+        assert!(result.contains("+ b1") && result.contains("+ b2"), "got: {result}");
+        assert!(!result.contains("- c"), "c must stay unchanged, got: {result}");
+        assert!(!result.contains("- d"), "d must stay unchanged, got: {result}");
     }
 }

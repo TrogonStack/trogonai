@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::ToolContext;
+use crate::fs::resolve_path;
 
 const MAX_OUTPUT: usize = 4 * 1024;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 10_000;
@@ -79,6 +80,11 @@ pub async fn commit(ctx: &ToolContext, input: &Value) -> String {
             let Some(p) = path.as_str() else {
                 return "Error: `paths` must be an array of strings".to_string();
             };
+            // MED-16: refuse to stage paths that escape the working directory
+            // (e.g. `../sibling-repo/credentials.json`) even if git tracks them.
+            if let Err(e) = resolve_path(&ctx.cwd, p) {
+                return format!("Error: refusing to stage path outside working directory: {p} ({e})");
+            }
             let added = run_git(&ctx.cwd, &["add", "--", p]).await;
             if added.starts_with("Error running git") {
                 return added;

@@ -2,6 +2,26 @@ use serde_json::Value;
 
 use crate::ToolContext;
 
+/// Build a collision-resistant sibling temp path for atomic writes.
+///
+/// MED-12: a deterministic `<file>.tmp` lets two concurrent writes to the same
+/// target pick the same temp file and clobber each other on rename. Mixing in
+/// the pid, a monotonic nanosecond clock, and a process-local counter makes the
+/// name unique per in-flight write so the `write → rename` pairs never collide.
+pub(crate) fn unique_tmp_path(target: &std::path::Path) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let seq = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let ext = target.extension().and_then(|e| e.to_str()).unwrap_or("");
+    target.with_extension(format!("{ext}.{pid}.{nanos}.{seq}.tmp"))
+}
+
 /// Resolve a directory path from the session cwd (supports `~`, relative, and absolute).
 pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathBuf, String> {
     use std::path::{Path, PathBuf};
@@ -114,9 +134,12 @@ pub async fn read_file(ctx: &ToolContext, input: &Value) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let start = offset.unwrap_or(0);
 
-    if start > lines.len() {
+    // MED-13: `offset == lines.len()` previously slipped through (`>` only) and
+    // returned an empty string with no signal that the read was past the end.
+    // An empty file (0 lines) at offset 0 is still a legitimate empty read.
+    if start >= lines.len() && !lines.is_empty() {
         return format!(
-            "Error: offset {start} exceeds file length ({} lines)",
+            "Error: offset {start} is at or past end of file ({} lines)",
             lines.len()
         );
     }
@@ -153,13 +176,7 @@ pub async fn write_file(ctx: &ToolContext, input: &Value) -> String {
         return format!("Error creating directories: {e}");
     }
 
-    let tmp = full_path.with_extension(format!(
-        "{}.tmp",
-        full_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("tmp")
-    ));
+    let tmp = unique_tmp_path(&full_path);
     if let Err(e) = tokio::fs::write(&tmp, content).await {
         return format!("Error writing file: {e}");
     }
@@ -499,7 +516,28 @@ mod tests {
         let ctx = ctx(&dir);
         let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 100})).await;
         assert!(result.contains("Error"), "got: {result}");
-        assert!(result.contains("exceeds"), "got: {result}");
+        assert!(result.contains("past end"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn read_file_offset_equal_to_length_returns_error() {
+        // MED-13: offset == line count must be reported, not silently empty.
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("f.txt"), "a\nb\nc").await.unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "f.txt", "offset": 3})).await;
+        assert!(result.contains("past end"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn read_file_empty_file_at_offset_zero_is_ok() {
+        // MED-13: an empty file (0 lines) read at offset 0 is a valid empty read.
+        let dir = TempDir::new().unwrap();
+        tokio::fs::write(dir.path().join("empty.txt"), "").await.unwrap();
+        let ctx = ctx(&dir);
+        let result = read_file(&ctx, &json!({"path": "empty.txt"})).await;
+        assert!(!result.contains("Error"), "got: {result}");
+        assert_eq!(result, "");
     }
 
     #[tokio::test]
