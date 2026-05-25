@@ -84,7 +84,7 @@ async fn usage_update_notification_emits_usage_event() {
     let session_id = "sess-usage-1".to_string();
     spawn_fake_runner(runner_nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
     assert_eq!(session.session_id(), session_id);
@@ -157,7 +157,7 @@ async fn tool_call_edit_emits_tool_call_and_diff_events() {
     let session_id = "sess-edit-1".to_string();
     spawn_fake_runner(nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -221,7 +221,7 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
     let session_id = "sess-write-1".to_string();
     spawn_fake_runner(nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -273,7 +273,7 @@ async fn tool_call_bash_emits_only_tool_call_no_diff() {
     let session_id = "sess-bash-1".to_string();
     spawn_fake_runner(nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -317,7 +317,7 @@ async fn cancel_publishes_to_cancel_subject() {
     let session_id = "sess-cancel-1".to_string();
     spawn_fake_runner(nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -344,7 +344,7 @@ async fn agent_message_chunk_emits_text_event() {
     let session_id = "sess-text-1".to_string();
     spawn_fake_runner(nats.clone(), session_id.clone()).await;
 
-    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 

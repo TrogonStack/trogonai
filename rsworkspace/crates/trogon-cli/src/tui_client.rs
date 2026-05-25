@@ -680,10 +680,10 @@ mod tests {
 
     #[test]
     fn bracketed_paste_markers() {
-        assert!(is_bracketed_paste_start(&[b'2', b'0', b'0', b'~']));
-        assert!(!is_bracketed_paste_start(&[b'2', b'0', b'1', b'~']));
-        assert!(is_bracketed_paste_end(&[b'2', b'0', b'1', b'~']));
-        assert!(!is_bracketed_paste_end(&[b'2', b'0', b'0', b'~']));
+        assert!(is_bracketed_paste_start(b"200~"));
+        assert!(!is_bracketed_paste_start(b"201~"));
+        assert!(is_bracketed_paste_end(b"201~"));
+        assert!(!is_bracketed_paste_end(b"200~"));
     }
 
     #[test]

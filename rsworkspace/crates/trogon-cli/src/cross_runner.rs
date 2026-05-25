@@ -282,12 +282,12 @@ mod tests {
         use futures::StreamExt as _;
         let mut sub = nats.subscribe(subject).await.expect("subscribe");
         tokio::spawn(async move {
-            if let Some(msg) = sub.next().await {
-                if let Some(reply) = msg.reply {
-                    nats.publish(reply, axum::body::Bytes::from_static(response_bytes))
-                        .await
-                        .ok();
-                }
+            if let Some(msg) = sub.next().await
+                && let Some(reply) = msg.reply
+            {
+                nats.publish(reply, axum::body::Bytes::from_static(response_bytes))
+                    .await
+                    .ok();
             }
         });
     }
@@ -331,10 +331,10 @@ mod tests {
         let mut sub = nats.subscribe(subject.to_string()).await.expect("subscribe");
         tokio::spawn(async move {
             for response in responses {
-                if let Some(msg) = sub.next().await {
-                    if let Some(reply) = msg.reply {
-                        nats.publish(reply, axum::body::Bytes::from_static(response)).await.ok();
-                    }
+                if let Some(msg) = sub.next().await
+                    && let Some(reply) = msg.reply
+                {
+                    nats.publish(reply, axum::body::Bytes::from_static(response)).await.ok();
                 }
             }
         });

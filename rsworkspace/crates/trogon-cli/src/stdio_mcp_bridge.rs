@@ -101,24 +101,19 @@ impl StdioMcpBridge {
         let reader_inner = inner.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
-                        if line.trim().is_empty() {
-                            continue;
-                        }
-                        let Ok(msg): Result<Value, _> = serde_json::from_str(&line) else {
-                            continue;
-                        };
-                        let Some(id) = msg.get("id").and_then(Value::as_u64) else {
-                            // Notification — no pending channel to unblock.
-                            continue;
-                        };
-                        if let Some(tx) = reader_inner.pending.lock().await.remove(&id) {
-                            let _ = tx.send(msg);
-                        }
-                    }
-                    _ => break,
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let Ok(msg): Result<Value, _> = serde_json::from_str(&line) else {
+                    continue;
+                };
+                let Some(id) = msg.get("id").and_then(Value::as_u64) else {
+                    // Notification — no pending channel to unblock.
+                    continue;
+                };
+                if let Some(tx) = reader_inner.pending.lock().await.remove(&id) {
+                    let _ = tx.send(msg);
                 }
             }
             // MED-42: the child's stdout closed (process exited/crashed). Drop every

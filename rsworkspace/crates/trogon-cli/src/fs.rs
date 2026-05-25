@@ -49,6 +49,12 @@ pub mod mock {
         files: Mutex<HashMap<PathBuf, Vec<u8>>>,
     }
 
+    impl Default for MockFs {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockFs {
         pub fn new() -> Self {
             Self { files: Mutex::new(HashMap::new()) }

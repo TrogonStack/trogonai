@@ -336,10 +336,10 @@ pub fn collect_token_warnings() -> Vec<String> {
         "acp.codex" => None,
         _ => None,
     };
-    if let Some((var, label)) = active {
-        if !env_var_nonempty(var) {
-            warnings.push(format!("{var} is empty for active runner ({label}) — fill `.env.local`"));
-        }
+    if let Some((var, label)) = active
+        && !env_var_nonempty(var)
+    {
+        warnings.push(format!("{var} is empty for active runner ({label}) — fill `.env.local`"));
     }
 
     for (var, label) in [
