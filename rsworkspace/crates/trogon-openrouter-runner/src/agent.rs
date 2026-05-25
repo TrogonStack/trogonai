@@ -1526,26 +1526,38 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         self.cancel_senders.lock().await.remove(&session_id);
 
-        {
+        // MED-21: compact and persist WITHOUT holding the global sessions mutex
+        // across the NATS round-trips. Previously the lock was held for the whole
+        // compaction (up to the compaction timeout), blocking every other session's
+        // prompt/cancel/close. Assemble the history locally, compact unlocked, then
+        // re-acquire only to write back and snapshot.
+        if !assistant_text.is_empty() {
+            let msg = if let Some((pt, ct)) = usage {
+                Message::assistant_with_usage(&assistant_text, pt, ct)
+            } else {
+                Message::assistant(&assistant_text)
+            };
+            messages.push(msg);
+        }
+        let mut history = messages;
+        compact_or_trim_openrouter_history(&self.execution_nats, &mut history, self.max_history).await;
+
+        let snapshot = {
             let mut sessions = self.sessions.lock().await;
-            if let Some(s) = sessions.get_mut(&session_id) {
-                if !assistant_text.is_empty() {
-                    let msg = if let Some((pt, ct)) = usage {
-                        Message::assistant_with_usage(&assistant_text, pt, ct)
-                    } else {
-                        Message::assistant(&assistant_text)
-                    };
-                    messages.push(msg);
+            match sessions.get_mut(&session_id) {
+                Some(s) => {
+                    s.history = history;
+                    s.cwd = cwd.clone();
+                    self.session_store
+                        .as_ref()
+                        .map(|_| self.build_snapshot(&session_id, s))
                 }
-                s.history = messages;
-                s.cwd = cwd.clone();
-                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
-                    .await;
-                if let Some(store) = &self.session_store {
-                    let snapshot = self.build_snapshot(&session_id, s);
-                    store.save(&snapshot).await;
-                }
+                // Session was evicted/closed during the turn — drop the result.
+                None => None,
             }
+        };
+        if let (Some(store), Some(snapshot)) = (&self.session_store, snapshot) {
+            store.save(&snapshot).await;
         }
 
         Ok(PromptResponse::new(stop_reason))
