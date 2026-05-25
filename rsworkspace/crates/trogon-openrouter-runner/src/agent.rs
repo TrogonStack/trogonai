@@ -37,6 +37,7 @@ use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
 };
+use trogon_runner_tools::session_store::ToolPolicy;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -156,6 +157,9 @@ struct OpenRouterSession {
     branched_at_index: Option<usize>,
     #[serde(default = "default_session_mode")]
     mode: String,
+    /// Per-session tool policies (allow/deny/require-approval by tool+path pattern).
+    #[serde(default)]
+    tool_policies: Vec<ToolPolicy>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -791,6 +795,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
 
@@ -875,6 +880,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         parent_session_id,
                         branched_at_index,
                         mode: default_session_mode(),
+                        tool_policies: Vec::new(),
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
@@ -900,6 +906,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         req: ResumeSessionRequest,
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
+        if !self.sessions.lock().await.contains_key(&session_id) {
+            // Not in memory — try KV restore so /resume works across restarts.
+            let load_req = agent_client_protocol::LoadSessionRequest::new(
+                session_id.clone(),
+                req.cwd.clone(),
+            );
+            self.load_session(load_req).await
+                .map_err(|_| not_found(format!("session {session_id} not found")))?;
+        }
         let sessions = self.sessions.lock().await;
         let s = sessions
             .get(&session_id)
@@ -957,6 +972,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
                 mode: inherited_mode.clone(),
+                tool_policies: Vec::new(),
             },
         );
 
@@ -1128,7 +1144,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode, session_tool_policies) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1141,6 +1157,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.enabled_tools.clone(),
                 s.cwd.clone(),
                 s.mode.clone(),
+                s.tool_policies.clone(),
             )
         };
 
@@ -1348,7 +1365,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     }
                     OpenRouterEvent::Error { message } => {
                         warn!(session_id, error = %message, "openrouter: stream error");
-                        break;
+                        return Err(internal_error(format!("openrouter stream error: {message}")));
                     }
                 }
             }
@@ -1419,7 +1436,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         self.permission_tx.as_ref(),
                         &allowed_tools,
                         rules,
-                        &[],
+                        &session_tool_policies,
                         &call.id,
                         &call.name,
                         &tool_input,
@@ -1708,6 +1725,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             parent_session_id: None,
             branched_at_index: None,
             mode: default_session_mode(),
+            tool_policies: Vec::new(),
         });
     }
 
@@ -1913,6 +1931,7 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mode: default_session_mode(),
+            tool_policies: Vec::new(),
         }
     }
 

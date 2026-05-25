@@ -24,6 +24,10 @@ pub struct PermissionReq {
     pub tool_input: Value,
     /// Send `true` to allow, `false` to deny.
     pub response_tx: oneshot::Sender<bool>,
+    /// Shared with the originating `ChannelPermissionChecker`. The bridge writes
+    /// the tool name here when the user picks "Always Allow" so subsequent
+    /// calls in the same turn are auto-approved without another round-trip.
+    pub always_allowed: Arc<Mutex<Vec<String>>>,
 }
 
 /// Sender half — given to the Runner so it can forward permission requests.
@@ -63,7 +67,9 @@ pub struct ChannelPermissionChecker {
     pub session_id: String,
     pub tx: PermissionTx,
     /// Tools for which the user previously chose "Always Allow" — auto-approved.
-    pub allowed_tools: Vec<String>,
+    /// Shared with the permission bridge so mid-turn "Always Allow" decisions take
+    /// effect immediately without waiting for the next turn's store reload.
+    pub allowed_tools: Arc<Mutex<Vec<String>>>,
     pub audit_buf: AuditBuf,
 }
 
@@ -76,7 +82,11 @@ impl PermissionChecker for ChannelPermissionChecker {
         tool_input: &'a Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
         // Auto-allow tools the user has previously allowed for this session.
-        if self.allowed_tools.iter().any(|t| t == tool_name) {
+        // Comparison uses normalize_tool_name so "Bash" and "bash" match.
+        let norm_tool = normalize_tool_name(tool_name);
+        if self.allowed_tools.lock().unwrap().iter()
+            .any(|t| normalize_tool_name(t) == norm_tool)
+        {
             push_audit(&self.audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
             return Box::pin(async move { true });
         }
@@ -87,6 +97,7 @@ impl PermissionChecker for ChannelPermissionChecker {
         let tool_input = tool_input.clone();
         let tx = self.tx.clone();
         let audit_buf = self.audit_buf.clone();
+        let always_allowed = Arc::clone(&self.allowed_tools);
 
         Box::pin(async move {
             push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::RequiredApproval);
@@ -97,6 +108,7 @@ impl PermissionChecker for ChannelPermissionChecker {
                 tool_name: tool_name.clone(),
                 tool_input: tool_input.clone(),
                 response_tx: resp_tx,
+                always_allowed,
             };
             if tx.send(req).await.is_err() {
                 push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::DeniedByUser);
@@ -338,7 +350,7 @@ pub fn build_mode_permission_checker(
     let inner = ChannelPermissionChecker {
         session_id: session_id.to_string(),
         tx: perm_tx.clone(),
-        allowed_tools,
+        allowed_tools: Arc::new(Mutex::new(allowed_tools)),
         audit_buf,
     };
     let rules_checker = RulesPermissionChecker {
@@ -396,7 +408,7 @@ mod tests {
         ChannelPermissionChecker {
             session_id: "sess-1".to_string(),
             tx,
-            allowed_tools,
+            allowed_tools: Arc::new(Mutex::new(allowed_tools)),
             audit_buf: Arc::new(Mutex::new(vec![])),
         }
     }
@@ -409,7 +421,7 @@ mod tests {
         ChannelPermissionChecker {
             session_id: "sess-1".to_string(),
             tx,
-            allowed_tools,
+            allowed_tools: Arc::new(Mutex::new(allowed_tools)),
             audit_buf: buf,
         }
     }
@@ -425,26 +437,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_allows_is_case_sensitive() {
+    async fn auto_allows_normalizes_tool_name() {
+        // "Bash" in the allowed list must match the "bash" invocation after normalization.
         let (tx, _rx) = mpsc::channel(1);
         let checker = make_checker(tx, vec!["Bash".to_string()]);
-        // Lowercase "bash" is NOT the same as "Bash" — channel will be used
-        let (tx2, mut rx2) = mpsc::channel(1);
-        let checker2 = make_checker(tx2, vec!["Bash".to_string()]);
-        // Respond with false from a separate task so we don't deadlock
-        tokio::spawn(async move {
-            if let Some(req) = rx2.recv().await {
-                let _ = req.response_tx.send(false);
-            }
-        });
-        let result = checker2
+        let result = checker
             .check("tc-1", "bash", &serde_json::Value::Null)
             .await;
-        assert!(
-            !result,
-            "lowercase bash must not match Bash in allowed list"
-        );
-        drop(checker);
+        assert!(result, "normalized bash should be auto-allowed via Bash entry");
     }
 
     #[tokio::test]

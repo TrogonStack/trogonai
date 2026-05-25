@@ -243,6 +243,7 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
         Err(e) => return format!("Error: invalid glob pattern: {e}"),
     };
 
+    const MAX_GLOB_RESULTS: usize = 500;
     let mut matches: Vec<String> = Vec::new();
 
     let walker = ignore::WalkBuilder::new(&full_base)
@@ -250,6 +251,10 @@ pub async fn glob_files(ctx: &ToolContext, input: &Value) -> String {
         .build();
 
     for e in walker.flatten() {
+        if matches.len() >= MAX_GLOB_RESULTS {
+            matches.push(format!("… (truncated at {MAX_GLOB_RESULTS} results)"));
+            break;
+        }
         if e.file_type().map(|t| t.is_file()).unwrap_or(false)
             && let Ok(rel) = e.path().strip_prefix(&full_base)
             && matcher.is_match(rel)

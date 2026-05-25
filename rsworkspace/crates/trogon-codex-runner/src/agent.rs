@@ -561,11 +561,12 @@ where
             );
         }
 
-        let (thread_id, model, pending_history, cwd, prepend_trogon) = {
+        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
+            let orig_first_turn = s.first_turn;
             let prepend_trogon = s.first_turn || s.pending_history.is_some();
             let ph = s.pending_history.take();
             s.first_turn = false;
@@ -579,8 +580,12 @@ where
                 ph,
                 s.cwd.clone(),
                 prepend_trogon,
+                orig_first_turn,
             )
         };
+
+        // Keep a backup so we can restore if the turn never actually starts.
+        let ph_backup = pending_history.clone();
 
         let mut user_input = if let Some(prior) = pending_history {
             let formatted = prior
@@ -599,11 +604,32 @@ where
             }
         }
 
-        let proc = self.process().await?;
-        let mut event_rx = proc
-            .turn_start(&thread_id, &user_input, model.as_deref())
-            .await
-            .map_err(|e| internal_error(e.to_string()))?;
+        // HIGH-19: restore session state if the turn never actually starts.
+        let proc = match self.process().await {
+            Ok(p) => p,
+            Err(e) => {
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    s.pending_history = ph_backup;
+                    s.history.pop();
+                    s.first_turn = orig_first_turn;
+                }
+                return Err(e);
+            }
+        };
+        let mut event_rx = match proc.turn_start(&thread_id, &user_input, model.as_deref()).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                drop(proc);
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    s.pending_history = ph_backup;
+                    s.history.pop();
+                    s.first_turn = orig_first_turn;
+                }
+                return Err(internal_error(e.to_string()));
+            }
+        };
         drop(proc); // release process lock before entering the event loop
 
         // Stream Codex events → ACP SessionNotifications.
@@ -620,7 +646,13 @@ where
                     continue;
                 }
                 Ok(Err(_)) => {
-                    break StopReason::EndTurn;
+                    warn!(session_id, "codex: process channel closed unexpectedly");
+                    // Remove the user message that never received a response.
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.history.pop();
+                    }
+                    return Err(internal_error("codex process terminated unexpectedly"));
                 }
             };
 

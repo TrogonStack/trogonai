@@ -2275,33 +2275,26 @@ async fn run_chat_real_notebook_edit_modifies_cell() {
 }
 
 /// The agent receives a `tool_use` block for `fetch_url`, dispatches it to
-/// the real `web::fetch_url` implementation, and the response body is
-/// included in the tool_result sent back to the API.
+/// fetch_url tool result forwarding is covered by `run_chat_real_read_file_tool_result_sent_back`
+/// and similar tests. The `fetch_url` implementation itself (including SSRF protection) is tested
+/// via unit tests in `trogon-tools/src/web.rs`.
 #[tokio::test]
-async fn run_chat_real_fetch_url_response_content_sent_back() {
+async fn run_chat_real_fetch_url_ssrf_blocked_result_sent_back() {
     use httpmock::prelude::*;
-
-    let file_server = MockServer::start();
-    file_server.mock(|when, then| {
-        when.method(GET).path("/data.txt");
-        then.status(200)
-            .header("Content-Type", "text/plain")
-            .body("unique-payload-xyz");
-    });
 
     let api_server = MockServer::start();
 
+    // SSRF-blocked result contains "private" — the agent should receive this as the tool_result.
     api_server.mock(|when, then| {
         when.method(POST)
             .path("/messages")
             .body_contains("tool_result")
-            .body_contains("unique-payload-xyz");
+            .body_contains("private");
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(end_turn_body("fetch url done"));
+            .body(end_turn_body("blocked"));
     });
 
-    let fetch_url = file_server.url("/data.txt");
     api_server.mock(|when, then| {
         when.method(POST).path("/messages");
         then.status(200)
@@ -2313,7 +2306,7 @@ async fn run_chat_real_fetch_url_response_content_sent_back() {
                         "type": "tool_use",
                         "id": "tu_fu_001",
                         "name": "fetch_url",
-                        "input": { "url": fetch_url, "raw": true }
+                        "input": { "url": "http://10.0.0.1/secret", "raw": true }
                     }]
                 })
                 .to_string(),
@@ -2322,7 +2315,7 @@ async fn run_chat_real_fetch_url_response_content_sent_back() {
 
     let mut agent = make_agent(&api_server.base_url());
     agent.tool_context = Arc::new(ToolContext {
-        proxy_url: "http://127.0.0.1:1".to_string(),
+        proxy_url: String::new(),
         cwd: ".".to_string(),
         http_client: reqwest::Client::new(),
     });
@@ -2332,7 +2325,7 @@ async fn run_chat_real_fetch_url_response_content_sent_back() {
         .await
         .unwrap();
 
-    assert_eq!(text, "fetch url done");
+    assert_eq!(text, "blocked");
 }
 
 /// `todo_write` executed by the agent loop writes a todo item to disk and

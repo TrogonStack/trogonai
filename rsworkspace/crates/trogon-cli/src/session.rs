@@ -391,29 +391,9 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                                 .await;
                             break;
                         }
-                        bytes = resp_rx.recv() => {
-                            let Some(bytes) = bytes else { break };
-                            if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-                                // ACP error response serializes as {"code": <int>, "message": "..."}.
-                                // PromptResponse serializes as {"stopReason": "..."}.
-                                // If there's no stopReason but there is a code field, it's an error.
-                                if v.get("stopReason").is_none() && v.get("code").is_some() {
-                                    let msg = v.get("message")
-                                        .and_then(|m| m.as_str())
-                                        .unwrap_or("unknown runner error");
-                                    let _ = tx.send(StreamEvent::Error(msg.to_string())).await;
-                                    break;
-                                }
-                                let stop = v.get("stopReason")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("end_turn")
-                                    .to_string();
-                                let _ = tx.send(StreamEvent::Done(stop)).await;
-                            } else {
-                                let _ = tx.send(StreamEvent::Done("end_turn".to_string())).await;
-                            }
-                            break;
-                        }
+                        // Notifications come before resp_rx so that when both are ready
+                        // simultaneously (e.g. last tool output + final response arrive
+                        // in the same batch), we drain notifications first and don't drop them.
                         bytes = notif_rx.recv() => {
                             let Some(bytes) = bytes else { break };
                             if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&bytes) {
@@ -459,6 +439,29 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                                     _ => {}
                                 }
                             }
+                        }
+                        bytes = resp_rx.recv() => {
+                            let Some(bytes) = bytes else { break };
+                            if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+                                // ACP error response serializes as {"code": <int>, "message": "..."}.
+                                // PromptResponse serializes as {"stopReason": "..."}.
+                                // If there's no stopReason but there is a code field, it's an error.
+                                if v.get("stopReason").is_none() && v.get("code").is_some() {
+                                    let msg = v.get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("unknown runner error");
+                                    let _ = tx.send(StreamEvent::Error(msg.to_string())).await;
+                                    break;
+                                }
+                                let stop = v.get("stopReason")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("end_turn")
+                                    .to_string();
+                                let _ = tx.send(StreamEvent::Done(stop)).await;
+                            } else {
+                                let _ = tx.send(StreamEvent::Done("end_turn".to_string())).await;
+                            }
+                            break;
                         }
                     }
                 }
@@ -507,9 +510,16 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .await
                 .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
 
-            tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
+            let bytes = tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
                 .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?;
+            if let Some(bytes) = bytes {
+                let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                if v.get("stopReason").is_none() && v.get("code").is_some() {
+                    let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("model update failed");
+                    return Err(anyhow::anyhow!("{}", msg));
+                }
+            }
             *model.lock().unwrap() = model_id;
             Ok(())
         }
@@ -539,9 +549,16 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             nats.publish_with_req_id_bytes(subject, req_id, payload.into())
                 .await
                 .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
-            tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
+            let bytes = tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
                 .map_err(|_| anyhow::anyhow!("timed out waiting for set_mode response"))?;
+            if let Some(bytes) = bytes {
+                let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                if v.get("stopReason").is_none() && v.get("code").is_some() {
+                    let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("mode update failed");
+                    return Err(anyhow::anyhow!("{}", msg));
+                }
+            }
             Ok(())
         }
     }

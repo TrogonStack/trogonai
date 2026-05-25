@@ -291,11 +291,21 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
         t
     };
 
-    let restore = || unsafe {
-        libc::tcsetattr(fd, libc::TCSANOW, &original);
-        drain_stdin();
-        reset_display();
-    };
+    /// RAII guard that restores the terminal to its original `termios` settings on drop.
+    struct RawModeGuard {
+        fd: i32,
+        original: libc::termios,
+    }
+
+    impl Drop for RawModeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+            }
+            drain_stdin();
+            reset_display();
+        }
+    }
 
     unsafe {
         let mut raw = original;
@@ -307,11 +317,15 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
         }
     }
 
+    // Guard installed after raw mode is set; Drop restores original termios regardless
+    // of whether the function returns Ok or Err (covers all `?`-propagated errors).
+    let _guard = RawModeGuard { fd, original };
+
     tty_debug("waiting for permission key…");
     let deadline = Instant::now() + PERMISSION_TIMEOUT;
     let mut last_invalid_msg: Option<Instant> = None;
 
-    let result = loop {
+    loop {
         if coordinator.is_cancelled(generation) {
             tty_debug("permission read cancelled by coordinator");
             break Ok(PermissionKey::Cancel);
@@ -349,10 +363,7 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
                 continue;
             }
         }
-    };
-
-    restore();
-    result
+    }
 }
 
 fn read_line_from_dev_tty(prompt: &str) -> io::Result<String> {
@@ -461,7 +472,9 @@ fn permission_key_to_outcome(key: PermissionKey) -> Option<RequestPermissionOutc
     }
 }
 
-async fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<RequestPermissionResponse> {
+async fn handle_exit_plan_mode_permission(
+    coordinator: Arc<PermissionCoordinator>,
+) -> agent_client_protocol::Result<RequestPermissionResponse> {
     let options = exit_plan_mode_options(allow_bypass());
     eprint!("\r\x1b[2K");
     eprintln!();
@@ -470,6 +483,9 @@ async fn handle_exit_plan_mode_permission() -> agent_client_protocol::Result<Req
         eprintln!("  {}. {}", i + 1, opt.name);
     }
     flush_stderr();
+
+    // Cancel any racing permission reader before we take the lock ourselves.
+    coordinator.begin_prompt();
 
     let line = match tokio::task::spawn_blocking(|| read_line_from_dev_tty("Choice: ")).await {
         Ok(Ok(l)) => l,
@@ -494,6 +510,27 @@ async fn handle_tool_permission(
     req: &RequestPermissionRequest,
     coordinator: Arc<PermissionCoordinator>,
 ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+    // When there is no controlling terminal (CI, piped input) we cannot display
+    // the interactive prompt.  If TROGON_NON_INTERACTIVE=1 is set the caller
+    // explicitly opts in to auto-approving all tool requests; otherwise we deny
+    // with a clear explanation so the user knows to either run interactively or
+    // set TROGON_MODE=bypassPermissions / TROGON_NON_INTERACTIVE=1.
+    if let Err(e) = open_dev_tty(true, true) {
+        if std::env::var("TROGON_NON_INTERACTIVE").as_deref() == Ok("1") {
+            tracing::info!(
+                tool = req.tool_call.fields.title.as_deref().unwrap_or("<unknown>"),
+                "TROGON_NON_INTERACTIVE=1 — auto-approving tool call (no TTY)"
+            );
+            return selected_outcome("allow");
+        }
+        tracing::warn!(
+            error = %e,
+            tool = req.tool_call.fields.title.as_deref().unwrap_or("<unknown>"),
+            "no TTY available — tool call denied; set TROGON_NON_INTERACTIVE=1 or TROGON_MODE=bypassPermissions for headless use"
+        );
+        return cancelled_outcome();
+    }
+
     let summary = format_tool_summary(req);
     reset_display();
     eprint!("\r\x1b[2K");
@@ -532,7 +569,7 @@ impl Client for TuiClient {
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
         let title = req.tool_call.fields.title.as_deref().unwrap_or("");
         if title == "ExitPlanMode" || req.tool_call.fields.title.as_deref() == Some("Exit Plan Mode") {
-            return handle_exit_plan_mode_permission().await;
+            return handle_exit_plan_mode_permission(self.coordinator.clone()).await;
         }
         handle_tool_permission(&req, self.coordinator.clone()).await
     }

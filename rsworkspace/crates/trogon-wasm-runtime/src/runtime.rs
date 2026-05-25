@@ -436,7 +436,7 @@ where
         let terminal = WasmTerminal {
             kind: TerminalKind::Native {
                 child: Some(handle),
-                stdin,
+                stdin: std::sync::Arc::new(tokio::sync::Mutex::new(stdin)),
             },
             output_buf,
             output_collector: Some(collector),
@@ -676,27 +676,51 @@ where
         data: &[u8],
     ) -> agent_client_protocol::Result<()> {
         self.tick_last_activity_for_terminal(terminal_id);
-        // Remove the terminal from the map so the borrow is dropped before the await.
-        let t = self.terminals.borrow_mut().remove(terminal_id);
-        match t {
-            Some(mut terminal) => {
-                let ok = terminal.write_stdin(data).await;
-                self.terminals
-                    .borrow_mut()
-                    .insert(terminal_id.to_string(), terminal);
+        // Clone the stdin Arc while the RefCell borrow is held (sync), then drop the
+        // borrow and perform the async write through the Arc. This keeps the terminal
+        // in the map during the write, so concurrent kill / output calls never see a
+        // phantom "Unknown terminal" error (HIGH-23, HIGH-26).
+        let stdin_arc = {
+            let terminals = self.terminals.borrow();
+            match terminals.get(terminal_id) {
+                Some(t) => {
+                    if let crate::terminal::TerminalKind::Native { ref stdin, .. } = t.kind {
+                        Some(std::sync::Arc::clone(stdin))
+                    } else {
+                        None // WASM terminal: no stdin
+                    }
+                }
+                None => {
+                    return Err(agent_client_protocol::Error::new(
+                        -32602,
+                        format!("Unknown terminal: {terminal_id}"),
+                    ));
+                }
+            }
+        };
+        match stdin_arc {
+            Some(arc) => {
+                let mut guard = arc.lock().await;
+                let ok = if let Some(ref mut s) = *guard {
+                    use tokio::io::AsyncWriteExt;
+                    s.write_all(data).await.is_ok()
+                } else {
+                    false
+                };
                 if ok {
                     Ok(())
                 } else {
                     Err(agent_client_protocol::Error::new(
                         -32603,
-                        "Failed to write to terminal stdin (WASM terminals do not support stdin)"
+                        "Failed to write to terminal stdin (stdin closed or WASM terminal)"
                             .to_string(),
                     ))
                 }
             }
             None => Err(agent_client_protocol::Error::new(
-                -32602,
-                format!("Unknown terminal: {terminal_id}"),
+                -32603,
+                "Failed to write to terminal stdin (WASM terminals do not support stdin)"
+                    .to_string(),
             )),
         }
     }
@@ -889,6 +913,12 @@ where
         } else if let Some(c) = collector {
             // WASM background task: wait for the task to finish.
             let _ = c.await;
+            // Ensure exit_arc is populated even if the task panicked before setting it.
+            // Any concurrent wait_for_terminal_exit caller spinning on arc.get() will
+            // unblock once this set() call succeeds.
+            if let Some(ref arc) = wasm_exit_arc {
+                let _ = arc.set(TerminalExitStatus::new().signal(Some("task_panic".to_string())));
+            }
             wasm_exit_arc
                 .as_ref()
                 .and_then(|arc| arc.get().cloned())

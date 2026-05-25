@@ -35,6 +35,7 @@ use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
+use trogon_runner_tools::session_store::ToolPolicy;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -131,6 +132,9 @@ struct XaiSession {
     /// Permission mode for tool approval gates.
     #[serde(default = "default_session_mode")]
     mode: String,
+    /// Per-session tool policies (allow/deny/require-approval by tool+path pattern).
+    #[serde(default)]
+    tool_policies: Vec<ToolPolicy>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -715,6 +719,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
 
@@ -805,6 +810,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         parent_session_id,
                         branched_at_index,
                         mode: default_session_mode(),
+                        tool_policies: Vec::new(),
                     },
                 );
                 info!(session_id, "xai: load_session restored from KV snapshot");
@@ -831,7 +837,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
     ) -> agent_client_protocol::Result<ResumeSessionResponse> {
         let session_id = req.session_id.to_string();
         if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(not_found(format!("session {session_id} not found")));
+            // Not in memory — try KV restore so /resume works across restarts.
+            // Reuse load_session which already has the full restore logic.
+            let load_req = agent_client_protocol::LoadSessionRequest::new(
+                session_id.clone(),
+                req.cwd.clone(),
+            );
+            self.load_session(load_req).await
+                .map_err(|_| not_found(format!("session {session_id} not found")))?;
         }
         Ok(ResumeSessionResponse::new())
     }
@@ -888,6 +901,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
                 mode: inherited_mode.clone(),
+                tool_policies: Vec::new(),
             },
         );
 
@@ -1086,7 +1100,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode) = {
+        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1100,18 +1114,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.system_prompt.clone(),
                 s.cwd.clone(),
                 s.mode.clone(),
+                s.tool_policies.clone(),
             )
         };
 
+        let mut pre_turn_compacted = false;
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
             if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
                 history = xai_history_from_wire(compacted);
-                // Intentionally not writing back to s.history here: the post-turn
-                // compact_or_trim_xai_history will persist the compacted history after
-                // the response is appended.  Writing here would race with concurrent
-                // prompts that also hold the lock and append to s.history.
+                pre_turn_compacted = true;
             }
         }
 
@@ -1246,6 +1259,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let mut assistant_text = String::new();
         let mut current_turn_usage: Option<(u64, u64)> = None;
         let mut canceled = false;
+        let mut timed_out = false;
         // (call_id, name, arguments)
         let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new();
         // Counts client-driven bash execution rounds to prevent infinite loops.
@@ -1300,7 +1314,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 warn!(session_id, "xai: prompt timed out");
                                 // Do NOT set canceled=true. Unlike an explicit cancel,
                                 // a timeout may have produced partial text that should be
-                                // preserved.
+                                // preserved. But clear last_response_id: a timed-out
+                                // response may be incomplete and its ID should not be
+                                // used as previous_response_id on the next turn.
+                                timed_out = true;
                                 break 'outer StopReason::Cancelled;
                             }
                             Ok(Some(e)) => e,
@@ -1551,7 +1568,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             self.permission_tx.as_ref(),
                             &allowed_tools,
                             rules,
-                            &[],
+                            &session_tool_policies,
                             &call_id,
                             &name,
                             &tool_input,
@@ -1671,6 +1688,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !canceled {
             let mut sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get_mut(&session_id) {
+                // If pre-turn compaction ran, the stored history should be based on
+                // the compacted snapshot to stay consistent with what was sent to xAI.
+                if pre_turn_compacted {
+                    s.history = history;
+                }
                 if !resuming {
                     s.history.push(Message::user(user_input));
                 }
@@ -1685,10 +1707,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 compact_or_trim_xai_history(&self.execution_nats, &mut s.history, self.max_history)
                     .await;
                 // Update the stored response ID from this turn.
-                // If bash rounds ran but the final round returned no ID, clear the
-                // stored ID — a stale ID from a previous prompt would cause the next
-                // turn to send a wrong previous_response_id.
-                if let Some(resp_id) = current_response_id {
+                // On timeout, clear last_response_id — the timed-out response may be
+                // incomplete and its ID must not be used as previous_response_id.
+                // If bash rounds ran but the final round returned no ID, also clear it.
+                if timed_out {
+                    s.last_response_id = None;
+                } else if let Some(resp_id) = current_response_id {
                     s.last_response_id = Some(resp_id);
                 } else if tool_rounds > 0 {
                     s.last_response_id = None;
@@ -2029,6 +2053,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
     }
@@ -2049,6 +2074,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
     }
@@ -2114,6 +2140,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
     }
@@ -2134,6 +2161,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
     }
@@ -2154,6 +2182,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 parent_session_id: None,
                 branched_at_index: None,
                 mode: default_session_mode(),
+                tool_policies: Vec::new(),
             },
         );
     }

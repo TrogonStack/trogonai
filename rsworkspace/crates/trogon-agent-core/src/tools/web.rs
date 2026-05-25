@@ -4,11 +4,38 @@ use crate::tools::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
 
+fn is_ssrf_blocked(url: &str) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return true,
+    };
+    match parsed.host() {
+        None => true,
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (ip.segments()[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
+                || (ip.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
+        }
+    }
+}
+
 pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     let url = match input.get("url").and_then(|v| v.as_str()) {
         Some(u) => u,
         None => return "Error: missing required parameter 'url'".to_string(),
     };
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return "Error: only http:// and https:// URLs are supported".to_string();
+    }
+    if is_ssrf_blocked(url) {
+        return "Error: requests to private, loopback, or link-local addresses are not permitted"
+            .to_string();
+    }
     let raw = input
         .get("raw")
         .and_then(|v| v.as_bool())
@@ -35,7 +62,8 @@ pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     };
 
     if text.len() > MAX_RESPONSE {
-        format!("{}... (truncated at 8KB)", &text[..MAX_RESPONSE])
+        let boundary = text.floor_char_boundary(MAX_RESPONSE);
+        format!("{}... (truncated at 8KB)", &text[..boundary])
     } else {
         text
     }
@@ -55,10 +83,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ssrf_blocked_loopback_and_private() {
+        assert!(is_ssrf_blocked("http://127.0.0.1/"));
+        assert!(is_ssrf_blocked("http://localhost/"));
+        assert!(is_ssrf_blocked("http://10.0.0.1/"));
+        assert!(is_ssrf_blocked("http://192.168.1.1/"));
+        assert!(is_ssrf_blocked("http://169.254.169.254/"));
+        assert!(is_ssrf_blocked("http://[::1]/"));
+    }
+
+    #[test]
+    fn ssrf_allowed_public() {
+        assert!(!is_ssrf_blocked("https://example.com/"));
+    }
+
     #[tokio::test]
     async fn fetch_url_missing_url_returns_error() {
         let result = fetch_url(&ctx(), &json!({})).await;
         assert!(result.contains("Error"));
+    }
+
+    #[tokio::test]
+    async fn fetch_url_rejects_non_http_scheme() {
+        let result = fetch_url(&ctx(), &json!({"url": "file:///etc/passwd"})).await;
+        assert!(result.contains("Error"), "got: {result}");
     }
 
     #[tokio::test]
