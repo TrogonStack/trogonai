@@ -1551,6 +1551,74 @@ mod tests {
         }
     }
 
+    // ── PermissionResponderNats ───────────────────────────────────────────────
+    // A broker whose `request` records the subject and replies with a Selected
+    // outcome — simulating the CLI answering a forwarded permission prompt.
+
+    #[derive(Clone)]
+    struct PermissionResponderNats {
+        selected_option: String,
+        last_subject: Arc<Mutex<Option<String>>>,
+    }
+
+    impl PermissionResponderNats {
+        fn new(selected_option: &str) -> Self {
+            Self {
+                selected_option: selected_option.to_string(),
+                last_subject: Arc::new(Mutex::new(None)),
+            }
+        }
+    }
+
+    impl NatsBroker for PermissionResponderNats {
+        type Sub = futures::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(
+            &self,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
+        }
+
+        async fn publish(
+            &self,
+            _: async_nats::Subject,
+            _: bytes::Bytes,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
+        }
+
+        async fn request(
+            &self,
+            subject: impl Into<String> + Send,
+            _: bytes::Bytes,
+        ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
+            *self.last_subject.lock().unwrap() = Some(subject.into());
+            let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                SelectedPermissionOutcome::new(self.selected_option.clone()),
+            ));
+            let payload = bytes::Bytes::from(serde_json::to_vec(&resp).unwrap());
+            let length = payload.len();
+            Ok(async_nats::Message {
+                subject: "_INBOX.reply".into(),
+                reply: None,
+                payload,
+                headers: None,
+                status: None,
+                description: None,
+                length,
+            })
+        }
+
+        async fn queue_subscribe(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
+        }
+    }
+
     // ── Test helpers ──────────────────────────────────────────────────────────
 
     type TestRuntime<FS = MockFs> = WasmRuntime<
@@ -1722,9 +1790,52 @@ mod tests {
 
     #[tokio::test]
     async fn request_permission_cancelled_when_auto_allow_disabled() {
-        let rt = make_runtime(); // auto_allow_permissions = false
+        let rt = make_runtime(); // auto_allow_permissions = false, no nats_client
         let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
+    }
+
+    /// CRIT-5: with auto_allow disabled but a NATS client present, the handler must
+    /// forward the prompt to the CLI and honour its response — NOT silently deny.
+    #[tokio::test]
+    async fn request_permission_forwards_to_cli_when_nats_present() {
+        type ForwardingRuntime = WasmRuntime<
+            MockFs,
+            NeverProcessSpawner,
+            PermissionResponderNats,
+            NeverWasmExecutor<PermissionResponderNats>,
+            MockClock,
+            MockIdGenerator,
+            UnlimitedTaskLimiter,
+        >;
+
+        let nats = PermissionResponderNats::new("opt-allow");
+        let config = test_config(); // auto_allow_permissions = false
+        let rt: ForwardingRuntime = WasmRuntime::with_services(
+            &config,
+            Some(nats.clone()),
+            MockFs::new(),
+            NeverProcessSpawner,
+            NeverWasmExecutor(PhantomData),
+            MockClock::new(),
+            MockIdGenerator::new(),
+            UnlimitedTaskLimiter,
+        )
+        .unwrap();
+
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
+
+        assert!(
+            matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
+            "permission must be forwarded to the CLI and its Selected outcome returned, got: {:?}",
+            resp.outcome
+        );
+        // It actually published to the per-session request_permission subject.
+        let subject = nats.last_subject.lock().unwrap().clone();
+        assert_eq!(
+            subject.as_deref(),
+            Some("acp.session.sess1.client.session.request_permission"),
+        );
     }
 
     // ── list_sessions / list_terminals ────────────────────────────────────────
