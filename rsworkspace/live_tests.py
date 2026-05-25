@@ -950,11 +950,8 @@ async def test_tool_execution():
                 msgs2 = json.dumps(body2.get("messages", []))
                 if "TOOL_EXEC_CONTENT_T12" in msgs2:
                     ok("tool loop: read_file content returned in HTTP call 2 — full loop works")
-                elif "tool_result" in msgs2 or '"type": "tool_result"' in msgs2 or "tool_result" in msgs2:
-                    ok("tool loop: tool_result present in call 2 — loop structure correct")
-                    print(f"    call2 msgs preview: {msgs2[:200]!r}")
                 else:
-                    fail("tool loop: call 2 has no tool_result content",
+                    fail("tool loop: read_file content missing from HTTP call 2",
                          f"msgs preview: {msgs2[:300]!r}")
             elif len(mock.received) == 1:
                 fail("tool loop: only 1 HTTP call — tool_use did not trigger a second call",
