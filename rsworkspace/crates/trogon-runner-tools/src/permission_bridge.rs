@@ -221,6 +221,7 @@ mod tests {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::Value::Null,
             response_tx: tx,
+            always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
         };
         handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
         assert!(!rx.await.unwrap());

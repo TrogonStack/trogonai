@@ -713,7 +713,7 @@ where
 
                 CodexEvent::Error { message } => {
                     warn!(session_id, error = %message, "codex: turn error");
-                    break StopReason::EndTurn;
+                    return Err(internal_error(format!("codex error: {message}")));
                 }
             }
         };
