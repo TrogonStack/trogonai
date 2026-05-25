@@ -56,10 +56,14 @@ impl PermissionCoordinator {
     ///
     /// Does not drain `/dev/tty` — keys typed right after the prompt appears must not be eaten.
     pub fn begin_prompt(&self) -> u64 {
-        self.cancel.store(true, Ordering::SeqCst);
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // MED-9: clear the cancel flag *before* bumping the generation. The old
+        // sequence (store true → bump → store false) left a window in which a
+        // concurrent is_cancelled(new_generation) observed cancel=true together
+        // with the already-bumped generation and wrongly concluded the brand-new
+        // prompt was cancelled. Bumping the generation alone retires the previous
+        // reader, since is_cancelled compares generations.
         self.cancel.store(false, Ordering::SeqCst);
-        generation
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     pub fn is_cancelled(&self, generation: u64) -> bool {
@@ -295,6 +299,10 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
     struct RawModeGuard {
         fd: i32,
         original: libc::termios,
+        /// MED-8: only drain stdin when the prompt was cancelled/timed out. After a
+        /// deliberate key choice, draining would eat the keystrokes of the next
+        /// prompt the user starts typing immediately after approving.
+        drain_stdin_on_drop: bool,
     }
 
     impl Drop for RawModeGuard {
@@ -302,7 +310,9 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
             unsafe {
                 libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
             }
-            drain_stdin();
+            if self.drain_stdin_on_drop {
+                drain_stdin();
+            }
             reset_display();
         }
     }
@@ -319,7 +329,7 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
 
     // Guard installed after raw mode is set; Drop restores original termios regardless
     // of whether the function returns Ok or Err (covers all `?`-propagated errors).
-    let _guard = RawModeGuard { fd, original };
+    let mut guard = RawModeGuard { fd, original, drain_stdin_on_drop: true };
 
     tty_debug("waiting for permission key…");
     let deadline = Instant::now() + PERMISSION_TIMEOUT;
@@ -351,6 +361,8 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
             Some(byte) => {
                 if let Some(key) = classify_permission_byte(byte) {
                     tty_debug(format!("permission key {byte} -> {key:?}"));
+                    // MED-8: deliberate choice — keep stdin intact for the next prompt.
+                    guard.drain_stdin_on_drop = false;
                     break Ok(key);
                 }
                 tty_debug(format!("ignored byte {byte}"));
