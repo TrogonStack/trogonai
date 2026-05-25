@@ -6,7 +6,7 @@ Design context: [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](./docs/A2A_AUTH_CALLOUT_DESI
 
 ## Why
 
-Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` request headers with a header-trust fallback. Once a callout is deployed and the gateway reads the JWT-derived principal off the connection, these downstream items unblock:
+Today the gateway derives caller identity from the `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` request headers with a header-trust fallback. Once a callout is deployed and gateway clients carry the auth-callout-minted JWT as a signed message header, these downstream items unblock:
 
 - JWT-derived `caller_id` on gateway decision-site audits (live in production)
 - Populated `caller_id` segments on `A2A_PUSH_DLQ` subjects (today's `_` fallback retires)
@@ -18,7 +18,7 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 - `rsworkspace/crates/a2a-auth-callout/src/subscriber.rs` — NATS subscriber loop on `$SYS.REQ.USER.AUTH`; decodes the server-signed authorization request, delegates to `CalloutDispatcher`, publishes a signed authorization response (success or denial) via `AuthCalloutWireCodec`.
 - `rsworkspace/crates/a2a-auth-callout/src/wire/` — pinned NATS auth-callout wire format: NKey-signed request/response JWTs, optional XKey envelope encryption, in-process `BridgeMintAdapter`.
 - `rsworkspace/crates/a2a-auth-callout/src/credentials/{oidc,mtls,api_key}.rs` — OIDC JWKS, mTLS x509 chain, HMAC-SHA256 API-key verifiers.
-- `rsworkspace/crates/a2a-auth-callout/src/jwt.rs` — `UserJwtClaims` minter (Account-bound `aud`, `SpiceDbPrincipal` `data`, derived `caller_id`, `IssuedPermissions` `nats_permissions`, `kid` rotation header) producing a `MintedUserJwt` newtype.
+- `rsworkspace/crates/a2a-auth-callout/src/jwt/` — NATS User JWT minter (`ed25519-nkey`, `nats.pub` / `nats.sub` from `IssuedPermissions`, `sub` = caller User NKey, Account NKey `iss`) producing a `MintedUserJwt` newtype; carries `aud`, `caller_id`, `kid`, SpiceDB `data`.
 - `rsworkspace/crates/a2a-auth-callout/src/dispatcher.rs` — `CalloutDispatcher` routes OIDC bearer / mTLS client cert / API-key credential off `ServerAuthRequestClaims`, resolves the tenant Account, mints via the active `SigningKeySource` handle.
 - `rsworkspace/crates/a2a-auth-callout/src/account_resolver.rs` — `AccountResolver` trait + env-driven `StaticAccountResolver` (`AUTH_CALLOUT_ALLOWED_ACCOUNTS`).
 - `rsworkspace/crates/a2a-auth-callout/src/permissions.rs` — `IssuedPermissions::default_for_caller` mirrors `scripts/acl-templates/caller.acl`.
@@ -28,32 +28,28 @@ Today the gateway still derives caller identity from the `X-A2a-Spicedb-Principa
 
 ## Remaining work
 
-### 8. Integration test against a real `nats-server`
-- [x] Testcontainer-backed `nats-server` (pinned to 2.14.x — see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`) configured with `authorization { auth_callout { ... } }` pointing at this subscriber.
-- [x] Mock OIDC issuer (inline JWKS endpoint).
-- [x] Connect a NATS client with an OIDC bearer token; assert the minted User JWT carries the expected `aud`, stable `caller_id`, and `IssuedPermissions` matching `scripts/acl-templates/caller.acl`. *(Connect admission is still blocked on NATS User JWT mint — see `TODO(CALLOUT_E2E_CONNECT_ADMISSION)` in `tests/nats_server_callout_integration.rs`.)*
-- [x] Repeat for the mTLS and API-key credential paths.
-- [x] Mark live tests `#[ignore = "requires Docker (task #8)"]` so CI can skip without infra.
+### 9. Gateway per-message caller identity
 
-### 9. Gateway consumption path
-- [ ] In `a2a-gateway`, read the verified principal from the NATS connection metadata (once `async-nats` exposes it) and prefer it over the `X-A2a-Spicedb-Principal` header. *(Blocked: `async-nats` does not yet surface the auth-callout-minted JWT to clients. Seam is already in tree as `ConnectionCallerIdentitySource` — `UnavailableConnectionCallerIdentity` is the current stand-in; flip the binding when upstream lands.)*
-- [x] Gate the header-trust fallback behind a new env (`A2A_GATEWAY_TRUST_CALLER_HEADERS`, default off in prod). Surface a warn-once when the fallback is active. *(`jwt_caller_identity::gateway_caller_identity_policy` + `TRUST_CALLER_HEADERS_WARN`.)*
-- [x] Update `resolve_gateway_caller_identity` tests for both paths.
+**Status:** architectural decision needed; previously framed as "blocked on async-nats" — that framing was incorrect.
 
-### 11. Docs
-- [x] Promote auth callout sketch to [`docs/A2A_AUTH_CALLOUT_DESIGN.md`](./docs/A2A_AUTH_CALLOUT_DESIGN.md) now that the wire format is pinned.
-- [x] Update `docs/A2A_RUNTIME_ENV.md` with the deployed `AUTH_CALLOUT_*` envs (server NKey/XKey, signing-key source, allowed accounts, user JWT TTL, OIDC, mTLS).
+**Background.** The NATS protocol authenticates the publishing **connection** at connect time but does not stamp publisher identity onto MSG / HMSG frames delivered to subscribers. A client library can only surface what the server sends; there is no per-message principal field to expose. No upstream change to `async-nats` will produce one — the missing surface is the protocol, not the client. The gap is structural.
 
-### 12. Operator artifacts
-- [x] NSC operator/account JWT provisioning script (or extension of `scripts/a2a-nsc-bootstrap.sh`) covering the callout signing keys and the AUTH/APP/SYS layout.
-- [x] Reference `nats-server` config snippet committed under `scripts/` showing the callout binding for a single tenant Account.
-- [x] Deployment manifest matching the rest of the stack (k8s / systemd — match the in-tree pattern).
+**Implication.** The current seam — `ConnectionCallerIdentitySource` trait + `UnavailableConnectionCallerIdentity` stand-in at `rsworkspace/crates/a2a-gateway/src/runtime.rs:292`, with the connection-wins branch in `resolve_gateway_caller_identity` (`rsworkspace/crates/a2a-gateway/src/jwt_caller_identity.rs:129`) — encodes an abstraction that cannot be satisfied. It needs to be either deleted or repurposed.
+
+**Decision needed.** Pick one:
+
+1. **Signed-header convention (recommended).** Publishers include the auth-callout-minted User JWT (already operator-signed, short-lived, audience-bound, carries `SpiceDbPrincipal` in `data`) as a NATS header on every publish to `a2a.gateway.>`. Gateway verifies signature + expiry + audience against the same `kid`-aware `SigningKeySource` rotation the callout uses. No new signing surface; reuses the verifier + key source already in `a2a-auth-callout`. The trait gets repurposed to `MessageCallerIdentitySource` — "verify the JWT header on this `async_nats::Message`."
+2. **Trusted ingress hop.** Keep the `A2A_GATEWAY_TRUST_CALLER_HEADERS` path behind an auth-callout-bound rebroadcaster process; subject ACL limits header-bearing publishes to that User. Doesn't cover NATS-native clients that publish to `a2a.gateway.>` directly.
+3. **Request/reply only.** Route through the callout in the request path; correlate via `client_id` at connect time. Loses `message/stream` and `tasks/resubscribe`.
+
+**Once decided:**
+- [ ] Implement the chosen scheme; verifier lives in the gateway crate; signing-key material reuses `a2a-auth-callout`'s `SigningKeySource`.
+- [ ] Delete `ConnectionCallerIdentitySource` + `UnavailableConnectionCallerIdentity`, or rename the trait to match the new abstraction.
+- [ ] Retire `A2A_GATEWAY_TRUST_CALLER_HEADERS` from production env once the new path is live.
 
 ## Suggested ordering
 
-1. **#11 + #12** — promote docs and ship operator artifacts for production rollout.
-2. **#4** (NATS User JWT mint) — unblocks connect-admission assertions in the #8 testcontainer suite.
-3. **#9** — once `async-nats` exposes the verified JWT on the connection, bind a real `ConnectionCallerIdentitySource` and retire the header-trust default. (Tracking item only; no code work until upstream lands.)
+1. **#9** — design decision, then gateway-side implementation.
 
 ## Out of scope
 
