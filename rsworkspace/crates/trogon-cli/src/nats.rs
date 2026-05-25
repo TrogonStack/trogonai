@@ -117,6 +117,12 @@ pub mod mock {
         inbox_seq: Arc<std::sync::atomic::AtomicUsize>,
     }
 
+    impl Default for MockNatsClient {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockNatsClient {
         pub fn new() -> Self {
             Self {

@@ -19,6 +19,7 @@ pub use crate::tui_client::PermissionCoordinator;
 use crate::RunnerSwitcher;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_interactive<SF, F, SW, RS>(
     factory: SF,
     prefix: &str,
@@ -46,6 +47,7 @@ where
         .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_interactive_inner<SF, F, SW, RS>(
     factory: SF,
     prefix: &str,

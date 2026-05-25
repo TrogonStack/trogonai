@@ -19,19 +19,19 @@ pub fn find_env_local() -> Option<PathBuf> {
         }
     }
 
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Some(p) = find_in_ancestors(&cwd, ".env.local") {
-            return Some(p);
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(p) = find_in_ancestors(&cwd, ".env.local")
+    {
+        return Some(p);
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for rel in ["../../.env.local", "../../../.env.local"] {
-                let candidate = dir.join(rel);
-                if candidate.is_file() {
-                    return candidate.canonicalize().ok();
-                }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        for rel in ["../../.env.local", "../../../.env.local"] {
+            let candidate = dir.join(rel);
+            if candidate.is_file() {
+                return candidate.canonicalize().ok();
             }
         }
     }

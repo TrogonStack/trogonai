@@ -19,10 +19,11 @@ pub struct ToolFinishedEvent {
 
 /// Returns `None` for in-progress or intermediate terminal streaming updates.
 pub fn map_tool_call_update(update: &ToolCallUpdate) -> Option<ToolFinishedEvent> {
-    if let Some(meta) = update.meta.as_ref() {
-        if meta.contains_key("terminal_output") && !meta.contains_key("terminal_exit") {
-            return None;
-        }
+    if let Some(meta) = update.meta.as_ref()
+        && meta.contains_key("terminal_output")
+        && !meta.contains_key("terminal_exit")
+    {
+        return None;
     }
 
     let status = update.fields.status?;
@@ -44,10 +45,10 @@ pub fn map_tool_call_update(update: &ToolCallUpdate) -> Option<ToolFinishedEvent
 }
 
 fn tool_name_from_update(update: &ToolCallUpdate) -> String {
-    if let Some(meta) = update.meta.as_ref() {
-        if let Some(name) = meta.get("tool_name").and_then(|v| v.as_str()) {
-            return name.to_string();
-        }
+    if let Some(meta) = update.meta.as_ref()
+        && let Some(name) = meta.get("tool_name").and_then(|v| v.as_str())
+    {
+        return name.to_string();
     }
     update
         .fields
@@ -77,12 +78,11 @@ fn extract_exit_code(
     raw_output: &str,
     status: ToolCallStatus,
 ) -> Option<i32> {
-    if let Some(meta) = update.meta.as_ref() {
-        if let Some(exit) = meta.get("terminal_exit") {
-            if let Some(code) = exit.get("exit_code").and_then(|v| v.as_i64()) {
-                return i32::try_from(code).ok();
-            }
-        }
+    if let Some(meta) = update.meta.as_ref()
+        && let Some(exit) = meta.get("terminal_exit")
+        && let Some(code) = exit.get("exit_code").and_then(|v| v.as_i64())
+    {
+        return i32::try_from(code).ok();
     }
     if let Some(code) = parse_exit_marker(raw_output) {
         return Some(code);
@@ -103,10 +103,10 @@ fn parse_exit_marker(output: &str) -> Option<i32> {
         let after = &output[abs + EXIT_MARKER_PREFIX.len()..];
         if let Some(end) = after.find(EXIT_MARKER_SUFFIX) {
             let code_str = &after[..end];
-            if code_str.chars().all(|c| c.is_ascii_digit()) {
-                if let Ok(code) = code_str.parse::<i32>() {
-                    last = Some(code);
-                }
+            if code_str.chars().all(|c| c.is_ascii_digit())
+                && let Ok(code) = code_str.parse::<i32>()
+            {
+                last = Some(code);
             }
         }
         offset = abs + EXIT_MARKER_PREFIX.len();

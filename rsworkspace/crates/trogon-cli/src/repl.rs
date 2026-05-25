@@ -167,6 +167,7 @@ fn join_continuation(s: &str) -> String {
 
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStore>(
     factory: SF,
     prefix: &str,
@@ -208,10 +209,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     };
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
-        if resumed {
-            if let Err(e) = sup.rebind(&prefix, session.session_id()).await {
-                eprintln!("warning: permission client rebind failed: {e}");
-            }
+        if resumed
+            && let Err(e) = sup.rebind(&prefix, session.session_id()).await
+        {
+            eprintln!("warning: permission client rebind failed: {e}");
         }
     }
 
@@ -373,8 +374,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             Ok(list) => {
                                 let index = SessionIndex::load(&fs);
                                 println!(
-                                    "{:<36}  {:<20}  {}",
-                                    "session_id", "updated", "cwd"
+                                    "{:<36}  {:<20}  cwd",
+                                    "session_id", "updated"
                                 );
                                 for s in list {
                                     let updated = s.updated_at.as_deref().unwrap_or("-");
@@ -479,13 +480,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // mode in sync so /status and permission prompts match.
                                     session_mode = std::env::var("TROGON_MODE")
                                         .unwrap_or_else(|_| "default".into());
-                                    if let Some(ref sup) = client_supervisor {
-                                        if let Err(e) = sup
+                                    if let Some(ref sup) = client_supervisor
+                                        && let Err(e) = sup
                                             .rebind(&outcome.new_prefix, session.session_id())
                                             .await
-                                        {
-                                            eprintln!("error rebinding permission client: {e}");
-                                        }
+                                    {
+                                        eprintln!("error rebinding permission client: {e}");
                                     }
                                     match session.set_model(&model_id).await {
                                         Ok(()) => {
@@ -1529,10 +1529,10 @@ fn fmt_tokens(n: u64) -> String {
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::var("HOME").ok().map(PathBuf::from) {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = std::env::var("HOME").ok().map(PathBuf::from)
+    {
+        return home.join(rest);
     }
     PathBuf::from(path)
 }

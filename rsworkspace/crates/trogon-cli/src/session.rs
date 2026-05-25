@@ -640,10 +640,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let resp: CompactResponse = serde_json::from_slice(&bytes)
                 .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
 
-            if !resp.compacted {
-                if let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes) {
-                    return Err(anyhow::anyhow!("compactor error: {}", err.error));
-                }
+            if !resp.compacted
+                && let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes)
+            {
+                return Err(anyhow::anyhow!("compactor error: {}", err.error));
             }
 
             let result = CompactResult {
@@ -1019,18 +1019,16 @@ pub mod mock {
             }
         }
 
-        fn compact(&self) -> impl std::future::Future<Output = anyhow::Result<CompactResult>> + Send + '_ {
-            async move {
-                if let Some(err) = self.compact_error.lock().unwrap().clone() {
-                    return Err(anyhow::anyhow!("{err}"));
-                }
-                *self.compacted.lock().unwrap() += 1;
-                Ok(CompactResult {
-                    compacted: true,
-                    tokens_before: 100,
-                    tokens_after: 50,
-                })
+        async fn compact(&self) -> anyhow::Result<CompactResult> {
+            if let Some(err) = self.compact_error.lock().unwrap().clone() {
+                return Err(anyhow::anyhow!("{err}"));
             }
+            *self.compacted.lock().unwrap() += 1;
+            Ok(CompactResult {
+                compacted: true,
+                tokens_before: 100,
+                tokens_after: 50,
+            })
         }
 
         fn load_session(
@@ -1053,10 +1051,8 @@ pub mod mock {
             self.load_session(self.session_id(), cwd, vec![])
         }
 
-        fn list_sessions(
-            &self,
-        ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionSummary>>> + Send + '_ {
-            async move { Ok(vec![]) }
+        async fn list_sessions(&self) -> anyhow::Result<Vec<SessionSummary>> {
+            Ok(vec![])
         }
 
         fn session_cwd(
@@ -1066,18 +1062,19 @@ pub mod mock {
             async move { Ok(cwd) }
         }
 
+        // Not `async fn`: the body ignores `_mode`, so it must stay bound to `&self`
+        // only (`+ '_`). `async fn` would tie the future to `_mode`'s lifetime and
+        // break the delegating `Arc<MockSession>` impl below.
+        #[allow(clippy::manual_async_fn)]
         fn set_mode(
             &self,
             _mode: &str,
-        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
-        {
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
             async move { Ok(()) }
         }
 
-        fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
-            async move {
-                *self.closed.lock().unwrap() += 1;
-            }
+        async fn close(&self) {
+            *self.closed.lock().unwrap() += 1;
         }
     }
 
@@ -1178,17 +1175,15 @@ pub mod mock {
     impl super::SessionFactory for MockSessionFactory {
         type Sess = std::sync::Arc<MockSession>;
 
-        fn create_session<'a>(
-            &'a self,
-            _prefix: &'a str,
+        async fn create_session(
+            &self,
+            _prefix: &str,
             _cwd: PathBuf,
             _mcp_servers: Vec<McpServer>,
-        ) -> impl std::future::Future<Output = anyhow::Result<std::sync::Arc<MockSession>>> + 'a {
-            async move {
-                let session = self.sessions.lock().unwrap().pop_front()
-                    .unwrap_or_else(|| std::sync::Arc::new(MockSession::new(&self.default_id)));
-                Ok(session)
-            }
+        ) -> anyhow::Result<std::sync::Arc<MockSession>> {
+            let session = self.sessions.lock().unwrap().pop_front()
+                .unwrap_or_else(|| std::sync::Arc::new(MockSession::new(&self.default_id)));
+            Ok(session)
         }
 
         fn attach_session(&self, _prefix: &str, session_id: String) -> std::sync::Arc<MockSession> {

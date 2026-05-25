@@ -72,37 +72,33 @@ fn render_inline(text: &str) -> String {
 
     while !rest.is_empty() {
         // Inline code: `...`  (but not ```)
-        if rest.starts_with('`') && !rest.starts_with("```") {
-            if let Some(end) = rest[1..].find('`') {
+        if rest.starts_with('`') && !rest.starts_with("```")
+            && let Some(end) = rest[1..].find('`') {
                 out.push_str(YELLOW);
                 out.push_str(&rest[1..1 + end]);
                 out.push_str(RESET);
                 rest = &rest[1 + end + 1..];
                 continue;
             }
-        }
         // Bold: **...**
-        if rest.starts_with("**") {
-            if let Some(end) = rest[2..].find("**") {
+        if rest.starts_with("**")
+            && let Some(end) = rest[2..].find("**") {
                 out.push_str(BOLD);
                 out.push_str(&render_inline(&rest[2..2 + end]));
                 out.push_str(RESET);
                 rest = &rest[2 + end + 2..];
                 continue;
             }
-        }
         // Italic: *...* (not preceded by another *)
-        if rest.starts_with('*') && !rest.starts_with("**") {
-            if let Some(end) = rest[1..].find('*') {
-                if end > 0 && !rest[1..1 + end].starts_with('*') {
-                    out.push_str(ITALIC);
-                    out.push_str(&rest[1..1 + end]);
-                    out.push_str(RESET);
-                    rest = &rest[1 + end + 1..];
-                    continue;
-                }
+        if rest.starts_with('*') && !rest.starts_with("**")
+            && let Some(end) = rest[1..].find('*')
+            && end > 0 && !rest[1..1 + end].starts_with('*') {
+                out.push_str(ITALIC);
+                out.push_str(&rest[1..1 + end]);
+                out.push_str(RESET);
+                rest = &rest[1 + end + 1..];
+                continue;
             }
-        }
         // Consume one UTF-8 character
         let ch_len = rest.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
         out.push_str(&rest[..ch_len]);
