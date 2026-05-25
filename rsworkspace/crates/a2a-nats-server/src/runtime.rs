@@ -1,6 +1,7 @@
 use std::fmt;
 use std::net::SocketAddr;
 
+use a2a_auth_callout::MintedUserJwt;
 use a2a_nats::client::Client;
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, Config, NatsConfig};
 use tracing::info;
@@ -14,10 +15,13 @@ const DEFAULT_BIND: &str = "0.0.0.0:8080";
 const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
 const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
 const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
+const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
 
 #[derive(Debug)]
 pub enum RuntimeError {
     MissingAgentId,
+    MissingGatewayCallerJwt,
+    InvalidGatewayCallerJwt(String),
     InvalidAgentId(AgentIdError),
     InvalidPrefix(A2aPrefixError),
     InvalidBind(std::net::AddrParseError),
@@ -29,6 +33,11 @@ impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingAgentId => write!(f, "A2A_AGENT_ID environment variable is required"),
+            Self::MissingGatewayCallerJwt => write!(
+                f,
+                "{ENV_GATEWAY_CALLER_JWT} is required when {ENV_USE_GATEWAY} is enabled"
+            ),
+            Self::InvalidGatewayCallerJwt(msg) => write!(f, "invalid gateway caller JWT: {msg}"),
             Self::InvalidAgentId(e) => write!(f, "invalid agent id: {e}"),
             Self::InvalidPrefix(e) => write!(f, "invalid A2A prefix: {e}"),
             Self::InvalidBind(e) => write!(f, "invalid bind address: {e}"),
@@ -46,7 +55,7 @@ impl std::error::Error for RuntimeError {
             Self::InvalidBind(e) => Some(e),
             Self::NatsConnect(e) => Some(e),
             Self::Io(e) => Some(e),
-            Self::MissingAgentId => None,
+            Self::MissingAgentId | Self::MissingGatewayCallerJwt | Self::InvalidGatewayCallerJwt(_) => None,
         }
     }
 }
@@ -87,8 +96,14 @@ pub async fn run() -> Result<(), RuntimeError> {
 
     let client = Client::new(a2a_config, agent_id, nats_client, js_client);
     let client = if env_flag(&env, ENV_USE_GATEWAY) {
+        let raw_jwt = trogon_std::env::ReadEnv::var(&env, ENV_GATEWAY_CALLER_JWT)
+            .map_err(|_| RuntimeError::MissingGatewayCallerJwt)?;
+        let caller_jwt = MintedUserJwt::new(raw_jwt);
+        caller_jwt
+            .ensure_fresh()
+            .map_err(|e| RuntimeError::InvalidGatewayCallerJwt(e.to_string()))?;
         info!("Routing HTTP requests through a2a-gateway ingress");
-        client.routing_via_gateway_ingress()
+        client.routing_via_gateway_ingress(caller_jwt)
     } else {
         client
     };
