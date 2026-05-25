@@ -547,7 +547,14 @@ where
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
-            let _permit = task_limiter.acquire().await;
+            let Some(_permit) = task_limiter.acquire().await else {
+                // MED-30: limiter closed (runtime shutting down). Set the exit arc
+                // so a concurrent wait_for_terminal_exit doesn't loop forever.
+                let _ = exit_arc.set(
+                    TerminalExitStatus::new().signal(Some("runtime shutting down".to_string())),
+                );
+                return;
+            };
             // Count tasks that actually start executing, not just those queued for a permit.
             METRICS
                 .wasm_tasks_started
@@ -1446,7 +1453,9 @@ mod tests {
 
     impl TaskLimiter for UnlimitedTaskLimiter {
         type Permit = ();
-        async fn acquire(&self) {}
+        async fn acquire(&self) -> Option<()> {
+            Some(())
+        }
     }
 
     // ── NeverHandle / NeverProcessSpawner ─────────────────────────────────────

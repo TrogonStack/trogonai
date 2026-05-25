@@ -485,7 +485,9 @@ impl IdGenerator for UuidGenerator {
 pub trait TaskLimiter: Clone + 'static {
     /// Token held for the duration of a task; dropped when the task finishes.
     type Permit: 'static;
-    fn acquire(&self) -> impl std::future::Future<Output = Self::Permit>;
+    /// Acquire a permit. Returns `None` when the limiter is closed (runtime
+    /// shutting down) so callers can bail out instead of panicking.
+    fn acquire(&self) -> impl std::future::Future<Output = Option<Self::Permit>>;
 }
 
 /// Real implementation backed by `tokio::sync::Semaphore`.
@@ -500,11 +502,11 @@ impl SemaphoreTaskLimiter {
 
 impl TaskLimiter for SemaphoreTaskLimiter {
     type Permit = tokio::sync::OwnedSemaphorePermit;
-    async fn acquire(&self) -> Self::Permit {
-        std::sync::Arc::clone(&self.0)
-            .acquire_owned()
-            .await
-            .expect("task semaphore closed unexpectedly")
+    async fn acquire(&self) -> Option<Self::Permit> {
+        // MED-30: the semaphore is closed when the runtime is dropped at
+        // shutdown. Return None instead of panicking — a panic here would leave
+        // the task's exit arc unset and deadlock wait_for_terminal_exit (HIGH-25).
+        std::sync::Arc::clone(&self.0).acquire_owned().await.ok()
     }
 }
 
