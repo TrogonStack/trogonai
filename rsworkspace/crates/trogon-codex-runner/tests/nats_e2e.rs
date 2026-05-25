@@ -388,3 +388,73 @@ async fn clear_creates_distinct_session_id_in_codex_runner() {
         "/clear (second session/new) must produce a distinct session ID; both got: {session_id_1:?}"
     );
 }
+
+/// Validates that the codex runner sends JSON-RPC messages conforming to the
+/// Codex CLI protocol schema when `MOCK_VALIDATE_SCHEMA` is set.
+///
+/// The mock rejects `turn/start` messages that have a missing or empty
+/// `params.threadId`, or a missing `params.userInput`. A rejection causes the
+/// runner to propagate an error, which would cause the test to fail before
+/// the `stopReason: end_turn` assertion is reached.
+///
+/// Passing this test proves the runner sends structurally valid JSON-RPC to the
+/// Codex subprocess — no real Codex CLI or API key needed.
+#[tokio::test]
+async fn codex_turn_start_request_has_valid_jsonrpc_schema() {
+    let _lock = bin_env_lock().lock().await;
+    // SAFETY: serialized by BIN_ENV_LOCK; single-process test binary.
+    unsafe {
+        std::env::set_var("CODEX_BIN", MOCK_BIN);
+        std::env::set_var("MOCK_VALIDATE_SCHEMA", "1");
+    }
+
+    let (_container, nats) = start_nats().await;
+    start_agent(nats.clone()).await;
+
+    // Create session.
+    let new_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": null,
+        "cwd": "/tmp",
+        "mcpServers": []
+    }))
+    .unwrap();
+    let new_msg = tokio::time::timeout(
+        Duration::from_secs(10),
+        nats.request("acp.agent.session.new", new_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for session/new")
+    .expect("NATS request failed");
+
+    let new_resp: Value = serde_json::from_slice(&new_msg.payload).unwrap();
+    let session_id = new_resp["sessionId"].as_str().unwrap_or("").to_string();
+    assert!(!session_id.is_empty(), "session/new must return a non-empty sessionId");
+
+    // Send prompt — mock validates JSON-RPC schema of turn/start.
+    // If the runner sends a malformed message the mock returns an error and
+    // the runner propagates it; the test would time-out or get an error response.
+    let prompt_subject = format!("acp.session.{session_id}.agent.prompt");
+    let prompt_payload = serde_json::to_vec(&serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{"type": "text", "text": "validate schema"}]
+    }))
+    .unwrap();
+
+    let prompt_msg = tokio::time::timeout(
+        Duration::from_secs(15),
+        nats.request(prompt_subject, prompt_payload.into()),
+    )
+    .await
+    .expect("timed out waiting for prompt response")
+    .expect("NATS prompt request failed");
+
+    let prompt_resp: Value = serde_json::from_slice(&prompt_msg.payload).unwrap();
+    assert_eq!(
+        prompt_resp["stopReason"].as_str(),
+        Some("end_turn"),
+        "turn/start must pass schema validation and return end_turn; got: {prompt_resp}"
+    );
+
+    // Clean up env var so other tests in the same binary are not affected.
+    unsafe { std::env::remove_var("MOCK_VALIDATE_SCHEMA") };
+}

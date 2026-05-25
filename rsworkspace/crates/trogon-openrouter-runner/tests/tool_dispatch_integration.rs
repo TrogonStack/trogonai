@@ -1316,3 +1316,53 @@ async fn or_programming_tool_chain_read_str_replace_git_diff() {
         })
         .await;
 }
+
+/// Validates that OpenRouter API calls use the correct OpenAI-compatible wire format.
+///
+/// Inspects `MockOpenRouterHttpClient` calls directly — no real API key or Docker needed.
+/// Required fields per the OpenAI chat completions spec:
+/// - `model`: non-empty string
+/// - `messages`: non-empty array; each message has a valid role
+/// - `api_key`: non-empty (sent as Authorization header in the real client)
+#[tokio::test]
+async fn or_request_has_required_openai_compatible_fields() {
+    let http = Arc::new(MockOpenRouterHttpClient::new());
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "ok".to_string() }]);
+
+    let agent = make_agent(Arc::clone(&http));
+    let dir = tempfile::TempDir::new().unwrap();
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from(dir.path())))
+                .await
+                .unwrap();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("schema check")],
+                ))
+                .await
+                .unwrap();
+
+            let calls = http.calls.lock().unwrap();
+            assert_eq!(calls.len(), 1, "must have exactly 1 API call");
+
+            let call = &calls[0];
+            assert!(!call.model.is_empty(), "model must be a non-empty string");
+            assert!(!call.api_key.is_empty(), "api_key must be non-empty");
+            assert!(!call.messages.is_empty(), "messages array must not be empty");
+
+            for (i, msg) in call.messages.iter().enumerate() {
+                assert!(
+                    ["user", "assistant", "system", "tool"].contains(&msg.role.as_str()),
+                    "messages[{i}].role must be a valid OpenAI role, got: {:?}",
+                    msg.role
+                );
+                // content is a String field (not Option) — always present
+            }
+        })
+        .await;
+}

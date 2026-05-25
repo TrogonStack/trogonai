@@ -6125,3 +6125,62 @@ async fn no_crash_when_trogon_md_absent_from_session_directory() {
         );
     }
 }
+
+/// Validates that xAI Responses API calls use the correct wire format.
+///
+/// Inspects `MockXaiHttpClient` calls directly — no real API key or Docker needed.
+/// Required fields per the xAI Responses API spec:
+/// - `model`: non-empty string
+/// - `input`: non-empty array; each `Message` item has a valid role
+/// - `api_key`: non-empty (sent as Bearer token in the real client)
+#[tokio::test]
+async fn xai_request_has_required_responses_api_fields() {
+    use trogon_xai_runner::InputItem;
+
+    let _lock = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(vec![
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+    ]);
+
+    let agent = make_agent(Arc::clone(&mock)).await;
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let sess = agent
+        .new_session(NewSessionRequest::new(dir.path()))
+        .await
+        .unwrap();
+
+    agent
+        .prompt(PromptRequest::new(
+            sess.session_id.to_string(),
+            vec![ContentBlock::Text(TextContent::new("schema check"))],
+        ))
+        .await
+        .expect("prompt must not error");
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "must have exactly 1 API call");
+
+    let call = &calls[0];
+    assert!(!call.model.is_empty(), "model must be a non-empty string");
+    assert!(!call.api_key.is_empty(), "api_key must be non-empty");
+    assert!(!call.input.is_empty(), "input array must not be empty");
+
+    for (i, item) in call.input.iter().enumerate() {
+        match item {
+            InputItem::Message { role, .. } => {
+                assert!(
+                    ["user", "assistant", "system"].contains(&role.as_str()),
+                    "input[{i}].role must be user/assistant/system, got: {role:?}"
+                );
+            }
+            InputItem::FunctionCallOutput { call_id, .. } => {
+                assert!(
+                    !call_id.is_empty(),
+                    "input[{i}] FunctionCallOutput.call_id must not be empty"
+                );
+            }
+        }
+    }
+}
