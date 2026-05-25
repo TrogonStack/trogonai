@@ -192,6 +192,15 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<
         Output = Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>>,
     > + Send;
+
+    /// Returns the NATS server's maximum message payload size in bytes.
+    ///
+    /// Used by the dispatcher to guard replies before publishing so that
+    /// oversized payloads are caught here rather than silently dropped by the
+    /// server. The default matches the NATS server default (1 MiB).
+    fn max_payload(&self) -> usize {
+        1024 * 1024
+    }
 }
 
 /// Blanket implementation of `NatsBroker` for the real `async_nats::Client`.
@@ -235,6 +244,10 @@ impl NatsBroker for async_nats::Client {
         async_nats::Client::request(self, subject.into(), payload)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    fn max_payload(&self) -> usize {
+        self.server_info().max_payload
     }
 }
 
@@ -327,6 +340,12 @@ pub trait ChildProcessHandle: 'static {
     fn wait(&mut self) -> impl std::future::Future<Output = io::Result<std::process::ExitStatus>>;
 
     fn kill(&mut self) -> impl std::future::Future<Output = io::Result<()>>;
+
+    /// Sends a kill signal without waiting for the process to exit.
+    /// Used by `handle_kill_terminal` so the terminal can stay in the map
+    /// during the signal delivery, preventing concurrent writes from seeing
+    /// "Unknown terminal" (HIGH-26).
+    fn start_kill(&mut self) -> io::Result<()>;
 }
 
 /// Implement `ChildProcessHandle` for the real `tokio::process::Child`.
@@ -353,6 +372,10 @@ impl ChildProcessHandle for tokio::process::Child {
 
     async fn kill(&mut self) -> io::Result<()> {
         tokio::process::Child::kill(self).await
+    }
+
+    fn start_kill(&mut self) -> io::Result<()> {
+        tokio::process::Child::start_kill(self)
     }
 }
 
