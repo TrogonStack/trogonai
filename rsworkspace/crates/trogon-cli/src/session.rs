@@ -512,13 +512,12 @@ impl<N: NatsClient> Session for TrogonSession<N> {
 
             let bytes = tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
-                .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?;
-            if let Some(bytes) = bytes {
-                let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-                if v.get("stopReason").is_none() && v.get("code").is_some() {
-                    let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("model update failed");
-                    return Err(anyhow::anyhow!("{}", msg));
-                }
+                .map_err(|_| anyhow::anyhow!("timed out waiting for model update"))?
+                .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
+            let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            if v.get("stopReason").is_none() && v.get("code").is_some() {
+                let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("model update failed");
+                return Err(anyhow::anyhow!("{}", msg));
             }
             *model.lock().unwrap() = model_id;
             Ok(())
@@ -551,13 +550,12 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
             let bytes = tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
                 .await
-                .map_err(|_| anyhow::anyhow!("timed out waiting for set_mode response"))?;
-            if let Some(bytes) = bytes {
-                let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-                if v.get("stopReason").is_none() && v.get("code").is_some() {
-                    let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("mode update failed");
-                    return Err(anyhow::anyhow!("{}", msg));
-                }
+                .map_err(|_| anyhow::anyhow!("timed out waiting for set_mode response"))?
+                .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
+            let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            if v.get("stopReason").is_none() && v.get("code").is_some() {
+                let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("mode update failed");
+                return Err(anyhow::anyhow!("{}", msg));
             }
             Ok(())
         }
