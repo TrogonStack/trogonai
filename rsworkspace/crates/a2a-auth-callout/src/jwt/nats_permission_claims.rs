@@ -30,8 +30,18 @@ pub struct NatsPermissionClaims {
 impl From<&IssuedPermissions> for NatsPermissionClaims {
     fn from(perms: &IssuedPermissions) -> Self {
         Self {
-            publish: NatsSubjectPermission::allow_only(perms.publish_allow.iter().map(|p| p.as_str().to_owned())),
-            subscribe: NatsSubjectPermission::allow_only(perms.subscribe_allow.iter().map(|p| p.as_str().to_owned())),
+            publish: NatsSubjectPermission::allow_only(
+                perms
+                    .publish_allow
+                    .iter()
+                    .map(|p| p.as_str().to_owned()),
+            ),
+            subscribe: NatsSubjectPermission::allow_only(
+                perms
+                    .subscribe_allow
+                    .iter()
+                    .map(|p| p.as_str().to_owned()),
+            ),
         }
     }
 }

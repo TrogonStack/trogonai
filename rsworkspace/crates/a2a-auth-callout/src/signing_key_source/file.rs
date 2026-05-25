@@ -29,7 +29,7 @@ impl FileSigningKeySource {
         })?;
         let current = SigningKeyHandle::new(
             KeyVersion::new(VERSION_CURRENT).expect("static version"),
-            SigningKey::from_secret(&current_bytes),
+            signing_key_from_file_bytes(&current_bytes)?,
         );
 
         let previous = match previous_path {
@@ -43,13 +43,20 @@ impl FileSigningKeySource {
                 })?;
                 Some(SigningKeyHandle::new(
                     KeyVersion::new(VERSION_PREVIOUS).expect("static version"),
-                    SigningKey::from_secret(&bytes),
+                    signing_key_from_file_bytes(&bytes)?,
                 ))
             }
         };
 
         Ok(Self { current, previous })
     }
+}
+
+fn signing_key_from_file_bytes(bytes: &[u8]) -> Result<SigningKey, AuthCalloutError> {
+    let seed = std::str::from_utf8(bytes)
+        .map_err(|e| AuthCalloutError::Internal(format!("signing key file must be UTF-8 NKey seed: {e}")))?
+        .trim();
+    SigningKey::from_seed(seed).map_err(|e| AuthCalloutError::Internal(e.to_string()))
 }
 
 impl SigningKeySource for FileSigningKeySource {
