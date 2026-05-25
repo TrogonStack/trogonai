@@ -4,6 +4,7 @@ use a2a_types::{
     ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, SendMessageRequest,
     SendMessageResponse, SubscribeToTaskRequest, Task, TaskPushNotificationConfig,
 };
+use a2a_auth_callout::MintedUserJwt;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
@@ -29,7 +30,7 @@ use super::unary::send_unary;
 #[derive(Clone, Debug)]
 enum ClientIngressTarget {
     AgentSubjects,
-    GatewayIngress,
+    GatewayIngress(MintedUserJwt),
 }
 
 pub struct Client<N, J> {
@@ -60,8 +61,12 @@ impl<N, J> Client<N, J> {
     /// **`message/stream`** and **`tasks/resubscribe`** still attach to JetStream **`{prefix}.task.…`** event
     /// subjects after their gateway-routed bootstrap/snapshot RPC; only the JSON-RPC ingress hop uses
     /// `{prefix}.gateway.…`.
-    pub fn routing_via_gateway_ingress(mut self) -> Self {
-        self.ingress = ClientIngressTarget::GatewayIngress;
+    ///
+    /// `caller_jwt` is attached as [`CALLER_JWT_HEADER_NAME`](a2a_auth_callout::CALLER_JWT_HEADER_NAME) on every
+    /// gateway ingress publish. Refresh and replace the JWT on the client when [`ClientError::GatewayCallerJwtExpired`]
+    /// is returned.
+    pub fn routing_via_gateway_ingress(mut self, caller_jwt: MintedUserJwt) -> Self {
+        self.ingress = ClientIngressTarget::GatewayIngress(caller_jwt);
         self
     }
 
@@ -74,15 +79,20 @@ impl<N, J> Client<N, J> {
     fn outbound_rpc_subject(&self, agent_subject: String) -> Result<String, ClientError> {
         match &self.ingress {
             ClientIngressTarget::AgentSubjects => Ok(agent_subject),
-            ClientIngressTarget::GatewayIngress => {
-                gateway_ingress_subject_from_agent_subject(&agent_subject, self.prefix())
-                    .ok_or(ClientError::InvalidRpcSubjectOverlay)
-            }
+            ClientIngressTarget::GatewayIngress(_) => gateway_ingress_subject_from_agent_subject(&agent_subject, self.prefix())
+                .ok_or(ClientError::InvalidRpcSubjectOverlay),
         }
     }
 
     fn prefix(&self) -> &A2aPrefix {
         self.config.a2a_prefix_ref()
+    }
+
+    fn gateway_caller_jwt(&self) -> Option<&MintedUserJwt> {
+        match &self.ingress {
+            ClientIngressTarget::AgentSubjects => None,
+            ClientIngressTarget::GatewayIngress(jwt) => Some(jwt),
+        }
     }
 }
 
@@ -100,7 +110,16 @@ where
     pub async fn message_send(&self, req: &SendMessageRequest) -> Result<SendMessageResponse, ClientError> {
         let subject = self.outbound_rpc_subject(MessageSendSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(&self.nats, &subject, "message/send", req, &req_id, self.config.operation_timeout()).await
+        send_unary(
+            &self.nats,
+            &subject,
+            "message/send",
+            req,
+            &req_id,
+            self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 
     pub async fn message_stream(
@@ -117,6 +136,7 @@ where
             req_id: &req_id,
             prefix: self.prefix(),
             op_timeout: self.config.operation_timeout(),
+            gateway_caller_jwt: self.gateway_caller_jwt(),
         };
         send_streaming(ctx, req).await
     }
@@ -124,19 +144,46 @@ where
     pub async fn tasks_get(&self, req: &GetTaskRequest) -> Result<Task, ClientError> {
         let subject = self.outbound_rpc_subject(TasksGetSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(&self.nats, &subject, "tasks/get", req, &req_id, self.config.operation_timeout()).await
+        send_unary(
+            &self.nats,
+            &subject,
+            "tasks/get",
+            req,
+            &req_id,
+            self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 
     pub async fn tasks_list(&self, req: &ListTasksRequest) -> Result<ListTasksResponse, ClientError> {
         let subject = self.outbound_rpc_subject(TasksListSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(&self.nats, &subject, "tasks/list", req, &req_id, self.config.operation_timeout()).await
+        send_unary(
+            &self.nats,
+            &subject,
+            "tasks/list",
+            req,
+            &req_id,
+            self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 
     pub async fn tasks_cancel(&self, req: &CancelTaskRequest) -> Result<Task, ClientError> {
         let subject = self.outbound_rpc_subject(TasksCancelSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
-        send_unary(&self.nats, &subject, "tasks/cancel", req, &req_id, self.config.operation_timeout()).await
+        send_unary(
+            &self.nats,
+            &subject,
+            "tasks/cancel",
+            req,
+            &req_id,
+            self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 
     pub async fn tasks_resubscribe(
@@ -149,8 +196,16 @@ where
         let req_id = ReqId::new();
         let req = SubscribeToTaskRequest { id: task_id.as_str().to_owned(), tenant: String::new() };
         let snapshot: Task =
-            send_unary(&self.nats, &subject, "tasks/resubscribe", &req, &req_id, self.config.operation_timeout())
-                .await?;
+            send_unary(
+                &self.nats,
+                &subject,
+                "tasks/resubscribe",
+                &req,
+                &req_id,
+                self.config.operation_timeout(),
+                self.gateway_caller_jwt(),
+            )
+            .await?;
         let stream = open_resubscribe_stream(&self.js, self.prefix(), task_id, last_seq).await?;
         Ok((snapshot, stream))
     }
@@ -165,6 +220,7 @@ where
             req,
             &req_id,
             self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
         )
         .await
     }
@@ -182,6 +238,7 @@ where
             req,
             &req_id,
             self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
         )
         .await
     }
@@ -199,6 +256,7 @@ where
             req,
             &req_id,
             self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
         )
         .await
     }
@@ -213,6 +271,7 @@ where
             req,
             &req_id,
             self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
         )
         .await
     }
@@ -221,14 +280,25 @@ where
         let subject = self.outbound_rpc_subject(AgentCardSubject::new(self.prefix(), &self.agent_id).to_string())?;
         let req_id = ReqId::new();
         let req = GetExtendedAgentCardRequest { tenant: String::new() };
-        send_unary(&self.nats, &subject, "agent/getAuthenticatedExtendedCard", &req, &req_id, self.config.operation_timeout())
-            .await
+        send_unary(
+            &self.nats,
+            &subject,
+            "agent/getAuthenticatedExtendedCard",
+            &req,
+            &req_id,
+            self.config.operation_timeout(),
+            self.gateway_caller_jwt(),
+        )
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
+    use a2a_auth_callout::test_support::mint_test_user_jwt;
     use a2a_types::{Task, TaskState, TaskStatus};
     use trogon_nats::AdvancedMockNatsClient;
     use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
@@ -528,7 +598,8 @@ mod tests {
         nats.set_response("a2a.gateway.acme.bot.tasks.get", task_response("wrong-shape"));
         nats.set_response("a2a.gateway.bot.tasks.get", task_response("task-gw"));
 
-        let client = make_client(nats, MockJetStreamConsumerFactory::new()).routing_via_gateway_ingress();
+        let jwt = mint_test_user_jwt("gw-caller", "a2a", Duration::from_secs(3600));
+        let client = make_client(nats, MockJetStreamConsumerFactory::new()).routing_via_gateway_ingress(jwt);
         let req = GetTaskRequest {
             id: "task-gw".into(),
             tenant: String::new(),

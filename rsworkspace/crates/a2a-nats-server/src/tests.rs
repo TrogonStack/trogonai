@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use a2a_auth_callout::test_support::mint_test_user_jwt;
 use a2a_nats::client::Client;
 use a2a_nats::{A2aAgentId, Config, NatsConfig};
 use axum::body::{Body, to_bytes};
@@ -22,6 +25,10 @@ fn test_config() -> Config {
 
 fn test_agent_id() -> A2aAgentId {
     A2aAgentId::new("test-agent").unwrap()
+}
+
+fn gateway_test_caller_jwt() -> a2a_nats::client::MintedUserJwt {
+    mint_test_user_jwt("test-agent", "a2a", Duration::from_secs(3600))
 }
 
 fn build_app(nats: AdvancedMockNatsClient) -> axum::Router {
@@ -355,7 +362,8 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
     );
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress();
+    let client = Client::new(test_config(), test_agent_id(), nats, js)
+        .routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app
@@ -379,7 +387,8 @@ async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
     );
 
     let js = MockJetStreamConsumerFactory::new();
-    let client = Client::new(test_config(), test_agent_id(), nats, js).routing_via_gateway_ingress();
+    let client = Client::new(test_config(), test_agent_id(), nats, js)
+        .routing_via_gateway_ingress(gateway_test_caller_jwt());
     let app = router::build(client);
 
     let response = app
