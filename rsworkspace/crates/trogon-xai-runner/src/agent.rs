@@ -103,6 +103,9 @@ struct XaiSession {
     model: Option<String>,
     /// API key bound to this session at `new_session` time.
     /// Falls back to the agent-wide `global_api_key` if None.
+    // MED-25: never serialize the API key — session/get_state would otherwise
+    // return it in plaintext, and it would be persisted to KV.
+    #[serde(skip)]
     api_key: Option<String>,
     /// Conversation history (user + assistant turns).
     /// Trimmed to `max_history` entries when it grows too large.
@@ -1393,10 +1396,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             }
                             FinishReason::Failed => {
                                 warn!(session_id, "xai: response failed");
+                                // MED-24: these arms return early, bypassing the
+                                // end-of-prompt cleanup; drop the cancel sender here
+                                // so a later cancel() doesn't fire on a stale entry.
+                                self.cancel_senders.lock().await.remove(&session_id);
                                 return Err(internal_error("xAI response failed"));
                             }
                             FinishReason::Cancelled => {
                                 info!(session_id, "xai: response cancelled by server");
+                                self.cancel_senders.lock().await.remove(&session_id);
                                 return Err(internal_error(
                                     "xAI request cancelled by server",
                                 ));
@@ -1810,6 +1818,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 }
             };
             s.last_response_id = None;
+            // MED-20: persist the imported history to KV so a runner restart before
+            // the next prompt doesn't revert /compact back to the pre-import state.
+            if let Some(store) = &self.session_store {
+                let snapshot = self.build_snapshot(session_id, s);
+                store.save(&snapshot).await;
+            }
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
