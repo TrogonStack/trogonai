@@ -84,7 +84,7 @@ Full env reference: [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md).
 
 ## Sample `nats-server` config (centralized)
 
-Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../scripts/a2a-auth-callout-bootstrap.sh). Deployment units: [`scripts/a2a-auth-callout.service`](../scripts/a2a-auth-callout.service), [`scripts/a2a-auth-callout-compose.yaml`](../scripts/a2a-auth-callout-compose.yaml).
+Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../scripts/a2a-auth-callout-bootstrap.sh). **Local end-to-end reference implementation:** the `a2a-bootstrap` init container in [`devops/docker/compose/compose.a2a.smoke.yml`](../devops/docker/compose/compose.a2a.smoke.yml) wraps those scripts, renders `nats-server.conf`, and populates the shared volume (see [`docs/A2A_DEVELOPMENT.md`](./A2A_DEVELOPMENT.md)). Production deployment unit: [`scripts/a2a-auth-callout.service`](../scripts/a2a-auth-callout.service).
 
 ```hcl
 accounts {

@@ -34,6 +34,15 @@ impl<D: AuthDispatcher> Subscriber<D> {
 
         info!(subject = AUTH_CALLOUT_SUBJECT, "auth callout subscriber started");
 
+        if let Ok(path) = std::env::var("AUTH_CALLOUT_READY_FILE") {
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::write(&path, "ready\n").is_err() {
+                warn!(path = %path, "failed to write auth-callout readiness marker");
+            }
+        }
+
         while let Some(msg) = sub.next().await {
             let reply = match msg.reply.clone() {
                 Some(r) => r,

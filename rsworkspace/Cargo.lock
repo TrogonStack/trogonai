@@ -234,6 +234,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-smoke-test"
+version = "0.1.0"
+dependencies = [
+ "a2a-auth-callout",
+ "a2a-nats",
+ "a2a-types",
+ "async-nats",
+ "clap",
+ "futures",
+ "nkeys",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "a2a-types"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

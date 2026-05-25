@@ -101,6 +101,21 @@ Set `A2A_USE_GATEWAY=1` on **`a2a-nats-server`** to route unary traffic via `{pr
 
 ---
 
+## Local end-to-end (Docker smoke)
+
+The opt-in compose stack at [`../devops/docker/compose/compose.a2a.smoke.yml`](../devops/docker/compose/compose.a2a.smoke.yml) proves auth-callout minting, gateway JWT verification, and `tasks/get` through the echo agent without cloud NATS. Service images use **cargo-chef**: each Dockerfile runs `cargo chef cook` for all A2A binaries (`a2a-auth-callout`, `a2a-gateway`, `a2a-bridge`, `a2a-nats-server`, `a2a-nats-agent`, `a2a-smoke-test`) so dependency layers stay warm across rebuilds.
+
+```bash
+make smoke          # up, run a2a-smoke-test, down
+make smoke-build    # images only
+```
+
+Prerequisites: Docker with Compose v2, enough RAM for parallel Rust image builds (first build is slow; later builds reuse chef layers). The `a2a-bootstrap` init container runs [`scripts/a2a-nsc-bootstrap.sh`](../scripts/a2a-nsc-bootstrap.sh) and [`scripts/a2a-auth-callout-bootstrap.sh`](../scripts/a2a-auth-callout-bootstrap.sh), renders `nats-server.conf`, and mints a long-lived smoke caller JWT into the shared volume. Confirm JWT attribution in gateway audit subjects `{prefix}.audit.ok.tasks.get` — `caller_source` must be `jwt_header`, not `_` or header-trust fallbacks (`A2A_GATEWAY_TRUST_CALLER_HEADERS=0` in the smoke profile).
+
+Common failures: starting gateway before `auth-callout-ready` (race on `$SYS.REQ.USER.AUTH`), missing signing key files on the volume, or an expired smoke JWT (regenerate with `docker compose run --rm a2a-bootstrap` after `make smoke-down`).
+
+---
+
 ## Where to go next
 
 - **Operators / NSC bootstrap:** [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)

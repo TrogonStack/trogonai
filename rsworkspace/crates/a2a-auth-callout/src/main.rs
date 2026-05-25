@@ -172,7 +172,15 @@ async fn main() {
 
     info!(nats_url = %nats_url, accounts = ?allowed_accounts, "connecting to NATS for auth callout");
 
-    let client = async_nats::connect(&nats_url).await.unwrap_or_else(|e| {
+    let connect_opts = match (
+        std::env::var("NATS_USER").ok(),
+        std::env::var("NATS_PASSWORD").ok(),
+    ) {
+        (Some(user), Some(password)) => async_nats::ConnectOptions::new()
+            .user_and_password(user, password),
+        _ => async_nats::ConnectOptions::new(),
+    };
+    let client = connect_opts.connect(&nats_url).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to connect to NATS");
         std::process::exit(1);
     });

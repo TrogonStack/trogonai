@@ -26,6 +26,7 @@ a2a-nats-agent = { path = "crates/a2a-nats-agent" }
 a2a-nats-discovery = { path = "crates/a2a-nats-discovery" }
 a2a-gateway = { path = "crates/a2a-gateway" }
 a2a-nats-server = { path = "crates/a2a-nats-server" }
+a2a-smoke-test = { path = "crates/a2a-smoke-test" }
 a2a-nats-stdio = { path = "crates/a2a-nats-stdio" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }

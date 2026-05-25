@@ -1,0 +1,191 @@
+name: a2a-smoke
+
+services:
+  a2a-bootstrap:
+    build:
+      context: ../../..
+      dockerfile: devops/docker/compose/services/a2a-bootstrap/Dockerfile
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap
+    restart: "no"
+
+  nats:
+    image: nats:2.14-alpine
+    command:
+      - "-c"
+      - "/run/a2a-bootstrap/nats-server.conf"
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+    networks:
+      - a2a_smoke
+
+  a2a-auth-callout:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-auth-callout/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/auth-callout.env
+        set +a
+        exec /usr/local/bin/a2a-auth-callout
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /run/a2a-bootstrap/auth-callout-ready"]
+      interval: 3s
+      timeout: 2s
+      start_period: 15s
+      retries: 20
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-gateway:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-gateway/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/gateway.env
+        set +a
+        exec /usr/local/bin/a2a-gateway
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-auth-callout:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q a2a-gateway"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 10
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-bridge:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-bridge/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/bridge.env
+        set +a
+        exec /usr/local/bin/a2a-bridge
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7443/ || test $$? -eq 8"]
+      interval: 5s
+      timeout: 3s
+      start_period: 15s
+      retries: 10
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-nats-agent:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-nats-agent/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/agent.env
+        set +a
+        exec /usr/local/bin/a2a-nats-agent
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-auth-callout:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q a2a-nats-agent"]
+      interval: 5s
+      timeout: 3s
+      start_period: 25s
+      retries: 10
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-nats-server:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-nats-server/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/nats-server.env
+        set +a
+        exec /usr/local/bin/a2a-nats-server
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-nats-agent:
+        condition: service_healthy
+      a2a-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ || test $$? -eq 8"]
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 10
+    networks:
+      - a2a_smoke
+    restart: unless-stopped
+
+  a2a-smoke-test:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/a2a-workspace/Dockerfile
+      target: a2a-smoke-test
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/nats-server.env
+        export A2A_SMOKE_EXPECTED_CALLER_ID=smoke-caller-1
+        set +a
+        exec a2a-smoke-test run
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap:ro
+    depends_on:
+      a2a-nats-server:
+        condition: service_healthy
+    networks:
+      - a2a_smoke
+    profiles:
+      - smoke
+
+volumes:
+  a2a_bootstrap:
+
+networks:
+  a2a_smoke:
+    driver: bridge
