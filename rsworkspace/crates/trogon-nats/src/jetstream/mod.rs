@@ -30,7 +30,7 @@ pub use stream_max_age::StreamMaxAge;
 pub use traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
     JetStreamGetStream, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
-    JetStreamKeyValueUpdate, JetStreamPublishMessage, JetStreamPublisher, JsMessageOf,
+    JetStreamKeyValueUpdate, JetStreamPublishMessage, JetStreamPublisher, JetStreamStreamUpdater, JsMessageOf,
 };
 
 #[cfg(any(test, feature = "test-support"))]

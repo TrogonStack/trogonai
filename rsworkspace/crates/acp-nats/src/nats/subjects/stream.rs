@@ -73,10 +73,10 @@ impl AcpStream {
     }
 
     pub fn config(&self, prefix: &AcpPrefix) -> Config {
-        // Global and GlobalExt subjects are used for core NATS request-reply.
+        // Global, GlobalExt, and ClientOps subjects are used for core NATS request-reply.
         // no_ack prevents JetStream from sending PubAcks to the request reply-to
         // inbox, which would race with the runner's actual response.
-        let no_ack = matches!(self, Self::Global | Self::GlobalExt);
+        let no_ack = matches!(self, Self::Global | Self::GlobalExt | Self::ClientOps);
         Config {
             name: self.stream_name(prefix),
             subjects: self.subject_patterns(prefix),
