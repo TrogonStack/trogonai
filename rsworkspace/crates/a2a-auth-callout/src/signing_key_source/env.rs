@@ -41,21 +41,26 @@ impl EnvSigningKeySource {
         })?;
         let current = SigningKeyHandle::new(
             KeyVersion::new(VERSION_CURRENT).expect("static version"),
-            SigningKey::from_secret(current_secret.as_bytes()),
+            signing_key_from_secret(&current_secret)?,
         );
 
-        let previous = std::env::var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
+        let previous = match std::env::var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
             .ok()
             .filter(|s| !s.is_empty())
-            .map(|secret| {
-                SigningKeyHandle::new(
-                    KeyVersion::new(VERSION_PREVIOUS).expect("static version"),
-                    SigningKey::from_secret(secret.as_bytes()),
-                )
-            });
+        {
+            None => None,
+            Some(secret) => Some(SigningKeyHandle::new(
+                KeyVersion::new(VERSION_PREVIOUS).expect("static version"),
+                signing_key_from_secret(&secret)?,
+            )),
+        };
 
         Ok(Self { current, previous })
     }
+}
+
+fn signing_key_from_secret(secret: &str) -> Result<SigningKey, AuthCalloutError> {
+    SigningKey::from_seed(secret.trim()).map_err(|e| AuthCalloutError::Internal(e.to_string()))
 }
 
 impl SigningKeySource for EnvSigningKeySource {

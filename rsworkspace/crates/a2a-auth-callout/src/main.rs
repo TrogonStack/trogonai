@@ -51,11 +51,14 @@ fn load_signing_key_source() -> Result<Arc<dyn SigningKeySource>, AuthCalloutErr
     match kind.as_str() {
         "env" => {
             if std::env::var("AUTH_CALLOUT_SIGNING_SECRET").is_err() {
+                let fallback = std::env::var("AUTH_CALLOUT_ISSUER_NKEY_SEED").map_err(|_| {
+                    AuthCalloutError::Internal(
+                        "AUTH_CALLOUT_SIGNING_SECRET or AUTH_CALLOUT_ISSUER_NKEY_SEED is required for env custody"
+                            .into(),
+                    )
+                })?;
                 unsafe {
-                    std::env::set_var(
-                        "AUTH_CALLOUT_SIGNING_SECRET",
-                        "dev-secret-not-for-production",
-                    );
+                    std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", fallback);
                 }
             }
             Ok(Arc::new(EnvSigningKeySource::from_env()?))
