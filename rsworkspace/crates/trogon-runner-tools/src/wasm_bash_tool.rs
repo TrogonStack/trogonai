@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -12,6 +13,24 @@ use trogon_tools::ToolDef;
 use trogon_mcp::McpCallTool;
 
 use crate::session_store::SessionStore;
+
+/// Returns a per-session async Mutex used to serialize terminal creation.
+///
+/// Two concurrent bash calls for the same session both find `terminal_id == None`
+/// on the first store load; without this lock, both would create a bash process and
+/// the first one would be orphaned. Holding this lock across the check-create-save
+/// critical section ensures only one terminal is ever created per session.
+fn session_creation_lock(session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    let map = LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    map.lock()
+        .unwrap()
+        .entry(session_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const EXIT_MARKER_PREFIX: &str = "__EXIT_";
@@ -103,34 +122,41 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
 
             // ── Obtain or create the persistent terminal ──────────────────────
-            let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
+            // The creation lock serialises concurrent bash calls for the same session
+            // so that both can't see terminal_id==None and each spawn their own bash
+            // process, leaving the loser orphaned. The second caller reloads state
+            // inside the lock and reuses the terminal the first caller just saved.
+            let terminal_id: String = {
+                let _create_lock = session_creation_lock(&session_id).lock_owned().await;
 
-            let cwd_str = sandbox_dir.to_string_lossy().into_owned();
-            if state.terminal_id.is_some()
-                && state.terminal_cwd.as_deref() != Some(cwd_str.as_str())
-            {
-                state.terminal_id = None;
-                state.terminal_cwd = None;
-            }
+                let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
+                let cwd_str = sandbox_dir.to_string_lossy().into_owned();
+                if state.terminal_id.is_some()
+                    && state.terminal_cwd.as_deref() != Some(cwd_str.as_str())
+                {
+                    state.terminal_id = None;
+                    state.terminal_cwd = None;
+                }
 
-            let terminal_id: String = if let Some(tid) = &state.terminal_id {
-                tid.clone()
-            } else {
-                let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
-                    .cwd(sandbox_dir.clone());
-                let payload =
-                    serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
-                let msg = nats
-                    .request(format!("{term_base}.create"), payload.into())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let resp: CreateTerminalResponse =
-                    serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
-                let tid = resp.terminal_id.0.to_string();
-                state.terminal_id = Some(tid.clone());
-                state.terminal_cwd = Some(cwd_str);
-                store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
-                tid
+                if let Some(tid) = &state.terminal_id {
+                    tid.clone()
+                } else {
+                    let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
+                        .cwd(sandbox_dir.clone());
+                    let payload =
+                        serde_json::to_vec(&create_req).map_err(|e| e.to_string())?;
+                    let msg = nats
+                        .request(format!("{term_base}.create"), payload.into())
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let resp: CreateTerminalResponse =
+                        serde_json::from_slice(&msg.payload).map_err(|e| e.to_string())?;
+                    let tid = resp.terminal_id.0.to_string();
+                    state.terminal_id = Some(tid.clone());
+                    state.terminal_cwd = Some(cwd_str);
+                    store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
+                    tid
+                }
             };
 
             // ── Snapshot baseline output length ───────────────────────────────
