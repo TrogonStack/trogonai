@@ -1293,7 +1293,22 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
     async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
         match args.method.as_ref() {
             "session/list_children" => {
-                let raw = serde_json::value::RawValue::from_string("[]".to_string())
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let parent_id = params
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                let children: Vec<String> = self
+                    .sessions
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|(_, s)| s.parent_session_id.as_deref() == Some(parent_id))
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                let result = serde_json::json!({ "children": children });
+                let raw = serde_json::value::RawValue::from_string(result.to_string())
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
