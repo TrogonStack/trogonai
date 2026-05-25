@@ -29,6 +29,41 @@ Spec references:
 
 The HTTPS bridge does **not** speak the server JWT envelope. It request/replies on `a2a.bridge.auth.callout.request` with JSON `BridgeMintRequest` / `BridgeMintResponse`. The in-process adapter synthesizes `ServerAuthRequestClaims` so the same `CalloutDispatcher` logic runs. Rationale: the bridge is not a NATS client connection subject to `$SYS.REQ.USER.AUTH`; only the server-facing subscriber needs the real wire format.
 
+## Signing key custody
+
+Inner User JWTs (`nats.jwt`) are NATS-shaped User JWTs (`typ: JWT`, `alg: ed25519-nkey`, `nats.type: user`, `pub`/`sub` permissions) signed by the callout Account NKey via `SigningKeySource`. Select custody with `AUTH_CALLOUT_SIGNING_KEY_SOURCE`:
+
+| Value | Use | Notes |
+|-------|-----|--------|
+| `env` | Local dev only | Default. Reads `AUTH_CALLOUT_SIGNING_SECRET` (+ optional `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS`). Logs a one-time warning that env secrets are not for production. |
+| `file` | Production / VMs | Requires `AUTH_CALLOUT_SIGNING_KEY_PATH` (current key material). Optional `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH` for overlap during rotation. Files are raw PEM or shared-secret bytes (no JSON envelope). |
+| `vault` | Planned | Not wired yet; process exits if selected. Future work will load keys from an operator vault behind a feature flag. |
+
+Minted User JWTs carry a `kid` claim (and matching JWS header `kid`) set to the key version string (`current` / `previous` for file and env sources). Verifiers should select the decoding key from the source's `accepted()` list using `kid`, falling back to trial verification only when `kid` is absent.
+
+### Rotation procedure
+
+1. Generate new signing material. Deploy callout with **new** key at `current` and **old** key at `previous` (`AUTH_CALLOUT_SIGNING_KEY_PATH` + `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH`, or env equivalents).
+2. Wait at least one full User JWT TTL (`AUTH_CALLOUT_USER_JWT_TTL_SECS`, default 300s) so outstanding tokens expire.
+3. Redeploy with only the new key at `current`; remove `previous` paths / `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS`.
+
+During overlap, mint always uses `current`; verification accepts both until step 3.
+
+## Denial semantics
+
+When `AuthDispatcher::dispatch` rejects a connect attempt, the subscriber replies with a signed **authorization response** JWT (NATS auth-callout extension). The JWT omits `nats.jwt` and sets `nats.error` to an opaque category string. The server logs that string; clients must not rely on it for security decisions.
+
+| `nats.error` category | Meaning for operators |
+|----------------------|------------------------|
+| `invalid_credentials` | Presented credential failed verification (OIDC, mTLS, or API key), or policy rejected the principal. Check IdP health, cert trust, and key registry. |
+| `unknown_account` | Requested tenant account is not in the callout allowlist (`AUTH_CALLOUT_ALLOWED_ACCOUNTS`). |
+| `invalid_request` | Request shape is incomplete (missing account, missing credential material, or scheme/credential mismatch). |
+| `verifier_unavailable` | Required verifier is not configured on the callout process (e.g. OIDC issuer set but JWKS discovery failed). |
+| `internal_error` | Callout-internal failure (serialization, reply publish, JWT mint). Inspect callout logs with full `error` field. |
+| `service_unavailable` | Callout could not reach NATS or subscribe to `$SYS.REQ.USER.AUTH`. |
+
+Structured audit logs on denial include `reason_category`, `server_id`, `caller_id_hint` (untrusted `user_nkey`), and the full internal error for operators. Wire categories never include OIDC, x509, or verifier exception text.
+
 ## Environment variables
 
 | Variable | Required | Purpose |
@@ -39,7 +74,9 @@ The HTTPS bridge does **not** speak the server JWT envelope. It request/replies 
 | `AUTH_CALLOUT_XKEY_SEED` | no | Account XKey seed when `auth_callout.xkey` is set on the server. |
 | `AUTH_CALLOUT_SERVER_XKEY_PUBLIC` | when encryption enabled | Server **persistent** XKey public key (`nats-server` seals requests with this keypair). |
 | `AUTH_CALLOUT_ALLOWED_ACCOUNTS` | **yes** | Comma-separated tenant account names the resolver may mint for. |
-| `AUTH_CALLOUT_SIGNING_SECRET` | dev fallback | HS256 secret for inner user JWT (`nats.jwt`) until NATS User JWT mint lands in task #4. |
+| `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no (default `env`) | `env` \| `file` \| `vault` — selects signing key custody. |
+| `AUTH_CALLOUT_SIGNING_SECRET` / `AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS` | dev fallback | Account NKey seed(s) for inner user JWT signing when source is `env` (defaults to `AUTH_CALLOUT_ISSUER_NKEY_SEED` when unset). |
+| `AUTH_CALLOUT_SIGNING_KEY_PATH` / `AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH` | when source is `file` | UTF-8 Account NKey seed file paths for current and previous keys. |
 | `AUTH_CALLOUT_USER_JWT_TTL_SECS` | no | TTL for minted user JWT (default 300). |
 | `AUTH_CALLOUT_OIDC_*` / `AUTH_CALLOUT_MTLS_*` | per verifier | See credential modules. |
 
@@ -72,5 +109,4 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 
 ## Open questions
 
-- **Inner user JWT**: responses currently embed the HS256 `UserJwtClaims` mint from `AUTH_CALLOUT_SIGNING_SECRET`. A real deployment must mint **NATS User JWTs** (nkey-signed, with `pub`/`sub` permissions) before `nats-server` will accept `nats.jwt` in production (tracked in `A2A_AUTH_CALLOUT_TODO.md` #4 and integration test #8).
 - **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per `A2A_PLAN.md`).

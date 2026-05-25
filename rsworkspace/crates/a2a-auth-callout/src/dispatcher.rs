@@ -9,7 +9,8 @@ use crate::credentials::api_key::ApiKeyVerifier;
 use crate::credentials::mtls::MTlsVerifier;
 use crate::credentials::oidc::{BearerToken, OidcVerifier};
 use crate::error::AuthCalloutError;
-use crate::jwt::{MintedUserJwt, SigningKey};
+use crate::jwt::{MintedUserJwt, UserJwtSubject};
+use crate::signing_key_source::SigningKeySource;
 use crate::wire::ServerAuthRequestClaims;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,8 +121,16 @@ impl AuthDispatcher for CalloutDispatcher {
             }
         };
 
+        let user_nkey = request.user_nkey()?;
+        let user_subject = UserJwtSubject::from_user_nkey(user_nkey);
+        let material = self.config.signing_key_source.current().minting_material();
         claims
-            .mint(&self.config.signing_key, SystemTime::now(), self.config.user_jwt_ttl)
+            .mint(
+                &material,
+                &user_subject,
+                SystemTime::now(),
+                self.config.user_jwt_ttl,
+            )
             .map_err(AuthCalloutError::from)
     }
 }
@@ -230,10 +239,15 @@ pub(crate) mod tests {
         let resolver: Arc<dyn AccountResolver> = Arc::new(StaticAccountResolver::new(
             allowed.iter().map(|s| s.to_string()),
         ));
-        let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(StaticSigningKeySource::new(
-            b"dispatcher-test-secret",
-            KeyVersion::new("test").expect("fixture version"),
-        ));
+        let account = KeyPair::new_account();
+        let account_seed = account.seed().expect("account seed");
+        let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
+            StaticSigningKeySource::new(
+                &account_seed,
+                KeyVersion::new("test").expect("test key version"),
+            )
+            .expect("static signing source"),
+        );
         CalloutDispatcher::new(CalloutDispatcherConfig {
             signing_key_source,
             user_jwt_ttl: Duration::from_secs(60),

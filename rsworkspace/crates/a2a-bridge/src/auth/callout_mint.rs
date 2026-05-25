@@ -121,10 +121,12 @@ pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::C
     let oidc: Arc<dyn OidcVerifier> = Arc::new(HarnessOidcVerifier { caller_id: caller });
     let resolver: Arc<dyn a2a_auth_callout::AccountResolver> =
         Arc::new(StaticAccountResolver::new(["tenant-harness".to_string()]));
-    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(StaticSigningKeySource::new(
-        b"bridge-harness-callout-secret",
-        KeyVersion::new("test").expect("harness version"),
-    ));
+    let issuer = nkeys::KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let signing_key_source: Arc<dyn SigningKeySource> = Arc::new(
+        StaticSigningKeySource::new(&issuer_seed, KeyVersion::new("test").expect("harness version"))
+            .expect("harness signing source"),
+    );
     CalloutDispatcher::new(CalloutDispatcherConfig {
         signing_key_source,
         user_jwt_ttl: Duration::from_secs(60),

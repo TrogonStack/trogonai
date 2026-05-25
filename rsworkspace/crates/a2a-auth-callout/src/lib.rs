@@ -19,12 +19,13 @@ pub use bridge_mint::{
 pub use dispatcher::{AuthDispatcher, AuthScheme, CalloutDispatcher, CalloutDispatcherConfig};
 pub use error::AuthCalloutError;
 pub use jwt::{
-    caller_id_from_minted_jwt, AccountName, AudienceAccount, CallerId, MintedUserJwt, SigningKey,
-    SpiceDbPrincipal, SpiceDbSubject, UserJwtClaims,
+    caller_id_from_minted_jwt, decode_nats_user_payload, AccountName, AudienceAccount, CallerId,
+    MintedUserJwt, NatsPermissionClaims, NatsSubjectPermission, SigningKey, SpiceDbPrincipal,
+    SpiceDbSubject, UserJwtClaims, UserJwtSubject,
 };
 pub use signing_key_source::{
-    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, SigningKeyHandle,
-    SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
+    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial,
+    SigningKeyHandle, SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
 };
 pub use permissions::{IssuedPermissions, SubjectPattern, SubjectPatternError};
 pub use subscriber::Subscriber;

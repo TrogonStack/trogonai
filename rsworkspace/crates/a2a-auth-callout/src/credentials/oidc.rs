@@ -340,14 +340,25 @@ mod tests {
         assert_eq!(user.sub.as_str(), "user-42");
         assert_eq!(user.aud.as_str(), "nats-acct-1");
         assert!(!user.caller_id.as_str().contains('.'));
+        let issuer = nkeys::KeyPair::new_account();
+        let issuer_seed = issuer.seed().expect("issuer seed");
+        let subject_kp = nkeys::KeyPair::new_user();
         let handle = SigningKeyHandle::new(
             KeyVersion::new("test").unwrap(),
-            SigningKey::from_secret(b"gw-secret-----------------------"),
+            SigningKey::from_seed(&issuer_seed).unwrap(),
         );
         let mut user = user;
         user.kid = handle.version().clone();
+        let subject = crate::jwt::UserJwtSubject::from_user_nkey(
+            crate::wire::NkeyPublic::parse(subject_kp.public_key()).unwrap(),
+        );
         let minted = user
-            .mint(&handle, std::time::SystemTime::now(), Duration::from_secs(60))
+            .mint(
+                &handle.minting_material(),
+                &subject,
+                std::time::SystemTime::now(),
+                Duration::from_secs(60),
+            )
             .unwrap();
         assert!(minted.as_str().split('.').count() == 3);
     }

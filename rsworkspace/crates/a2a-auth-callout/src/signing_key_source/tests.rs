@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tempfile::NamedTempFile;
 
-use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims};
+use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims, UserJwtSubject};
 use crate::permissions::IssuedPermissions;
 use super::env::test_env_dev_warn_count;
 use super::{
@@ -11,12 +11,18 @@ use super::{
     VaultSigningKeySource,
 };
 use crate::{AccountName, SpiceDbPrincipal};
+use nkeys::KeyPair;
 
 #[test]
 fn env_source_current_previous_missing_and_warn_once() {
+    let account = KeyPair::new_account();
+    let previous = KeyPair::new_account();
     unsafe {
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", "env-current-secret-bytes");
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS", "env-previous-secret-bytes");
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+        std::env::set_var(
+            "AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS",
+            previous.seed().expect("previous seed"),
+        );
     }
 
     let before = test_env_dev_warn_count();
@@ -43,16 +49,18 @@ fn env_source_current_previous_missing_and_warn_once() {
 
 #[test]
 fn file_reads_current_and_optional_previous() {
+    let current_kp = KeyPair::new_account();
     let mut current = NamedTempFile::new().expect("current temp");
     current
-        .write_all(b"file-current-secret----------------")
+        .write_all(current_kp.seed().expect("current seed").as_bytes())
         .expect("write current");
     let source = FileSigningKeySource::new(current.path(), None::<&str>).expect("file source");
     assert_eq!(source.accepted().len(), 1);
 
+    let previous_kp = KeyPair::new_account();
     let mut previous = NamedTempFile::new().expect("previous temp");
     previous
-        .write_all(b"file-previous-secret---------------")
+        .write_all(previous_kp.seed().expect("previous seed").as_bytes())
         .expect("write previous");
     let source =
         FileSigningKeySource::new(current.path(), Some(previous.path())).expect("file overlap");
@@ -73,12 +81,16 @@ fn vault_load_always_errors() {
 
 #[test]
 fn rotation_mint_verify_round_trip() {
+    let old_kp = KeyPair::new_account();
+    let current_kp = KeyPair::new_account();
+    let user = KeyPair::new_user();
     let source = StaticSigningKeySource::with_overlap(
-        b"new-signing-secret----------------",
+        &current_kp.seed().expect("current seed"),
         KeyVersion::new("current").expect("version"),
-        b"old-signing-secret-----------------",
+        &old_kp.seed().expect("previous seed"),
         KeyVersion::new("previous").expect("version"),
-    );
+    )
+    .expect("overlap source");
 
     let caller_id = CallerId::new("rotcaller").expect("caller");
     let claims = UserJwtClaims {
@@ -95,9 +107,12 @@ fn rotation_mint_verify_round_trip() {
         .into_iter()
         .find(|h| h.version().as_str() == "previous")
         .expect("previous handle");
+    let subject =
+        UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
     let old_token = claims
         .mint(
-            &old_handle,
+            &old_handle.minting_material(),
+            &subject,
             std::time::UNIX_EPOCH + Duration::from_secs(2_000),
             Duration::from_secs(60),
         )
@@ -111,7 +126,8 @@ fn rotation_mint_verify_round_trip() {
     current_claims.kid = current_handle.version().clone();
     let current_token = current_claims
         .mint(
-            &current_handle,
+            &current_handle.minting_material(),
+            &subject,
             std::time::UNIX_EPOCH + Duration::from_secs(2_000),
             Duration::from_secs(60),
         )
