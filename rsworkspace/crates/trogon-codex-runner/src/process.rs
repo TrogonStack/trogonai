@@ -247,6 +247,12 @@ impl CodexProcess {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let params = serde_json::json!({ "threadId": thread_id });
         self.request("turn/interrupt", Some(params)).await?;
+        // MED-23: drop the interrupted turn's broadcast sender. Events are keyed by
+        // thread_id, so a later turn reusing this thread would otherwise receive the
+        // interrupted turn's late tail events. Removing the sender now means those
+        // late events find no receiver and are discarded instead of corrupting the
+        // next turn.
+        self.turn_senders.lock().await.remove(thread_id);
         Ok(())
     }
 
