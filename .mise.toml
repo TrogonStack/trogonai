@@ -1,4 +1,6 @@
 [tools]
+node = "24.13.1"
+pnpm = "11.3.0"
 rust = { version = "1.93.0", profile = "default" }
 
 [tasks.dev]
@@ -7,14 +9,18 @@ run = "docker compose -f devops/docker/compose/compose.yml up -d"
 
 [tasks.build]
 description = "Build all"
-depends = ["build:rust"]
+depends = ["build:rust", "build:docs"]
+
+[tasks."build:docs"]
+dir = "docs"
+run = "pnpm docs:build"
 
 [tasks."build:rust"]
 dir = "rsworkspace"
 run = "cargo build"
 
 [tasks.check]
-description = "Check all"
+description = "Check Rust"
 depends = ["check:rust"]
 
 [tasks."check:rust"]
