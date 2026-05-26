@@ -4,7 +4,7 @@ Work tracker for the gap between [`A2A_PLAN.md`](./A2A_PLAN.md) and what is in-t
 
 Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementation Status — not duplicated here. All architectural decisions are landed (see `A2A_PLAN.md` §Decisions).
 
-In-tree code work (bundle placeholders, missing audit fields, discovery shaping, KV watch ergonomics, true time-of-day predicates) lives in [`WORKING_ITEMS_TODO.md`](./WORKING_ITEMS_TODO.md) — this file tracks the operator/deployment surface only.
+This file tracks the operator/deployment surface only — all in-tree code work has shipped.
 
 Docker-only end-to-end harness work (compose stack, bootstrap container, smoke tests `make smoke` + `make smoke-full`) is shipped — see `devops/docker/compose/compose.a2a.smoke.yml`, `compose.a2a.full.yml`, and the `a2a-smoke-test` crate.
 
