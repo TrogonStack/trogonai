@@ -8,16 +8,17 @@
 
 </div>
 
-**TrogonAi is a fully distributed agentic platform built on event sourcing and message passing.** It provides the infrastructure for deploying, orchestrating, and scaling autonomous AI agents across distributed systems.
+**TrogonAi is a distributed agentic platform for coordinating autonomous AI agents across services and runtimes.** It provides infrastructure for deploying, orchestrating, and scaling agents in systems where work crosses process and network boundaries.
 
-**Agents communicate through immutable event streams, making every interaction auditable, replayable, and composable.** The platform handles agent lifecycle management, inter-agent coordination, and durable state — so you can focus on agent behavior rather than distributed systems plumbing.
+**Agents communicate through explicit boundaries, making coordination observable, composable, and resilient.** The platform handles agent lifecycle management, inter-agent communication, and durable state so teams can focus on agent behavior instead of distributed systems plumbing.
 
-**Building reliable multi-agent systems today means stitching together queues, databases, orchestrators, and custom glue code.** TrogonAi replaces that patchwork with a single platform where event sourcing gives you a built-in audit trail, message passing gives you loose coupling, and immutability gives you correctness guarantees — all without sacrificing the ability to scale horizontally.
+**Building reliable multi-agent systems today means stitching together queues, databases, orchestrators, and custom glue code.** TrogonAi replaces that patchwork with a platform shaped around distributed architecture primitives: clear service boundaries, durable coordination, observable execution, and horizontal scale.
 
 **TrogonAi is for teams building production AI agent systems that need to be observable, resilient, and scalable.** Whether you're running a handful of cooperating agents or coordinating thousands across a cluster, the platform provides the primitives to do it without reinventing distributed infrastructure.
 
 ---
 
-## Getting Started
+## Project Areas
 
-Visit [`./rsworkspace`](rsworkspace/) to explore the Rust components and their documentation.
+- [`docs/`](docs/) - Documentation website and contribution workflow.
+- [`rsworkspace/`](rsworkspace/) - Rust components and crate documentation.
