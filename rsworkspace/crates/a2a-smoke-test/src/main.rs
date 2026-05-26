@@ -16,7 +16,9 @@ use a2a_nats_discovery::{
     parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export, OperatorKeyId,
     OperatorSignatureGate,
 };
-use a2a_types::{GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskState};
+use a2a_types::{
+    GetTaskRequest, Message, Part, Role, SendMessageRequest, TaskPushNotificationConfig, TaskState,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use futures::StreamExt;
@@ -24,6 +26,8 @@ use serde::Deserialize;
 use tracing::{error, info};
 
 const TIER3_REFUSE_TRIGGER: &str = "SMOKE_T3_REFUSE_ME";
+const ECHO_TASK_ID_PREFIX: &str = "echo-task:";
+const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum SmokeProfile {
@@ -368,6 +372,7 @@ async fn run_full_stack(ctx: &SmokeContext) -> Result<(), String> {
     assert_tier3_refusal(ctx).await?;
     let (caller_id, caller_source, rules) = assert_policy_allow_path(ctx).await?;
     assert_resubscribe_replay(ctx).await?;
+    assert_push_dlq_envelope(ctx).await?;
     println!(
         "SMOKE_FULL_OK caller_id={caller_id} caller_source={caller_source} rules_fired={rules:?}"
     );
@@ -552,6 +557,115 @@ async fn assert_policy_allow_path(ctx: &SmokeContext) -> Result<(String, String,
     let caller_id = envelope.caller_id.clone().unwrap_or_default();
     let caller_source = envelope.caller_source.clone().unwrap_or_default();
     Ok((caller_id, caller_source, Vec::new()))
+}
+
+#[derive(Debug, Deserialize)]
+struct PushDlqEnvelope {
+    schema: String,
+    task_id: String,
+    push_config_id: String,
+    target_url: String,
+    #[serde(default)]
+    error: String,
+    idempotency_key: String,
+}
+
+async fn assert_push_dlq_envelope(ctx: &SmokeContext) -> Result<(), String> {
+    let task_id_value = format!("dlq-{}", uuid::Uuid::new_v4().simple());
+    let task_id = A2aTaskId::new(&task_id_value).map_err(|e| e.to_string())?;
+    let config_id = format!("smoke-dlq-{}", uuid::Uuid::new_v4().simple());
+    let target_url = "https://127.0.0.1:1/smoke-dlq-unreachable".to_string();
+
+    let dlq_subject = format!(
+        "{}.push.dlq.*.{}",
+        ctx.prefix.as_str(),
+        task_id.as_str()
+    );
+    let mut dlq_sub = ctx
+        .nats
+        .subscribe(async_nats::Subject::from(dlq_subject.as_str()))
+        .await
+        .map_err(|e| format!("subscribe DLQ: {e}"))?;
+
+    let push_cfg = TaskPushNotificationConfig {
+        task_id: task_id.as_str().to_owned(),
+        id: config_id.clone(),
+        url: target_url.clone(),
+        ..Default::default()
+    };
+    tokio::time::timeout(ctx.op_timeout, ctx.client.push_set(&push_cfg))
+        .await
+        .map_err(|_| "push_set timed out".to_string())?
+        .map_err(|e| format!("push_set: {e}"))?;
+
+    let send_req = SendMessageRequest {
+        message: Some(Message {
+            message_id: format!("{ECHO_TASK_ID_PREFIX}{}", task_id.as_str()),
+            role: Role::User as i32,
+            parts: vec![Part {
+                content: Some(a2a_types::part::Content::Text("smoke-dlq".into())),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let (_bootstrap, mut event_stream) = tokio::time::timeout(ctx.op_timeout, ctx.client.message_stream(&send_req))
+        .await
+        .map_err(|_| "dlq message/stream timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    while let Ok(Some(_)) = tokio::time::timeout(ctx.op_timeout, event_stream.next()).await {}
+
+    let dlq_msg = tokio::time::timeout(Duration::from_secs(30), dlq_sub.next())
+        .await
+        .map_err(|_| "timed out waiting for push DLQ envelope".to_string())?
+        .ok_or("DLQ subscription ended".to_string())?;
+
+    let envelope: PushDlqEnvelope =
+        serde_json::from_slice(&dlq_msg.payload).map_err(|e| format!("DLQ json: {e}"))?;
+    if envelope.schema != PUSH_DLQ_SCHEMA_V1 {
+        return Err(format!("DLQ schema {:?} != {PUSH_DLQ_SCHEMA_V1}", envelope.schema));
+    }
+    if envelope.task_id != task_id.as_str() {
+        return Err(format!("DLQ task_id {} != {}", envelope.task_id, task_id.as_str()));
+    }
+    if envelope.push_config_id != config_id {
+        return Err(format!(
+            "DLQ push_config_id {} != {config_id}",
+            envelope.push_config_id
+        ));
+    }
+    if envelope.target_url != target_url {
+        return Err(format!(
+            "DLQ target_url {} != {target_url}",
+            envelope.target_url
+        ));
+    }
+    if envelope.error.is_empty() {
+        return Err("DLQ envelope missing error description".into());
+    }
+    if !envelope.idempotency_key.starts_with(task_id.as_str()) {
+        return Err(format!(
+            "DLQ idempotency_key {:?} should start with task id",
+            envelope.idempotency_key
+        ));
+    }
+
+    let subject = dlq_msg.subject.as_str();
+    let expected_suffix = format!(".{}", task_id.as_str());
+    if !subject.ends_with(&expected_suffix) {
+        return Err(format!("DLQ subject {subject} missing task_id segment"));
+    }
+
+    info!(
+        task_id = %task_id.as_str(),
+        config_id = %config_id,
+        subject = %subject,
+        "push DLQ envelope verified"
+    );
+    Ok(())
 }
 
 async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {

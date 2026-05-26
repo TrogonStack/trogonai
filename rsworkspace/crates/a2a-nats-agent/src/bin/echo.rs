@@ -3,19 +3,33 @@ use std::sync::Mutex;
 
 use a2a_nats::agent::{A2aError, A2aHandler, TaskEventStream};
 use a2a_types::{
-    GetTaskRequest, Message, Part, Role, SendMessageResponse, StreamResponse, Task, TaskState, TaskStatus,
-    TaskStatusUpdateEvent,
+    GetTaskRequest, Message, Part, Role, SendMessageResponse, StreamResponse, Task, TaskPushNotificationConfig,
+    TaskState, TaskStatus, TaskStatusUpdateEvent,
 };
 use tracing::error;
 
+/// Smoke-only convention: when a message id starts with this prefix, echo treats
+/// the suffix as the task id so smoke tests can pre-register a push config for a
+/// task that does not yet exist.
+const TASK_ID_FROM_MESSAGE_ID_PREFIX: &str = "echo-task:";
+
+fn task_id_from_message_id(message_id: &str) -> String {
+    message_id
+        .strip_prefix(TASK_ID_FROM_MESSAGE_ID_PREFIX)
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
 struct EchoHandler {
     tasks: Mutex<HashMap<String, Task>>,
+    push_configs: Mutex<HashMap<String, Vec<TaskPushNotificationConfig>>>,
 }
 
 impl EchoHandler {
     fn new() -> Self {
         Self {
             tasks: Mutex::new(HashMap::new()),
+            push_configs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -75,7 +89,7 @@ fn completed_task(task_id: &str, context_id: &str, input: &Message) -> Task {
 impl A2aHandler for EchoHandler {
     async fn message_send(&self, req: a2a_types::SendMessageRequest) -> Result<SendMessageResponse, A2aError> {
         let input = req.message.unwrap_or_default();
-        let task_id = uuid::Uuid::new_v4().to_string();
+        let task_id = task_id_from_message_id(&input.message_id);
         let context_id = if input.context_id.is_empty() {
             uuid::Uuid::new_v4().to_string()
         } else {
@@ -92,7 +106,7 @@ impl A2aHandler for EchoHandler {
 
     async fn message_stream(&self, req: a2a_types::SendMessageRequest) -> Result<(Task, TaskEventStream), A2aError> {
         let input = req.message.unwrap_or_default();
-        let task_id = uuid::Uuid::new_v4().to_string();
+        let task_id = task_id_from_message_id(&input.message_id);
         let context_id = if input.context_id.is_empty() {
             uuid::Uuid::new_v4().to_string()
         } else {
@@ -157,30 +171,66 @@ impl A2aHandler for EchoHandler {
 
     async fn push_notification_set(
         &self,
-        _req: a2a_types::TaskPushNotificationConfig,
+        req: a2a_types::TaskPushNotificationConfig,
     ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
-        Err(A2aError::push_notification_not_supported("not implemented"))
+        let task_id = req.task_id.clone();
+        if task_id.is_empty() {
+            return Err(A2aError::unsupported_operation("task_id required"));
+        }
+        let mut guard = self
+            .push_configs
+            .lock()
+            .map_err(|_| A2aError::internal("push config store lock poisoned"))?;
+        let bucket = guard.entry(task_id).or_default();
+        if let Some(slot) = bucket.iter_mut().find(|c| c.id == req.id) {
+            *slot = req.clone();
+        } else {
+            bucket.push(req.clone());
+        }
+        Ok(req)
     }
 
     async fn push_notification_get(
         &self,
-        _req: a2a_types::GetTaskPushNotificationConfigRequest,
+        req: a2a_types::GetTaskPushNotificationConfigRequest,
     ) -> Result<a2a_types::TaskPushNotificationConfig, A2aError> {
-        Err(A2aError::push_notification_not_supported("not implemented"))
+        let guard = self
+            .push_configs
+            .lock()
+            .map_err(|_| A2aError::internal("push config store lock poisoned"))?;
+        guard
+            .get(&req.task_id)
+            .and_then(|bucket| bucket.iter().find(|c| c.id == req.id).cloned())
+            .ok_or_else(|| A2aError::push_notification_not_supported("config not found"))
     }
 
     async fn push_notification_list(
         &self,
-        _req: a2a_types::ListTaskPushNotificationConfigsRequest,
+        req: a2a_types::ListTaskPushNotificationConfigsRequest,
     ) -> Result<a2a_types::ListTaskPushNotificationConfigsResponse, A2aError> {
-        Err(A2aError::push_notification_not_supported("not implemented"))
+        let guard = self
+            .push_configs
+            .lock()
+            .map_err(|_| A2aError::internal("push config store lock poisoned"))?;
+        let configs = guard.get(&req.task_id).cloned().unwrap_or_default();
+        Ok(a2a_types::ListTaskPushNotificationConfigsResponse {
+            configs,
+            next_page_token: String::new(),
+        })
     }
 
     async fn push_notification_delete(
         &self,
-        _req: a2a_types::DeleteTaskPushNotificationConfigRequest,
+        req: a2a_types::DeleteTaskPushNotificationConfigRequest,
     ) -> Result<(), A2aError> {
-        Err(A2aError::push_notification_not_supported("not implemented"))
+        let mut guard = self
+            .push_configs
+            .lock()
+            .map_err(|_| A2aError::internal("push config store lock poisoned"))?;
+        if let Some(bucket) = guard.get_mut(&req.task_id) {
+            bucket.retain(|c| c.id != req.id);
+        }
+        Ok(())
     }
 
     async fn agent_card(&self, _req: a2a_types::GetExtendedAgentCardRequest) -> Result<a2a_types::AgentCard, A2aError> {
