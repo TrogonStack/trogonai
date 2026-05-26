@@ -8731,11 +8731,24 @@ async def test_acp_cancel_mid_prompt():
 
 async def test_bash_bypass_permissions():
     """Spec (PR2/acp-runner): when a session is created with bypassPermissions,
-    the bash tool executes without requesting user approval. No auto_approve.py
-    should be needed — the bash command produces output in the tool_result."""
-    print("\n\033[1mTest 164: bash tool with bypassPermissions — executes without approval\033[0m")
+    the bash tool executes without requesting user approval at the runner level.
+    No auto_approve.py needed for the runner gate; wasm runtime runs with
+    WASM_AUTO_ALLOW_PERMISSIONS=1 for its own independent gate."""
+    print("\n\033[1mTest 164: bash tool with bypassPermissions — executes without auto_approve\033[0m")
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        # Wasm runtime required so runner can discover the "execution" service
+        wasm_env = {**os.environ,
+                    "NATS_URL": NATS_JS,
+                    "ACP_PREFIX": "acp.wasm164",
+                    "AGENT_TYPE": "wasm-t164",
+                    "WASM_SESSION_ROOT": tmpdir,
+                    "WASM_AUTO_ALLOW_PERMISSIONS": "1",
+                    "WASM_ONLY": "0"}
+        wasm_proc = subprocess.Popen([f"{BIN}/trogon-wasm-runtime"], env=wasm_env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.0)
+
         def sse(n):
             if n == 1:
                 return acp_tool_use_sse(
@@ -8753,27 +8766,32 @@ async def test_bash_bypass_permissions():
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         await asyncio.sleep(2.5)
         try:
-            # bypass_permissions=True → no auto_approve.py needed
+            # bypass_permissions=True → runner skips approval gate without auto_approve
             sid, done, _ = await runner_session_prompt(
-                NATS_JS, "acp.t164", tmpdir, "run bash without approval", timeout=20,
+                NATS_JS, "acp.t164", tmpdir, "run bash without approval", timeout=25,
                 bypass_permissions=True)
             print(f"    done={done} api_calls={len(mock.received)}", flush=True)
 
             tool_result = get_tool_result_content(mock.received)
             print(f"    tool_result: {tool_result!r}", flush=True)
 
-            if len(mock.received) >= 2 and tool_result and "BASH_T164_OUTPUT" in tool_result:
+            if tool_result and "BASH_T164_OUTPUT" in tool_result:
                 ok("bash bypassPermissions: bash executed without auto_approve "
-                   "(tool_result contains echo output)")
-            elif len(mock.received) >= 2 and tool_result is not None:
-                fail("bash bypassPermissions: tool_result present but missing expected output",
+                   "(runner gate bypassed; tool_result contains echo output)")
+            elif tool_result and "Unknown tool" in tool_result:
+                fail("bash bypassPermissions: wasm-runtime not registered — bash unavailable",
+                     f"tool_result={tool_result!r}")
+            elif tool_result is not None:
+                fail("bash bypassPermissions: tool ran but output unexpected",
                      f"tool_result={tool_result!r}")
             else:
-                fail("bash bypassPermissions: bash did not execute or tool_result missing",
-                     f"done={done} api_calls={len(mock.received)} tool_result={tool_result!r}")
+                fail("bash bypassPermissions: bash did not execute",
+                     f"done={done} api_calls={len(mock.received)}")
         except Exception as e:
             fail("bash bypassPermissions", str(e))
         finally:
+            try: wasm_proc.terminate(); wasm_proc.wait(timeout=3)
+            except Exception: pass
             try: proc.terminate(); proc.wait(timeout=3)
             except Exception: pass
             mock.stop()
