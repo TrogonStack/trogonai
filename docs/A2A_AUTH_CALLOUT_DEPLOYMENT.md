@@ -111,7 +111,7 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 
 ## Open questions
 
-- **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per `A2A_PLAN.md`).
+- **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per [A2A architecture](./A2A_ARCHITECTURE.md)).
 
 ## Related
 

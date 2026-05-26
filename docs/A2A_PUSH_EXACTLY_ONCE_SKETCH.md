@@ -1,14 +1,14 @@
 # A2A push exactly-once — design sketch
 
-Engineering sketch for opt-in **exactly-once** terminal push delivery (Phase 3). Not implemented in-tree yet; tracked in [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 3 and decided in [`../A2A_PLAN.md`](../A2A_PLAN.md) §Decisions.
+Engineering sketch for opt-in **exactly-once** terminal push delivery (Phase 3). Not implemented in-tree yet; tracked in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Phase 3 and decided in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Decisions.
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
 | [`./A2A_PUSH_DLQ_OPS.md`](./A2A_PUSH_DLQ_OPS.md) | Terminal push failure path — **`push::dlq`** publishes to **`A2A_PUSH_DLQ`** after retries exhaust |
-| [`../A2A_TODO.md`](../A2A_TODO.md) | Open engineering items (exactly-once flag, gateway DLQ mirroring, …) |
-| [`../A2A_PLAN.md`](../A2A_PLAN.md) | Push target schemes (`http(s)://`, `subject:`, `jetstream:`) and default at-least-once semantics |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Open engineering items (exactly-once flag, gateway DLQ mirroring, …) |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Push target schemes (`http(s)://`, `subject:`, `jetstream:`) and default at-least-once semantics |
 
 ---
 

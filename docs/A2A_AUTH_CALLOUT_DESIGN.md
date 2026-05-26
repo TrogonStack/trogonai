@@ -4,7 +4,7 @@ Stable design reference for the **`a2a-auth-callout`** service (`rsworkspace/cra
 
 **Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
 
-Related decisions: [`A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) (auth callout deployment, subject ACL, push DLQ).
+Related decisions: [A2A architecture §Decisions](./A2A_ARCHITECTURE.md) (auth callout deployment, subject ACL, push DLQ).
 
 ---
 
@@ -54,7 +54,7 @@ The HTTPS bridge does **not** speak the server JWT envelope. It request/replies 
 
 ### Credential sources (preference order)
 
-Landed in [`A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md); implemented in `credentials/`:
+Landed in [A2A architecture §Decisions](./A2A_ARCHITECTURE.md); implemented in `credentials/`:
 
 1. **OIDC** — primary (`AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES`). JWKS discovery; map claims → tenant Account + `caller_id`.
 2. **mTLS** — service-to-service (`AUTH_CALLOUT_MTLS_TRUST_ANCHORS`). Map certificate subject / SAN → Account principal.
@@ -210,7 +210,7 @@ External client ──OIDC/mTLS/API key──► a2a-auth-callout ($SYS.REQ.USER
 
 - [A2A auth callout deployment](./A2A_AUTH_CALLOUT_DEPLOYMENT.md) — operator runbook
 - [A2A runtime env](./A2A_RUNTIME_ENV.md) — `AUTH_CALLOUT_*` env reference
-- [A2A TODO](../A2A_TODO.md) — Phase 0 checklist
+- [A2A TODO](./A2A_ARCHITECTURE.md) — Phase 0 checklist
 - [A2A NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) — Operator / Account / User hierarchy and ACL table
 - [A2A per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) — `A2A_PUSH_DLQ` subject shape
 - [A2A push DLQ ops](./A2A_PUSH_DLQ_OPS.md) — operator consumption of `{caller_id}` segments

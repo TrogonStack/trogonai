@@ -109,4 +109,4 @@ let plan = a2a_redaction::SkillSelectionPlan::plan(
 ## Related docs
 
 - [Runtime environment](./A2A_RUNTIME_ENV.md) — `A2A_GATEWAY_POLICY_BUNDLE_DIR`, `A2A_GATEWAY_POLICY_SKILLS`
-- [Open work tracker](../A2A_TODO.md) — Phase 2 skill matrix status
+- [Open work tracker](./A2A_ARCHITECTURE.md) — Phase 2 skill matrix status

@@ -2,7 +2,7 @@
 
 One-page summary of Phase 0 per-User NATS subject ACL inside a tenant Account. Full provisioning steps: [A2A NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md).
 
-**Related:** [A2A plan](../A2A_PLAN.md) · [A2A pending decisions](../A2A_PENDING_DECISION.md) · [A2A JetStream account streams](./A2A_JETSTREAM_ACCOUNT_STREAMS.md)
+**Related:** [A2A plan](./A2A_ARCHITECTURE.md) · [A2A pending decisions](./A2A_ARCHITECTURE.md) · [A2A JetStream account streams](./A2A_JETSTREAM_ACCOUNT_STREAMS.md)
 
 ---
 
@@ -16,7 +16,7 @@ One **NATS Account per tenant**. Subjects carry **no `{tenant}` segment** — th
 
 | Role | Publish (allow) | Subscribe (allow) | Typical use |
 |------|-----------------|-------------------|-------------|
-| **Caller User** | `a2a.gateway.>` | `_INBOX.{caller_id}.>` | External or bridge-originated identity; request/reply into gateway ingress; replies on caller-owned inbox. Also provision subscribe on `a2a.push.{caller_id}.>` for push read path ([pending decision](../A2A_PENDING_DECISION.md)). **Do not** grant `{prefix}.catalog.register.*` publish. |
+| **Caller User** | `a2a.gateway.>` | `_INBOX.{caller_id}.>` | External or bridge-originated identity; request/reply into gateway ingress; replies on caller-owned inbox. Also provision subscribe on `a2a.push.{caller_id}.>` for push read path ([pending decision](./A2A_ARCHITECTURE.md)). **Do not** grant `{prefix}.catalog.register.*` publish. |
 | **Gateway User** | `a2a.agent.>`, `a2a.task.>`, `a2a.push.>` | `a2a.gateway.>` | Long-lived `a2a-gateway` service; queue-group consumer on ingress; forwards to agents, task events, push envelopes. Read-only catalog (KV get/watch or `{prefix}.discover.*`); no KV put. |
 | **Registrar service User** | `{prefix}.catalog.register.*` | `{prefix}.discover.*` | Long-lived `a2a-nats-discovery` identity; catalog write ingress + KV-backed discover request/reply. Grant `--allow-pub-response` on both paths. |
 

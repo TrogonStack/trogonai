@@ -6,8 +6,8 @@ Short runbook for the per-Account JetStream dead-letter stream used when termina
 
 | Document | Purpose |
 |----------|---------|
-| [A2A plan](../A2A_PLAN.md) | Push delivery semantics, Bridge dispatch |
-| [A2A TODO](../A2A_TODO.md) | Remaining phased work (gateway, exactly-once, …) |
+| [A2A plan](./A2A_ARCHITECTURE.md) | Push delivery semantics, Bridge dispatch |
+| [A2A TODO](./A2A_ARCHITECTURE.md) | Remaining phased work (gateway, exactly-once, …) |
 | [Push exactly-once sketch](./A2A_PUSH_EXACTLY_ONCE_SKETCH.md) | Opt-in idempotency keys, JetStream dedupe, HTTP cooperation, `subject:` best-effort |
 | [A2A per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) | Stream provisioning reference alongside **`A2A_EVENTS`** |
 | [Auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md) | Minted User JWT → stable **`caller_id`** for ACL + DLQ segments |

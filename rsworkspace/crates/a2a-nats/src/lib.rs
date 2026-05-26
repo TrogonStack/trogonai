@@ -4,7 +4,7 @@
 //! subjects and JetStream streams. Mirrors the patterns established by `acp-nats` and
 //! `mcp-nats` for JSON-RPC-over-NATS protocols in this workspace.
 //!
-//! See [`A2A_PLAN.md`](../../../../A2A_PLAN.md) at the repo root for architecture.
+//! See [A2A architecture](../../../../docs/A2A_ARCHITECTURE.md) at the repo root for architecture.
 //! Operator + embedder wiring: **[`docs/A2A_RUNTIME_ENV.md`](../../../../docs/A2A_RUNTIME_ENV.md)**,
 //! **[`docs/A2A_DOCS_INDEX.md`](../../../../docs/A2A_DOCS_INDEX.md)**.
 
