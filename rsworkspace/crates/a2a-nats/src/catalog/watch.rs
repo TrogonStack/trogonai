@@ -106,10 +106,96 @@ fn map_kv_entry(entry: kv::Entry) -> Result<AgentCardWatchEvent, AgentCardWatchE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use time::OffsetDateTime;
+
+    fn minimal_card_json(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "supportedInterfaces": [{
+                "url": "https://example.com/a2a",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "0.2.0",
+                "tenant": ""
+            }]
+        })
+    }
+
+    fn entry(key: &str, op: Operation, value: Bytes, revision: u64) -> kv::Entry {
+        kv::Entry {
+            bucket: "A2A_AGENT_CARDS".to_string(),
+            key: key.to_string(),
+            value,
+            revision,
+            delta: 0,
+            created: OffsetDateTime::UNIX_EPOCH,
+            operation: op,
+            seen_current: true,
+        }
+    }
 
     #[test]
     fn watch_error_display() {
         let err = AgentCardWatchError::Kv("down".into());
         assert!(err.to_string().contains("KV watch"));
+    }
+
+    #[test]
+    fn map_kv_entry_put_valid_card() {
+        let body = serde_json::to_vec(&minimal_card_json("bot")).unwrap();
+        let entry = entry("bot", Operation::Put, Bytes::from(body), 7);
+
+        let event = map_kv_entry(entry).expect("valid put should map");
+        match event {
+            AgentCardWatchEvent::Put { agent_id, card, revision } => {
+                assert_eq!(agent_id.as_str(), "bot");
+                assert_eq!(card.name, "bot");
+                assert_eq!(revision, 7);
+            }
+            other => panic!("expected Put event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_kv_entry_put_invalid_json_returns_deserialize() {
+        let entry = entry("bot", Operation::Put, Bytes::from_static(b"not json"), 1);
+        let err = map_kv_entry(entry).expect_err("invalid json must error");
+        assert!(matches!(err, AgentCardWatchError::Deserialize(_)));
+    }
+
+    #[test]
+    fn map_kv_entry_put_schema_failure_returns_schema() {
+        let body = serde_json::to_vec(&serde_json::json!({})).unwrap();
+        let entry = entry("bot", Operation::Put, Bytes::from(body), 1);
+        let err = map_kv_entry(entry).expect_err("missing required fields must error");
+        assert!(matches!(err, AgentCardWatchError::Schema(_)));
+    }
+
+    #[test]
+    fn map_kv_entry_delete_yields_delete_event() {
+        let entry = entry("bot", Operation::Delete, Bytes::new(), 9);
+        let event = map_kv_entry(entry).expect("delete should map");
+        match event {
+            AgentCardWatchEvent::Delete { agent_id, revision } => {
+                assert_eq!(agent_id.as_str(), "bot");
+                assert_eq!(revision, 9);
+            }
+            other => panic!("expected Delete event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_kv_entry_purge_yields_delete_event() {
+        let entry = entry("bot", Operation::Purge, Bytes::new(), 10);
+        let event = map_kv_entry(entry).expect("purge should map to delete");
+        assert!(matches!(event, AgentCardWatchEvent::Delete { revision: 10, .. }));
+    }
+
+    #[test]
+    fn map_kv_entry_invalid_key_returns_invalid_key() {
+        let body = serde_json::to_vec(&minimal_card_json("bot")).unwrap();
+        let entry = entry("not a valid id!", Operation::Put, Bytes::from(body), 1);
+        let err = map_kv_entry(entry).expect_err("bogus key must error");
+        assert!(matches!(err, AgentCardWatchError::InvalidKey(_)));
     }
 }

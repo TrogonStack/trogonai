@@ -34,6 +34,7 @@ trogon-std = { workspace = true }
 [dev-dependencies]
 a2a-auth-callout = { workspace = true, features = ["test-support"] }
 opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "metrics", "testing"] }
+time = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
