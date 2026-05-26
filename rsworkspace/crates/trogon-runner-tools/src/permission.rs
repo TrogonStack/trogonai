@@ -388,6 +388,11 @@ pub async fn check_tool_permission(
     tool_call_id: &str,
     tool_name: &str,
     tool_input: &Value,
+    // MED-7: caller-owned audit buffer. Previously a fresh buffer was allocated
+    // here and dropped immediately, so xai/openrouter session audit logs were
+    // always empty. The caller passes a turn-scoped buffer and drains it into the
+    // session's audit_log after the turn.
+    audit_buf: AuditBuf,
 ) -> bool {
     if mode == "bypassPermissions" {
         return true;
@@ -402,7 +407,7 @@ pub async fn check_tool_permission(
         allowed_tools.to_vec(),
         Arc::new(rules),
         tool_policies.to_vec(),
-        Arc::new(Mutex::new(Vec::new())),
+        audit_buf,
     ) else {
         return true;
     };
