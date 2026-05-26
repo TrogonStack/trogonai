@@ -11,10 +11,6 @@ path = "src/main.rs"
 name = "a2a-nats-agent-echo"
 path = "src/bin/echo.rs"
 
-[[example]]
-name = "echo"
-path = "examples/echo.rs"
-
 [lints]
 workspace = true
 
