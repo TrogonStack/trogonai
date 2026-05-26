@@ -60,4 +60,4 @@ Successful allow paths emit `gateway.tier2.evaluated_allow` when CEL is enabled,
 
 - [Runtime env reference](./A2A_RUNTIME_ENV.md)
 - [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md)
-- [Architecture plan](../A2A_PLAN.md)
+- [Architecture plan](./A2A_ARCHITECTURE.md)
