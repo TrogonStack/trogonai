@@ -218,6 +218,21 @@ def acp_two_tool_use_sse(tool_id1, name1, args1, tool_id2, name2, args2):
         'event: message_stop\ndata: {"type":"message_stop"}\n\n'
     )
 
+def acp_max_tokens_sse(text="partial"):
+    """ACP SSE with stop_reason='max_tokens' — simulates context-window exhaustion."""
+    return (
+        'event: message_start\ndata: {"type":"message_start","message":{"usage":'
+        '{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n\n'
+        'event: content_block_start\ndata: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"text","text":""}}\n\n'
+        f'event: content_block_delta\ndata: {{"type":"content_block_delta","index":0,'
+        f'"delta":{{"type":"text_delta","text":{json.dumps(text)}}}}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},'
+        '"usage":{"output_tokens":4096}}\n\n'
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    )
+
 def xai_text_sse_with_id(text, resp_id):
     """xai SSE with specific response ID — used to test last_response_id tracking."""
     return (
@@ -8227,6 +8242,404 @@ async def test_multiple_at_mentions():
                  f"rc={rc} out={out[:200]!r}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 155 — acp-runner: max_iterations exceeded → stop_reason "max_turn_requests"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_max_iterations_stop_reason():
+    """Spec (PR2/acp-runner agent_loop): when AGENT_MAX_ITERATIONS is reached,
+    the runner returns StopReason::MaxTurnRequests serialised as 'max_turn_requests'.
+    With AGENT_MAX_ITERATIONS=2, the mock always returns tool_use so the loop
+    exhausts after exactly 2 API calls."""
+    print("\n\033[1mTest 155: acp-runner max_iterations → stop_reason 'max_turn_requests'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(
+            30179,
+            lambda n: acp_tool_use_sse(
+                f"t155_{n}", "write_file",
+                json.dumps({"path": "t155_tmp.txt", "content": "x"})
+            )
+        ).start()
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t155",
+               "PROXY_URL": "http://127.0.0.1:30179",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "2"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t155", tmpdir, "loop forever", timeout=30)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            stop_reason = done.get("stopReason")
+            api_calls   = len(mock.received)
+
+            if stop_reason == "max_turn_requests" and api_calls == 2:
+                ok("acp max_iterations: stop_reason='max_turn_requests', exactly 2 API calls")
+            elif stop_reason == "max_turn_requests":
+                ok(f"acp max_iterations: stop_reason correct; api_calls={api_calls} (expected 2)")
+            else:
+                fail("acp max_iterations: wrong stop_reason",
+                     f"stop_reason={stop_reason!r} api_calls={api_calls} done={done}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 156 — xai-runner: MAX_TOOL_ROUNDS (10) exceeded → stop_reason "cancelled"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_max_tool_rounds_stop_reason():
+    """Spec (PR3/xai-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop runs
+    10 times, the 11th check (tool_rounds >= MAX_TOOL_ROUNDS) triggers
+    StopReason::Cancelled serialised as 'cancelled'. The mock always returns a
+    function_call, forcing 11 total API calls before the runner stops."""
+    print("\n\033[1mTest 156: xai-runner MAX_TOOL_ROUNDS=10 → stop_reason 'cancelled'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(
+            30180,
+            lambda n: xai_function_call_sse(
+                f"c156_{n}", "write_file",
+                json.dumps({"path": "t156_tmp.txt", "content": "x"})
+            )
+        ).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t156",
+                   "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30180",
+                   "XAI_MODELS": "grok-t156:grok-t156"}
+            proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t156", tmpdir, "loop forever", timeout=45)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            stop_reason = done.get("stopReason")
+            api_calls   = len(mock.received)
+
+            # 10 tool executions → 11 total API calls → break on 11th check
+            if stop_reason == "cancelled" and api_calls == 11:
+                ok("xai MAX_TOOL_ROUNDS: stop_reason='cancelled', exactly 11 API calls")
+            elif stop_reason == "cancelled":
+                ok(f"xai MAX_TOOL_ROUNDS: stop_reason correct; api_calls={api_calls} (expected 11)")
+            else:
+                fail("xai MAX_TOOL_ROUNDS: wrong stop_reason",
+                     f"stop_reason={stop_reason!r} api_calls={api_calls} done={done}")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 157 — openrouter-runner: MAX_TOOL_ROUNDS (10) exceeded → stop_reason "cancelled"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_max_tool_rounds_stop_reason():
+    """Spec (PR4/openrouter-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop
+    executes 10 rounds, the 11th check (tool_rounds >= MAX_TOOL_ROUNDS) triggers
+    StopReason::Cancelled serialised as 'cancelled'. The mock always returns a
+    tool_calls SSE, forcing 11 total API calls before the runner stops."""
+    print("\n\033[1mTest 157: openrouter-runner MAX_TOOL_ROUNDS=10 → stop_reason 'cancelled'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(
+            30181,
+            lambda n: or_tool_calls_sse(
+                f"c157_{n}", "write_file",
+                json.dumps({"path": "t157_tmp.txt", "content": "x"})
+            )
+        ).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t157",
+                   "OPENROUTER_API_KEY": "test",
+                   "OPENROUTER_BASE_URL": "http://127.0.0.1:30181",
+                   "OPENROUTER_MODELS": "gpt-t157:gpt-t157"}
+            proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t157", tmpdir, "loop forever", timeout=45)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            stop_reason = done.get("stopReason")
+            api_calls   = len(mock.received)
+
+            if stop_reason == "cancelled" and api_calls == 11:
+                ok("openrouter MAX_TOOL_ROUNDS: stop_reason='cancelled', exactly 11 API calls")
+            elif stop_reason == "cancelled":
+                ok(f"openrouter MAX_TOOL_ROUNDS: stop_reason correct; api_calls={api_calls} (expected 11)")
+            else:
+                fail("openrouter MAX_TOOL_ROUNDS: wrong stop_reason",
+                     f"stop_reason={stop_reason!r} api_calls={api_calls} done={done}")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 158 — acp-runner: LLM returns max_tokens → stop_reason "max_tokens"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_max_tokens_stop_reason():
+    """Spec (PR2/acp-runner agent_loop.rs): when the LLM returns stop_reason='max_tokens'
+    (context window full), the runner catches MaxTokens and returns StopReason::MaxTokens
+    serialised as 'max_tokens'."""
+    print("\n\033[1mTest 158: acp-runner LLM max_tokens → stop_reason 'max_tokens'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30182, lambda n: acp_max_tokens_sse("partial text t158")).start()
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t158",
+               "PROXY_URL": "http://127.0.0.1:30182",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t158", tmpdir, "fill context", timeout=20)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            stop_reason = done.get("stopReason")
+
+            if stop_reason == "max_tokens":
+                ok("acp max_tokens: stop_reason='max_tokens' when LLM returns max_tokens")
+            else:
+                fail("acp max_tokens: wrong stop_reason",
+                     f"stop_reason={stop_reason!r} done={done}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 159 — acp-runner: fork with branchAtIndex truncates history
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_fork_branch_at_index():
+    """Spec (PR6/acp-runner): fork_session with _meta.branchAtIndex=N truncates the
+    parent history at index N before copying to the forked session. A fork at index 2
+    of a 4-message history gives the forked session only the first 2 messages."""
+    print("\n\033[1mTest 159: acp fork with branchAtIndex — forked history truncated\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_count = [0]
+        def sse(n):
+            call_count[0] = n
+            return acp_text_sse(f"reply-t159-{n}")
+
+        mock = MockHttpServer(30183, sse).start()
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t159",
+               "PROXY_URL": "http://127.0.0.1:30183",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            # Create session + send 2 prompts → history = [user1,asst1,user2,asst2] (4 msgs)
+            r = await nc.request("acp.t159.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            parent_sid = json.loads(r.data)["sessionId"]
+
+            async def _noop(m): pass
+            await nc.subscribe(f"acp.t159.session.{parent_sid}.client.session.update", cb=_noop)
+
+            for i in range(1, 3):
+                req_id = str(uuid.uuid4())
+                resp_sub = await nc.subscribe(
+                    f"acp.t159.session.{parent_sid}.agent.prompt.response.{req_id}")
+                await nc.publish(
+                    f"acp.t159.session.{parent_sid}.agent.prompt",
+                    json.dumps({"sessionId": parent_sid,
+                                "prompt": [{"type": "text", "text": f"prompt-t159-{i}"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+                await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+
+            # Fork with branchAtIndex=2 (keep only first 2 messages: user1+asst1)
+            req_id_fork = str(uuid.uuid4())
+            resp_subj = f"acp.t159.session.{parent_sid}.agent.response.{req_id_fork}"
+            fork_sub = await nc.subscribe(resp_subj)
+
+            fork_payload = json.dumps({
+                "sessionId": parent_sid, "cwd": tmpdir, "mcpServers": [],
+                "_meta": {"branchAtIndex": 2}
+            }).encode()
+            await js.publish(
+                f"acp.t159.session.{parent_sid}.agent.fork",
+                fork_payload,
+                headers={"X-Req-Id": req_id_fork},
+            )
+            fork_msg = await asyncio.wait_for(fork_sub.next_msg(), timeout=10)
+            fork_sid = json.loads(fork_msg.data).get("sessionId", "")
+            print(f"    parent_sid={parent_sid!r} fork_sid={fork_sid!r}", flush=True)
+
+            if not fork_sid:
+                fail("fork branchAtIndex: fork response missing sessionId")
+                return
+
+            # Export forked session — should have only 2 messages (user1+asst1)
+            r = await nc.request("acp.t159.agent.ext.session/export",
+                                 json.dumps({"sessionId": fork_sid}).encode(), timeout=5)
+            export_data = json.loads(r.data)
+            msgs = export_data if isinstance(export_data, list) else export_data.get("messages", [])
+            print(f"    forked history len={len(msgs)}", flush=True)
+
+            if len(msgs) == 2:
+                ok("fork branchAtIndex: forked session has exactly 2 messages "
+                   "(truncated at index 2, discarding user2+asst2)")
+            elif len(msgs) < 4:
+                ok(f"fork branchAtIndex: forked history truncated ({len(msgs)} msgs < 4 parent msgs)")
+            else:
+                fail("fork branchAtIndex: forked session has full history — branchAtIndex not applied",
+                     f"len(msgs)={len(msgs)} expected 2")
+
+        except Exception as e:
+            fail("fork branchAtIndex", str(e))
+        finally:
+            await nc.close()
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 160 — acp-runner: additionalRoots injected into system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_read_file_offset_only():
+    """Spec (PR1/fs.rs read_file): offset without limit reads to end of file.
+    offset=N skips the first N lines (0-based). offset=2 skips lines 1-2,
+    returns lines 3 to end — not just one line and not the whole file."""
+    print("\n\033[1mTest 162: read_file offset-only (no limit) — reads from offset to end\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "offset_t162.txt")
+        with open(path, 'w') as f:
+            for i in range(1, 6):
+                f.write(f"LINE_{i}_T162\n")
+
+        def sse(n):
+            if n == 1:
+                # offset=2 skips the first 2 lines (index 0,1) → returns lines 3-5
+                return acp_tool_use_sse("r162", "read_file",
+                    json.dumps({"path": "offset_t162.txt", "offset": 2}))
+            return acp_text_sse("read done t162")
+
+        mock = MockHttpServer(30186, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30186, 162, tmpdir)
+        try:
+            _, _, _ = await runner_session_prompt(NATS_JS, prefix, tmpdir,
+                                                  "read from line 3 to end", timeout=20)
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+
+            has_line1 = tool_result and "LINE_1_T162" in tool_result
+            has_line2 = tool_result and "LINE_2_T162" in tool_result
+            has_line3 = tool_result and "LINE_3_T162" in tool_result
+            has_line4 = tool_result and "LINE_4_T162" in tool_result
+            has_line5 = tool_result and "LINE_5_T162" in tool_result
+
+            if has_line3 and has_line4 and has_line5 and not has_line1 and not has_line2:
+                ok("read_file offset-only: lines 3-5 returned, lines 1-2 excluded")
+            elif has_line3 and not has_line1:
+                ok(f"read_file offset-only: starts at line 3 (line1={has_line1} "
+                   f"line4={has_line4} line5={has_line5})")
+            elif has_line1:
+                fail("read_file offset-only: line 1 included — offset not applied",
+                     f"tool_result={tool_result!r}")
+            else:
+                fail("read_file offset-only: line 3 not found",
+                     f"tool_result={tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+async def test_bypass_permissions_tool_executes():
+    """Spec (PR2/acp-runner): when a session is created with _meta.mode='bypassPermissions',
+    tool calls execute immediately without requesting user approval. Write_file should
+    succeed even though no auto_approve.py is running."""
+    print("\n\033[1mTest 161: bypassPermissions — write_file executes without approval\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse(
+                    "bp161", "write_file",
+                    json.dumps({"path": "bypass_t161.txt", "content": "BYPASS_WRITTEN_T161\n"}))
+            return acp_text_sse("wrote file without approval")
+
+        mock = MockHttpServer(30185, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t161",
+               "PROXY_URL": "http://127.0.0.1:30185",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            # runner_session_prompt with bypass_permissions=True sets _meta.mode=bypassPermissions
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t161", tmpdir, "write a file", timeout=20,
+                bypass_permissions=True)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            out_path = os.path.join(tmpdir, "bypass_t161.txt")
+            file_exists = os.path.exists(out_path)
+            file_content = open(out_path).read() if file_exists else ""
+            print(f"    file_exists={file_exists} content={file_content!r}", flush=True)
+
+            if file_exists and "BYPASS_WRITTEN_T161" in file_content:
+                ok("bypassPermissions: write_file executed without auto_approve "
+                   "(file created on disk)")
+            elif file_exists:
+                fail("bypassPermissions: file created but wrong content",
+                     f"content={file_content!r}")
+            else:
+                fail("bypassPermissions: file NOT created — tool did not execute",
+                     f"done={done} api_calls={len(mock.received)}")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -8376,6 +8789,13 @@ async def main():
     await test_git_diff_with_args()
     await test_notebook_edit_out_of_range()
     await test_multiple_at_mentions()
+    await test_acp_max_iterations_stop_reason()
+    await test_xai_max_tool_rounds_stop_reason()
+    await test_openrouter_max_tool_rounds_stop_reason()
+    await test_acp_max_tokens_stop_reason()
+    await test_acp_fork_branch_at_index()
+    await test_bypass_permissions_tool_executes()
+    await test_read_file_offset_only()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
