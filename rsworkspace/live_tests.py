@@ -7674,6 +7674,559 @@ async def test_openrouter_trogon_md_second_prompt():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SSE HELPER — acp thinking block + text block (extended thinking)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def acp_thinking_and_text_sse(thinking, text):
+    """ACP SSE: thinking block (index 0) followed by text block (index 1)."""
+    return (
+        'event: message_start\ndata: {"type":"message_start","message":{"usage":'
+        '{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n\n'
+        'event: content_block_start\ndata: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"thinking","thinking":""}}\n\n'
+        f'event: content_block_delta\ndata: {{"type":"content_block_delta","index":0,'
+        f'"delta":{{"type":"thinking_delta","thinking":{json.dumps(thinking)}}}}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+        'event: content_block_start\ndata: {"type":"content_block_start","index":1,'
+        '"content_block":{"type":"text","text":""}}\n\n'
+        f'event: content_block_delta\ndata: {{"type":"content_block_delta","index":1,'
+        f'"delta":{{"type":"text_delta","text":{json.dumps(text)}}}}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n'
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},'
+        '"usage":{"output_tokens":20}}\n\n'
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 147 — xai stateful: previous_response_id sent on 2nd call
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_stateful_previous_response_id():
+    """Spec (PR7/xai-runner): the xAI Responses API is stateful.
+    After the first call returns a response ID, the runner must include
+    previous_response_id in the second call body — and send ONLY the new
+    user message (not the full history) because the API manages context."""
+    print("\n\033[1mTest 147: xai stateful — previous_response_id sent on 2nd call\033[0m")
+
+    resp_id = "resp-t147-stateful-marker"
+
+    def sse(n):
+        if n == 1:
+            return xai_text_sse_with_id("xai reply 1 t147", resp_id)
+        return xai_text_sse("xai reply 2 t147")
+
+    mock = MockHttpServer(30170, sse).start()
+    try:
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t147",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30170",
+               "XAI_MODELS": "grok-t147:grok-t147"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        with tempfile.TemporaryDirectory() as cwd:
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request("acp.t147.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(),
+                                     timeout=5)
+                sid = json.loads(r.data)["sessionId"]
+
+                async def _noop(m): pass
+
+                # First prompt — runner stores last_response_id = resp_id
+                req_id1 = str(uuid.uuid4())
+                resp_sub1 = await nc.subscribe(
+                    f"acp.t147.session.{sid}.agent.prompt.response.{req_id1}")
+                await nc.subscribe(f"acp.t147.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t147.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "first-t147"}]}).encode(),
+                    headers={"X-Req-Id": req_id1})
+                await asyncio.wait_for(resp_sub1.next_msg(), timeout=10)
+                print(f"    first prompt done; runner should have stored resp_id={resp_id!r}",
+                      flush=True)
+
+                # Second prompt — must include previous_response_id
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t147.session.{sid}.agent.prompt.response.{req_id2}")
+                await nc.subscribe(f"acp.t147.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t147.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "second-t147"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=10)
+
+                if len(mock.received) < 2:
+                    fail("xai stateful", "second prompt made no HTTP call")
+                else:
+                    body2 = json.loads(mock.received[1])
+                    has_prev_id = "previous_response_id" in body2
+                    prev_id_val = body2.get("previous_response_id")
+                    body2_str = json.dumps(body2)
+                    # stateful API: only new user message sent, not full history
+                    has_first_prompt = "first-t147" in body2_str
+                    print(f"    call2 previous_response_id={prev_id_val!r} "
+                          f"has_first_prompt_in_body={has_first_prompt}", flush=True)
+                    if has_prev_id and prev_id_val == resp_id and not has_first_prompt:
+                        ok("xai stateful: previous_response_id sent on 2nd call "
+                           "with correct ID; first prompt absent (stateful API)")
+                    elif has_prev_id and prev_id_val == resp_id:
+                        ok("xai stateful: previous_response_id sent on 2nd call with correct ID")
+                    elif has_prev_id:
+                        fail("xai stateful: previous_response_id present but wrong value",
+                             f"got={prev_id_val!r} expected={resp_id!r}")
+                    else:
+                        fail("xai stateful: previous_response_id NOT in 2nd call body — "
+                             "stateful API optimization not applied",
+                             f"keys={list(body2.keys())}")
+            finally:
+                await nc.close()
+    finally:
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 148 — openrouter stateless: full conversation history in 2nd call
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_stateless_history_rebuild():
+    """Spec (PR7/openrouter-runner): unlike xai, openrouter rebuilds the full
+    messages array on every call (stateless API). The 2nd call must include the
+    first user message AND first assistant reply in its messages array."""
+    print("\n\033[1mTest 148: openrouter stateless — full history in 2nd call messages\033[0m")
+
+    with tempfile.TemporaryDirectory() as cwd:
+        mock = MockHttpServer(30171, lambda n: or_text_sse(f"or-t148-reply-{n}")).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t148",
+                   "OPENROUTER_API_KEY": "test",
+                   "OPENROUTER_BASE_URL": "http://127.0.0.1:30171",
+                   "OPENROUTER_MODELS": "gpt-t148:gpt-t148"}
+            proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request("acp.t148.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(),
+                                     timeout=5)
+                sid = json.loads(r.data)["sessionId"]
+
+                async def _noop(m): pass
+
+                # First prompt
+                req_id1 = str(uuid.uuid4())
+                resp_sub1 = await nc.subscribe(
+                    f"acp.t148.session.{sid}.agent.prompt.response.{req_id1}")
+                await nc.subscribe(f"acp.t148.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t148.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text",
+                                            "text": "first-t148"}]}).encode(),
+                    headers={"X-Req-Id": req_id1})
+                await asyncio.wait_for(resp_sub1.next_msg(), timeout=10)
+
+                # Second prompt
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t148.session.{sid}.agent.prompt.response.{req_id2}")
+                await nc.subscribe(f"acp.t148.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t148.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text",
+                                            "text": "second-t148"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=10)
+
+                if len(mock.received) < 2:
+                    fail("openrouter stateless", f"only {len(mock.received)} HTTP calls made")
+                else:
+                    body2 = json.loads(mock.received[1])
+                    msgs2 = body2.get("messages", [])
+                    body2_str = json.dumps(msgs2)
+                    has_first_user   = "first-t148" in body2_str
+                    has_first_reply  = "or-t148-reply-1" in body2_str
+                    has_second_user  = "second-t148" in body2_str
+                    print(f"    call2 messages count={len(msgs2)} "
+                          f"has_first_user={has_first_user} "
+                          f"has_first_reply={has_first_reply} "
+                          f"has_second_user={has_second_user}", flush=True)
+                    if has_first_user and has_first_reply and has_second_user:
+                        ok("openrouter stateless: 2nd call messages include full history "
+                           "(first user + first reply + second user)")
+                    else:
+                        fail("openrouter stateless: 2nd call messages do NOT contain full history "
+                             "— stateless rebuild broken",
+                             f"has_first_user={has_first_user} "
+                             f"has_first_reply={has_first_reply} "
+                             f"has_second_user={has_second_user} "
+                             f"preview={body2_str[:300]!r}")
+            finally:
+                await nc.close()
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 149 — acp export drops thinking blocks
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_export_drops_thinking_blocks():
+    """Spec (PR7/acp-runner Known Limitations): Thinking blocks are intentionally
+    dropped in session/export — they have no cross-API equivalent.
+    Text blocks must still appear in the export."""
+    print("\n\033[1mTest 149: acp export — thinking blocks dropped from export\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(
+            30172,
+            lambda n: acp_thinking_and_text_sse(
+                "T149_THINKING_CONTENT_SECRET",
+                "T149_TEXT_REPLY_VISIBLE"
+            )
+        ).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t149",
+               "PROXY_URL": "http://127.0.0.1:30172",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            r = await nc.request("acp.t149.agent.session.new",
+                                  json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(),
+                                  timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # Send one prompt — LLM returns thinking + text
+            sid2, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t149", tmpdir, "think about t149", timeout=15)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            # Export session
+            r = await nc.request("acp.t149.agent.ext.session/export",
+                                  json.dumps({"sessionId": sid2}).encode(), timeout=5)
+            exported = json.loads(r.data)
+            if isinstance(exported, dict):
+                exported = exported.get("messages", [])
+            export_str = json.dumps(exported)
+            print(f"    exported {len(exported)} messages preview: {export_str[:300]!r}",
+                  flush=True)
+
+            has_text    = "T149_TEXT_REPLY_VISIBLE" in export_str
+            has_thinking = "T149_THINKING_CONTENT_SECRET" in export_str
+
+            if has_text and not has_thinking:
+                ok("acp export drops thinking blocks: text preserved, thinking absent from export")
+            elif has_thinking:
+                fail("acp export: thinking block NOT dropped — leaks into export",
+                     f"export_str preview={export_str[:300]!r}")
+            else:
+                fail("acp export: text reply also missing from export",
+                     f"has_text={has_text} export_str={export_str[:300]!r}")
+        except Exception as e:
+            fail("acp export drops thinking", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 150 — fetch_url: HTTP error status returned as "Error: HTTP …"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_fetch_url_http_error():
+    """Spec (PR1/web.rs fetch_url): when the target server returns a non-2xx
+    status, fetch_url returns 'Error: HTTP {status}' — not the body."""
+    print("\n\033[1mTest 150: fetch_url — HTTP error status returned correctly\033[0m")
+
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import threading
+
+    # Inline 404 server on port 30174
+    class _404Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        def log_message(self, *args): pass
+
+    srv_404 = HTTPServer(("127.0.0.1", 30174), _404Handler)
+    t_404 = threading.Thread(target=srv_404.serve_forever)
+    t_404.daemon = True
+    t_404.start()
+
+    target_url = "http://127.0.0.1:30174/t150-notfound"
+
+    def sse(n):
+        if n == 1:
+            return acp_tool_use_sse("fu150", "fetch_url",
+                                    json.dumps({"url": target_url, "raw": True}))
+        return acp_text_sse("fetched t150")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30173, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30173, 150, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "fetch the url", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            tool_result = get_tool_result_content(mock.received, call_index=1)
+            print(f"    tool_result={tool_result!r}", flush=True)
+
+            if tool_result and "Error" in tool_result and "404" in tool_result:
+                ok("fetch_url HTTP error: 'Error: HTTP 404 …' returned correctly")
+            elif tool_result and "Error" in tool_result:
+                ok(f"fetch_url HTTP error: error message returned: {tool_result!r}")
+            else:
+                fail("fetch_url HTTP error: expected error message not in tool_result",
+                     f"tool_result={tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+            srv_404.shutdown()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 151 — list_dir empty directory returns "(empty directory)"
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_list_dir_empty_directory():
+    """Spec (PR1/fs.rs list_dir): when the target path is an empty directory,
+    list_dir returns the string '(empty directory)' instead of an empty string."""
+    print("\n\033[1mTest 151: list_dir — empty directory returns '(empty directory)'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create an empty subdirectory
+        empty_dir = os.path.join(tmpdir, "emptydir_t151")
+        os.makedirs(empty_dir)
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("ld151", "list_dir",
+                                        json.dumps({"path": "emptydir_t151"}))
+            return acp_text_sse("listed t151")
+
+        mock = MockHttpServer(30175, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30175, 151, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "list the empty dir", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            tool_result = get_tool_result_content(mock.received, call_index=1)
+            print(f"    tool_result={tool_result!r}", flush=True)
+
+            if tool_result and "(empty directory)" in tool_result:
+                ok("list_dir empty directory: '(empty directory)' returned")
+            else:
+                fail("list_dir empty directory: expected '(empty directory)', got something else",
+                     f"tool_result={tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 152 — git_diff with optional args parameter (--staged scopes to staged changes)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_git_diff_with_args():
+    """Spec (PR1/git.rs diff): git_diff accepts optional 'args' parameter appended
+    to the git diff command. '--staged' shows only staged changes; without args,
+    unstaged changes are shown. The args parameter must change the output."""
+    print("\n\033[1mTest 152: git_diff with args — '--staged' scopes to staged file\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Set up git repo with two modified files, only one staged
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir,
+                       capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+
+        file_a = os.path.join(tmpdir, "file_a_t152.txt")
+        file_b = os.path.join(tmpdir, "file_b_t152.txt")
+        with open(file_a, 'w') as f: f.write("original-a\n")
+        with open(file_b, 'w') as f: f.write("original-b\n")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init t152"], cwd=tmpdir, capture_output=True)
+
+        # Modify both files
+        with open(file_a, 'w') as f: f.write("modified-a-t152\n")
+        with open(file_b, 'w') as f: f.write("modified-b-t152\n")
+        # Stage only file_a
+        subprocess.run(["git", "add", "file_a_t152.txt"], cwd=tmpdir, capture_output=True)
+
+        # LLM asks for git_diff --staged → should see file_a only
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("gd152", "git_diff",
+                                        json.dumps({"args": "--staged"}))
+            return acp_text_sse("diff done t152")
+
+        mock = MockHttpServer(30176, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30176, 152, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "show staged diff", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            tool_result = get_tool_result_content(mock.received, call_index=1)
+            print(f"    tool_result={tool_result!r}", flush=True)
+
+            has_file_a = tool_result and "file_a_t152" in tool_result
+            has_file_b = tool_result and "file_b_t152" in tool_result
+
+            if has_file_a and not has_file_b:
+                ok("git_diff with args: --staged shows only staged file_a, "
+                   "unstaged file_b excluded")
+            elif has_file_a and has_file_b:
+                fail("git_diff --staged: file_b (unstaged) appeared — args not applied correctly",
+                     f"tool_result={tool_result!r}")
+            elif not has_file_a:
+                fail("git_diff --staged: file_a (staged) not found in diff",
+                     f"tool_result={tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 153 — notebook_edit: out-of-range cell index returns error
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_notebook_edit_out_of_range():
+    """Spec (PR1/fs.rs notebook_edit): if cell_index >= number of cells, returns
+    'Error: cell_index N out of range (notebook has M cells)'."""
+    print("\n\033[1mTest 153: notebook_edit — out-of-range cell index returns error\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create .ipynb with exactly 2 cells (indices 0 and 1)
+        nb = {
+            "nbformat": 4, "nbformat_minor": 5,
+            "metadata": {"kernelspec": {"name": "python3"}},
+            "cells": [
+                {"cell_type": "code", "source": ["print('cell 0')\n"],
+                 "metadata": {}, "outputs": [], "execution_count": None},
+                {"cell_type": "code", "source": ["print('cell 1')\n"],
+                 "metadata": {}, "outputs": [], "execution_count": None},
+            ]
+        }
+        nb_path = os.path.join(tmpdir, "notebook_t153.ipynb")
+        with open(nb_path, 'w') as f:
+            json.dump(nb, f)
+
+        # Try to edit cell index 5 (out of range — notebook has only 2 cells)
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("ne153", "notebook_edit",
+                                        json.dumps({"path": "notebook_t153.ipynb",
+                                                    "cell_index": 5,
+                                                    "content": "should not reach here"}))
+            return acp_text_sse("notebook done t153")
+
+        mock = MockHttpServer(30177, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30177, 153, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "edit notebook cell", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            tool_result = get_tool_result_content(mock.received, call_index=1)
+            print(f"    tool_result={tool_result!r}", flush=True)
+
+            has_error     = tool_result and "out of range" in tool_result
+            has_idx       = tool_result and "5" in tool_result
+            has_cell_count = tool_result and "2" in tool_result
+
+            if has_error and has_idx and has_cell_count:
+                ok("notebook_edit out-of-range: error with index and cell count returned")
+            elif has_error:
+                ok(f"notebook_edit out-of-range: error returned: {tool_result!r}")
+            else:
+                fail("notebook_edit out-of-range: expected 'out of range' error, got:",
+                     f"tool_result={tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 154 — multiple @mentions in one prompt all expanded
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_multiple_at_mentions():
+    """Spec (PR10/repl.rs expand_mentions): before sending the prompt, scan for
+    @<path> tokens and expand all of them. Multiple @mentions in a single prompt
+    must ALL be expanded — each file's content injected into the sent prompt."""
+    print("\n\033[1mTest 154: multiple @mentions — both files expanded in prompt\033[0m")
+
+    with tempfile.TemporaryDirectory() as cwd:
+        file_a = os.path.join(cwd, "file_a_t154.txt")
+        file_b = os.path.join(cwd, "file_b_t154.txt")
+        with open(file_a, 'w') as f: f.write("CONTENT_A_T154_UNIQUE\n")
+        with open(file_b, 'w') as f: f.write("CONTENT_B_T154_UNIQUE\n")
+
+        runner = FakeRunner("acp.t154", "s154r", "both files received", nats_url=NATS_JS)
+        await runner.start()
+        await asyncio.sleep(0.3)
+
+        out, rc = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: run_repl_cli(
+                "acp.t154", NATS_JS, cwd,
+                input_text="@file_a_t154.txt @file_b_t154.txt what do these say?\n",
+                timeout=15))
+        await runner.wait(timeout=5)
+        await runner.close()
+
+        payload = runner.received_prompt_payload
+        print(f"    rc={rc} payload_received={payload is not None}", flush=True)
+        if payload:
+            prompt_text = " ".join(
+                c.get("text", "") for c in payload.get("prompt", []) if isinstance(c, dict))
+            has_a = "CONTENT_A_T154_UNIQUE" in prompt_text
+            has_b = "CONTENT_B_T154_UNIQUE" in prompt_text
+            print(f"    has_a={has_a} has_b={has_b} "
+                  f"preview={prompt_text[:200]!r}", flush=True)
+            if has_a and has_b:
+                ok("multiple @mentions: both file contents expanded in single prompt")
+            elif has_a:
+                fail("multiple @mentions: only first @mention expanded, second missing",
+                     f"prompt_text={prompt_text[:300]!r}")
+            elif has_b:
+                fail("multiple @mentions: only second @mention expanded, first missing",
+                     f"prompt_text={prompt_text[:300]!r}")
+            else:
+                fail("multiple @mentions: neither file content in prompt — no expansion",
+                     f"prompt_text={prompt_text[:300]!r}")
+        else:
+            fail("multiple @mentions: runner never received prompt",
+                 f"rc={rc} out={out[:200]!r}")
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -7815,6 +8368,14 @@ async def main():
     await test_openrouter_export_content()
     await test_notebook_edit_cell_type()
     await test_openrouter_trogon_md_second_prompt()
+    await test_xai_stateful_previous_response_id()
+    await test_openrouter_stateless_history_rebuild()
+    await test_acp_export_drops_thinking_blocks()
+    await test_fetch_url_http_error()
+    await test_list_dir_empty_directory()
+    await test_git_diff_with_args()
+    await test_notebook_edit_out_of_range()
+    await test_multiple_at_mentions()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
