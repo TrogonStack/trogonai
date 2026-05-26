@@ -17,11 +17,12 @@ SpiceDB Tier-1 (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) remains the authz floor; de
 |------|--------|-------|
 | `per-method-allowlist.tier1.toml` | Any `agent_method` other than `message/send`, `tasks/get`, `tasks/list` | Catch-all `agent_method *` deny at priority 100 |
 | `per-agent-allowlist.tier1.toml` | `caller_subject` not in `user/alice`, `user/bob`, `service/internal-*` | Maps gateway caller slug → `user/{slug}` SpiceDB subject |
-| `time-of-day.tier1.toml` | All methods (`agent_method *`) when this after-hours profile is deployed | No time predicates in schema; swap bundle dir on schedule until `time_utc_between` (or similar) exists |
+| `time-of-day.tier1.toml` | Requests outside Mon–Fri 09:00–17:00 UTC | `time_of_day` match with pattern `Mon-Fri\|09:00-17:00\|UTC` and `negate = true` |
 
 ## Schema
 
-- Match kinds: `agent_method`, `agent_id`, `caller_subject`, `nats_subject_pattern`
+- Match kinds: `agent_method`, `agent_id`, `caller_subject`, `nats_subject_pattern`, `time_of_day`
+- `time_of_day` pattern: `{weekdays}|{HH:MM-HH:MM}|{UTC|Z|±HH:MM}` (weekdays: `Mon-Fri`, `Mon,Wed`, or `*`)
 - Effects: `allow`, `deny`
 - Deny returns JSON-RPC `-32801` on ingress
 
