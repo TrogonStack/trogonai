@@ -186,6 +186,7 @@ impl PromptEventConverter {
                 let Some((name, input)) = self.tool_cache.get(&id) else {
                     // Unknown tool ID — no cached context to build a meaningful update from.
                     // Skip emitting rather than sending an empty-content notification.
+                    tracing::warn!(tool_id = %id, "ToolCallFinished for unknown tool ID; skipping update");
                     return (vec![], None);
                 };
 

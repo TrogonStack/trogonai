@@ -103,15 +103,43 @@ impl<S: SessionStore> McpCallTool for NatsTodoTool<S> {
                         ));
                     }
 
-                    let mut state = store.load(&session_id).await.map_err(|e| e.to_string())?;
-                    if let Some(t) = state.todos.iter_mut().find(|t| t.id == id) {
-                        t.content = content;
-                        t.status = status;
-                    } else {
-                        state.todos.push(TodoItem { id, content, status });
+                    // Retry the load-modify-save up to 3 times to reduce the
+                    // likelihood that two concurrent todo_write calls for the
+                    // same session silently overwrite each other's change.
+                    let mut last_err = String::new();
+                    for attempt in 0..3u8 {
+                        if attempt > 0 {
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                20 * u64::from(attempt),
+                            ))
+                            .await;
+                        }
+                        let mut state =
+                            store.load(&session_id).await.map_err(|e| e.to_string())?;
+                        if let Some(t) = state.todos.iter_mut().find(|t| t.id == id) {
+                            t.content = content.clone();
+                            t.status = status.clone();
+                        } else {
+                            state.todos.push(TodoItem {
+                                id: id.clone(),
+                                content: content.clone(),
+                                status: status.clone(),
+                            });
+                        }
+                        match store.save(&session_id, &state).await {
+                            Ok(()) => return Ok("OK".to_string()),
+                            Err(e) => {
+                                last_err = e.to_string();
+                                tracing::warn!(
+                                    session_id = %session_id,
+                                    attempt,
+                                    error = %last_err,
+                                    "todo_write save failed, retrying"
+                                );
+                            }
+                        }
                     }
-                    store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
-                    Ok("OK".to_string())
+                    Err(format!("todo_write failed after 3 attempts: {last_err}"))
                 }
                 "todo_read" => {
                     let state = store.load(&session_id).await.map_err(|e| e.to_string())?;

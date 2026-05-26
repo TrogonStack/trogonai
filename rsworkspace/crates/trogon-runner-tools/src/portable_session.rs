@@ -221,23 +221,43 @@ pub fn v2_message_to_text(m: &PortableMessageV2) -> PortableMessage {
     }
 }
 
+/// Parse a session-export JSON payload into a `ParsedExport`.
+///
+/// Valid inputs:
+/// - A JSON array → V1 (`Vec<PortableMessage>`)
+/// - A JSON object with `"version": 2` → V2 (`PortableExportV2`)
+///
+/// Every other shape (null, number, boolean, plain object without `version`,
+/// a lone `{role, text}` object, etc.) is rejected with a descriptive error.
+/// An empty array (`[]`) is valid and yields `ParsedExport::V1(vec![])`.
 pub fn parse_export_json(json: &str) -> Result<ParsedExport, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_str(json)?;
-    if value.get("version").and_then(|v| v.as_u64()) == Some(EXPORT_VERSION_V2 as u64) {
-        return serde_json::from_value(value).map(ParsedExport::V2);
+    match &value {
+        serde_json::Value::Array(_) => {
+            // V1: array of `{role, text}` objects (may be empty).
+            serde_json::from_value(value).map(ParsedExport::V1)
+        }
+        serde_json::Value::Object(map)
+            if map.get("version").and_then(|v| v.as_u64()) == Some(EXPORT_VERSION_V2 as u64) =>
+        {
+            // V2: versioned export object.
+            serde_json::from_value(value).map(ParsedExport::V2)
+        }
+        serde_json::Value::Object(_) => {
+            // An object without the expected `version` field is malformed — this
+            // includes lone `{role, text}` objects that look like single messages.
+            Err(serde::de::Error::custom(
+                "invalid export format: expected a JSON array (V1) or a versioned object (V2), \
+                 got a plain object",
+            ))
+        }
+        _ => {
+            // null, boolean, number, string
+            Err(serde::de::Error::custom(
+                "invalid export format: expected a JSON array (V1) or a versioned object (V2)",
+            ))
+        }
     }
-    if value.is_array() {
-        return serde_json::from_value(value).map(ParsedExport::V1);
-    }
-    if !value.is_object() {
-        return Err(serde::de::Error::custom("expected array or object"));
-    }
-    // Single object without version — treat as one v1 message wrapper.
-    if value.get("role").is_some() && value.get("text").is_some() {
-        let one: PortableMessage = serde_json::from_value(value)?;
-        return Ok(ParsedExport::V1(vec![one]));
-    }
-    Ok(ParsedExport::V1(Vec::new()))
 }
 
 pub fn export_json_from_wire(messages: &[Message]) -> Result<String, serde_json::Error> {

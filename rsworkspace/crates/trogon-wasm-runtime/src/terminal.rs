@@ -160,6 +160,20 @@ pub(crate) fn append_output(
         guard.drain(..trim_at);
         was_truncated.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    // Trim any incomplete trailing UTF-8 sequence from the end of the buffer.
+    // Bytes at the tail that form the start of a multi-byte sequence but lack
+    // their continuation bytes would produce U+FFFD on the next snapshot.
+    // Walk backward: drop leading bytes (0xC0–0xFF) that are not followed by
+    // enough continuation bytes (0x80–0xBF) to complete the sequence.
+    let len = guard.len();
+    if len > 0 {
+        // Find the last valid UTF-8 boundary by trying to decode from the end.
+        let valid_up_to = match std::str::from_utf8(&guard) {
+            Ok(_) => len,
+            Err(e) => e.valid_up_to(),
+        };
+        guard.truncate(valid_up_to);
+    }
 }
 
 pub fn exit_status_from_std(status: &std::process::ExitStatus) -> TerminalExitStatus {
