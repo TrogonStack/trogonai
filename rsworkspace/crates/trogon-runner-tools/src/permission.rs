@@ -24,6 +24,11 @@ pub struct PermissionReq {
     pub tool_input: Value,
     /// Send `true` to allow, `false` to deny.
     pub response_tx: oneshot::Sender<bool>,
+    /// MED-11: the bridge signals on this channel when it dequeues the request and
+    /// is about to prompt the user. The checker waits for this before starting its
+    /// response timeout, so a request that sat in the (sequential) bridge queue
+    /// behind a slow prompt isn't charged for that queue time.
+    pub started_tx: oneshot::Sender<()>,
     /// Shared with the originating `ChannelPermissionChecker`. The bridge writes
     /// the tool name here when the user picks "Always Allow" so subsequent
     /// calls in the same turn are auto-approved without another round-trip.
@@ -102,12 +107,14 @@ impl PermissionChecker for ChannelPermissionChecker {
         Box::pin(async move {
             push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::RequiredApproval);
             let (resp_tx, resp_rx) = oneshot::channel();
+            let (started_tx, started_rx) = oneshot::channel();
             let req = PermissionReq {
                 session_id,
                 tool_call_id,
                 tool_name: tool_name.clone(),
                 tool_input: tool_input.clone(),
                 response_tx: resp_tx,
+                started_tx,
                 always_allowed,
             };
             if tx.send(req).await.is_err() {
@@ -115,7 +122,18 @@ impl PermissionChecker for ChannelPermissionChecker {
                 // Channel closed — default deny
                 return false;
             }
-            // Wait up to 60 seconds for the user to respond; deny on timeout or error
+            // MED-11: the bridge is sequential. Wait (generously) for it to dequeue
+            // this request and signal `started` before charging the response clock,
+            // so a request stuck behind a slow prompt isn't unfairly timed out. If
+            // the bridge drops the request without starting (e.g. invalid session),
+            // started_rx errors and we fall through to read the denial below.
+            const MAX_QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
+            if tokio::time::timeout(MAX_QUEUE_WAIT, started_rx).await.is_err() {
+                // Bridge never started this request within the queue window — deny.
+                push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::DeniedByUser);
+                return false;
+            }
+            // Now the user is actually being prompted — apply the response timeout.
             match tokio::time::timeout(std::time::Duration::from_secs(60), resp_rx).await {
                 Ok(Ok(true)) => {
                     push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::ApprovedByUser);
