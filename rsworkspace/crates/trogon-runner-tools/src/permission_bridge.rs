@@ -54,6 +54,11 @@ pub async fn handle_permission_request_nats<S, N>(
     let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
     let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
 
+    // MED-11: signal the checker that this request has reached the front of the
+    // (sequential) bridge queue and the user is about to be prompted, so its
+    // response timeout starts now rather than when it was first enqueued.
+    let _ = req.started_tx.send(());
+
     let outcome = proxy.request_permission(perm_req).await;
 
     let (allowed, save_always) = match outcome {
@@ -112,12 +117,14 @@ mod tests {
 
     fn make_req(tool_name: &str) -> (PermissionReq, oneshot::Receiver<bool>) {
         let (tx, rx) = oneshot::channel();
+        let (started_tx, _started_rx) = oneshot::channel();
         let req = PermissionReq {
             session_id: SESSION.to_string(),
             tool_call_id: "tc-1".to_string(),
             tool_name: tool_name.to_string(),
             tool_input: serde_json::json!({"path": "/tmp/x"}),
             response_tx: tx,
+            started_tx,
             always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
         };
         (req, rx)
@@ -215,12 +222,14 @@ mod tests {
         let nats = AdvancedMockNatsClient::new();
         let store = MemorySessionStore::new();
         let (tx, rx) = oneshot::channel();
+        let (started_tx, _started_rx) = oneshot::channel();
         let req = PermissionReq {
             session_id: "invalid.session.id".to_string(),
             tool_call_id: "tc-1".to_string(),
             tool_name: "Bash".to_string(),
             tool_input: serde_json::Value::Null,
             response_tx: tx,
+            started_tx,
             always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
         };
         handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
