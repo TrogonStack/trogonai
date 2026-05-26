@@ -15,8 +15,6 @@
 //! If the gateway later owns push remediation, DLQ subjects may include caller segments such as
 //! `{prefix}.push.dlq.{caller_id}.{task_id}`. Terminal push DLQ publishes today originate from
 //! the `a2a-nats` agent `Bridge` / `message/stream` pump — not from this gateway forwarding layer.
-//!
-//! Compile-only roadmap scaffolding for future seams lives in **`planned`** (**`planned::`** first-wave stubs and **`planned::batch2`** one-file-per-`A2A_TODO` lane through Phase&nbsp;4).
 
 pub mod agent_card_surface;
 pub mod caller_jwt_header;
@@ -24,7 +22,6 @@ pub mod config;
 pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;
-pub mod planned;
 pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;
