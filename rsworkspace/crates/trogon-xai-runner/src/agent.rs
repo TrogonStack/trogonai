@@ -111,6 +111,12 @@ struct XaiSession {
     parent_session_id: Option<String>,
     /// Message index at which the branch was made. None for full forks.
     branched_at_index: Option<usize>,
+    /// Terminal ID for the persistent bash shell. Set on first bash call; reused thereafter.
+    #[serde(skip)]
+    terminal_id: Option<String>,
+    /// NATS wasm prefix used when the terminal was created, needed for release on close.
+    #[serde(skip)]
+    terminal_wasm_prefix: Option<String>,
     /// Cumulative input tokens billed across all prompts in this session.
     total_input_tokens: u64,
     /// Cumulative output tokens billed across all prompts in this session.
@@ -662,6 +668,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso,
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -749,6 +757,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         created_at_iso,
                         parent_session_id,
                         branched_at_index,
+                        terminal_id: None,
+                        terminal_wasm_prefix: None,
                         total_input_tokens: snap.total_input_tokens,
                         total_output_tokens: snap.total_output_tokens,
                         total_cache_read_tokens: snap.total_cache_read_tokens,
@@ -828,6 +838,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 created_at_iso: now_iso(),
                 parent_session_id: Some(source_id.clone()),
                 branched_at_index: branch_at,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -862,6 +874,22 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
             let snapshot = self.build_snapshot(&session_id, s);
             store.save(&snapshot).await;
+        }
+        // Release persistent bash terminal if one was created for this session.
+        if let Some(s) = sessions.get(&session_id) {
+            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+                s.terminal_id.clone(),
+                s.terminal_wasm_prefix.clone(),
+                &self.execution_nats,
+            ) {
+                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+                if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
+                    session_id.clone(),
+                    tid,
+                )) {
+                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                }
+            }
         }
         sessions.remove(&session_id);
         drop(sessions);
@@ -1032,7 +1060,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Snapshot session state — release lock before streaming.
-        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt, cwd) = {
+        let (model, api_key, history, last_response_id, enabled_tools, session_system_prompt, cwd, mut terminal_id) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -1045,6 +1073,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
                 s.cwd.clone(),
+                s.terminal_id.clone(),
             )
         };
 
@@ -1462,7 +1491,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         "bash" => {
                             if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                                execute_bash_via_nats(nats, wasm, &session_id, &arguments).await
+                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &arguments).await;
+                                // Persist terminal_id back to session if it was just created
+                                if terminal_id.is_some() {
+                                    let mut sessions = self.sessions.lock().await;
+                                    if let Some(s) = sessions.get_mut(&session_id) {
+                                        if s.terminal_id.is_none() {
+                                            s.terminal_id = terminal_id.clone();
+                                            s.terminal_wasm_prefix = Some(wasm.to_string());
+                                        }
+                                    }
+                                }
+                                result
                             } else {
                                 "bash not available: no execution backend configured".to_string()
                             }
@@ -1558,6 +1598,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.total_input_tokens += prompt_input_total;
                 s.total_output_tokens += prompt_output_total;
                 s.total_cache_read_tokens += prompt_cache_read_total;
+                s.terminal_id = terminal_id.clone();
             }
             // If session was closed during streaming, silently discard history update.
             if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
@@ -1759,21 +1800,27 @@ fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
         .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
 }
 
-/// Execute a bash command by delegating to the wasm-runtime over NATS.
+const BASH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const BASH_EXIT_MARKER_PREFIX: &str = "__EXIT_";
+const BASH_EXIT_MARKER_SUFFIX: &str = "__";
+
+/// Execute a bash command using a persistent terminal per session.
 ///
-/// Sends four NATS requests against `{wasm_prefix}.session.{session_id}.client.terminal.*`:
-/// create → wait_for_exit → output → release. Returns the captured stdout/stderr,
-/// or an error message string on failure (never propagates errors — the model
-/// receives the error text as the tool result and can decide how to proceed).
-async fn execute_bash_via_nats(
+/// On the first call, creates a `bash` terminal (no `-c` args) with `cwd` as
+/// the working directory and stores its ID in `terminal_id`. Subsequent calls
+/// reuse the same terminal. The demarcation protocol
+/// `<command>; echo "__EXIT_$?__"` is used to detect completion.
+async fn execute_bash_stateful(
     nats: &async_nats::Client,
     wasm_prefix: &str,
     session_id: &str,
+    terminal_id: &mut Option<String>,
+    cwd: &str,
     arguments: &str,
 ) -> String {
     use agent_client_protocol::{
-        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
-        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+        CreateTerminalRequest, CreateTerminalResponse,
+        TerminalOutputRequest,
     };
 
     let command = match serde_json::from_str::<serde_json::Value>(arguments)
@@ -1784,67 +1831,135 @@ async fn execute_bash_via_nats(
         None => return "error: missing 'command' in bash arguments".to_string(),
     };
 
-    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-    let session_id_owned = session_id.to_string();
-    let nats = nats.clone();
+    let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
 
-    let result = tokio::time::timeout(Duration::from_secs(30), async move {
-        // 1. create terminal
-        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
-            .args(vec!["-c".to_string(), command]);
+    // 1. Obtain or create the persistent terminal (outside timeout closure to
+    //    allow mutation of terminal_id, which cannot be captured by &mut in async move).
+    let tid: String = if let Some(id) = terminal_id.as_deref() {
+        id.to_string()
+    } else {
+        let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
+            .cwd(std::path::PathBuf::from(cwd));
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+        let msg = match nats.request(format!("{term_base}.create"), payload.into()).await {
             Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
+            Err(e) => return format!("error creating terminal: {e}"),
         };
-        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+        let resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
+            Err(e) => return format!("error parsing create response: {e}"),
         };
-        let tid = create_resp.terminal_id.clone();
+        let new_tid = resp.terminal_id.0.to_string();
+        *terminal_id = Some(new_tid.clone());
+        new_tid
+    };
 
-        // 2. wait for exit
-        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&wait_req) {
+    let nats = nats.clone();
+    let session_id_owned = session_id.to_string();
+
+    let result = tokio::time::timeout(Duration::from_secs(30), async move {
+        // 2. Snapshot baseline output length
+        let baseline_len = {
+            let req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+            let payload = match serde_json::to_vec(&req) {
+                Ok(p) => p,
+                Err(e) => return format!("error: {e}"),
+            };
+            match nats.request(format!("{term_base}.output"), payload.into()).await {
+                Ok(msg) => {
+                    serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                        .ok()
+                        .and_then(|v| v["output"].as_str().map(|s| s.len()))
+                        .unwrap_or(0)
+                }
+                Err(_) => 0,
+            }
+        };
+
+        // 3. Write command with demarcation marker
+        let cmd_with_marker = format!(
+            "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
+        );
+        let write_req = serde_json::json!({
+            "terminal_id": tid,
+            "data": cmd_with_marker.as_bytes()
+        });
+        let payload = match serde_json::to_vec(&write_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
-            return format!("error: {e}");
+        if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
+            return format!("error writing to terminal: {e}");
         }
 
-        // 3. collect output
-        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&out_req) {
-            Ok(p) => p,
-            Err(e) => return format!("error: {e}"),
-        };
-        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
-            Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
-        };
-        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
-            Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
-        };
+        // 4. Poll for output until marker found or timeout
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            tokio::time::sleep(BASH_POLL_INTERVAL).await;
 
-        // 4. release (best-effort)
-        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
-        if let Ok(payload) = serde_json::to_vec(&rel_req) {
-            let _ = nats.request(format!("{base}.release"), payload.into()).await;
+            let req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+            let payload = match serde_json::to_vec(&req) {
+                Ok(p) => p,
+                Err(e) => return format!("error: {e}"),
+            };
+            let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
+                Ok(msg) => {
+                    serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                        .ok()
+                        .and_then(|v| v["output"].as_str().map(str::to_string))
+                        .unwrap_or_default()
+                }
+                Err(e) => return format!("error reading output: {e}"),
+            };
+
+            if full_output.len() > baseline_len {
+                let new_output = &full_output[baseline_len..];
+                if let Some(output) = bash_extract_before_marker(new_output) {
+                    return output;
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                let partial = if full_output.len() > baseline_len {
+                    full_output[baseline_len..].to_string()
+                } else {
+                    String::new()
+                };
+                return format!("error: bash timed out. Partial output:\n{partial}");
+            }
         }
-
-        out.output
-    })
-    .await;
+    }).await;
 
     match result {
         Ok(output) => output,
-        Err(_elapsed) => "error: bash execution timed out".to_string(),
+        Err(_) => "error: bash execution timed out".to_string(),
     }
+}
+
+fn bash_extract_before_marker(output: &str) -> Option<String> {
+    let mut last_match: Option<usize> = None;
+    let mut search = output;
+    let mut offset = 0;
+    while let Some(pos) = search.find(BASH_EXIT_MARKER_PREFIX) {
+        let abs = offset + pos;
+        let after = &output[abs + BASH_EXIT_MARKER_PREFIX.len()..];
+        if let Some(end) = after.find(BASH_EXIT_MARKER_SUFFIX) {
+            let code_str = &after[..end];
+            if code_str.chars().all(|c| c.is_ascii_digit()) {
+                last_match = Some(abs);
+            }
+        }
+        offset = abs + BASH_EXIT_MARKER_PREFIX.len();
+        search = &output[offset..];
+    }
+    last_match.map(|pos| {
+        let before = &output[..pos];
+        before.strip_suffix('\n').unwrap_or(before).to_string()
+    })
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -1866,6 +1981,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -1888,6 +2005,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -1955,6 +2074,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -1977,6 +2098,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
@@ -1999,6 +2122,8 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 created_at_iso: now_iso(),
                 parent_session_id: None,
                 branched_at_index: None,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
                 total_input_tokens: 0,
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
