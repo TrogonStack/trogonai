@@ -13,6 +13,7 @@ node_modules
 .next
 .turbo
 dist
+docs/.vitepress/cache
 *.tsbuildinfo
 
 # pnpm
