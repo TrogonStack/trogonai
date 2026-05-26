@@ -1,10 +1,11 @@
 use std::fmt;
 use std::hash::Hash;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
+use a2a_pack::resource_tuples::{Tier1A2aMethodSlug, Tier1ResourceTupleTable};
 use a2a_nats::catalog::import_gate::{
     BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
     ZedTokenSnapshot, ZedTokenTtl,
@@ -32,53 +33,12 @@ pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SE
 const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
 const SESSION_CACHE_CAPACITY: u64 = 4096;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tier1ResourceType(String);
+static TIER1_RESOURCE_TUPLE_TABLE: LazyLock<Tier1ResourceTupleTable> =
+    LazyLock::new(Tier1ResourceTupleTable::bundled);
 
-impl Tier1ResourceType {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tier1ResourceId(String);
-
-impl Tier1ResourceId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tier1Permission(String);
-
-impl Tier1Permission {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tier1ResourceTuple {
-    pub resource_type: Tier1ResourceType,
-    pub resource_id: Tier1ResourceId,
-    pub permission: Tier1Permission,
-}
-
-impl Tier1ResourceTuple {
-    pub fn new(
-        resource_type: impl Into<String>,
-        resource_id: impl Into<String>,
-        permission: impl Into<String>,
-    ) -> Self {
-        Self {
-            resource_type: Tier1ResourceType(resource_type.into()),
-            resource_id: Tier1ResourceId(resource_id.into()),
-            permission: Tier1Permission(permission.into()),
-        }
-    }
-}
+pub use a2a_pack::resource_tuples::{
+    Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple, Tier1ResourceType,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tier1OwnerTuple {
@@ -91,9 +51,14 @@ pub struct Tier1OwnerTuple {
 
 impl Tier1OwnerTuple {
     pub fn for_task(agent_id: &A2aAgentId, task_id: &str, subject_type: &str, subject_id: &str) -> Self {
+        let tuple = Tier1ResourceTuple::new(
+            "task",
+            format!("{}:{}", agent_id.as_str(), task_id),
+            "owner",
+        );
         Self {
-            resource_type: Tier1ResourceType("task".into()),
-            resource_id: Tier1ResourceId(format!("{}:{}", agent_id.as_str(), task_id)),
+            resource_type: tuple.resource_type,
+            resource_id: tuple.resource_id,
             relation: "owner".into(),
             subject_type: subject_type.to_owned(),
             subject_id: subject_id.to_owned(),
@@ -124,23 +89,6 @@ impl Tier1SessionKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Tier1DeriveError {
-    MissingTaskId,
-    UnknownMethod,
-}
-
-impl fmt::Display for Tier1DeriveError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingTaskId => write!(f, "task id missing from params"),
-            Self::UnknownMethod => write!(f, "no tier-1 resource tuple for method"),
-        }
-    }
-}
-
-impl std::error::Error for Tier1DeriveError {}
-
 pub fn a2a_method_from_dots(method_dots: &str) -> Option<A2aMethod> {
     match method_dots {
         "message.send" => Some(A2aMethod::MessageSend),
@@ -158,6 +106,20 @@ pub fn a2a_method_from_dots(method_dots: &str) -> Option<A2aMethod> {
     }
 }
 
+pub fn derive_tuple(
+    method: &A2aMethod,
+    agent_id: &A2aAgentId,
+    publisher_account: &str,
+    params: &Value,
+) -> Result<Tier1ResourceTuple, Tier1DeriveError> {
+    TIER1_RESOURCE_TUPLE_TABLE.derive(
+        &Tier1A2aMethodSlug::new(method.as_str()),
+        agent_id.as_str(),
+        publisher_account,
+        params,
+    )
+}
+
 fn task_id_from_params(params: &Value) -> Option<String> {
     params
         .get("id")
@@ -165,58 +127,6 @@ fn task_id_from_params(params: &Value) -> Option<String> {
         .or_else(|| params.get("taskId"))
         .and_then(Value::as_str)
         .map(str::to_owned)
-}
-
-pub fn derive_tuple(
-    method: &A2aMethod,
-    agent_id: &A2aAgentId,
-    publisher_account: &str,
-    params: &Value,
-) -> Result<Tier1ResourceTuple, Tier1DeriveError> {
-    match method {
-        A2aMethod::AgentCard => Ok(Tier1ResourceTuple::new(
-            "agent_card",
-            format!("{publisher_account}/{}", agent_id.as_str()),
-            "view",
-        )),
-        A2aMethod::MessageSend | A2aMethod::MessageStream => Ok(Tier1ResourceTuple::new(
-            "agent",
-            agent_id.as_str(),
-            "invoke",
-        )),
-        A2aMethod::TasksList => Ok(Tier1ResourceTuple::new(
-            "agent",
-            agent_id.as_str(),
-            "discover",
-        )),
-        A2aMethod::TasksGet | A2aMethod::TasksResubscribe => {
-            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
-            Ok(Tier1ResourceTuple::new(
-                "task",
-                format!("{}:{task_id}", agent_id.as_str()),
-                "read",
-            ))
-        }
-        A2aMethod::TasksCancel => {
-            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
-            Ok(Tier1ResourceTuple::new(
-                "task",
-                format!("{}:{task_id}", agent_id.as_str()),
-                "cancel",
-            ))
-        }
-        A2aMethod::PushNotificationSet
-        | A2aMethod::PushNotificationGet
-        | A2aMethod::PushNotificationList
-        | A2aMethod::PushNotificationDelete => {
-            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
-            Ok(Tier1ResourceTuple::new(
-                "task",
-                format!("{}:{task_id}", agent_id.as_str()),
-                "configure_push",
-            ))
-        }
-    }
 }
 
 #[derive(Clone)]
