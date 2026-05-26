@@ -1,0 +1,53 @@
+[package]
+name = "a2a-auth-callout"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "a2a-auth-callout"
+path = "src/main.rs"
+
+[lib]
+name = "a2a_auth_callout"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["ring"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true, features = ["std"] }
+rustls-webpki = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+x509-parser = { workspace = true, features = ["verify"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+uuid = { workspace = true }
+nats-jwt-rs = { workspace = true }
+nkeys = { workspace = true }
+base64 = { workspace = true }
+data-encoding = "2.6.0"
+
+[features]
+test-support = []
+
+[dev-dependencies]
+tempfile = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+rcgen = { workspace = true }
+rsa = { workspace = true }
+serde_json = { workspace = true }
+wiremock = { workspace = true }
+testcontainers = { workspace = true }

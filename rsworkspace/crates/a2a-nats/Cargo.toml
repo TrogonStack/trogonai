@@ -1,0 +1,41 @@
+[package]
+name = "a2a-nats"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-pack = { workspace = true }
+a2a-types = { workspace = true }
+opentelemetry = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+authzed = { workspace = true }
+moka = { workspace = true }
+tonic = { workspace = true }
+
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+a2a-auth-callout = { workspace = true, features = ["test-support"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "metrics", "testing"] }
+time = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

@@ -1,0 +1,44 @@
+# =============================================================================
+# A2A Account User — Gateway (subject ACL template for nsc-derived provisioning)
+#
+# Role: Gateway User (`a2a-gateway` service principal in the tenant Account).
+#
+# Bounded subject set:
+#   Publish: `{prefix}.agent.>`, `{prefix}.task.>`, `{prefix}.push.>`
+#   Subscribe (as needed): `{prefix}.gateway.>` (caller ingress queue group),
+#                          `{prefix}.agent.>`, `{prefix}.task.>`, `{prefix}.push.>`
+#                          for inbound agent replies/events and delivery outcomes,
+#                          plus `{prefix}.discover.>` read-only catalog request path
+#
+# NSC / JWT semantics — “deny outside scope”:
+#   Narrow allowlists reject any publish/subscribe not explicitly allowed (see Caller
+#   template notes). Explicit deny entries below blacklist `{prefix}` branches that must
+#   never originate from this identity (KV/catalog write path, ingress impersonation).
+#
+# NSC flags (repeat --allow-* / --deny-* per line):
+#   --allow-pub   for each "# allow-pub" subject (below)
+#   --allow-sub   for each "# allow-sub" subject (below)
+#   --deny-pub    for each "# deny-pub" subject (below)
+#   --deny-sub    for each "# deny-sub" subject (below)
+#
+# References: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §Subject ACL templates,
+#             docs/A2A_SUBJECT_ACL_QUICKREF.md
+# =============================================================================
+
+# allow-pub — forward to agents, lifecycle events, and push envelopes
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>
+
+# allow-sub — consume ingress plus operational fan-in on agent/task/push AND discover RR
+{prefix}.gateway.>
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>
+{prefix}.discover.>
+
+# deny-pub — registrar-only catalog ingress; gateway must remain read-only on catalog KV
+{prefix}.catalog.register.>
+
+# deny-sub — registrar-only registration ingress subscriber
+{prefix}.catalog.register.>

@@ -1,0 +1,45 @@
+[package]
+name = "a2a-gateway"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "a2a-gateway"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-nats = { workspace = true }
+a2a-pack = { workspace = true }
+a2a-redaction = { workspace = true }
+a2a-types = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+authzed = { workspace = true }
+bytes = { workspace = true }
+cel-interpreter = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+moka = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+time = { workspace = true }
+toml = "=0.8.23"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+nkeys = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

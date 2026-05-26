@@ -1,0 +1,11 @@
+/// Subject used with Core NATS request/reply. Expects a response.
+pub trait Requestable: std::fmt::Display {}
+
+/// Subject used with Core NATS publish. Fire-and-forget, no response.
+pub trait Publishable: std::fmt::Display {}
+
+/// Subject used with .subscribe() calls.
+pub trait Subscribable: std::fmt::Display {}
+
+/// Subject used as a JetStream consumer source for task event streaming.
+pub trait JetStreamEvents: std::fmt::Display {}

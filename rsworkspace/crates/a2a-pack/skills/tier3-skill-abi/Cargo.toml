@@ -1,0 +1,18 @@
+[package]
+name = "tier3-skill-abi"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "wrap-redact-export"
+path = "src/bin/wrap_redact_export.rs"
+
+[dependencies]
+walrus = "=0.24.3"

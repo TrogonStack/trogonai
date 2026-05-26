@@ -1,0 +1,52 @@
+# =============================================================================
+# A2A Account User — Caller (subject ACL template for nsc-derived provisioning)
+#
+# Role: Caller User (external or bridge identity; JWT mint path is the auth callout
+#       in production; this file describes the bound subject ACL inside one tenant
+#       Account).
+#
+# Bounded subject set (substitute `{prefix}` = A2A_PREFIX, usually `a2a`; replace
+# `{caller_id}` with the stable token-safe caller segment from the minted JWT):
+#   Publish: `{prefix}.gateway.>`
+#   Subscribe: `_INBOX.{caller_id}.>`, `{prefix}.push.{caller_id}.>`
+#
+# NSC / JWT semantics — “deny outside scope”:
+#   User JWT authorization uses narrow allowlists. Listing `--allow-pub` /
+#   `--allow-sub` entries means publishes/subscribes to any OTHER subject are
+#   rejected unless separately permitted (`--allow-pub-response` only relaxes reply
+#   publishes matching that rule). Explicit `--deny-pub` / `--deny-sub` lines below
+#   add defense-in-depth for sibling `{prefix}` branches that MUST NOT be used even
+#   if a buggy client widens allowances later.
+#
+# NSC flags (repeat --allow-* / --deny-* per line):
+#   --allow-pub   for each "# allow-pub" subject (below)
+#   --allow-sub   for each "# allow-sub" subject (below)
+#   --allow-pub-response   (recommended; dynamic reply subjects beyond `_INBOX.*`)
+#   --deny-pub    for each "# deny-pub" subject (below)
+#   --deny-sub    for each "# deny-sub" subject (below)
+#
+# References: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §Subject ACL templates,
+#             docs/A2A_SUBJECT_ACL_QUICKREF.md
+# =============================================================================
+
+# allow-pub — request/reply and ingress traffic to gateway only
+{prefix}.gateway.>
+
+# allow-sub — inbound replies + caller-scoped JetStream push read path (Phase 0)
+_INBOX.{caller_id}.>
+{prefix}.push.{caller_id}.>
+
+# deny-pub — non-gateway `{prefix}` tree (caller MUST NOT originate these)
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.push.>
+{prefix}.catalog.register.>
+{prefix}.discover.>
+
+# deny-sub — prevent lateral subscribe on shared service planes (everything outside
+# the bounded subscribe set uses implicit deny already; listed here intentionally)
+{prefix}.gateway.>
+{prefix}.agent.>
+{prefix}.task.>
+{prefix}.catalog.register.>
+{prefix}.discover.>

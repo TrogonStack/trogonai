@@ -1,0 +1,32 @@
+[package]
+name = "a2a-redaction"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "a2a_redaction"
+path = "src/lib.rs"
+
+[[bin]]
+name = "a2a-sign-bundle"
+path = "src/bin/sign-bundle.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-types = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+wasmtime = { workspace = true }
+
+[dev-dependencies]
+a2a-types = { workspace = true }
+ed25519-dalek = { workspace = true }
+tempfile = { workspace = true }

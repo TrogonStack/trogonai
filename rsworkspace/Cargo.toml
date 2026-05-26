@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = [
+    "crates/*",
+    "crates/a2a-pack/skills/tier3-skill-abi",
+    "crates/a2a-pack/skills/pii-regex-redactor",
+    "crates/a2a-pack/skills/secrets-redactor",
+    "crates/a2a-pack/skills/json-path-sanitizer",
+    "crates/a2a-pack/skills/smoke-tier3-refuse",
+]
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -11,6 +18,17 @@ all = "deny"
 
 [workspace.dependencies]
 # Internal crates
+a2a-auth-callout = { path = "crates/a2a-auth-callout" }
+a2a-bridge = { path = "crates/a2a-bridge" }
+a2a-nats = { path = "crates/a2a-nats" }
+a2a-pack = { path = "crates/a2a-pack" }
+a2a-redaction = { path = "crates/a2a-redaction" }
+a2a-nats-agent = { path = "crates/a2a-nats-agent" }
+a2a-nats-discovery = { path = "crates/a2a-nats-discovery" }
+a2a-gateway = { path = "crates/a2a-gateway" }
+a2a-nats-server = { path = "crates/a2a-nats-server" }
+a2a-smoke-test = { path = "crates/a2a-smoke-test" }
+a2a-nats-stdio = { path = "crates/a2a-nats-stdio" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp-nats" }
@@ -19,6 +37,11 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
+
+# A2A
+a2a-types = { version = "=0.2.0" }
+
+wasmtime = "=45.0.0"
 
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
@@ -32,9 +55,11 @@ async-nats = { version = "=0.47.0", default-features = false }
 async-trait = "=0.1.89"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.11.1"
+cel-interpreter = "=0.10.0"
 futures = "=0.3.32"
 futures-util = "=0.3.32"
 tokio = "=1.52.1"
+tokio-util = "=0.7.18"
 tokio-tungstenite = "=0.29.0"
 tower-http = { version = "=0.6.8", features = ["trace"] }
 
@@ -42,6 +67,8 @@ tower-http = { version = "=0.6.8", features = ["trace"] }
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+jsonschema = { version = "=0.46.5", default-features = false }
+toml = "=0.9.12"
 
 # CLI
 clap = { version = "=4.6.1", features = ["derive"] }
@@ -60,10 +87,35 @@ tracing-subscriber = "=0.3.23"
 twilight-gateway = { version = "=0.17.1", default-features = false, features = ["rustls-native-roots"] }
 twilight-model = "=0.17.1"
 
+# HTTP client
+reqwest = { version = "0.12", default-features = false }
+
 # Misc
 tempfile = "=3.27.0"
 time = "=0.3.47"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
+sha2 = "=0.10.8"
+ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
+hmac = "=0.12.1"
+hex = "=0.4.3"
+rustls-pemfile = "=2.2.0"
+rustls-pki-types = { version = "=1.14.0", default-features = false, features = ["std"] }
+rustls-webpki = { version = "=0.103.10", default-features = false, features = ["std", "alloc", "ring"] }
+jsonwebtoken = "=9.3.0"
+x509-parser = "=0.16.0"
+rcgen = "=0.13.2"
+base64 = "=0.22.1"
+rsa = "=0.9.9"
+rand = "=0.8.5"
+wiremock = "=0.6.3"
+testcontainers = "=0.27.3"
+nats-jwt-rs = "=0.1.1"
+nkeys = { version = "=0.4.5", features = ["xkeys"] }
+
+# SpiceDB / Authzed gRPC (org-standard `authzed` crate name; generated API from buf.build/authzed/api)
+authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
+tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen"] }
+moka = { version = "=0.12.10", features = ["future"] }
 
 [profile.release]
 lto = "thin"

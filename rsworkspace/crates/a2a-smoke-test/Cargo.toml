@@ -1,0 +1,33 @@
+[package]
+name = "a2a-smoke-test"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "a2a-smoke-test"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-nats = { workspace = true }
+a2a-nats-discovery = { workspace = true }
+a2a-types = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+ed25519-dalek = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+nkeys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
