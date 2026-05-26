@@ -790,7 +790,16 @@ where
             let sessions = self.sessions.lock().await;
             let s = sessions.get(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
-            let raw = serde_json::to_string(&s.history)
+            // MED-22: a turn pushes the user message at turn start and the assistant
+            // reply at turn end. If export runs mid-turn (or after a turn errored
+            // before the reply was recorded), history ends with an unpaired "user"
+            // message. Export only complete turns so the snapshot is consistent.
+            let end = if s.history.last().map(|m| m.role == "user").unwrap_or(false) {
+                s.history.len() - 1
+            } else {
+                s.history.len()
+            };
+            let raw = serde_json::to_string(&s.history[..end])
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()));
@@ -1704,17 +1713,12 @@ mod tests {
         use trogon_runner_tools::portable_session::PortableMessage;
         let agent = make_agent().await;
         agent.test_insert_session("e1", "/tmp", None).await;
-        agent
-            .sessions
-            .lock()
-            .await
-            .get_mut("e1")
-            .unwrap()
-            .history
-            .push(PortableMessage {
-                role: "user".into(),
-                text: "hello".into(),
-            });
+        {
+            let mut sessions = agent.sessions.lock().await;
+            let h = &mut sessions.get_mut("e1").unwrap().history;
+            h.push(PortableMessage { role: "user".into(), text: "hello".into() });
+            h.push(PortableMessage { role: "assistant".into(), text: "hi there".into() });
+        }
 
         let raw_params = serde_json::value::RawValue::from_string(
             serde_json::json!({ "sessionId": "e1" }).to_string(),
@@ -1723,9 +1727,36 @@ mod tests {
         let ext_req = ExtRequest::new("session/export", raw_params.into());
         let resp = agent.ext_method(ext_req).await.unwrap();
         let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
-        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].text, "hello");
-        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].text, "hi there");
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_excludes_in_progress_user_turn() {
+        // MED-22: a trailing unpaired user message (mid-turn / post-error) must not
+        // appear in the export — only complete turns are exported.
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let agent = make_agent().await;
+        agent.test_insert_session("e2", "/tmp", None).await;
+        {
+            let mut sessions = agent.sessions.lock().await;
+            let h = &mut sessions.get_mut("e2").unwrap().history;
+            h.push(PortableMessage { role: "user".into(), text: "q1".into() });
+            h.push(PortableMessage { role: "assistant".into(), text: "a1".into() });
+            h.push(PortableMessage { role: "user".into(), text: "in-progress".into() });
+        }
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "e2" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", raw_params.into()))
+            .await
+            .unwrap();
+        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(msgs.len(), 2, "the trailing in-progress user turn must be excluded");
+        assert_eq!(msgs[1].text, "a1");
     }
 
     #[tokio::test]
