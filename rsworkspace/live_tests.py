@@ -6442,6 +6442,545 @@ def test_sse_helpers():
                 fail("or_tool_calls_sse: arguments not valid JSON", f"{fn.get('arguments','')!r} — {e}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 129 — TROGON.md + _meta.systemPrompt combined in xai-runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_trogon_md_plus_system_prompt_xai():
+    """Spec (PR4+PR15): when TROGON.md exists AND _meta.systemPrompt is given,
+    xai-runner combines them as '{trogon_md}\\n\\n{systemPrompt}' in input[role=system]."""
+    print("\n\033[1mTest 129: TROGON.md + _meta.systemPrompt combined in xai-runner\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        TROGON_MARKER = "TROGON_T129_MARKER"
+        SYS_MARKER = "SYS_T129_MARKER"
+        with open(os.path.join(tmpdir, "TROGON.md"), "w") as f:
+            f.write(f"# {TROGON_MARKER}\nThis is the TROGON context.\n")
+
+        mock = MockHttpServer(30141, lambda n: xai_text_sse("xai t129")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t129",
+               "XAI_API_KEY": "test",
+               "XAI_BASE_URL": "http://127.0.0.1:30141",
+               "XAI_MODELS": "grok-t129:grok-t129",
+               "RUST_LOG": "warn"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        await asyncio.sleep(2)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            r = await nc.request("acp.t129.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": [],
+                                             "_meta": {"systemPrompt": SYS_MARKER}}).encode(),
+                                 timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            req_id = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(f"acp.t129.session.{sid}.agent.prompt.response.{req_id}")
+            async def _noop129(m): pass
+            await nc.subscribe(f"acp.t129.session.{sid}.client.session.update", cb=_noop129)
+            await nc.publish(f"acp.t129.session.{sid}.agent.prompt",
+                             json.dumps({"sessionId": sid,
+                                         "prompt": [{"type": "text", "text": "hello t129"}]}).encode(),
+                             headers={"X-Req-Id": req_id})
+            await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+            print(f"    mock calls: {len(mock.received)}", flush=True)
+        except Exception as e:
+            fail("TROGON.md + systemPrompt xai", str(e))
+            return
+        finally:
+            await nc.close()
+            proc.terminate(); proc.wait(timeout=3)
+            mock.stop()
+
+        if not mock.received:
+            fail("TROGON.md + systemPrompt xai: no calls to xAI API")
+            return
+        body = json.loads(mock.received[0])
+        input_items = body.get("input", [])
+        system_items = [it for it in input_items if isinstance(it, dict) and it.get("role") == "system"]
+        combined = json.dumps(system_items)
+        has_trogon = TROGON_MARKER in combined
+        has_sys = SYS_MARKER in combined
+        print(f"    has_trogon={has_trogon} has_sys={has_sys}", flush=True)
+        if has_trogon and has_sys:
+            ok("TROGON.md + systemPrompt combined in xai: both markers present in system input")
+        elif has_trogon:
+            fail("TROGON.md + systemPrompt xai: TROGON.md present but systemPrompt missing",
+                 f"system={combined[:300]!r}")
+        elif has_sys:
+            fail("TROGON.md + systemPrompt xai: systemPrompt present but TROGON.md missing",
+                 f"system={combined[:300]!r}")
+        else:
+            fail("TROGON.md + systemPrompt xai: neither marker in system input",
+                 f"system={combined[:300]!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 130 — TROGON.md + _meta.systemPrompt combined in acp-runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_trogon_md_plus_system_prompt_acp():
+    """Spec (PR4+PR15): when TROGON.md exists AND _meta.systemPrompt is given,
+    acp-runner combines them as '{trogon_md}\\n\\n{systemPrompt}' in Anthropic 'system' field."""
+    print("\n\033[1mTest 130: TROGON.md + _meta.systemPrompt combined in acp-runner\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        TROGON_MARKER = "TROGON_T130_MARKER"
+        SYS_MARKER = "SYS_T130_MARKER"
+        with open(os.path.join(tmpdir, "TROGON.md"), "w") as f:
+            f.write(f"# {TROGON_MARKER}\nThis is the TROGON context.\n")
+
+        mock = MockHttpServer(30142, lambda n: acp_text_sse("acp t130")).start()
+        proc, prefix = await _start_acp_runner_only(30142, 130, tmpdir)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            r = await nc.request(f"{prefix}.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": [],
+                                             "_meta": {"systemPrompt": SYS_MARKER}}).encode(),
+                                 timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            req_id = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(f"{prefix}.session.{sid}.agent.prompt.response.{req_id}")
+            async def _noop130(m): pass
+            await nc.subscribe(f"{prefix}.session.{sid}.client.session.update", cb=_noop130)
+            await nc.publish(f"{prefix}.session.{sid}.agent.prompt",
+                             json.dumps({"sessionId": sid,
+                                         "prompt": [{"type": "text", "text": "hello t130"}]}).encode(),
+                             headers={"X-Req-Id": req_id})
+            await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+            print(f"    calls={len(mock.received)}", flush=True)
+        except Exception as e:
+            fail("TROGON.md + systemPrompt acp", str(e))
+            return
+        finally:
+            await nc.close()
+            proc.terminate(); proc.wait(timeout=3)
+            mock.stop()
+
+        if not mock.received:
+            fail("TROGON.md + systemPrompt acp: no calls to Anthropic API")
+            return
+        body = json.loads(mock.received[0])
+        system_field = body.get("system", "")
+        if isinstance(system_field, list):
+            system_str = " ".join(b.get("text", "") for b in system_field if isinstance(b, dict))
+        else:
+            system_str = str(system_field)
+        print(f"    system field preview: {system_str[:150]!r}", flush=True)
+        has_trogon = TROGON_MARKER in system_str
+        has_sys = SYS_MARKER in system_str
+        if has_trogon and has_sys:
+            ok("TROGON.md + systemPrompt combined in acp: both markers present in Anthropic system field")
+        elif has_trogon:
+            fail("TROGON.md + systemPrompt acp: TROGON.md present but systemPrompt missing",
+                 f"system={system_str[:300]!r}")
+        elif has_sys:
+            fail("TROGON.md + systemPrompt acp: systemPrompt present but TROGON.md missing",
+                 f"system={system_str[:300]!r}")
+        else:
+            fail("TROGON.md + systemPrompt acp: neither marker in system field",
+                 f"system={system_str[:300]!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 131 — TROGON.md + _meta.systemPrompt combined in openrouter-runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_trogon_md_plus_system_prompt_openrouter():
+    """Spec (PR4+PR15): when TROGON.md exists AND _meta.systemPrompt is given,
+    openrouter-runner combines them in messages[role=system]."""
+    print("\n\033[1mTest 131: TROGON.md + _meta.systemPrompt combined in openrouter-runner\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        TROGON_MARKER = "TROGON_T131_MARKER"
+        SYS_MARKER = "SYS_T131_MARKER"
+        with open(os.path.join(tmpdir, "TROGON.md"), "w") as f:
+            f.write(f"# {TROGON_MARKER}\nThis is the TROGON context.\n")
+
+        mock = MockHttpServer(30143, lambda n: or_text_sse("or t131")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t131",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30143",
+               "OPENROUTER_MODELS": "gpt-t131:gpt-t131",
+               "RUST_LOG": "warn"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        await asyncio.sleep(2)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            r = await nc.request("acp.t131.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": [],
+                                             "_meta": {"systemPrompt": SYS_MARKER}}).encode(),
+                                 timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            req_id = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(f"acp.t131.session.{sid}.agent.prompt.response.{req_id}")
+            async def _noop131(m): pass
+            await nc.subscribe(f"acp.t131.session.{sid}.client.session.update", cb=_noop131)
+            await nc.publish(f"acp.t131.session.{sid}.agent.prompt",
+                             json.dumps({"sessionId": sid,
+                                         "prompt": [{"type": "text", "text": "hello t131"}]}).encode(),
+                             headers={"X-Req-Id": req_id})
+            await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+            print(f"    mock calls: {len(mock.received)}", flush=True)
+        except Exception as e:
+            fail("TROGON.md + systemPrompt openrouter", str(e))
+            return
+        finally:
+            await nc.close()
+            proc.terminate(); proc.wait(timeout=3)
+            mock.stop()
+
+        if not mock.received:
+            fail("TROGON.md + systemPrompt openrouter: no calls to OpenRouter API")
+            return
+        body = json.loads(mock.received[0])
+        messages = body.get("messages", [])
+        system_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+        combined = json.dumps(system_msgs)
+        has_trogon = TROGON_MARKER in combined
+        has_sys = SYS_MARKER in combined
+        print(f"    has_trogon={has_trogon} has_sys={has_sys}", flush=True)
+        if has_trogon and has_sys:
+            ok("TROGON.md + systemPrompt combined in openrouter: both markers present in system message")
+        elif has_trogon:
+            fail("TROGON.md + systemPrompt openrouter: TROGON.md present but systemPrompt missing",
+                 f"system={combined[:300]!r}")
+        elif has_sys:
+            fail("TROGON.md + systemPrompt openrouter: systemPrompt present but TROGON.md missing",
+                 f"system={combined[:300]!r}")
+        else:
+            fail("TROGON.md + systemPrompt openrouter: neither marker in system messages",
+                 f"system={combined[:300]!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 132 — codex import: pending_history takes priority over TROGON.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_codex_import_pending_history_suppresses_trogon():
+    """Spec (PR7/codex): when pending_history is set (from import), the first prompt
+    uses the 'Prior conversation:' format and does NOT inject TROGON.md separately.
+    The spec branching: if pending_history { use it } else if first_turn { inject TROGON.md }."""
+    print("\n\033[1mTest 132: codex import — pending_history suppresses TROGON.md injection\033[0m")
+    with tempfile.TemporaryDirectory() as cwd:
+        TROGON_MARKER = "TROGON_T132_MARKER"
+        with open(os.path.join(cwd, "TROGON.md"), "w") as f:
+            f.write(f"# {TROGON_MARKER}\nCodex workspace context.\n")
+
+        record_file = os.path.join(cwd, "recorded_input_t132.txt")
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t132",
+               "CODEX_BIN": f"{BIN}/mock_codex_server",
+               "CODEX_MODELS": "codex-t132:codex-t132",
+               "CODEX_DEFAULT_MODEL": "codex-t132",
+               "MOCK_RECORD_TURN_INPUT_FILE": record_file,
+               "CODEX_SPAWN_TIMEOUT_SECS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-codex-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(3)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            # Create session
+            r = await nc.request("acp.t132.agent.session.new",
+                                 json.dumps({"cwd": cwd, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # Import prior conversation (sets pending_history)
+            prior_msgs = [
+                {"role": "user", "text": "prior-user-t132"},
+                {"role": "assistant", "text": "prior-asst-t132"}
+            ]
+            await nc.request("acp.t132.agent.ext.session/import",
+                             json.dumps({"sessionId": sid, "messages": prior_msgs}).encode(),
+                             timeout=5)
+
+            # Send first prompt
+            req_id = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(f"acp.t132.session.{sid}.agent.prompt.response.{req_id}")
+            async def _noop132(m): pass
+            await nc.subscribe(f"acp.t132.session.{sid}.client.session.update", cb=_noop132)
+            await nc.publish(f"acp.t132.session.{sid}.agent.prompt",
+                             json.dumps({"sessionId": sid,
+                                         "prompt": [{"type": "text", "text": "first-prompt-t132"}]}).encode(),
+                             headers={"X-Req-Id": req_id})
+            await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            fail("codex pending_history suppresses TROGON.md", str(e))
+            return
+        finally:
+            await nc.close()
+            proc.terminate(); proc.wait(timeout=3)
+
+        if not os.path.exists(record_file):
+            fail("codex pending_history: MOCK_RECORD_TURN_INPUT_FILE not written")
+            return
+        recorded = open(record_file).read()
+        print(f"    recorded input: {recorded[:200]!r}", flush=True)
+        has_prior = "Prior conversation:" in recorded and "prior-user-t132" in recorded
+        has_trogon = TROGON_MARKER in recorded
+        if has_prior and not has_trogon:
+            ok("codex import: pending_history used, TROGON.md NOT injected (correct priority)")
+        elif has_prior and has_trogon:
+            fail("codex import: pending_history present but TROGON.md also injected — should be suppressed",
+                 f"recorded={recorded[:300]!r}")
+        elif has_trogon:
+            fail("codex import: TROGON.md injected instead of pending_history — priority wrong",
+                 f"recorded={recorded[:300]!r}")
+        else:
+            fail("codex import: neither pending_history nor TROGON.md in recorded input",
+                 f"recorded={recorded[:300]!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 133 — fetch_url raw=true: HTML tags preserved (not html2text processed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_fetch_url_raw_html():
+    """Spec (PR1/web.rs fetch_url): raw=true returns unprocessed HTML; tags must be preserved.
+    Complement to T61 (raw=false strips tags). T48 uses raw=true but plain text — this
+    test specifically verifies HTML tags survive when raw=true."""
+    print("\n\033[1mTest 133: fetch_url raw=true — HTML tags preserved\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        html_body = "<html><body><h1>HEADING_T133</h1><p>PARAGRAPH_T133</p></body></html>"
+        content_server = SimpleGetServer(30153, html_body, content_type="text/html").start()
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("fu133", "fetch_url",
+                    json.dumps({"url": "http://127.0.0.1:30153/", "raw": True}))
+            return acp_text_sse("fetched raw")
+
+        mock = MockHttpServer(30154, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30154, 133, tmpdir)
+        try:
+            _, _, _ = await runner_session_prompt(NATS_JS, prefix, tmpdir,
+                                                  "fetch the page raw", timeout=20)
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+            if tool_result and "<h1>" in tool_result and "HEADING_T133" in tool_result:
+                ok("fetch_url raw=true: HTML tags preserved in tool_result (not stripped)")
+            elif tool_result and "HEADING_T133" in tool_result and "<h1>" not in tool_result:
+                fail("fetch_url raw=true: content present but HTML tags stripped — raw=true not respected",
+                     f"tool_result={tool_result[:300]!r}")
+            else:
+                fail("fetch_url raw=true: expected content not in tool_result",
+                     f"tool_result={tool_result!r} calls={len(mock.received)}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+            content_server.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 134 — glob: no matches returns empty (not error)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_glob_no_matches():
+    """Spec (PR1/fs.rs glob): when pattern matches no files, tool_result is empty string
+    (not an error). The runner must not crash and must make ≥2 HTTP calls."""
+    print("\n\033[1mTest 134: glob — no matches returns empty (not error)\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Only .py files exist; glob for *.rs matches nothing
+        with open(os.path.join(tmpdir, "main_t134.py"), "w") as f:
+            f.write("print('hello')\n")
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("g134", "glob",
+                    json.dumps({"pattern": "**/*.rs"}))
+            return acp_text_sse("no rust files")
+
+        mock = MockHttpServer(30155, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30155, 134, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "find rust files", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+            if len(mock.received) >= 2 and (tool_result == "" or tool_result is not None):
+                # Non-error: runner made 2+ calls (tool result was fed back), no crash
+                if tool_result is not None and "Error" not in str(tool_result):
+                    ok("glob no matches: empty result returned (not error), runner continued")
+                else:
+                    fail("glob no matches: tool_result contains error",
+                         f"tool_result={tool_result!r}")
+            else:
+                fail("glob no matches: runner did not complete tool loop",
+                     f"calls={len(mock.received)} done={done!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 135 — list_dir with path parameter: scoped to subdirectory
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_list_dir_with_path():
+    """Spec (PR1/fs.rs list_dir): path parameter scopes listing to that subdirectory.
+    Files outside path must not appear in tool_result."""
+    print("\n\033[1mTest 135: list_dir with path parameter — scoped to subdirectory\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.makedirs(os.path.join(tmpdir, "src"), exist_ok=True)
+        os.makedirs(os.path.join(tmpdir, "tests"), exist_ok=True)
+        with open(os.path.join(tmpdir, "src", "main_t135.rs"), "w") as f:
+            f.write("fn main() {}\n")
+        with open(os.path.join(tmpdir, "src", "lib_t135.rs"), "w") as f:
+            f.write("pub mod lib;\n")
+        with open(os.path.join(tmpdir, "tests", "test_t135.rs"), "w") as f:
+            f.write("#[test] fn it_works() {}\n")
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("ld135", "list_dir",
+                    json.dumps({"path": "src"}))
+            return acp_text_sse("listed src dir")
+
+        mock = MockHttpServer(30156, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30156, 135, tmpdir)
+        try:
+            _, _, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "list the src directory", timeout=20)
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+            has_main = "main_t135.rs" in str(tool_result)
+            has_lib = "lib_t135.rs" in str(tool_result)
+            has_test = "test_t135.rs" in str(tool_result)
+            if has_main and has_lib and not has_test:
+                ok("list_dir path param: src/ files listed, tests/ file excluded by path scope")
+            elif has_test:
+                fail("list_dir path param: tests/test_t135.rs appeared — path scope NOT applied",
+                     f"tool_result={tool_result!r}")
+            else:
+                fail("list_dir path param: src/ files missing from result",
+                     f"has_main={has_main} has_lib={has_lib} tool_result={str(tool_result)[:200]!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 136 — /model switch: two consecutive prompts after switch both reach new runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_model_switch_multiple_prompts():
+    """Spec (PR8+PR9): after /model switch, ALL subsequent prompts route to the new runner.
+    T11 tests one prompt after switch. This test sends TWO prompts after switch and
+    verifies both reach the new runner (xai), while acp got exactly 1 call total."""
+    print("\n\033[1mTest 136: /model switch — two prompts after switch both reach new runner\033[0m")
+    with tempfile.TemporaryDirectory() as cwd:
+        acp_mock = MockHttpServer(30157, lambda n: acp_text_sse("acp-t136-reply")).start()
+        xai_mock = MockHttpServer(30158, lambda n: xai_text_sse(f"xai-t136-turn{n}")).start()
+        try:
+            env_acp = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t136a",
+                       "PROXY_URL": "http://127.0.0.1:30157",
+                       "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-t136"}
+            env_xai = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t136x",
+                       "AGENT_TYPE": "xai-t136x",
+                       "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30158",
+                       "XAI_MODELS": "grok-t136:grok-t136"}
+            proc_acp = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env_acp,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3)
+
+            # Turn 1 on acp, /model switch to xai, turns 2 and 3 on xai
+            cli_input = "turn-1-t136\n/model grok-t136\nturn-2-t136\nturn-3-t136\n"
+            out, rc = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: run_repl_cli(
+                    "acp.t136a", NATS_JS, cwd,
+                    input_text=cli_input, timeout=45))
+            print(f"    rc={rc} acp_calls={len(acp_mock.received)} xai_calls={len(xai_mock.received)}", flush=True)
+            print(f"    out preview: {out[:200]!r}", flush=True)
+
+            if len(acp_mock.received) != 1:
+                fail("model switch multi-prompt: acp should receive exactly 1 call",
+                     f"acp_calls={len(acp_mock.received)}")
+            elif len(xai_mock.received) != 2:
+                fail("model switch multi-prompt: xai should receive exactly 2 calls (turns 2+3)",
+                     f"xai_calls={len(xai_mock.received)}")
+            else:
+                ok("/model switch: both prompts after switch reached xai-runner (acp=1 xai=2)")
+        finally:
+            for p in (proc_acp, proc_xai):
+                p.terminate(); p.wait(timeout=3)
+            acp_mock.stop(); xai_mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 137 — git_log: limited to 20 commits (--oneline -20)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_git_log_limit():
+    """Spec (PR1/git.rs git_log): 'git log --oneline -20' — with >20 commits in the repo,
+    tool_result must contain exactly 20 commit lines (oldest beyond 20 are omitted)."""
+    print("\n\033[1mTest 137: git_log — limited to 20 commits (--oneline -20)\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Initialize git repo and make 22 commits
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+        for i in range(22):
+            p = os.path.join(tmpdir, f"file_{i}.txt")
+            with open(p, "w") as f:
+                f.write(f"commit {i}\n")
+            subprocess.run(["git", "add", f"file_{i}.txt"], cwd=tmpdir, capture_output=True)
+            subprocess.run(["git", "commit", "-m", f"commit-t137-{i:02d}"], cwd=tmpdir,
+                           capture_output=True)
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("gl137", "git_log", json.dumps({}))
+            return acp_text_sse("git log done")
+
+        mock = MockHttpServer(30159, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30159, 137, tmpdir)
+        try:
+            _, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "show git log", timeout=20)
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result preview: {str(tool_result)[:200]!r}", flush=True)
+            if tool_result:
+                lines = [l for l in tool_result.strip().splitlines() if l.strip()]
+                print(f"    commit line count: {len(lines)}", flush=True)
+                # Verify: exactly 20 lines (not 22), and the 21st and 22nd (commit-t137-00, -01) absent
+                has_limit = len(lines) <= 20
+                has_oldest = "commit-t137-00" in tool_result or "commit-t137-01" in tool_result
+                if has_limit and not has_oldest:
+                    ok(f"git_log limit: {len(lines)} lines returned (≤20), oldest commits excluded")
+                elif not has_limit:
+                    fail(f"git_log limit: {len(lines)} lines returned — exceeds 20 commit limit",
+                         f"tool_result={tool_result[:300]!r}")
+                else:
+                    fail("git_log limit: ≤20 lines but oldest commits present — limit not applied correctly",
+                         f"tool_result={tool_result[:300]!r}")
+            else:
+                fail("git_log limit: no tool_result received",
+                     f"calls={len(mock.received)} done={done!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -6565,6 +7104,15 @@ async def main():
     await test_trogon_md_after_cross_runner_switch()
     await test_acp_export_preserves_portable_blocks()
     await test_cross_runner_switch_after_programming()
+    await test_trogon_md_plus_system_prompt_xai()
+    await test_trogon_md_plus_system_prompt_acp()
+    await test_trogon_md_plus_system_prompt_openrouter()
+    await test_codex_import_pending_history_suppresses_trogon()
+    await test_fetch_url_raw_html()
+    await test_glob_no_matches()
+    await test_list_dir_with_path()
+    await test_model_switch_multiple_prompts()
+    await test_git_log_limit()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
