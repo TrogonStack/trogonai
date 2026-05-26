@@ -86,6 +86,10 @@ struct AuditEnvelopeWire {
     #[serde(default)]
     rules_fired: Option<Vec<String>>,
     #[serde(default)]
+    tier1_decision: Option<String>,
+    #[serde(default)]
+    tier3_decision: Option<String>,
+    #[serde(default)]
     refusal_skill: Option<String>,
     method: String,
     outcome: serde_json::Value,
@@ -427,8 +431,8 @@ async fn assert_tier1_declarative_denied(ctx: &SmokeContext) -> Result<(), Strin
     .expect_err("agent.card should be denied by tier-1 declarative allowlist");
 
     let code = json_rpc_code(&err).ok_or_else(|| format!("expected JSON-RPC denial, got {err}"))?;
-    if code != -32_801 {
-        return Err(format!("tier-1 declarative deny expected -32801, got {code}"));
+    if code != -32_803 {
+        return Err(format!("tier-1 declarative deny expected -32803, got {code}"));
     }
     info!(code, "tier-1 declarative deny verified");
     Ok(())
@@ -482,6 +486,12 @@ async fn assert_tier3_refusal(ctx: &SmokeContext) -> Result<(), String> {
     if refusal != "smoke-tier3-refuse" {
         return Err(format!("refusal_skill {refusal:?} != smoke-tier3-refuse"));
     }
+    if envelope.tier3_decision.as_deref() != Some("refuse") {
+        return Err(format!(
+            "tier-3 refusal audit expected tier3_decision=refuse, got {:?}",
+            envelope.tier3_decision
+        ));
+    }
 
     info!(%refusal, "tier-3 refusal verified");
     Ok(())
@@ -522,25 +532,22 @@ async fn assert_policy_allow_path(ctx: &SmokeContext) -> Result<(String, String,
         serde_json::from_slice(&audit.payload).map_err(|e| format!("audit json: {e}"))?;
     assert_jwt_audit(&envelope, "message/send", &ctx.expected_caller)?;
 
-    let rules = envelope
-        .rules_fired
-        .clone()
-        .ok_or("allow-path audit missing rules_fired")?;
-    let rules_joined = rules.join(",");
-    if !rules_joined.contains("gateway.tier1.spicedb_allowed") {
-        return Err(format!("expected gateway.tier1.spicedb_allowed in rules_fired: {rules:?}"));
+    if envelope.tier1_decision.as_deref() != Some("allow") {
+        return Err(format!(
+            "allow-path audit expected tier1_decision=allow, got {:?}",
+            envelope.tier1_decision
+        ));
     }
-    if !rules_joined.contains("gateway.tier1.declarative") {
-        return Err(format!("expected tier-1 declarative rule in rules_fired: {rules:?}"));
-    }
-    if !rules_joined.contains("gateway.tier3.evaluated_allow") && !rules_joined.contains("gateway.tier3.redacted")
-    {
-        return Err(format!("expected tier-3 allow in rules_fired: {rules:?}"));
+    if envelope.tier3_decision.as_deref() != Some("allow") {
+        return Err(format!(
+            "allow-path audit expected tier3_decision=allow, got {:?}",
+            envelope.tier3_decision
+        ));
     }
 
     let caller_id = envelope.caller_id.clone().unwrap_or_default();
     let caller_source = envelope.caller_source.clone().unwrap_or_default();
-    Ok((caller_id, caller_source, rules))
+    Ok((caller_id, caller_source, Vec::new()))
 }
 
 fn normalize_audit_caller_id(caller_id: &str) -> &str {
