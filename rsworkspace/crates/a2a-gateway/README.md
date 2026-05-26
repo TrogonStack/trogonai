@@ -2,7 +2,7 @@
 
 Pass-through ingress seam for future A2A gateway authz and policy. **Forwarding only** — opaque request/reply relay on `{prefix}.gateway.>`; **no push delivery and no DLQ**. Terminal push DLQ publishes live on the agent **`Bridge`** in `a2a-nats`, not on this gateway.
 
-**Related:** [Gateway roadmap](../../../docs/A2A_GATEWAY_ROADMAP.md) · [Auth callout design](../../../docs/A2A_AUTH_CALLOUT_DESIGN.md) · [A2A architecture](../../../docs/A2A_ARCHITECTURE.md)
+**Related:** [Gateway roadmap](../../../docs/a2a/explanation/gateway-roadmap.md) · [Auth callout design](../../../docs/a2a/explanation/auth-callout-design.md) · [A2A architecture](../../../docs/a2a/explanation/architecture.md)
 
 ## Role
 
@@ -32,4 +32,4 @@ Span `gateway.ingress.dispatch`: **`gateway_ingress.subject`**, `ingress.reply_p
 
 ## Limitations (today)
 
-No auth callout / JWT validation, policy engine, or ingress audit. Streaming back-pressure across the gateway (pull consumer egress, JetStream policy alignment) remains future — see [`../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md). See roadmap links above for the full backlog.
+No auth callout / JWT validation, policy engine, or ingress audit. Streaming back-pressure across the gateway (pull consumer egress, JetStream policy alignment) remains future — see [`../../../docs/a2a/how-to/operators/streaming-backpressure.md`](../../../docs/a2a/how-to/operators/streaming-backpressure.md). See roadmap links above for the full backlog.

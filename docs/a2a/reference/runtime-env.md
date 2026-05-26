@@ -199,7 +199,7 @@ NATS auth callout subscriber on `$SYS.REQ.USER.AUTH`; mints short-lived User JWT
 | `AUTH_CALLOUT_OIDC_AUDIENCES` | when OIDC on | — | Comma-separated allowed `aud` values |
 | `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | no | — | PEM bundle path for mTLS client cert verification |
 
-Deployment notes: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
+Deployment notes: [Auth callout deployment](../how-to/operators/auth-callout-deployment.md).
 
 Source: [`a2a-auth-callout/src/main.rs`](../../../rsworkspace/crates/a2a-auth-callout/src/main.rs).
 
