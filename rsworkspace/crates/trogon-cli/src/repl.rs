@@ -139,8 +139,16 @@ fn expand_mentions<F: Fs>(text: &str, cwd: &Path, fs: &F) -> String {
                             };
                             result.push_str(&format!("`{path_str}`:\n```\n{body}\n```"));
                         }
-                        Err(_) => {
-                            eprintln!("warning: @{path_str}: file not found or not readable");
+                        Err(e) => {
+                            // LOW-20: distinguish "is a directory" from other read errors.
+                            let msg = if e.kind() == std::io::ErrorKind::IsADirectory
+                                || full_path.is_dir()
+                            {
+                                "is a directory"
+                            } else {
+                                "file not found or not readable"
+                            };
+                            eprintln!("warning: @{path_str}: {msg}");
                             result.push('@');
                             result.push_str(path_str);
                         }
