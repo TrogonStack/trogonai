@@ -6,6 +6,9 @@
 //! Requires Docker. Run with:
 //!   cargo test -p trogon-cli --test slash_commands_integration
 
+// Test scaffolding (fake-runner NATS handlers) reads cleaner as nested `if let`.
+#![allow(clippy::collapsible_if)]
+
 use std::time::Duration;
 
 use futures::StreamExt as _;
@@ -85,7 +88,7 @@ async fn drain_until_done(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) {
 const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
 
 /// Respond once on `subject` with `response_bytes` (core NATS request-reply).
-async fn mock_responder(nats: async_nats::Client, subject: &'static str, response_bytes: &'static [u8]) {
+async fn mock_responder(nats: async_nats::Client, subject: &'static str, response_bytes: Vec<u8>) {
     let mut sub = nats.subscribe(subject).await.expect("subscribe");
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await {
@@ -116,12 +119,12 @@ async fn clear_creates_session_with_different_id() {
 
     spawn_fake_runner_multi(nats.clone(), "sess-clear", 2).await;
 
-    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
     // Simulate /clear: create a fresh session on the same NATS connection.
-    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -144,7 +147,7 @@ async fn new_session_after_clear_can_prompt() {
     spawn_fake_runner_multi(nats.clone(), "sess-clear-prompt", 2).await;
 
     // First session — send and complete one prompt.
-    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -159,7 +162,7 @@ async fn new_session_after_clear_can_prompt() {
     drain_until_done(rx1).await;
 
     // Simulate /clear: new session.
-    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -193,7 +196,7 @@ async fn new_session_starts_with_no_usage_events() {
     spawn_fake_runner_multi(nats.clone(), "sess-clear-usage", 2).await;
 
     // First session accumulates some usage.
-    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session1 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -218,7 +221,7 @@ async fn new_session_starts_with_no_usage_events() {
     drain_until_done(rx1).await;
 
     // Simulate /clear: create a fresh session.
-    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap())
+    let session2 = TrogonSession::new(nats.clone(), PREFIX, std::env::current_dir().unwrap(), vec![])
         .await
         .unwrap();
 
@@ -294,8 +297,8 @@ async fn nats_factory_successive_creates_return_distinct_ids() {
     spawn_fake_runner_multi(nats.clone(), "factory-multi", 2).await;
 
     let factory = NatsSessionFactory::new(nats);
-    let s1 = factory.create_session(PREFIX, std::env::current_dir().unwrap()).await.unwrap();
-    let s2 = factory.create_session(PREFIX, std::env::current_dir().unwrap()).await.unwrap();
+    let s1 = factory.create_session(PREFIX, std::env::current_dir().unwrap(), vec![]).await.unwrap();
+    let s2 = factory.create_session(PREFIX, std::env::current_dir().unwrap(), vec![]).await.unwrap();
 
     assert_ne!(s1.session_id(), s2.session_id());
     assert_eq!(s1.session_id(), "factory-multi-1");
@@ -316,19 +319,19 @@ async fn compact_export_compactor_import_round_trip() {
     mock_responder(
         nats_bg.clone(),
         "test.agent.ext.session/export",
-        &ext_response(r#"[{"role":"user","text":"hello"}]"#),
+        ext_response(r#"[{"role":"user","text":"hello"}]"#),
     )
     .await;
     mock_responder(
         nats_bg.clone(),
         COMPACT_SUBJECT,
-        br#"{"messages":[{"role":"user","content":[{"type":"text","text":"summary"}]}],"compacted":true,"tokens_before":500,"tokens_after":100}"#,
+        br#"{"messages":[{"role":"user","content":[{"type":"text","text":"summary"}]}],"compacted":true,"tokens_before":500,"tokens_after":100}"#.to_vec(),
     )
     .await;
     mock_responder(
         nats_bg.clone(),
         "test.agent.ext.session/import",
-        &ext_response("{}"),
+        ext_response("{}"),
     )
     .await;
 
@@ -366,7 +369,7 @@ async fn compact_on_attached_session_uses_correct_session_id() {
     mock_responder(
         nats_bg.clone(),
         COMPACT_SUBJECT,
-        br#"{"messages":[],"compacted":false,"tokens_before":10,"tokens_after":10}"#,
+        br#"{"messages":[],"compacted":false,"tokens_before":10,"tokens_after":10}"#.to_vec(),
     )
     .await;
 
