@@ -1,7 +1,8 @@
 _doc = """
-Method allowlist: permits only message/send, tasks/get, and tasks/list. All other
-agent_method values are denied. High-priority allow rules match the enumerated
-methods; a catch-all deny rule (agent_method *) rejects everything else.
+Method allowlist: permits the common A2A caller methods (message/send,
+message/stream, tasks/get, tasks/list, tasks/pushNotificationConfig/set) and
+denies everything else via a catch-all `agent_method *` rule at priority 100.
+High-priority allow rules at priority 200 take precedence over the catch-all.
 """
 
 [[rule]]
@@ -12,6 +13,15 @@ effect = "allow"
 [[rule.matches]]
 kind = "agent_method"
 pattern = "message/send"
+
+[[rule]]
+id = "allow-message-stream"
+priority = 200
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "message/stream"
 
 [[rule]]
 id = "allow-tasks-get"
@@ -30,6 +40,15 @@ effect = "allow"
 [[rule.matches]]
 kind = "agent_method"
 pattern = "tasks/list"
+
+[[rule]]
+id = "allow-push-set"
+priority = 200
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_method"
+pattern = "tasks/pushNotificationConfig/set"
 
 [[rule]]
 id = "deny-other-methods"
