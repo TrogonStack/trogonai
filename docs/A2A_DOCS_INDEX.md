@@ -2,13 +2,11 @@
 
 Central navigation for the A2A-over-NATS binding: architecture, operator runbooks, gateway/auth design, and developer ergonomics.
 
-## Architecture & tracker
+## Architecture
 
 | Document | Purpose |
 |----------|---------|
-| [`../A2A_PLAN.md`](../A2A_PLAN.md) | Master architecture — subject topology, streaming semantics, phased delivery, implementation status |
-| [`../A2A_TODO.md`](../A2A_TODO.md) | Engineering work tracker — gaps between plan and in-tree code |
-| [`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) | Landed architectural decisions and audit trail for future choices |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Master architecture — subject topology, streaming semantics, auth model, policy tiers, audit envelope, landed decisions |
 
 ## Operators
 

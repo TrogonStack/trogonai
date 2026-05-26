@@ -6,8 +6,8 @@ Operator reference for the JetStream streams and KV bucket the A2A-over-NATS bin
 
 | Document | Purpose |
 |----------|---------|
-| [A2A plan](../A2A_PLAN.md) | Subject topology, streaming semantics, phased delivery |
-| [A2A pending decisions](../A2A_PENDING_DECISION.md) | Landed decisions: stream topology, retention, push DLQ |
+| [A2A plan](./A2A_ARCHITECTURE.md) | Subject topology, streaming semantics, phased delivery |
+| [A2A pending decisions](./A2A_ARCHITECTURE.md) | Landed decisions: stream topology, retention, push DLQ |
 | [A2A NSC account bootstrap](A2A_NSC_ACCOUNT_BOOTSTRAP.md) | Full operator runbook: NSC hierarchy, User ACL templates, bootstrap order |
 | [Push DLQ ops](A2A_PUSH_DLQ_OPS.md) | Stream verification, consumption, envelope schema |
 | [Auth callout design](A2A_AUTH_CALLOUT_DESIGN.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
@@ -32,7 +32,7 @@ This is the shared per-Account stream for all task event traffic. It backs `mess
 
 **In-tree reference:** stream config and naming live under `rsworkspace/crates/a2a-nats/src/jetstream/` (`streams.rs`, `provision.rs`) and `rsworkspace/crates/a2a-nats/src/nats/subjects/stream.rs` (`A2aStream::Events`).
 
-**Operator defaults** (from [landed decisions](../A2A_PENDING_DECISION.md)):
+**Operator defaults** (from [landed decisions](./A2A_ARCHITECTURE.md)):
 
 | Setting | Target value | Notes |
 |---------|--------------|-------|

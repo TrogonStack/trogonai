@@ -2,7 +2,7 @@
 //!
 //! Engineering checklist beyond opaque forward: **[`docs/A2A_GATEWAY_ROADMAP.md`](../../../../docs/A2A_GATEWAY_ROADMAP.md)**.
 //!
-//! Planned authorization and policy seams are documented in [`A2A_PLAN.md`](../../../../A2A_PLAN.md):
+//! Planned authorization and policy seams are documented in [A2A architecture](../../../../docs/A2A_ARCHITECTURE.md):
 //! queue-group subscriber (`A2A_GATEWAY_QUEUE_GROUP`) with opaque JSON-RPC bridging today; JWT
 //! validation, policy bundles (`a2a-pack`), and ingress audit emission remain future work.
 //!
