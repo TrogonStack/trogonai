@@ -101,7 +101,7 @@ Owner crate = where the work lands. ☆ = new crate.
 
 | ID    | Gap                                                        | Sev      | Owner crate                              |
 | ----- | ---------------------------------------------------------- | -------- | ---------------------------------------- |
-| TM-01 | No published STRIDE threat model per crate                 | High     | docs                                     |
+| TM-01 | No published STRIDE threat model per crate (**done** → `docs/security/threat-model.md`) | High     | docs                                     |
 | TN-01 | No tenant-scoped audit stream contract                     | Critical | `a2a-nats::audit`                        |
 | TN-02 | No tenant-scoped operator roles                            | High     | `a2a-auth-callout`                       |
 | TN-03 | No tenant kill switch                                      | High     | ☆ `trogon-governance`                    |
@@ -112,11 +112,11 @@ Owner crate = where the work lands. ☆ = new crate.
 
 | ID    | Gap                                                        | Sev      | Owner crate                              |
 | ----- | ---------------------------------------------------------- | -------- | ---------------------------------------- |
-| CS-01 | No OWASP Agentic Top 10 crosswalk                          | High     | docs                                     |
-| CS-02 | No NIST AI RMF crosswalk                                   | High     | docs                                     |
-| CS-03 | No EU AI Act high-risk mapping                             | High     | docs                                     |
-| CS-04 | No SOC 2 CC crosswalk                                      | High     | docs                                     |
-| CS-05 | No ISO 42001 crosswalk                                     | Medium   | docs                                     |
+| CS-01 | OWASP Agentic Top 10 crosswalk (**done** → `standards/owasp-agentic-top-10.md`) | High     | docs                                     |
+| CS-02 | NIST AI RMF crosswalk (**done** → `standards/nist-ai-rmf.md`)                   | High     | docs                                     |
+| CS-03 | EU AI Act high-risk mapping (**done** → `standards/eu-ai-act.md`)               | High     | docs                                     |
+| CS-04 | SOC 2 CC crosswalk (**done** → `standards/soc2.md`)                             | High     | docs                                     |
+| CS-05 | ISO 42001 crosswalk (**done** → `standards/iso-42001.md`)                       | Medium   | docs                                     |
 
 ## Severity Roll-Up
 

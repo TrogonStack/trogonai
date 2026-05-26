@@ -12,4 +12,9 @@ Read in order:
 6. [05-gap-analysis.md](./05-gap-analysis.md) — 59 distinct gaps, severity-rated, owner-mapped.
 7. [06-todo-backlog.md](./06-todo-backlog.md) — the actionable, dependency-ordered checklist.
 
+Reference material:
+
+- [standards/](./standards/) — crosswalks to OWASP Agentic, NIST AI RMF, EU AI Act, SOC 2, ISO 42001.
+- [../../security/threat-model.md](../../security/threat-model.md) — STRIDE threat model per security-critical crate (closes gap **TM-01**).
+
 The authoritative ship list is `06-todo-backlog.md`.
