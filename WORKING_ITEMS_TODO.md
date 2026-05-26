@@ -8,9 +8,9 @@ Operator/deployment work (deployed auth-callout subscriber, NSC pipelines, signi
 
 Source: `A2A_PLAN.md` §Implementation Status — Shipped crates / `a2a-pack`.
 
-- [ ] **Resource-tuple table bundle** — surface the `A2A_PLAN.md` §SpiceDB-resource-tuples table as a first-class `a2a-pack` module the gateway loads (rather than hard-coded in `a2a-gateway/src/policy/spicedb_tier1.rs`).
-- [ ] **Audit envelope extension bundle** — `a2a-pack` module for A2A-specific audit fields beyond the shipped `trace_id` / `rules_fired` / `rewrites` / `refusal_skill` / `stream_consumer` / `zed_token_snapshot` shape.
-- [ ] **Rate-limit profile bundle** — default per-skill-kind rate-limit profile per `A2A_PLAN.md` §Bundles.
+- [x] **Resource-tuple table bundle** — surface the `A2A_PLAN.md` §SpiceDB-resource-tuples table as a first-class `a2a-pack` module the gateway loads (rather than hard-coded in `a2a-gateway/src/policy/spicedb_tier1.rs`).
+- [x] **Audit envelope extension bundle** — `a2a-pack` module for A2A-specific audit fields beyond the shipped `trace_id` / `rules_fired` / `rewrites` / `refusal_skill` / `stream_consumer` / `zed_token_snapshot` shape.
+- [x] **Rate-limit profile bundle** — default per-skill-kind rate-limit profile per `A2A_PLAN.md` §Bundles.
 
 ## Audit attribution fields surfaced by Phase 4 smoke
 
@@ -38,7 +38,7 @@ Source: `A2A_PLAN.md` §Decisions — Streaming back-pressure.
 
 Source: `a2a-pack/policies/time-of-day.tier1.toml` ships an approximation.
 
-- [ ] **True time-of-day predicates** — extend the declarative evaluator to accept real time predicates (clock-aware), replacing the current approximation bundle.
+- [x] **True time-of-day predicates** — extend the declarative evaluator to accept real time predicates (clock-aware), replacing the current approximation bundle.
 
 ## Catalog
 
