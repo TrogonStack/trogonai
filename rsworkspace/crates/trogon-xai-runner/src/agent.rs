@@ -1434,7 +1434,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             if !pending_tool_calls.is_empty() {
                 if tool_rounds >= MAX_TOOL_ROUNDS {
                     warn!(session_id, MAX_TOOL_ROUNDS, "xai: max tool rounds reached");
-                    break 'outer StopReason::Cancelled;
+                    break 'outer StopReason::MaxTurnRequests;
                 }
                 let Some(resp_id) = current_response_id.clone() else {
                     warn!(
