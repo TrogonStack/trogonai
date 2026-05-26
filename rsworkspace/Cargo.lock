@@ -80,6 +80,7 @@ dependencies = [
  "serde_json",
  "spicedb-grpc-tonic",
  "tempfile",
+ "time",
  "tokio",
  "tokio-util",
  "toml 0.8.23",
@@ -212,6 +213,7 @@ version = "0.0.0-skeleton"
 dependencies = [
  "a2a-redaction",
  "jsonschema",
+ "serde",
  "serde_json",
  "tracing",
 ]

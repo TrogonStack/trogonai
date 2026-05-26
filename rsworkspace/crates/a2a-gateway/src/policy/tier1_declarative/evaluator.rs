@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::agent_id::A2aAgentId;
@@ -11,6 +12,35 @@ use super::bundle::{
     Tier1DeclarativeRule, Tier1ResourceKind,
 };
 use super::loader::Tier1DeclarativeLoadError;
+use super::time_predicate::time_of_day_pattern_matches;
+
+pub trait Tier1Clock: Send + Sync {
+    fn now(&self) -> SystemTime;
+}
+
+#[derive(Debug, Default)]
+pub struct SystemTier1Clock;
+
+impl Tier1Clock for SystemTier1Clock {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedTier1Clock(SystemTime);
+
+impl FixedTier1Clock {
+    pub fn new(instant: SystemTime) -> Self {
+        Self(instant)
+    }
+}
+
+impl Tier1Clock for FixedTier1Clock {
+    fn now(&self) -> SystemTime {
+        self.0
+    }
+}
 
 pub const ENV_TIER1_DECLARATIVE_ENABLED: &str = "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED";
 pub const ENV_TIER1_BUNDLE_DIR: &str = "A2A_GATEWAY_TIER1_BUNDLE_DIR";
@@ -60,11 +90,16 @@ impl Tier1DeclarativeGate for NoopTier1DeclarativeGate {
 
 pub struct RealTier1DeclarativeGate {
     bundle: Tier1DeclarativeBundle,
+    clock: Arc<dyn Tier1Clock>,
 }
 
 impl RealTier1DeclarativeGate {
     pub fn new(bundle: Tier1DeclarativeBundle) -> Self {
-        Self { bundle }
+        Self::with_clock(bundle, Arc::new(SystemTier1Clock))
+    }
+
+    pub fn with_clock(bundle: Tier1DeclarativeBundle, clock: Arc<dyn Tier1Clock>) -> Self {
+        Self { bundle, clock }
     }
 }
 
@@ -75,7 +110,7 @@ impl Tier1DeclarativeGate for RealTier1DeclarativeGate {
 
     fn evaluate(&self, ctx: &Tier1DeclarativeContext) -> Tier1DeclarativeDecision {
         for rule in self.bundle.rules() {
-            if rule_matches_all(ctx, rule) {
+            if rule_matches_all(ctx, rule, self.clock.as_ref()) {
                 return match rule.effect {
                     Tier1DeclarativeEffect::Allow => Tier1DeclarativeDecision::Allow {
                         rule: Some(rule.id.clone()),
@@ -91,13 +126,21 @@ impl Tier1DeclarativeGate for RealTier1DeclarativeGate {
     }
 }
 
-fn rule_matches_all(ctx: &Tier1DeclarativeContext, rule: &Tier1DeclarativeRule) -> bool {
-    rule.matches.iter().all(|item| match_hits(ctx, item))
+fn rule_matches_all(ctx: &Tier1DeclarativeContext, rule: &Tier1DeclarativeRule, clock: &dyn Tier1Clock) -> bool {
+    rule.matches
+        .iter()
+        .all(|item| match_hits(ctx, item, clock))
 }
 
-fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch) -> bool {
-    let value = field_value(ctx, item.kind);
-    let matched = pattern_matches(&item.pattern, &value);
+fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock: &dyn Tier1Clock) -> bool {
+    let matched = match item.kind {
+        Tier1ResourceKind::TimeOfDay => time_of_day_pattern_matches(&item.pattern, clock.now())
+            .unwrap_or(false),
+        kind => {
+            let value = field_value(ctx, kind);
+            pattern_matches(&item.pattern, &value)
+        }
+    };
     if item.negate { !matched } else { matched }
 }
 
@@ -112,6 +155,7 @@ fn field_value(ctx: &Tier1DeclarativeContext, kind: Tier1ResourceKind) -> String
             .unwrap_or_default()
             .to_owned(),
         Tier1ResourceKind::NatsSubjectPattern => ctx.nats_subject.clone(),
+        Tier1ResourceKind::TimeOfDay => String::new(),
     }
 }
 
