@@ -26,7 +26,7 @@ pub use stdio_mcp_bridge::StdioMcpBridge;
 pub mod cross_runner;
 pub use cross_runner::{CrossRunnerSwitcher, RunnerSwitcher};
 
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub struct KillOnDrop(pub Child);
@@ -60,7 +60,13 @@ pub async fn connect_or_start_nats(
         .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
         .unwrap_or("4222");
 
-    let child = match Command::new("nats-server").args(["-p", port, "-js"]).spawn() {
+    // LOW-22: suppress stderr so a second concurrent instance that loses the port-bind
+    // race does not produce "address already in use" noise on the terminal.
+    let child = match Command::new("nats-server")
+        .args(["-p", port, "-js"])
+        .stderr(Stdio::null())
+        .spawn()
+    {
         Ok(c) => c,
         Err(_) => {
             return Err(anyhow::anyhow!(
