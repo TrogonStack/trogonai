@@ -7,9 +7,10 @@ use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::catalog::import_gate::{
     BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
-    ZedTokenSnapshot, ZedTokenTtl, spicedb_subject_from_principal,
+    ZedTokenSnapshot, ZedTokenTtl,
 };
 use a2a_nats::catalog::import_gate::LiveBulkImportPermissionClient;
+use a2a_nats::catalog::import_gate::parse_subject_reference;
 use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
@@ -175,7 +176,7 @@ pub fn derive_tuple(
     match method {
         A2aMethod::AgentCard => Ok(Tier1ResourceTuple::new(
             "agent_card",
-            format!("{publisher_account}:{}", agent_id.as_str()),
+            format!("{publisher_account}/{}", agent_id.as_str()),
             "view",
         )),
         A2aMethod::MessageSend | A2aMethod::MessageStream => Ok(Tier1ResourceTuple::new(
@@ -477,7 +478,7 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
         principal: &SpiceDbPrincipal,
         tuple: &Tier1ResourceTuple,
     ) -> Tier1AuthorizeOutcome {
-        let Some((subject_type, subject_id)) = spicedb_subject_from_principal(principal) else {
+        let Some((subject_type, subject_id)) = spicedb_tier1_subject_from_principal(principal) else {
             tracing::warn!(
                 session_sub = %session.sub(),
                 session_account = %session.account(),
@@ -514,6 +515,10 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
                     },
                 )),
             });
+        } else {
+            request.consistency = Some(Consistency {
+                requirement: Some(authzed::v1::consistency::Requirement::FullyConsistent(true)),
+            });
         }
 
         let response = match self.client.check_bulk_permissions(request).await {
@@ -531,6 +536,34 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
 
         let allowed = response.pairs.first().is_some_and(pair_is_allowed);
         if !allowed {
+            match response.pairs.first().and_then(|pair| pair.response.as_ref()) {
+                Some(check_bulk_permissions_pair::Response::Item(item)) => {
+                    tracing::warn!(
+                        session_sub = %session.sub(),
+                        resource_type = %tuple.resource_type.as_str(),
+                        resource_id = %tuple.resource_id.as_str(),
+                        permission = %tuple.permission.as_str(),
+                        permissionship = item.permissionship,
+                        "SpiceDbTier1Gate: BulkCheckPermissions denied"
+                    );
+                }
+                Some(check_bulk_permissions_pair::Response::Error(error)) => {
+                    tracing::warn!(
+                        session_sub = %session.sub(),
+                        resource_type = %tuple.resource_type.as_str(),
+                        resource_id = %tuple.resource_id.as_str(),
+                        permission = %tuple.permission.as_str(),
+                        error = ?error,
+                        "SpiceDbTier1Gate: BulkCheckPermissions item error"
+                    );
+                }
+                None => {
+                    tracing::warn!(
+                        session_sub = %session.sub(),
+                        "SpiceDbTier1Gate: BulkCheckPermissions empty pair response"
+                    );
+                }
+            }
             return Tier1AuthorizeOutcome::Denied;
         }
 
@@ -569,7 +602,8 @@ pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_accou
 
     let account = principal
         .0
-        .get("account")
+        .get("session_account")
+        .or_else(|| principal.0.get("account"))
         .or_else(|| principal.0.get("aud"))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
@@ -582,8 +616,16 @@ pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbP
     SpiceDbPrincipal(serde_json::json!({
         "spicedb_subject": format!("user/{caller_slug}"),
         "sub": caller_slug,
-        "account": account,
+        "session_account": account,
     }))
+}
+
+fn spicedb_tier1_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
+    principal
+        .0
+        .get("spicedb_subject")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_subject_reference)
 }
 
 fn parse_subject_id(raw: &str) -> Option<String> {
@@ -610,7 +652,7 @@ pub fn owner_tuple_for_message_send(
     principal: &SpiceDbPrincipal,
 ) -> Option<Tier1OwnerTuple> {
     let task_id = task_id_from_params(params)?;
-    let (subject_type, subject_id) = spicedb_subject_from_principal(principal)?;
+    let (subject_type, subject_id) = spicedb_tier1_subject_from_principal(principal)?;
     Some(Tier1OwnerTuple::for_task(agent_id, &task_id, &subject_type, &subject_id))
 }
 
@@ -869,7 +911,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tuple.resource_type.as_str(), "agent_card");
-        assert_eq!(tuple.resource_id.as_str(), "publisher:planner");
+        assert_eq!(tuple.resource_id.as_str(), "publisher/planner");
     }
 
     #[test]

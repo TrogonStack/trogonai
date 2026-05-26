@@ -60,11 +60,11 @@ Proves the JWT plumbing end-to-end with no policy stack.
 
 Closer to prod; slower to run. Add only when minimal smoke is green and stable.
 
-- [ ] **SpiceDB service** — `authzed/spicedb:latest` with a preloaded schema/relationships fixture covering the gateway's Tier-1 needs.
-- [ ] **Gateway env** — flip `A2A_GATEWAY_TIER1_SPICEDB_ENABLED=1` and point at the in-network SpiceDB.
-- [ ] **Tier-1 declarative bundles (optional).** Load reference bundles from `a2a-pack/policies/` and set `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED=1`.
-- [ ] **Tier-3 signed bundles (optional).** Load `a2a-pack/skills/` with a smoke signing key and set `A2A_GATEWAY_TIER3_REDACTION_ENABLED=1`.
-- [ ] **Signed discovery exports (optional).** Provision a smoke operator key and exercise `a2a.discover.>` cross-Account flow.
+- [x] **SpiceDB service** — `authzed/spicedb:latest` with a preloaded schema/relationships fixture covering the gateway's Tier-1 needs.
+- [x] **Gateway env** — flip `A2A_GATEWAY_TIER1_SPICEDB_ENABLED=1` and point at the in-network SpiceDB.
+- [x] **Tier-1 declarative bundles (optional).** Load reference bundles from `a2a-pack/policies/` and set `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED=1`.
+- [x] **Tier-3 signed bundles (optional).** Load `a2a-pack/skills/` with a smoke signing key and set `A2A_GATEWAY_TIER3_REDACTION_ENABLED=1`.
+- [x] **Signed discovery exports (optional).** Provision a smoke operator key and exercise `a2a.discover.>` cross-Account flow.
 
 ## Phase 5 — docs
 
@@ -74,10 +74,10 @@ Closer to prod; slower to run. Add only when minimal smoke is green and stable.
 ## Shipped
 
 1. **Phase 0 → Phase 1 → Phase 2 → Phase 3** — minimal Docker smoke (`compose.a2a.smoke.yml`, `make smoke`, `a2a-smoke-test`).
+2. **Phase 4** — full-stack compose (`compose.a2a.full.yml`, `make smoke-full`, `a2a-smoke-test --profile full`): SpiceDB + seed, Tier-1 declarative bundles, Tier-3 signed WASM skills (`pii-regex-redactor`, `smoke-tier3-refuse`), operator-signed discovery gate. Tier-3 WASM build runs in the `a2a-bootstrap` image via `cargo chef` + `a2a-pack/skills/build.sh` (cold builds are slow; see [`docs/A2A_DEVELOPMENT.md`](./docs/A2A_DEVELOPMENT.md)).
 
 ## Suggested ordering
 
-2. **Phase 4** — only after the smoke is green. Adds policy and federation surface area.
 3. **Phase 5** — fold remaining auth-callout deployment cross-links into whichever phase landed last.
 
 ## Out of scope

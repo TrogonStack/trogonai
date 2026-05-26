@@ -6,13 +6,6 @@ MARKER="${BOOTSTRAP_DIR}/.bootstrap-complete"
 REPO_SCRIPTS="/opt/a2a/scripts"
 SMOKE_NATS_CONF="/opt/a2a/a2a-nats-server-smoke.conf"
 
-if [[ -f "${MARKER}" ]]; then
-  echo "[a2a-bootstrap] already complete (${MARKER})"
-  exit 0
-fi
-
-mkdir -p "${BOOTSTRAP_DIR}/jwt" "${BOOTSTRAP_DIR}/nsc/config" "${BOOTSTRAP_DIR}/nsc/data" "${BOOTSTRAP_DIR}/nsc/keys"
-
 export A2A_BOOTSTRAP_DIR="${BOOTSTRAP_DIR}"
 export A2A_OPERATOR_NAME="${A2A_OPERATOR_NAME:-smoke-op}"
 export A2A_ACCOUNT_NAME="${A2A_ACCOUNT_NAME:-SMOKE}"
@@ -25,6 +18,82 @@ export A2A_AUTH_CALLOUT_ALLOWED_ACCOUNTS="${A2A_AUTH_CALLOUT_ALLOWED_ACCOUNTS:-S
 export A2A_AUTH_CALLOUT_KEYS_DIR="${BOOTSTRAP_DIR}/auth-callout-keys"
 export A2A_AUTH_CALLOUT_OUTPUT_FILE="${BOOTSTRAP_DIR}/auth-callout.env"
 export A2A_PUSH_JWT=0
+COMPOSE_PROFILE="${A2A_COMPOSE_PROFILE:-smoke}"
+NATS_BASE_URL="nats://nats:4222"
+
+write_full_gateway_env() {
+  local tier1_dir="$1"
+  local tier3_dir="$2"
+  local tier3_pubkey="$3"
+  local discovery_pubkey="$4"
+  {
+    echo "NATS_URL=${NATS_BASE_URL}"
+    echo "NATS_USER=${A2A_AUTH_CALLOUT_USER}"
+    echo "NATS_PASSWORD=${AUTH_PASSWORD}"
+    echo "A2A_PREFIX=${A2A_PREFIX}"
+    echo "A2A_GATEWAY_TRUST_CALLER_HEADERS=0"
+    echo "A2A_GATEWAY_TIER1_SPICEDB_ENABLED=on"
+    echo "A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT=http://spicedb:50051"
+    echo "A2A_GATEWAY_TIER1_SPICEDB_TOKEN=devkey"
+    echo "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED=on"
+    echo "A2A_GATEWAY_TIER1_BUNDLE_DIR=${tier1_dir}"
+    echo "A2A_GATEWAY_TIER3_REDACTION_ENABLED=on"
+    echo "A2A_GATEWAY_POLICY_BUNDLE_DIR=${tier3_dir}"
+    echo "A2A_GATEWAY_POLICY_SKILLS=pii-regex-redactor,smoke-tier3-refuse"
+    echo "A2A_GATEWAY_TIER3_SIGNING_PUBKEY=${tier3_pubkey}"
+    echo "A2A_DISCOVERY_OPERATOR_KEYS=${A2A_OPERATOR_NAME}:${discovery_pubkey}"
+    echo "A2A_SMOKE_DISCOVERY_OPERATOR_SEED_PATH=${BOOTSTRAP_DIR}/discovery-operator-seed.hex"
+    echo "A2A_GATEWAY_AUDIT_PUBLISH=1"
+    echo "A2A_GATEWAY_JWT_AUDIENCE=${A2A_ACCOUNT_NAME}"
+    echo "AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
+    echo "AUTH_CALLOUT_SIGNING_KEY_PATH=${BOOTSTRAP_DIR}/signing-key.current"
+    echo "AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH=${BOOTSTRAP_DIR}/signing-key.previous"
+  } > "${BOOTSTRAP_DIR}/gateway.env"
+}
+
+bootstrap_full_policy_bundles() {
+  local tier1_dir="${BOOTSTRAP_DIR}/tier1-bundles"
+  local tier3_dir="${BOOTSTRAP_DIR}/tier3-bundles"
+  mkdir -p "${tier1_dir}" "${tier3_dir}"
+  cp /opt/a2a/policies/per-method-allowlist.tier1.toml "${tier1_dir}/"
+
+  stage_tier3_skill() {
+    local slug="$1"
+    local wasm_src="$2"
+    cp "${wasm_src}" "${tier3_dir}/${slug}.wasm"
+    cp "/opt/a2a/tier3-manifests/${slug}.manifest.json" "${tier3_dir}/${slug}.manifest.json"
+  }
+  stage_tier3_skill "pii-regex-redactor" "/opt/a2a/tier3-staging/pii_regex_redactor.wasm"
+  stage_tier3_skill "smoke-tier3-refuse" "/opt/a2a/tier3-staging/smoke_tier3_refuse.wasm"
+
+  local tier3_signing_seed discovery_signing_seed
+  tier3_signing_seed="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+  a2a-sign-bundle --key "${tier3_signing_seed}" --skill-dir "${tier3_dir}"
+  local tier3_signing_pubkey
+  tier3_signing_pubkey="$(a2a-smoke-test ed25519-pubkey --seed-hex "${tier3_signing_seed}")"
+
+  discovery_signing_seed="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+  local discovery_operator_pubkey
+  discovery_operator_pubkey="$(a2a-smoke-test ed25519-pubkey --seed-hex "${discovery_signing_seed}")"
+  printf '%s' "${discovery_signing_seed}" > "${BOOTSTRAP_DIR}/discovery-operator-seed.hex"
+  chmod 600 "${BOOTSTRAP_DIR}/discovery-operator-seed.hex"
+
+  write_full_gateway_env "${tier1_dir}" "${tier3_dir}" "${tier3_signing_pubkey}" "${discovery_operator_pubkey}"
+  echo "[a2a-bootstrap] full policy bundles refreshed"
+}
+
+if [[ -f "${MARKER}" && "${COMPOSE_PROFILE}" == "full" ]]; then
+  AUTH_PASSWORD="$(grep -E '^NATS_PASSWORD=' "${BOOTSTRAP_DIR}/auth-callout.env" | head -1 | cut -d= -f2-)"
+  bootstrap_full_policy_bundles
+  exit 0
+fi
+
+if [[ -f "${MARKER}" ]]; then
+  echo "[a2a-bootstrap] already complete (${MARKER})"
+  exit 0
+fi
+
+mkdir -p "${BOOTSTRAP_DIR}/jwt" "${BOOTSTRAP_DIR}/nsc/config" "${BOOTSTRAP_DIR}/nsc/data" "${BOOTSTRAP_DIR}/nsc/keys"
 
 NSC_FLAGS="--config-dir ${A2A_NSC_DIR}/config --data-dir ${A2A_NSC_DIR}/data --keystore-dir ${A2A_NSC_DIR}/keys"
 
@@ -52,8 +121,6 @@ sed -e "s|<replace-with-nsc-bootstrap-issuer-public>|${ISSUER_PUBLIC}|g" \
   -e "s|<replace-with-callout-auth-password>|${AUTH_PASSWORD}|g" \
   "${SMOKE_NATS_CONF}" \
   > "${BOOTSTRAP_DIR}/nats-server.conf"
-
-NATS_BASE_URL="nats://nats:4222"
 
 patch_nats_env() {
   local file="$1"
@@ -89,20 +156,24 @@ a2a-smoke-test mint-jwt \
   --out "${BOOTSTRAP_DIR}/nats-server-caller.jwt" \
   --creds-out "${BOOTSTRAP_DIR}/smoke-caller.creds"
 
-{
-  echo "NATS_URL=${NATS_BASE_URL}"
-  echo "NATS_USER=${A2A_AUTH_CALLOUT_USER}"
-  echo "NATS_PASSWORD=${AUTH_PASSWORD}"
-  echo "A2A_PREFIX=${A2A_PREFIX}"
-  echo "A2A_GATEWAY_TRUST_CALLER_HEADERS=0"
-  echo "A2A_GATEWAY_TIER1_SPICEDB_ENABLED=0"
-  echo "A2A_GATEWAY_TIER3_REDACTION_ENABLED=0"
-  echo "A2A_GATEWAY_AUDIT_PUBLISH=1"
-  echo "A2A_GATEWAY_JWT_AUDIENCE=${A2A_ACCOUNT_NAME}"
-  echo "AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
-  echo "AUTH_CALLOUT_SIGNING_KEY_PATH=${BOOTSTRAP_DIR}/signing-key.current"
-  echo "AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH=${BOOTSTRAP_DIR}/signing-key.previous"
-} > "${BOOTSTRAP_DIR}/gateway.env"
+if [[ "${COMPOSE_PROFILE}" == "full" ]]; then
+  bootstrap_full_policy_bundles
+else
+  {
+    echo "NATS_URL=${NATS_BASE_URL}"
+    echo "NATS_USER=${A2A_AUTH_CALLOUT_USER}"
+    echo "NATS_PASSWORD=${AUTH_PASSWORD}"
+    echo "A2A_PREFIX=${A2A_PREFIX}"
+    echo "A2A_GATEWAY_TRUST_CALLER_HEADERS=0"
+    echo "A2A_GATEWAY_TIER1_SPICEDB_ENABLED=0"
+    echo "A2A_GATEWAY_TIER3_REDACTION_ENABLED=0"
+    echo "A2A_GATEWAY_AUDIT_PUBLISH=1"
+    echo "A2A_GATEWAY_JWT_AUDIENCE=${A2A_ACCOUNT_NAME}"
+    echo "AUTH_CALLOUT_SIGNING_KEY_SOURCE=file"
+    echo "AUTH_CALLOUT_SIGNING_KEY_PATH=${BOOTSTRAP_DIR}/signing-key.current"
+    echo "AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH=${BOOTSTRAP_DIR}/signing-key.previous"
+  } > "${BOOTSTRAP_DIR}/gateway.env"
+fi
 
 {
   echo "NATS_URL=${NATS_BASE_URL}"
