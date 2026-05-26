@@ -8640,6 +8640,145 @@ async def test_bypass_permissions_tool_executes():
             mock.stop()
 
 
+async def test_acp_cancel_mid_prompt():
+    """Spec (PR3/acp-runner): publishing to {prefix}.session.{sid}.agent.cancel
+    while a prompt is in-flight (runner awaiting LLM HTTP response) causes the
+    runner to abort the call and return stopReason='cancelled'."""
+    print("\n\033[1mTest 163: mid-prompt cancel via NATS → stopReason 'cancelled'\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cancel_event = threading.Event()
+
+        def slow_sse(n):
+            # Hold connection open until signalled or 8s timeout
+            cancel_event.wait(timeout=8)
+            return acp_text_sse("too late t163")
+
+        mock = MockHttpServer(30187, slow_sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t163",
+               "PROXY_URL": "http://127.0.0.1:30187",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        try:
+            # Create session
+            r = await nc.request(
+                "acp.t163.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(),
+                timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            async def _noop(m): pass
+            await nc.subscribe(f"acp.t163.session.{sid}.client.session.update", cb=_noop)
+
+            # Subscribe to prompt response before firing the prompt
+            req_id = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(
+                f"acp.t163.session.{sid}.agent.prompt.response.{req_id}")
+
+            # Fire prompt (non-blocking; mock will hold the HTTP connection open)
+            await nc.publish(
+                f"acp.t163.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "cancel me t163"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+
+            # Wait until mock received the HTTP request — runner is now awaiting LLM
+            for _ in range(60):
+                if mock.received:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                fail("mid-prompt cancel: mock never received HTTP call from runner")
+                cancel_event.set()
+                await nc.close()
+                return
+
+            print(f"    mock received HTTP call; publishing cancel to runner", flush=True)
+
+            # Publish cancel — runner subscribes to this via regular NATS subscribe
+            await nc.publish(
+                f"acp.t163.session.{sid}.agent.cancel",
+                json.dumps({"sessionId": sid}).encode())
+
+            # Wait for done response (should arrive quickly after cancel)
+            msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=10)
+            await nc.close()
+
+            done = json.loads(msg.data)
+            print(f"    done={done}", flush=True)
+            stop_reason = done.get("stopReason", "")
+
+            if stop_reason == "cancelled":
+                ok("mid-prompt cancel: stopReason='cancelled' after NATS cancel notification")
+            else:
+                fail("mid-prompt cancel: expected stopReason='cancelled'",
+                     f"done={done}")
+        except Exception as e:
+            fail("mid-prompt cancel", str(e))
+            try: await nc.close()
+            except Exception: pass
+        finally:
+            cancel_event.set()  # wake sleeping mock handler so mock.stop() returns fast
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+async def test_bash_bypass_permissions():
+    """Spec (PR2/acp-runner): when a session is created with bypassPermissions,
+    the bash tool executes without requesting user approval. No auto_approve.py
+    should be needed — the bash command produces output in the tool_result."""
+    print("\n\033[1mTest 164: bash tool with bypassPermissions — executes without approval\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse(
+                    "bash164", "bash",
+                    json.dumps({"command": "echo BASH_T164_OUTPUT"}))
+            return acp_text_sse("bash ran without approval t164")
+
+        mock = MockHttpServer(30188, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t164",
+               "PROXY_URL": "http://127.0.0.1:30188",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            # bypass_permissions=True → no auto_approve.py needed
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t164", tmpdir, "run bash without approval", timeout=20,
+                bypass_permissions=True)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+
+            if len(mock.received) >= 2 and tool_result and "BASH_T164_OUTPUT" in tool_result:
+                ok("bash bypassPermissions: bash executed without auto_approve "
+                   "(tool_result contains echo output)")
+            elif len(mock.received) >= 2 and tool_result is not None:
+                fail("bash bypassPermissions: tool_result present but missing expected output",
+                     f"tool_result={tool_result!r}")
+            else:
+                fail("bash bypassPermissions: bash did not execute or tool_result missing",
+                     f"done={done} api_calls={len(mock.received)} tool_result={tool_result!r}")
+        except Exception as e:
+            fail("bash bypassPermissions", str(e))
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -8796,6 +8935,8 @@ async def main():
     await test_acp_fork_branch_at_index()
     await test_bypass_permissions_tool_executes()
     await test_read_file_offset_only()
+    await test_acp_cancel_mid_prompt()
+    await test_bash_bypass_permissions()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
