@@ -100,12 +100,14 @@ This is the actionable checklist. Order is **dependency-aware** within a phase, 
 
 ## Phase 11 — Standards Crosswalks (docs)
 
-- [ ] **TM-01** — STRIDE threat model per crate (gateway / auth-callout / decider / audit / redaction / trust / policy).
-- [ ] **CS-01** — OWASP Agentic Top 10 crosswalk.
-- [ ] **CS-02** — NIST AI RMF crosswalk.
-- [ ] **CS-03** — EU AI Act high-risk obligations crosswalk.
-- [ ] **CS-04** — SOC 2 CC crosswalk.
-- [ ] **CS-05** — ISO 42001 crosswalk.
+- [x] **TM-01** — STRIDE threat model per crate (gateway / auth-callout / decider / audit / redaction / policy / bridge / operator). → `docs/security/threat-model.md`
+- [x] **CS-01** — OWASP Agentic Top 10 crosswalk. → `standards/owasp-agentic-top-10.md`
+- [x] **CS-02** — NIST AI RMF crosswalk. → `standards/nist-ai-rmf.md`
+- [x] **CS-03** — EU AI Act high-risk obligations crosswalk. → `standards/eu-ai-act.md`
+- [x] **CS-04** — SOC 2 CC crosswalk. → `standards/soc2.md`
+- [x] **CS-05** — ISO 42001 crosswalk. → `standards/iso-42001.md`
+
+> Phase 11 docs are now authored as living crosswalks. Re-review when any control row's gap closes — flip the row to `met`.
 
 ## Cross-Cutting Requirements
 
