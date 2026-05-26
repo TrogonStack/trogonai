@@ -208,11 +208,25 @@ where
         }
     }
 
+    /// MED-31: `tokio::task::spawn_local` panics when called outside a `LocalSet`.
+    /// Production always drives this runtime inside a `LocalSet`, but tests and
+    /// future callers may not. Probe once (a no-op spawn) so the sync method can
+    /// degrade to synchronous-only cleanup instead of panicking. There is no public
+    /// API to detect a `LocalSet`, hence the `catch_unwind`.
+    fn local_set_available() -> bool {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio::task::spawn_local(async {}).abort();
+        }))
+        .is_ok()
+    }
+
     /// Cleans up sessions that have been idle longer than `session_idle_timeout_secs`.
     pub fn cleanup_idle_sessions(&self) {
         if self.session_idle_timeout_secs == 0 {
             return;
         }
+        // Whether we can schedule the async parts (terminal kill, sandbox removal).
+        let can_spawn_local = Self::local_set_available();
         let now = self.clock.now();
         let timeout = std::time::Duration::from_secs(self.session_idle_timeout_secs);
         let idle: Vec<String> = {
@@ -243,22 +257,32 @@ where
                 if let Some(mut t) = self.terminals.borrow_mut().remove(&tid) {
                     // Spawn kill + collector abort so native processes are not orphaned.
                     // cleanup_idle_sessions is sync, so async work must go to spawn_local.
-                    tokio::task::spawn_local(async move {
-                        t.kill().await;
-                        if let Some(c) = t.output_collector.take() {
-                            c.abort();
-                        }
-                    });
+                    if can_spawn_local {
+                        tokio::task::spawn_local(async move {
+                            t.kill().await;
+                            if let Some(c) = t.output_collector.take() {
+                                c.abort();
+                            }
+                        });
+                    } else if let Some(c) = t.output_collector.take() {
+                        // No LocalSet to drive the async kill — at least abort the
+                        // output collector synchronously; the terminal is dropped.
+                        c.abort();
+                    }
                 }
             }
             if let Some(session) = self.sessions.borrow_mut().remove(&session_id) {
                 let dir = session.dir.clone();
                 let fs = self.fs.clone();
                 // Spawn the fs removal as a background task if we're in an async context.
-                tokio::task::spawn_local(async move {
-                    let _ = fs.remove_dir_all(&dir).await;
-                    debug!(session_id = %session_id, "Idle session sandbox cleaned up");
-                });
+                if can_spawn_local {
+                    tokio::task::spawn_local(async move {
+                        let _ = fs.remove_dir_all(&dir).await;
+                        debug!(session_id = %session_id, "Idle session sandbox cleaned up");
+                    });
+                }
+                // Without a LocalSet (non-production callers) the sandbox dir removal
+                // is skipped — the in-memory session state is still cleaned up above.
             }
         }
     }
