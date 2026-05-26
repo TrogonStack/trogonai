@@ -1,15 +1,15 @@
 use axum::Router;
-use tracing::info;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
-use crate::config::{ResolvedConfig, SourceIntegration};
+use crate::config::ResolvedConfig;
+use crate::source_plugin;
 
 pub(crate) fn mount_sources<P, S>(config: ResolvedConfig, publisher: ClaimCheckPublisher<P, S>) -> Router
 where
     P: JetStreamPublisher,
     S: ObjectStorePut,
 {
-    let mut app = Router::new()
+    let app = Router::new()
         .route(
             "/-/liveness",
             axum::routing::get(|| async { axum::http::StatusCode::OK }),
@@ -19,119 +19,7 @@ where
             axum::routing::get(|| async { axum::http::StatusCode::OK }),
         );
 
-    app = mount_webhook_integrations(
-        app,
-        "github",
-        "/sources/github",
-        &config.github,
-        publisher.clone(),
-        |p, cfg| crate::source::github::router(p, cfg),
-    );
-    for integration in &config.slack {
-        if integration.config.webhook().is_none() {
-            continue;
-        }
-        let path = format!("/sources/slack/{}", integration.id);
-        app = app.nest(
-            &path,
-            crate::source::slack::router(publisher.clone(), &integration.config),
-        );
-        let integration_id = integration.id.as_str();
-        info!(
-            source = "slack",
-            integration = integration_id,
-            path,
-            "mounted source integration"
-        );
-    }
-    app = mount_webhook_integrations(
-        app,
-        "telegram",
-        "/sources/telegram",
-        &config.telegram,
-        publisher.clone(),
-        |p, cfg| crate::source::telegram::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "twitter",
-        "/sources/twitter",
-        &config.twitter,
-        publisher.clone(),
-        |p, cfg| crate::source::twitter::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "gitlab",
-        "/sources/gitlab",
-        &config.gitlab,
-        publisher.clone(),
-        |p, cfg| crate::source::gitlab::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "incidentio",
-        "/sources/incidentio",
-        &config.incidentio,
-        publisher.clone(),
-        |p, cfg| crate::source::incidentio::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "linear",
-        "/sources/linear",
-        &config.linear,
-        publisher.clone(),
-        |p, cfg| crate::source::linear::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "microsoft-graph",
-        "/sources/microsoft-graph",
-        &config.microsoft_graph,
-        publisher.clone(),
-        |p, cfg| crate::source::microsoft_graph::router(p, cfg),
-    );
-    app = mount_webhook_integrations(
-        app,
-        "notion",
-        "/sources/notion",
-        &config.notion,
-        publisher.clone(),
-        |p, cfg| crate::source::notion::router(p, cfg),
-    );
-    app = mount_webhook_integrations(app, "sentry", "/sources/sentry", &config.sentry, publisher, |p, cfg| {
-        crate::source::sentry::router(p, cfg)
-    });
-
-    app
-}
-
-fn mount_webhook_integrations<P, S, C, F>(
-    mut app: Router,
-    source: &'static str,
-    source_path: &'static str,
-    integrations: &[SourceIntegration<C>],
-    publisher: ClaimCheckPublisher<P, S>,
-    router: F,
-) -> Router
-where
-    P: JetStreamPublisher,
-    S: ObjectStorePut,
-    F: Fn(ClaimCheckPublisher<P, S>, &C) -> Router,
-{
-    for integration in integrations {
-        let path = format!("{}/{}", source_path, integration.id);
-        app = app.nest(&path, router(publisher.clone(), &integration.config));
-        info!(
-            source,
-            integration = integration.id.as_str(),
-            path,
-            "mounted source integration"
-        );
-    }
-
-    app
+    source_plugin::mount_webhook_sources(app, publisher, &config)
 }
 
 #[cfg(test)]
