@@ -1,0 +1,5 @@
+{
+  "skill_id": "pii-regex-redactor",
+  "json_path": "$.params.message.parts[0].text",
+  "kind": "Masked"
+}

@@ -21,7 +21,8 @@ RUN cargo chef cook --release --recipe-path recipe.json \
     -p a2a-bridge \
     -p a2a-nats-server \
     -p a2a-nats-agent \
-    -p a2a-smoke-test
+    -p a2a-smoke-test \
+    -p a2a-redaction
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
@@ -33,13 +34,20 @@ RUN cargo build --release \
     -p a2a-nats-server \
     -p a2a-nats-agent \
     -p a2a-smoke-test \
+    -p a2a-redaction \
     && strip target/release/a2a-auth-callout \
     && strip target/release/a2a-gateway \
     && strip target/release/a2a-bridge \
     && strip target/release/a2a-nats-server \
     && strip target/release/a2a-nats-agent \
     && strip target/release/a2a-nats-agent-echo \
-    && strip target/release/a2a-smoke-test
+    && strip target/release/a2a-smoke-test \
+    && strip target/release/a2a-sign-bundle
+
+FROM builder AS tier3-bundles-builder
+
+RUN rustup target add wasm32-unknown-unknown
+RUN bash crates/a2a-pack/skills/build.sh
 
 FROM debian:bookworm-20250317-slim AS runtime-base
 

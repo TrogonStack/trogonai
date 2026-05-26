@@ -1,0 +1,53 @@
+name: a2a-full
+
+include:
+  - path: compose.a2a.smoke.yml
+
+services:
+  a2a-bootstrap:
+    environment:
+      A2A_COMPOSE_PROFILE: full
+
+  spicedb:
+    image: authzed/spicedb:latest
+    command:
+      - serve
+      - --grpc-preshared-key=devkey
+      - --datastore-engine=memory
+    networks:
+      - a2a_smoke
+
+  a2a-spicedb-seed:
+    build:
+      context: ../../..
+      dockerfile: devops/docker/compose/services/a2a-spicedb-seed/Dockerfile
+    volumes:
+      - a2a_bootstrap:/run/a2a-bootstrap
+    depends_on:
+      a2a-bootstrap:
+        condition: service_completed_successfully
+      spicedb:
+        condition: service_started
+    networks:
+      - a2a_smoke
+    restart: "no"
+
+  a2a-gateway:
+    depends_on:
+      a2a-auth-callout:
+        condition: service_healthy
+      a2a-spicedb-seed:
+        condition: service_completed_successfully
+
+  a2a-smoke-test:
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -a
+        . /run/a2a-bootstrap/nats-server.env
+        . /run/a2a-bootstrap/gateway.env
+        export A2A_SMOKE_EXPECTED_CALLER_ID=smoke-caller-1
+        set +a
+        exec a2a-smoke-test run --profile full
+    profiles:
+      - smoke-full
