@@ -82,12 +82,13 @@ pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
                 continue;
             }
         };
-        let prompt = req["prompt"].as_str().unwrap_or("").to_string();
-        if prompt.is_empty() {
-            let err = serde_json::json!({"error": "missing or empty prompt field"}).to_string();
-            nats.publish(reply, err.into()).await.ok();
-            continue;
-        }
+        let prompt = match extract_prompt(&req) {
+            Ok(p) => p,
+            Err(err_json) => {
+                nats.publish(reply, err_json.into()).await.ok();
+                continue;
+            }
+        };
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
         let nats2 = nats.clone();
         let key2 = api_key.clone();
@@ -97,6 +98,19 @@ pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
             let result = oneshot_call_with_client(client2.as_ref(), &key2, &model2, &prompt, &url).await;
             nats2.publish(reply, result.into()).await.ok();
         });
+    }
+}
+
+/// Extract and validate the `prompt` field from a spawn request payload.
+///
+/// Returns `Ok(prompt)` when the field is present and non-empty.
+/// Returns `Err(json_error_body)` otherwise — the caller should publish this as the reply.
+pub(crate) fn extract_prompt(req: &serde_json::Value) -> Result<String, String> {
+    let prompt = req["prompt"].as_str().unwrap_or("").to_string();
+    if prompt.is_empty() {
+        Err(serde_json::json!({"error": "missing or empty prompt field"}).to_string())
+    } else {
+        Ok(prompt)
     }
 }
 
@@ -197,5 +211,32 @@ mod tests {
         oneshot_call_with_client(&mock, "my-secret-key", "grok-4", "hi", "http://x/chat/completions").await;
         let (api_key, _, _, _) = captured.lock().unwrap().take().unwrap();
         assert_eq!(api_key, "my-secret-key");
+    }
+
+    // ── LOW-15: empty/missing prompt is rejected before hitting the API ────────
+
+    #[test]
+    fn extract_prompt_rejects_missing_field() {
+        let req = serde_json::json!({});
+        assert!(extract_prompt(&req).is_err());
+    }
+
+    #[test]
+    fn extract_prompt_rejects_empty_string() {
+        let req = serde_json::json!({"prompt": ""});
+        let err = extract_prompt(&req).unwrap_err();
+        assert!(err.contains("missing or empty prompt field"), "got: {err}");
+    }
+
+    #[test]
+    fn extract_prompt_rejects_null_prompt() {
+        let req = serde_json::json!({"prompt": null});
+        assert!(extract_prompt(&req).is_err());
+    }
+
+    #[test]
+    fn extract_prompt_accepts_non_empty_prompt() {
+        let req = serde_json::json!({"prompt": "explain recursion"});
+        assert_eq!(extract_prompt(&req).unwrap(), "explain recursion");
     }
 }

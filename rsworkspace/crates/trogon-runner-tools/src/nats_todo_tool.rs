@@ -453,4 +453,102 @@ mod tests {
             assert!(result.contains("t1"), "read must return written todo, got: {result}");
         }
     }
+
+    // ── LOW-9: retry loop on save failure ────────────────────────────────────
+
+    /// A SessionStore that fails `save()` the first `fail_count` times,
+    /// then succeeds. `load()` always returns the last successfully saved state.
+    #[derive(Clone)]
+    struct FailNSaves {
+        inner: std::sync::Arc<std::sync::Mutex<Option<crate::session_store::SessionState>>>,
+        fails_left: std::sync::Arc<std::sync::Mutex<u8>>,
+    }
+
+    impl FailNSaves {
+        fn new(fail_count: u8) -> Self {
+            Self {
+                inner: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                fails_left: std::sync::Arc::new(std::sync::Mutex::new(fail_count)),
+            }
+        }
+
+        fn saved_state(&self) -> Option<crate::session_store::SessionState> {
+            self.inner.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl super::SessionStore for FailNSaves {
+        async fn load(&self, _: &str) -> anyhow::Result<crate::session_store::SessionState> {
+            Ok(self.inner.lock().unwrap().clone().unwrap_or_default())
+        }
+
+        async fn save(&self, _: &str, state: &crate::session_store::SessionState) -> anyhow::Result<()> {
+            let mut left = self.fails_left.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                Err(anyhow::anyhow!("simulated KV revision conflict"))
+            } else {
+                *self.inner.lock().unwrap() = Some(state.clone());
+                Ok(())
+            }
+        }
+
+        async fn delete(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn list_ids(&self) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn list_children(&self, _: &str) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn todo_write_succeeds_after_two_save_failures() {
+        let store = FailNSaves::new(2); // first 2 saves fail, 3rd succeeds
+        let tool = NatsTodoTool::new("session-1", store.clone());
+        let result = tool
+            .call_tool(
+                "todo_write",
+                &serde_json::json!({"id": "t1", "content": "test task", "status": "pending"}),
+            )
+            .await;
+        assert_eq!(result, Ok("OK".to_string()), "should succeed after retries");
+        let saved = store.saved_state().expect("state must be persisted");
+        assert_eq!(saved.todos.len(), 1);
+        assert_eq!(saved.todos[0].id, "t1");
+    }
+
+    #[tokio::test]
+    async fn todo_write_fails_after_three_save_failures() {
+        let store = FailNSaves::new(3); // all 3 attempts fail
+        let tool = NatsTodoTool::new("session-1", store);
+        let result = tool
+            .call_tool(
+                "todo_write",
+                &serde_json::json!({"id": "t1", "content": "task", "status": "pending"}),
+            )
+            .await;
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("failed after 3 attempts"),
+            "error should mention retry count, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn todo_write_succeeds_immediately_when_no_failures() {
+        let store = FailNSaves::new(0); // no failures
+        let tool = NatsTodoTool::new("session-1", store.clone());
+        let result = tool
+            .call_tool(
+                "todo_write",
+                &serde_json::json!({"id": "t1", "content": "task", "status": "pending"}),
+            )
+            .await;
+        assert_eq!(result, Ok("OK".to_string()));
+        assert!(store.saved_state().is_some());
+    }
 }
