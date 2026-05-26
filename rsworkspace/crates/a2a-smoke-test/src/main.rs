@@ -6,10 +6,11 @@ use a2a_auth_callout::{
 };
 use a2a_auth_callout::permissions::IssuedPermissions;
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_nats::client::resubscribe::open_resubscribe_stream;
 use a2a_nats::client::unary::send_unary;
 use a2a_nats::client::{Client, ClientError};
 use a2a_nats::{
-    compose_gateway_ingress_subject, A2aAgentId, A2aPrefix, Config, NatsConfig, ReqId,
+    compose_gateway_ingress_subject, A2aAgentId, A2aPrefix, A2aTaskId, Config, NatsConfig, ReqId,
 };
 use a2a_nats_discovery::{
     parse_operator_keys, resolve_operator_signature_gate, sign_discovery_export, OperatorKeyId,
@@ -103,6 +104,7 @@ struct SmokeContext {
     jwt: MintedUserJwt,
     client: SmokeClient,
     nats: async_nats::Client,
+    js: trogon_nats::jetstream::NatsJetStreamClient,
     op_timeout: Duration,
     expected_caller: String,
 }
@@ -286,7 +288,7 @@ async fn build_context(
         .map_err(|e| e.to_string())?;
     let js = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats.clone()));
     let config = Config::new(prefix.clone(), nats_config);
-    let client = Client::new(config, agent.clone(), nats.clone(), js).routing_via_gateway_ingress(jwt.clone());
+    let client = Client::new(config, agent.clone(), nats.clone(), js.clone()).routing_via_gateway_ingress(jwt.clone());
 
     Ok(SmokeContext {
         prefix,
@@ -294,6 +296,7 @@ async fn build_context(
         jwt,
         client,
         nats,
+        js,
         op_timeout,
         expected_caller,
     })
@@ -364,6 +367,7 @@ async fn run_full_stack(ctx: &SmokeContext) -> Result<(), String> {
     assert_tier1_declarative_denied(ctx).await?;
     assert_tier3_refusal(ctx).await?;
     let (caller_id, caller_source, rules) = assert_policy_allow_path(ctx).await?;
+    assert_resubscribe_replay(ctx).await?;
     println!(
         "SMOKE_FULL_OK caller_id={caller_id} caller_source={caller_source} rules_fired={rules:?}"
     );
@@ -548,6 +552,87 @@ async fn assert_policy_allow_path(ctx: &SmokeContext) -> Result<(String, String,
     let caller_id = envelope.caller_id.clone().unwrap_or_default();
     let caller_source = envelope.caller_source.clone().unwrap_or_default();
     Ok((caller_id, caller_source, Vec::new()))
+}
+
+async fn assert_resubscribe_replay(ctx: &SmokeContext) -> Result<(), String> {
+    let send_req = SendMessageRequest {
+        message: Some(Message {
+            message_id: uuid::Uuid::new_v4().to_string(),
+            role: Role::User as i32,
+            parts: vec![Part {
+                content: Some(a2a_types::part::Content::Text("smoke-resubscribe".into())),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let (bootstrap, mut event_stream) = tokio::time::timeout(ctx.op_timeout, ctx.client.message_stream(&send_req))
+        .await
+        .map_err(|_| "message/stream timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let task_id_str = match bootstrap.payload {
+        Some(a2a_types::send_message_response::Payload::Task(task)) => task.id,
+        other => return Err(format!("message/stream bootstrap did not return a Task: {other:?}")),
+    };
+    let task_id = A2aTaskId::new(&task_id_str).map_err(|e| e.to_string())?;
+
+    let first = tokio::time::timeout(ctx.op_timeout, event_stream.next())
+        .await
+        .map_err(|_| "timed out waiting for first stream event".to_string())?
+        .ok_or("event stream ended before first event".to_string())?
+        .map_err(|e| format!("first event error: {e}"))?;
+    if !matches!(
+        first.payload,
+        Some(a2a_types::stream_response::Payload::StatusUpdate(_))
+    ) {
+        return Err(format!("expected StatusUpdate as first event, got {:?}", first.payload));
+    }
+
+    let last_seq = event_stream.last_seq();
+    if last_seq == 0 {
+        return Err("first event did not record a JetStream sequence".into());
+    }
+
+    let mut replay_stream = open_resubscribe_stream(&ctx.js, &ctx.prefix, &task_id, last_seq)
+        .await
+        .map_err(|e| format!("open_resubscribe_stream: {e}"))?;
+
+    drop(event_stream);
+
+    let replayed = tokio::time::timeout(ctx.op_timeout, replay_stream.next())
+        .await
+        .map_err(|_| "timed out waiting for replayed event".to_string())?
+        .ok_or("replay stream ended without yielding an event".to_string())?
+        .map_err(|e| format!("replay event error: {e}"))?;
+
+    match replayed.payload {
+        Some(a2a_types::stream_response::Payload::Task(task)) => {
+            if task.id != task_id_str {
+                return Err(format!(
+                    "replayed Task id {} != original {task_id_str}",
+                    task.id
+                ));
+            }
+        }
+        other => {
+            return Err(format!(
+                "expected replayed completed Task event, got {other:?}"
+            ));
+        }
+    }
+
+    let replay_seq = replay_stream.last_seq();
+    if replay_seq <= last_seq {
+        return Err(format!(
+            "replay seq {replay_seq} did not advance past first event seq {last_seq}"
+        ));
+    }
+
+    info!(%task_id_str, last_seq, replay_seq, "tasks/resubscribe replay verified");
+    Ok(())
 }
 
 fn normalize_audit_caller_id(caller_id: &str) -> &str {
