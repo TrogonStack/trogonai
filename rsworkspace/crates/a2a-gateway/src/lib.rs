@@ -21,6 +21,7 @@
 pub mod agent_card_surface;
 pub mod caller_jwt_header;
 pub mod config;
+pub mod gw_ingress_stream;
 pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;
 pub mod planned;
