@@ -1,6 +1,6 @@
 //! Gateway-owned JetStream pull pipe for streaming ingress (`message/stream`, `tasks/resubscribe`).
 //!
-//! Operator guide: [`../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
+//! Operator guide: [`../../../../docs/a2a/how-to/operators/streaming-backpressure.md`](../../../../docs/a2a/how-to/operators/streaming-backpressure.md).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

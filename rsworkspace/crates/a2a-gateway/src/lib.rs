@@ -1,8 +1,8 @@
 //! A2A gateway service — ingress on `{prefix}.gateway.>` and forward to `{prefix}.agent.{id}.{method}`.
 //!
-//! Engineering checklist beyond opaque forward: **[`docs/A2A_GATEWAY_ROADMAP.md`](../../../../docs/A2A_GATEWAY_ROADMAP.md)**.
+//! Engineering checklist beyond opaque forward: **[`docs/a2a/explanation/gateway-roadmap.md`](../../../../docs/a2a/explanation/gateway-roadmap.md)**.
 //!
-//! Planned authorization and policy seams are documented in [A2A architecture](../../../../docs/A2A_ARCHITECTURE.md):
+//! Planned authorization and policy seams are documented in [A2A architecture](../../../../docs/a2a/explanation/architecture.md):
 //! queue-group subscriber (`A2A_GATEWAY_QUEUE_GROUP`) with opaque JSON-RPC bridging today; JWT
 //! validation, policy bundles (`a2a-pack`), and ingress audit emission remain future work.
 //!

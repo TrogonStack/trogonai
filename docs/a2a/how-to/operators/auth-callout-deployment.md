@@ -80,11 +80,11 @@ Structured audit logs on denial include `reason_category`, `server_id`, `caller_
 | `AUTH_CALLOUT_USER_JWT_TTL_SECS` | no | TTL for minted user JWT (default 300). |
 | `AUTH_CALLOUT_OIDC_*` / `AUTH_CALLOUT_MTLS_*` | per verifier | See credential modules. |
 
-Full env reference: [`A2A_RUNTIME_ENV.md`](../../reference/runtime-env.md).
+Full env reference: [Runtime env](../../reference/runtime-env.md).
 
 ## Sample `nats-server` config (centralized)
 
-Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../../../../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../../../../scripts/a2a-auth-callout-bootstrap.sh). **Local end-to-end reference implementation:** the `a2a-bootstrap` init container in [`devops/docker/compose/compose.a2a.smoke.yml`](../../../../devops/docker/compose/compose.a2a.smoke.yml) wraps those scripts, renders `nats-server.conf`, and populates the shared volume (see [`docs/A2A_DEVELOPMENT.md`](../../tutorials/development.md)). Production deployment unit: [`scripts/a2a-auth-callout.service`](../../../../scripts/a2a-auth-callout.service).
+Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../../../../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../../../../scripts/a2a-auth-callout-bootstrap.sh). **Local end-to-end reference implementation:** the `a2a-bootstrap` init container in [`devops/docker/compose/compose.a2a.smoke.yml`](../../../../devops/docker/compose/compose.a2a.smoke.yml) wraps those scripts, renders `nats-server.conf`, and populates the shared volume (see [developer guide](../../tutorials/development.md)). Production deployment unit: [`scripts/a2a-auth-callout.service`](../../../../scripts/a2a-auth-callout.service).
 
 ```hcl
 accounts {
@@ -115,4 +115,4 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 
 ## Related
 
-- Runtime env reference: [`A2A_RUNTIME_ENV.md`](../../reference/runtime-env.md)
+- Runtime env reference: [`runtime-env.md`](../../reference/runtime-env.md)

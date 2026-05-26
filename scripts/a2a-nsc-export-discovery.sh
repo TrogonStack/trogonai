@@ -2,7 +2,7 @@
 # a2a-nsc-export-discovery.sh — Phase 4 federated discovery export/import scaffold
 #
 # Wraps the operator-signed nsc add export / nsc add import flow described in:
-#   docs/A2A_FEDERATED_DISCOVERY_SKETCH.md  §Operator-signed Account export contract
+#   docs/a2a/explanation/federated-discovery-sketch.md  §Operator-signed Account export contract
 #
 # Federation is OFF by default. Operators opt in by running this script to
 # create signed exports on a publisher Account and matching imports on one or
@@ -57,7 +57,7 @@
 #   nsc push       : https://docs.nats.io/using-nats/nats-tools/nsc/basics
 #
 # NOTE: nsc was not available in the build environment when this script was
-# written. All flags are taken from docs/A2A_FEDERATED_DISCOVERY_SKETCH.md
+# written. All flags are taken from docs/a2a/explanation/federated-discovery-sketch.md
 # (which cites official nsc docs) and the nsc CLI reference at
 # https://nats-io.github.io/nsc/. Do NOT add flags beyond those cited above
 # without verifying against `nsc <subcommand> --help`.
@@ -190,7 +190,7 @@ if [ "${MODE}" = "export" ]; then
     log "       A2A_PUBLISHER_PUBKEY=<key> ./scripts/a2a-nsc-export-discovery.sh --import"
     log "  3. Configure gateway federation resolution:"
     log "       (publisher_account_id → import_name) mapping — see"
-    log "       docs/A2A_FEDERATED_DISCOVERY_SKETCH.md §Consumer Account"
+    log "       docs/a2a/explanation/federated-discovery-sketch.md §Consumer Account"
 
 # ---------------------------------------------------------------------------
 # Import mode — consumer Account
@@ -243,6 +243,6 @@ elif [ "${MODE}" = "import" ]; then
     log "  1. Verify gateway can reach the publisher DiscoverService:"
     log "       nats request ${DISCOVER_SUBJECT/<agent_id>} '' --creds consumer.creds"
     log "  2. Configure gateway federation merge — see"
-    log "       docs/A2A_FEDERATED_DISCOVERY_SKETCH.md §Client-visible catalog merge"
+    log "       docs/a2a/explanation/federated-discovery-sketch.md §Client-visible catalog merge"
     log "  3. Wire SpiceDB BulkCheckPermission for federated agent tuples (Phase 4)."
 fi

@@ -23,7 +23,7 @@ See also [`examples/echo.rs`](./examples/echo.rs).
 
 ## Environment
 
-Required and shared knobs mirror [`docs/A2A_RUNTIME_ENV.md`](../../../docs/A2A_RUNTIME_ENV.md) (**`a2a-nats-agent`** section).
+Required and shared knobs mirror [`docs/a2a/reference/runtime-env.md`](../../../docs/a2a/reference/runtime-env.md) (**`a2a-nats-agent`** section).
 
 | Variable | Required | Meaning |
 |----------|----------|---------|
@@ -36,4 +36,4 @@ Required and shared knobs mirror [`docs/A2A_RUNTIME_ENV.md`](../../../docs/A2A_R
 | **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | no | Push DLQ **`{caller_id}`** segment (default **`_`**) |
 | **`A2A_CONNECT_TIMEOUT_SECS`** | no | NATS dial timeout |
 
-**Navigation hub:** [`docs/A2A_DOCS_INDEX.md`](../../../docs/A2A_DOCS_INDEX.md).
+**Navigation hub:** [`docs/a2a/README.md`](../../../docs/a2a/README.md).
