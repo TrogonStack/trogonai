@@ -8,6 +8,7 @@ use super::bundle::{
     Tier1DeclarativeBundle, Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule,
     Tier1DeclarativeRuleId, Tier1DeclarativeSchemaError, Tier1ResourceKind,
 };
+use super::time_predicate::TimeOfDayWindow;
 
 pub const TIER1_BUNDLE_EXTENSION: &str = "tier1.toml";
 
@@ -157,6 +158,15 @@ fn convert_match(path: &Path, item: MatchToml) -> Result<Tier1DeclarativeMatch, 
             error,
         }
     })?;
+
+    if kind == Tier1ResourceKind::TimeOfDay {
+        TimeOfDayWindow::parse(item.pattern.trim()).map_err(|error| {
+            Tier1DeclarativeLoadError::Schema {
+                path: path.to_path_buf(),
+                error: Tier1DeclarativeSchemaError::InvalidTimeOfDayPattern(error.to_string()),
+            }
+        })?;
+    }
 
     Ok(Tier1DeclarativeMatch::new(kind, item.pattern, item.negate))
 }

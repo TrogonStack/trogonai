@@ -26,6 +26,7 @@ futures = { workspace = true }
 moka = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+time = { workspace = true }
 toml = "=0.8.23"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = { workspace = true }
@@ -40,4 +41,5 @@ uuid = { workspace = true }
 nkeys = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+time = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
