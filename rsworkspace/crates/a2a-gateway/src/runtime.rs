@@ -1306,6 +1306,7 @@ fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
     a2a_nats::extract_request_id(payload).map(|id| id.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn maybe_spawn_streaming_ingress_pump(
     client: &async_nats::Client,
     config: &Config,
