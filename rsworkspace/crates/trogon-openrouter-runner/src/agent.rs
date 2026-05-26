@@ -124,6 +124,12 @@ struct OpenRouterSession {
     total_output_tokens: u64,
     total_cache_read_tokens: u64,
     total_cache_creation_tokens: u64,
+    /// Terminal ID for the persistent bash shell. Set on first bash call; reused thereafter.
+    #[serde(skip)]
+    terminal_id: Option<String>,
+    /// NATS wasm prefix used when the terminal was created, needed for release on close.
+    #[serde(skip)]
+    terminal_wasm_prefix: Option<String>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -613,6 +619,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
                 total_cache_creation_tokens: 0,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
             },
         );
 
@@ -699,6 +707,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         total_output_tokens,
                         total_cache_read_tokens,
                         total_cache_creation_tokens,
+                        terminal_id: None,
+                        terminal_wasm_prefix: None,
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
@@ -778,6 +788,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 total_output_tokens: 0,
                 total_cache_read_tokens: 0,
                 total_cache_creation_tokens: 0,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
             },
         );
 
@@ -808,6 +820,24 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if let (Some(store), Some(s)) = (&self.session_store, sessions.get(&session_id)) {
             let snapshot = self.build_snapshot(&session_id, s);
             store.save(&snapshot).await;
+        }
+        // Release persistent bash terminal if one was created for this session.
+        if let Some(s) = sessions.get(&session_id) {
+            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+                s.terminal_id.clone(),
+                s.terminal_wasm_prefix.clone(),
+                &self.execution_nats,
+            ) {
+                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+                if let Ok(payload) = serde_json::to_vec(
+                    &agent_client_protocol::ReleaseTerminalRequest::new(
+                        session_id.clone(),
+                        tid,
+                    ),
+                ) {
+                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                }
+            }
         }
         sessions.remove(&session_id);
         drop(sessions);
@@ -954,7 +984,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd, mut terminal_id) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -966,6 +996,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
                 s.cwd.clone(),
+                s.terminal_id.clone(),
             )
         };
 
@@ -1210,7 +1241,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let result = if call.name == "bash" {
                     if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                        execute_bash_via_nats(nats, wasm, &session_id, &call.arguments).await
+                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &call.arguments).await;
+                        // Persist terminal_id back to session if it was just created
+                        if terminal_id.is_some() {
+                            let mut sessions = self.sessions.lock().await;
+                            if let Some(s) = sessions.get_mut(&session_id) {
+                                if s.terminal_id.is_none() {
+                                    s.terminal_id = terminal_id.clone();
+                                    s.terminal_wasm_prefix = Some(wasm.to_string());
+                                }
+                            }
+                        }
+                        result
                     } else {
                         "bash not available: no execution backend configured".to_string()
                     }
@@ -1268,6 +1310,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.total_output_tokens += prompt_output_total;
                 s.total_cache_read_tokens += prompt_cache_read_total;
                 s.total_cache_creation_tokens += prompt_cache_creation_total;
+                s.terminal_id = terminal_id.clone();
                 if let Some(store) = &self.session_store {
                     let snapshot = self.build_snapshot(&session_id, s);
                     store.save(&snapshot).await;
@@ -1445,16 +1488,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
 }
 
-async fn execute_bash_via_nats(
+const BASH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const BASH_EXIT_MARKER_PREFIX: &str = "__EXIT_";
+const BASH_EXIT_MARKER_SUFFIX: &str = "__";
+
+async fn execute_bash_stateful(
     nats: &async_nats::Client,
     wasm_prefix: &str,
     session_id: &str,
+    terminal_id: &mut Option<String>,
+    cwd: &str,
     arguments: &str,
 ) -> String {
-    use std::time::Duration;
     use agent_client_protocol::{
-        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
-        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+        CreateTerminalRequest, CreateTerminalResponse,
+        TerminalOutputRequest, TerminalOutputResponse,
     };
 
     let command = match serde_json::from_str::<serde_json::Value>(arguments)
@@ -1465,63 +1513,131 @@ async fn execute_bash_via_nats(
         None => return "error: missing 'command' in bash arguments".to_string(),
     };
 
-    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-    let session_id_owned = session_id.to_string();
-    let nats = nats.clone();
+    let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
 
-    let result = tokio::time::timeout(Duration::from_secs(30), async move {
-        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
-            .args(vec!["-c".to_string(), command]);
+    // Step 1: obtain or create the persistent terminal (outside timeout closure
+    // because &mut terminal_id cannot be moved into an async block)
+    let tid: String = if let Some(ref id) = *terminal_id {
+        id.clone()
+    } else {
+        let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
+            .cwd(std::path::PathBuf::from(cwd));
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+        let msg = match nats.request(format!("{term_base}.create"), payload.into()).await {
             Ok(m) => m,
             Err(e) => return format!("error: {e}"),
         };
-        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+        let resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
             Err(e) => return format!("error: {e}"),
         };
-        let tid = create_resp.terminal_id.clone();
+        let new_tid = resp.terminal_id.to_string();
+        *terminal_id = Some(new_tid.clone());
+        new_tid
+    };
 
-        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&wait_req) {
+    let nats = nats.clone();
+    let session_id = session_id.to_string();
+
+    let result = tokio::time::timeout(Duration::from_secs(30), async move {
+        // 2. Snapshot baseline output length
+        let baseline_len = {
+            let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+            let payload = match serde_json::to_vec(&req) {
+                Ok(p) => p,
+                Err(e) => return format!("error: {e}"),
+            };
+            match nats.request(format!("{term_base}.output"), payload.into()).await {
+                Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                    Ok(r) => r.output.len(),
+                    Err(_) => 0,
+                },
+                Err(_) => 0,
+            }
+        };
+
+        // 3. Write command with demarcation marker
+        let cmd_with_marker = format!(
+            "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
+        );
+        let write_req = serde_json::json!({
+            "terminal_id": tid,
+            "data": cmd_with_marker.as_bytes()
+        });
+        let payload = match serde_json::to_vec(&write_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
-            return format!("error: {e}");
+        if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
+            return format!("error writing to terminal: {e}");
         }
 
-        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&out_req) {
-            Ok(p) => p,
-            Err(e) => return format!("error: {e}"),
-        };
-        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
-            Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
-        };
-        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
-            Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
-        };
+        // 4. Poll for output until marker found or timeout
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            tokio::time::sleep(BASH_POLL_INTERVAL).await;
 
-        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
-        if let Ok(payload) = serde_json::to_vec(&rel_req) {
-            let _ = nats.request(format!("{base}.release"), payload.into()).await;
+            let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+            let payload = match serde_json::to_vec(&req) {
+                Ok(p) => p,
+                Err(e) => return format!("error: {e}"),
+            };
+            let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
+                Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                    Ok(r) => r.output,
+                    Err(e) => return format!("error reading output: {e}"),
+                },
+                Err(e) => return format!("error reading output: {e}"),
+            };
+
+            if full_output.len() > baseline_len {
+                let new_output = &full_output[baseline_len..];
+                if let Some(output) = bash_extract_before_marker(new_output) {
+                    return output;
+                }
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                let partial = if full_output.len() > baseline_len {
+                    full_output[baseline_len..].to_string()
+                } else {
+                    String::new()
+                };
+                return format!("error: bash timed out. Partial output:\n{partial}");
+            }
         }
-
-        out.output
-    })
-    .await;
+    }).await;
 
     match result {
         Ok(output) => output,
-        Err(_elapsed) => "error: bash execution timed out".to_string(),
+        Err(_) => "error: bash execution timed out".to_string(),
     }
+}
+
+fn bash_extract_before_marker(output: &str) -> Option<String> {
+    let mut last_match: Option<usize> = None;
+    let mut search = output;
+    let mut offset = 0;
+    while let Some(pos) = search.find(BASH_EXIT_MARKER_PREFIX) {
+        let abs = offset + pos;
+        let after = &output[abs + BASH_EXIT_MARKER_PREFIX.len()..];
+        if let Some(end) = after.find(BASH_EXIT_MARKER_SUFFIX) {
+            let code_str = &after[..end];
+            if code_str.chars().all(|c| c.is_ascii_digit()) {
+                last_match = Some(abs);
+            }
+        }
+        offset = abs + BASH_EXIT_MARKER_PREFIX.len();
+        search = &output[offset..];
+    }
+    last_match.map(|pos| {
+        let before = &output[..pos];
+        before.strip_suffix('\n').unwrap_or(before).to_string()
+    })
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -1542,6 +1658,8 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             total_output_tokens: 0,
             total_cache_read_tokens: 0,
             total_cache_creation_tokens: 0,
+            terminal_id: None,
+            terminal_wasm_prefix: None,
         });
     }
 
@@ -1756,6 +1874,8 @@ mod tests {
             total_output_tokens: 0,
             total_cache_read_tokens: 0,
             total_cache_creation_tokens: 0,
+            terminal_id: None,
+            terminal_wasm_prefix: None,
         }
     }
 
