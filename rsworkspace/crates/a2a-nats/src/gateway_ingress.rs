@@ -192,6 +192,15 @@ pub fn ingress_gateway_policy_denied_response_bytes(
     JsonRpcErrorResponse::new(id, -32_801, message.into()).to_bytes()
 }
 
+/// Serialize a Tier-1 declarative policy denial (`-32803`) for the correlating inbox.
+pub fn ingress_gateway_declarative_denied_response_bytes(
+    request_payload_hint: &[u8],
+    message: impl Into<String>,
+) -> Result<bytes::Bytes, serde_json::Error> {
+    let id = crate::extract_request_id(request_payload_hint);
+    JsonRpcErrorResponse::new(id, -32_803, message.into()).to_bytes()
+}
+
 /// Serialize a Tier-3 skill refusal reply (`-32802`) for the correlating inbox.
 pub fn ingress_gateway_tier3_refused_response_bytes(
     request_payload_hint: &[u8],

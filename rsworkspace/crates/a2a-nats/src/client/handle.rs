@@ -20,6 +20,8 @@ use crate::nats::subjects::agent::{
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
 
+use crate::catalog::{AgentCardWatchError, AgentCardWatchStream};
+
 use super::error::ClientError;
 use super::event_stream::TypedEventStream;
 use super::resubscribe::open_resubscribe_stream;
@@ -93,6 +95,10 @@ impl<N, J> Client<N, J> {
             ClientIngressTarget::AgentSubjects => None,
             ClientIngressTarget::GatewayIngress(jwt) => Some(jwt),
         }
+    }
+
+    pub fn agent_id(&self) -> &A2aAgentId {
+        &self.agent_id
     }
 }
 
@@ -290,6 +296,14 @@ where
             self.gateway_caller_jwt(),
         )
         .await
+    }
+
+    pub async fn watch_agent_card(
+        &self,
+        store: &async_nats::jetstream::kv::Store,
+        shutdown: tokio_util::sync::CancellationToken,
+    ) -> Result<AgentCardWatchStream, AgentCardWatchError> {
+        AgentCardWatchStream::subscribe_agent(store, &self.agent_id, shutdown).await
     }
 }
 
