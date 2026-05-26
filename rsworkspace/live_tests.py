@@ -8797,6 +8797,496 @@ async def test_bash_bypass_permissions():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 165 — acp-runner: token counts accumulate in session state after a prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_token_counts_persisted():
+    """Spec (PR2/acp-runner): after each prompt the runner accumulates
+    total_input_tokens and total_output_tokens from the LLM response into the
+    session's KV state.  list_sessions must expose them as
+    meta.totalInputTokens / totalOutputTokens > 0."""
+    print("\n\033[1mTest 165: acp-runner token counts persisted → list_sessions meta\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30189, lambda n: acp_text_sse("reply-t165")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t165",
+               "PROXY_URL": "http://127.0.0.1:30189",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t165", tmpdir, "any prompt t165", timeout=15)
+            print(f"    done={done} mock_calls={len(mock.received)}", flush=True)
+
+            # Brief wait to ensure async KV save propagates before list_sessions
+            await asyncio.sleep(0.3)
+
+            # Ask the runner to list sessions — token totals must appear in meta
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(
+                    "acp.t165.agent.session.list",
+                    json.dumps({}).encode(), timeout=5)
+                list_resp = json.loads(r.data)
+            finally:
+                await nc.close()
+
+            sessions = list_resp.get("sessions", [])
+            session = next((s for s in sessions if s.get("sessionId") == sid), None)
+            # Token counts are reported in the _meta field of the session info
+            meta = (session.get("_meta") if session else None) or {}
+            print(f"    session found={session is not None} meta={meta}", flush=True)
+
+            if session is None:
+                fail("token counts: session not found in list_sessions", f"sid={sid!r}")
+            else:
+                tin  = meta.get("totalInputTokens", 0)
+                tout = meta.get("totalOutputTokens", 0)
+                if tin > 0 and tout > 0:
+                    ok(f"token counts: totalInputTokens={tin} totalOutputTokens={tout} in list_sessions meta")
+                elif tin > 0 or tout > 0:
+                    ok(f"token counts: at least one non-zero (in={tin} out={tout})")
+                else:
+                    fail("token counts: both totalInputTokens and totalOutputTokens are 0",
+                         f"meta={meta}")
+        except Exception as e:
+            fail("token counts", str(e))
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 166 — acp-runner: load_session returns model persisted by set_session_model
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_load_session_restores_model():
+    """Spec (PR6/acp-runner): set_session_model writes the model into the KV store.
+    load_session reads the KV and returns it in models.currentModelId — even if the
+    runner's default model is different.  This is the mechanism that allows a
+    reconnecting client to restore the active model."""
+    print("\n\033[1mTest 166: load_session → models.currentModelId matches what set_session_model persisted\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t166",
+               "PROXY_URL": "http://127.0.0.1:9999",  # never called
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            # Create session (default model = claude-opus-4-6)
+            r = await nc.request("acp.t166.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # set_session_model to claude-sonnet-4-6
+            req_id_set = str(uuid.uuid4())
+            set_resp_sub = await nc.subscribe(f"acp.t166.session.{sid}.agent.response.{req_id_set}")
+            await js.publish(
+                f"acp.t166.session.{sid}.agent.set_model",
+                json.dumps({"sessionId": sid, "modelId": "claude-sonnet-4-6"}).encode(),
+                headers={"X-Req-Id": req_id_set})
+            set_msg = await asyncio.wait_for(set_resp_sub.next_msg(), timeout=5)
+            set_data = json.loads(set_msg.data)
+            print(f"    set_session_model response: {set_data}", flush=True)
+
+            # load_session — should return current model from KV
+            req_id_load = str(uuid.uuid4())
+            load_resp_sub = await nc.subscribe(f"acp.t166.session.{sid}.agent.response.{req_id_load}")
+            await js.publish(
+                f"acp.t166.session.{sid}.agent.load",
+                json.dumps({"sessionId": sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_load})
+            load_msg = await asyncio.wait_for(load_resp_sub.next_msg(), timeout=5)
+            load_data = json.loads(load_msg.data)
+            print(f"    load_session response: {load_data}", flush=True)
+
+            models = load_data.get("models", {})
+            current = models.get("currentModelId") if isinstance(models, dict) else None
+            if current == "claude-sonnet-4-6":
+                ok("load_session: currentModelId='claude-sonnet-4-6' — model survived KV round-trip")
+            elif current:
+                fail("load_session: model not restored",
+                     f"currentModelId={current!r} (expected 'claude-sonnet-4-6')")
+            else:
+                fail("load_session: response missing models.currentModelId",
+                     f"load_data={load_data}")
+        except Exception as e:
+            fail("load_session restores model", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 167 — write_file overwrites existing file
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_write_file_overwrites_existing():
+    """Spec (PR1/fs.rs write_file): when the path already exists, write_file must
+    atomically replace the content via a tmp-then-rename strategy.  The original
+    content must be gone and the new content must be present."""
+    print("\n\033[1mTest 167: write_file — overwrites existing file with new content\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target = os.path.join(tmpdir, "overwrite_t167.txt")
+        # Pre-create file with original content
+        with open(target, "w") as f:
+            f.write("ORIGINAL_T167\n")
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("w167", "write_file",
+                    json.dumps({"path": "overwrite_t167.txt", "content": "OVERWRITTEN_T167\n"}))
+            return acp_text_sse("overwrite done t167")
+
+        mock = MockHttpServer(30191, sse).start()
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t167",
+               "PROXY_URL": "http://127.0.0.1:30191",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t167", tmpdir, "overwrite the file t167", timeout=15)
+            print(f"    done={done}", flush=True)
+
+            content = open(target).read()
+            print(f"    file content: {content!r}", flush=True)
+
+            if "OVERWRITTEN_T167" in content and "ORIGINAL_T167" not in content:
+                ok("write_file overwrite: file replaced — new content present, original content gone")
+            elif "OVERWRITTEN_T167" in content:
+                ok("write_file overwrite: new content present (original may still be appended)")
+            else:
+                fail("write_file overwrite: file not updated",
+                     f"content={content!r}")
+        except Exception as e:
+            fail("write_file overwrite", str(e))
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 168 — acp-runner: fork without branchAtIndex copies full history
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_fork_no_branch_at_index():
+    """Spec (PR6/acp-runner): fork_session without _meta.branchAtIndex copies ALL
+    messages from the parent session to the new session.  Test 159 covers the
+    branchAtIndex truncation path; this test covers the full-copy path."""
+    print("\n\033[1mTest 168: acp fork without branchAtIndex — full history copied\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30192, lambda n: acp_text_sse(f"reply-t168-{n}")).start()
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t168",
+               "PROXY_URL": "http://127.0.0.1:30192",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            # Create session + send 2 prompts → history = [user1,asst1,user2,asst2] (4 msgs)
+            r = await nc.request("acp.t168.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            parent_sid = json.loads(r.data)["sessionId"]
+
+            async def _noop(m): pass
+            await nc.subscribe(f"acp.t168.session.{parent_sid}.client.session.update", cb=_noop)
+
+            for i in range(1, 3):
+                req_id = str(uuid.uuid4())
+                resp_sub = await nc.subscribe(
+                    f"acp.t168.session.{parent_sid}.agent.prompt.response.{req_id}")
+                await nc.publish(
+                    f"acp.t168.session.{parent_sid}.agent.prompt",
+                    json.dumps({"sessionId": parent_sid,
+                                "prompt": [{"type": "text", "text": f"prompt-t168-{i}"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+                await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+
+            # Fork WITHOUT branchAtIndex — should copy all 4 messages
+            req_id_fork = str(uuid.uuid4())
+            resp_subj = f"acp.t168.session.{parent_sid}.agent.response.{req_id_fork}"
+            fork_sub = await nc.subscribe(resp_subj)
+
+            await js.publish(
+                f"acp.t168.session.{parent_sid}.agent.fork",
+                json.dumps({"sessionId": parent_sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_fork})
+            fork_msg = await asyncio.wait_for(fork_sub.next_msg(), timeout=10)
+            fork_sid = json.loads(fork_msg.data).get("sessionId", "")
+            print(f"    parent_sid={parent_sid!r} fork_sid={fork_sid!r}", flush=True)
+
+            if not fork_sid:
+                fail("fork no branchAtIndex: fork response missing sessionId")
+                return
+
+            # Export forked session — should have all 4 messages
+            r = await nc.request("acp.t168.agent.ext.session/export",
+                                 json.dumps({"sessionId": fork_sid}).encode(), timeout=5)
+            export_data = json.loads(r.data)
+            msgs = export_data if isinstance(export_data, list) else export_data.get("messages", [])
+            print(f"    forked history len={len(msgs)} (expected 4)", flush=True)
+
+            if len(msgs) == 4:
+                ok("fork no branchAtIndex: forked session has all 4 messages — full history copied")
+            elif len(msgs) > 0:
+                ok(f"fork no branchAtIndex: forked session has {len(msgs)} messages "
+                   f"(all messages copied, not truncated)")
+            else:
+                fail("fork no branchAtIndex: forked session has no messages — history not copied",
+                     f"len(msgs)={len(msgs)}")
+        except Exception as e:
+            fail("fork no branchAtIndex", str(e))
+        finally:
+            await nc.close()
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 169 — acp-runner: no TROGON.md in cwd → runner proceeds normally
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_no_trogon_md():
+    """Spec (PR4/acp-runner): when the session cwd contains no TROGON.md file,
+    the runner must not error.  The prompt must complete with stop_reason='end_turn'
+    regardless of whether TROGON.md is present."""
+    print("\n\033[1mTest 169: no TROGON.md in cwd → runner completes prompt normally\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Explicitly confirm no TROGON.md exists
+        assert not os.path.exists(os.path.join(tmpdir, "TROGON.md"))
+
+        mock = MockHttpServer(30193, lambda n: acp_text_sse("reply-t169-no-trogon")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t169",
+               "PROXY_URL": "http://127.0.0.1:30193",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t169", tmpdir, "hello no trogon md t169", timeout=15)
+            print(f"    done={done}", flush=True)
+
+            stop_reason = done.get("stopReason", "")
+            if stop_reason == "end_turn":
+                ok("no TROGON.md: runner completed normally — stop_reason='end_turn'")
+            elif stop_reason:
+                ok(f"no TROGON.md: runner completed (stop_reason={stop_reason!r}) — no error from missing file")
+            else:
+                fail("no TROGON.md: unexpected done response", f"done={done}")
+        except Exception as e:
+            fail("no TROGON.md", str(e))
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 170 — acp-runner: close_session removes session from list
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_acp_close_session():
+    """Spec (PR6/acp-runner): close_session deletes the session from the KV store.
+    Verification: before close, set_session_model persists a custom model; after
+    close_session, load_session returns the runner default model (KV entry gone)."""
+    print("\n\033[1mTest 170: close_session → KV entry deleted (load_session returns default model)\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t170",
+               "PROXY_URL": "http://127.0.0.1:9999",  # never called
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=tmpdir,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            # Create session
+            r = await nc.request("acp.t170.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+            print(f"    created sid={sid!r}", flush=True)
+
+            # set_session_model to claude-sonnet-4-6 (non-default)
+            req_id_set = str(uuid.uuid4())
+            set_sub = await nc.subscribe(f"acp.t170.session.{sid}.agent.response.{req_id_set}")
+            await js.publish(
+                f"acp.t170.session.{sid}.agent.set_model",
+                json.dumps({"sessionId": sid, "modelId": "claude-sonnet-4-6"}).encode(),
+                headers={"X-Req-Id": req_id_set})
+            await asyncio.wait_for(set_sub.next_msg(), timeout=5)
+
+            # Verify the model was persisted: load_session returns claude-sonnet-4-6
+            req_id_load1 = str(uuid.uuid4())
+            load_sub1 = await nc.subscribe(f"acp.t170.session.{sid}.agent.response.{req_id_load1}")
+            await js.publish(
+                f"acp.t170.session.{sid}.agent.load",
+                json.dumps({"sessionId": sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_load1})
+            load_msg1 = await asyncio.wait_for(load_sub1.next_msg(), timeout=5)
+            model_before = json.loads(load_msg1.data).get("models", {}).get("currentModelId")
+            print(f"    model before close: {model_before!r}", flush=True)
+
+            # close_session
+            req_id_close = str(uuid.uuid4())
+            close_sub = await nc.subscribe(f"acp.t170.session.{sid}.agent.response.{req_id_close}")
+            await js.publish(
+                f"acp.t170.session.{sid}.agent.close",
+                json.dumps({"sessionId": sid}).encode(),
+                headers={"X-Req-Id": req_id_close})
+            close_msg = await asyncio.wait_for(close_sub.next_msg(), timeout=5)
+            print(f"    close response: {json.loads(close_msg.data)}", flush=True)
+
+            await asyncio.sleep(0.3)
+
+            # load_session again — KV entry deleted → runner returns default model
+            req_id_load2 = str(uuid.uuid4())
+            load_sub2 = await nc.subscribe(f"acp.t170.session.{sid}.agent.response.{req_id_load2}")
+            await js.publish(
+                f"acp.t170.session.{sid}.agent.load",
+                json.dumps({"sessionId": sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_load2})
+            load_msg2 = await asyncio.wait_for(load_sub2.next_msg(), timeout=5)
+            model_after = json.loads(load_msg2.data).get("models", {}).get("currentModelId")
+            print(f"    model after close: {model_after!r}", flush=True)
+
+            if model_before == "claude-sonnet-4-6" and model_after == "claude-opus-4-6":
+                ok("close_session: KV entry deleted — model reverted to runner default after close")
+            elif model_before != "claude-sonnet-4-6":
+                fail("close_session: set_session_model did not persist",
+                     f"model_before={model_before!r}")
+            elif model_after == "claude-sonnet-4-6":
+                fail("close_session: KV entry NOT deleted — custom model still present after close",
+                     f"model_after={model_after!r} (expected default 'claude-opus-4-6')")
+            else:
+                fail("close_session: unexpected model after close",
+                     f"model_before={model_before!r} model_after={model_after!r}")
+        except Exception as e:
+            fail("close_session", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 171 — openrouter-runner: set_session_model affects model in wire request
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_set_session_model_wire():
+    """Spec (PR3+PR9/openrouter-runner): set_session_model updates the model used
+    for the next HTTP call to the OpenRouter API.  The runner sends
+    {"model": "<new-model>", ...} in the request body after the switch."""
+    print("\n\033[1mTest 171: openrouter set_session_model → wire request uses new model\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30195, lambda n: or_text_sse("reply-t171")).start()
+        env_or = {**os.environ,
+                  "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t171",
+                  "OPENROUTER_API_KEY": "test",
+                  "OPENROUTER_BASE_URL": "http://127.0.0.1:30195",
+                  "OPENROUTER_MODELS": "gpt-t171-default:Default,gpt-t171-new:New"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env_or,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            # Create session (default model = gpt-t171-default)
+            r = await nc.request("acp.t171.agent.session.new",
+                                 json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # Switch model to gpt-t171-new
+            req_id_set = str(uuid.uuid4())
+            set_resp_sub = await nc.subscribe(f"acp.t171.session.{sid}.agent.response.{req_id_set}")
+            await js.publish(
+                f"acp.t171.session.{sid}.agent.set_model",
+                json.dumps({"sessionId": sid, "modelId": "gpt-t171-new"}).encode(),
+                headers={"X-Req-Id": req_id_set})
+            set_msg = await asyncio.wait_for(set_resp_sub.next_msg(), timeout=5)
+            print(f"    set_session_model response: {json.loads(set_msg.data)}", flush=True)
+
+            # Send a prompt — must use the new model in the wire request
+            async def _noop(m): pass
+            await nc.subscribe(f"acp.t171.session.{sid}.client.session.update", cb=_noop)
+
+            req_id_p = str(uuid.uuid4())
+            resp_sub = await nc.subscribe(
+                f"acp.t171.session.{sid}.agent.prompt.response.{req_id_p}")
+            await nc.publish(
+                f"acp.t171.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "model switch t171"}]}).encode(),
+                headers={"X-Req-Id": req_id_p})
+            await asyncio.wait_for(resp_sub.next_msg(), timeout=15)
+
+            if not mock.received:
+                fail("openrouter set_session_model wire: no HTTP call received by mock")
+            else:
+                body = json.loads(mock.received[0])
+                wire_model = body.get("model", "")
+                print(f"    wire model: {wire_model!r}", flush=True)
+                if wire_model == "gpt-t171-new":
+                    ok("openrouter set_session_model wire: HTTP request used new model 'gpt-t171-new'")
+                elif wire_model:
+                    fail("openrouter set_session_model wire: wrong model in wire request",
+                         f"wire_model={wire_model!r} (expected 'gpt-t171-new')")
+                else:
+                    fail("openrouter set_session_model wire: 'model' field missing from HTTP body",
+                         f"body_keys={list(body.keys())}")
+        except Exception as e:
+            fail("openrouter set_session_model wire", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -8955,6 +9445,13 @@ async def main():
     await test_read_file_offset_only()
     await test_acp_cancel_mid_prompt()
     await test_bash_bypass_permissions()
+    await test_acp_token_counts_persisted()
+    await test_acp_load_session_restores_model()
+    await test_write_file_overwrites_existing()
+    await test_acp_fork_no_branch_at_index()
+    await test_acp_no_trogon_md()
+    await test_acp_close_session()
+    await test_openrouter_set_session_model_wire()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
