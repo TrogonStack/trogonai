@@ -4,8 +4,25 @@ use crate::ToolContext;
 
 const MAX_RESPONSE: usize = 8 * 1024;
 
+/// Returns `true` if the IP falls in any SSRF-sensitive range (loopback, private,
+/// link-local, unspecified, or IPv6 unique-local).
+fn is_blocked_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        std::net::IpAddr::V6(ip) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (ip.segments()[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
+                || (ip.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
+        }
+    }
+}
+
 /// Returns `true` for URLs that target loopback, private, link-local, or unspecified
-/// addresses — the primary SSRF risk categories.
+/// addresses — the primary SSRF risk categories. Checks the *literal* host only;
+/// DNS-based escapes are caught separately by [`host_resolves_to_blocked`].
 fn is_ssrf_blocked(url: &str) -> bool {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
@@ -14,15 +31,32 @@ fn is_ssrf_blocked(url: &str) -> bool {
     match parsed.host() {
         None => true,
         Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
-        Some(url::Host::Ipv4(ip)) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
-        }
-        Some(url::Host::Ipv6(ip)) => {
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || (ip.segments()[0] & 0xfe00 == 0xfc00) // ULA fc00::/7
-                || (ip.segments()[0] & 0xffc0 == 0xfe80) // link-local fe80::/10
-        }
+        Some(url::Host::Ipv4(ip)) => is_blocked_ip(&std::net::IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => is_blocked_ip(&std::net::IpAddr::V6(ip)),
+    }
+}
+
+/// Resolve the URL's host via DNS and return `true` if ANY resolved address is in
+/// an SSRF-sensitive range. Catches a public hostname that resolves to a private /
+/// loopback / link-local IP (e.g. DNS rebinding to `169.254.169.254`).
+async fn host_resolves_to_blocked(url: &str) -> bool {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return true,
+    };
+    let Some(host) = parsed.host_str() else {
+        return true;
+    };
+    // A bare IP literal was already vetted by is_ssrf_blocked; skip DNS for it.
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => addrs.into_iter().any(|sa| is_blocked_ip(&sa.ip())),
+        // Resolution failure: let the actual request surface the DNS error rather
+        // than masking it as an SSRF block.
+        Err(_) => false,
     }
 }
 
@@ -39,16 +73,35 @@ pub async fn fetch_url(ctx: &ToolContext, input: &Value) -> String {
     // When trogon-tools is compiled as a dependency (e.g. integration tests), cfg(test)
     // is false and the guard is active.
     #[cfg(not(test))]
-    if is_ssrf_blocked(url) {
-        return "Error: requests to private, loopback, or link-local addresses are not permitted"
-            .to_string();
+    {
+        if is_ssrf_blocked(url) {
+            return "Error: requests to private, loopback, or link-local addresses are not permitted"
+                .to_string();
+        }
+        // B4: a public hostname can resolve via DNS to a private/loopback/link-local
+        // IP (e.g. metadata endpoints). Reject before connecting.
+        if host_resolves_to_blocked(url).await {
+            return "Error: host resolves to a private, loopback, or link-local address"
+                .to_string();
+        }
     }
     let raw = input
         .get("raw")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let response = match ctx.http_client.get(url).send().await {
+    // B4: reqwest follows redirects by default, so a vetted public URL could
+    // redirect to `http://169.254.169.254/…` and bypass the host check. Use a
+    // no-redirect client so any 3xx is surfaced rather than auto-followed.
+    let client = match reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(c) => c,
+        // Fall back to the shared client if a dedicated one can't be built.
+        Err(_) => ctx.http_client.clone(),
+    };
+    let response = match client.get(url).send().await {
         Ok(r) => r,
         Err(e) => return format!("Error fetching URL: {e}"),
     };
@@ -116,6 +169,25 @@ mod tests {
     fn ssrf_allowed_public_address() {
         assert!(!is_ssrf_blocked("https://example.com/"));
         assert!(!is_ssrf_blocked("https://8.8.8.8/"));
+    }
+
+    #[test]
+    fn is_blocked_ip_classifies_ranges() {
+        use std::net::IpAddr;
+        assert!(is_blocked_ip(&"127.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"10.0.0.1".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"169.254.169.254".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"::1".parse::<IpAddr>().unwrap()));
+        assert!(is_blocked_ip(&"fc00::1".parse::<IpAddr>().unwrap()));
+        assert!(!is_blocked_ip(&"8.8.8.8".parse::<IpAddr>().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn host_resolves_to_blocked_for_loopback_literal() {
+        // IP literals are vetted by is_ssrf_blocked, so the DNS path short-circuits.
+        assert!(!host_resolves_to_blocked("http://127.0.0.1/").await);
+        // A hostname resolving to loopback must be blocked.
+        assert!(host_resolves_to_blocked("http://localhost/").await);
     }
 
     #[tokio::test]

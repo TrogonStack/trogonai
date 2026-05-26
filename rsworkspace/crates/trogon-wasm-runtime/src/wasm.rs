@@ -417,11 +417,16 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 // Write response into WASM memory.
                 let to_write = response.len().min(out_max);
                 let mem_data = mem.data_mut(&mut caller);
-                if out_ptr + to_write > mem_data.len() {
+                // B3: `out_ptr` is a sign-extended `i32 as usize`, so a negative
+                // guest pointer wraps to a huge value; `+` would overflow-panic or
+                // (after wrap) pass the bound check. saturating_add can never wrap,
+                // so an out-of-range pointer always exceeds mem_data.len() here.
+                let out_end = out_ptr.saturating_add(to_write);
+                if out_end > mem_data.len() {
                     results[0] = wasmtime::Val::I32(-1);
                     return Ok(());
                 }
-                mem_data[out_ptr..out_ptr + to_write].copy_from_slice(&response[..to_write]);
+                mem_data[out_ptr..out_end].copy_from_slice(&response[..to_write]);
                 results[0] = wasmtime::Val::I32(to_write as i32);
                 Ok(())
             })
@@ -717,8 +722,10 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                 if auto_allow {
                     // Write selected index (0) to WASM memory.
                     let mem_data = mem.data_mut(&mut caller);
-                    if out_ptr + 4 <= mem_data.len() {
-                        mem_data[out_ptr..out_ptr + 4].copy_from_slice(&0i32.to_le_bytes());
+                    // B3: saturating_add so a sign-extended negative out_ptr can't wrap.
+                    let out_end = out_ptr.saturating_add(4);
+                    if out_end <= mem_data.len() {
+                        mem_data[out_ptr..out_end].copy_from_slice(&0i32.to_le_bytes());
                     }
                     results[0] = wasmtime::Val::I32(0);
                 } else if let Some(nats_client) = nats {
@@ -770,8 +777,10 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                                     match idx {
                                         Some(i) if i >= 0 && (i as usize) < options.len() => {
                                             let mem_data = mem.data_mut(&mut caller);
-                                            if out_ptr + 4 <= mem_data.len() {
-                                                mem_data[out_ptr..out_ptr + 4]
+                                            // B3: saturating_add so a negative out_ptr can't wrap.
+                                            let out_end = out_ptr.saturating_add(4);
+                                            if out_end <= mem_data.len() {
+                                                mem_data[out_ptr..out_end]
                                                     .copy_from_slice(&i.to_le_bytes());
                                             }
                                             results[0] = wasmtime::Val::I32(0);

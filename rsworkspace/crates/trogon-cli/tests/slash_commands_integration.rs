@@ -382,9 +382,12 @@ async fn compact_on_attached_session_uses_correct_session_id() {
         .await
         .expect("timed out waiting for export")
         .expect("no export message");
+    // ExtRequest is `#[serde(transparent)]` with `method` skipped (the method is
+    // carried in the NATS subject), so the payload IS the params object directly —
+    // sessionId is at the top level, not nested under a "params" key.
     let export_req: serde_json::Value = serde_json::from_slice(&export_msg.payload).unwrap();
     assert_eq!(
-        export_req["params"]["sessionId"].as_str().unwrap(),
+        export_req["sessionId"].as_str().unwrap(),
         "attached-for-compact"
     );
     if let Some(reply) = export_msg.reply {

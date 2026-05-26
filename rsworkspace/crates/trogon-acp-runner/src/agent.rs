@@ -689,11 +689,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
                                     // Persist the new cwd so subsequent turns use it.
                                     const CD_PREFIX: &str = "Working directory is now ";
-                                    if is_cd {
-                                        if let Some(new_path) = output.strip_prefix(CD_PREFIX) {
-                                            state.cwd = new_path.to_string();
-                                            state.terminal_cwd = None;
-                                        }
+                                    if is_cd
+                                        && let Some(new_path) = output.strip_prefix(CD_PREFIX)
+                                    {
+                                        state.cwd = new_path.to_string();
+                                        state.terminal_cwd = None;
                                     }
 
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
@@ -967,10 +967,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             state.updated_at = now_iso8601();
             needs_save = true;
         }
-        if needs_save {
-            if let Err(e) = self.store.save(&session_id, &state).await {
-                warn!(session_id, error = %e, "agent: failed to persist session on load");
-            }
+        if needs_save
+            && let Err(e) = self.store.save(&session_id, &state).await
+        {
+            warn!(session_id, error = %e, "agent: failed to persist session on load");
         }
         let response = LoadSessionResponse::new()
             .modes(self.session_mode_state(&state.mode))
@@ -1226,6 +1226,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             warn!(session_id, error = %e, "agent: failed to delete session");
         }
 
+        // B9: the per-session semaphore was inserted on first lock acquisition but
+        // never removed, leaking one entry per closed session. Drop it now that the
+        // session is gone. Any in-flight prompt holds its own `Arc` clone, so the
+        // live semaphore stays valid until that prompt finishes.
+        self.session_locks.lock().unwrap().remove(&session_id);
+
         Ok(CloseSessionResponse::new())
     }
 
@@ -1306,6 +1312,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string()))?;
+            // B11: acquire the session lock before loading, consistent with prompt /
+            // import / set_session_*. Without it, an export racing a concurrent
+            // compaction round-trip could read torn / stale history mid-write.
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore.acquire_owned().await
+                .map_err(|_| internal_error("session lock closed"))?;
             let state = self.store.load(session_id).await
                 .map_err(|e| internal_error(e.to_string()))?;
             let raw = trogon_runner_tools::portable_session::export_json_from_wire(&state.messages)
@@ -1446,7 +1458,7 @@ mod tests {
     #[test]
     fn estimate_token_count_grows_with_message_length() {
         let short = vec![Message::user_text("hi")];
-        let long = vec![Message::user_text(&"x".repeat(10_000))];
+        let long = vec![Message::user_text("x".repeat(10_000))];
         assert!(
             estimate_token_count(&long) > estimate_token_count(&short),
             "longer messages must produce a higher estimate"
@@ -1470,7 +1482,7 @@ mod tests {
     fn compact_threshold_reached_when_messages_exceed_85_percent() {
         // Use a very small budget so a few messages tip over the threshold.
         let budget = 10u64;
-        let msgs = vec![Message::user_text(&"x".repeat(200))];
+        let msgs = vec![Message::user_text("x".repeat(200))];
         let estimate = estimate_token_count(&msgs);
         assert!(
             estimate > budget * 85 / 100,
@@ -1485,8 +1497,9 @@ mod tests {
         // At exactly 85 % the condition is > (strict), so compact must NOT trigger.
         let budget = 100u64;
         let threshold = budget * 85 / 100; // 85
-        // estimate == threshold → condition false → no compact
-        assert!(!(threshold > threshold), "strictly greater-than must be false at the boundary");
+        // estimate == threshold → condition (estimate > threshold) is false → no compact
+        let estimate = threshold;
+        assert!(estimate <= threshold, "strictly greater-than must be false at the boundary");
     }
 
     // ── ext_method: session/export and session/import ─────────────────────────

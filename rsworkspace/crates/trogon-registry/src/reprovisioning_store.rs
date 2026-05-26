@@ -35,10 +35,10 @@ impl ReprovisioningStore {
     async fn reprovision(&self) {
         // Note: the lock guard is never held across an await — provision runs
         // first, then the write lock is taken and released synchronously.
-        if let Ok(fresh) = provision(&self.js).await {
-            if let Ok(mut guard) = self.store.write() {
-                *guard = fresh;
-            }
+        if let Ok(fresh) = provision(&self.js).await
+            && let Ok(mut guard) = self.store.write()
+        {
+            *guard = fresh;
         }
     }
 

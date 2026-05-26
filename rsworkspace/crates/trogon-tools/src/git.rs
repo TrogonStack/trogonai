@@ -5,35 +5,83 @@ use crate::fs::resolve_path;
 
 const MAX_OUTPUT: usize = 4 * 1024;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 10_000;
+/// B12: hard cap on how much git stdout we buffer in memory before killing the
+/// child. Comfortably above MAX_OUTPUT so normal output is unaffected, but bounded
+/// so a multi-gigabyte diff can't exhaust RAM.
+const MAX_STDOUT_BUFFER: usize = 256 * 1024;
 
 async fn run_git(cwd: &str, args: &[&str]) -> String {
-    let output = tokio::process::Command::new("git")
+    use tokio::io::AsyncReadExt;
+    use tokio::process::Command;
+
+    let mut child = match Command::new("git")
         .args(args)
         .current_dir(cwd)
-        .output()
-        .await;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return format!("Error running git: {e}"),
+    };
 
-    match output {
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let combined = if stderr.is_empty() {
-                stdout.into_owned()
-            } else if stdout.is_empty() {
-                stderr.into_owned()
-            } else {
-                format!("{stdout}{stderr}")
-            };
-            if combined.is_empty() {
-                "(no output)".to_string()
-            } else if combined.len() > MAX_OUTPUT {
-                let boundary = combined.floor_char_boundary(MAX_OUTPUT);
-                format!("{}... (truncated at 4KB)", &combined[..boundary])
-            } else {
-                combined
+    // B12: stream stdout and stop once we exceed the in-memory cap so a huge repo
+    // diff can't buffer unbounded. Reading one byte past the cap lets us detect
+    // (and flag) truncation before we kill the child.
+    let mut stdout_buf = Vec::new();
+    let mut truncated = false;
+    if let Some(mut out) = child.stdout.take() {
+        let mut chunk = [0u8; 8 * 1024];
+        loop {
+            match out.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    stdout_buf.extend_from_slice(&chunk[..n]);
+                    if stdout_buf.len() > MAX_STDOUT_BUFFER {
+                        truncated = true;
+                        let _ = child.start_kill();
+                        break;
+                    }
+                }
+                Err(_) => break,
             }
         }
-        Err(e) => format!("Error running git: {e}"),
+    }
+
+    let mut stderr_buf = Vec::new();
+    if let Some(mut err) = child.stderr.take() {
+        // stderr is git's diagnostic channel — small; cap it at MAX_STDOUT_BUFFER too.
+        let mut chunk = [0u8; 8 * 1024];
+        while let Ok(n) = err.read(&mut chunk).await {
+            if n == 0 {
+                break;
+            }
+            stderr_buf.extend_from_slice(&chunk[..n]);
+            if stderr_buf.len() > MAX_STDOUT_BUFFER {
+                break;
+            }
+        }
+    }
+
+    let _ = child.wait().await;
+
+    let stdout = String::from_utf8_lossy(&stdout_buf);
+    let stderr = String::from_utf8_lossy(&stderr_buf);
+    let combined = if stderr.is_empty() {
+        stdout.into_owned()
+    } else if stdout.is_empty() {
+        stderr.into_owned()
+    } else {
+        format!("{stdout}{stderr}")
+    };
+    if combined.is_empty() {
+        "(no output)".to_string()
+    } else if combined.len() > MAX_OUTPUT || truncated {
+        let cap = MAX_OUTPUT.min(combined.len());
+        let boundary = combined.floor_char_boundary(cap);
+        format!("{}... (truncated at 4KB)", &combined[..boundary])
+    } else {
+        combined
     }
 }
 
@@ -44,8 +92,10 @@ pub async fn status(ctx: &ToolContext, _input: &Value) -> String {
 pub async fn diff(ctx: &ToolContext, input: &Value) -> String {
     let mut args = vec!["diff"];
     let extra = input.get("args").and_then(|v| v.as_str());
+    // B13: split on whitespace so `args: "--staged HEAD~1"` becomes two argv
+    // elements instead of one broken arg.
     if let Some(e) = extra {
-        args.push(e);
+        args.extend(e.split_whitespace());
     }
     run_git(&ctx.cwd, &args).await
 }
@@ -134,6 +184,25 @@ mod tests {
     async fn git_diff_accepts_extra_args() {
         let result = diff(&ctx(), &json!({"args": "--staged"})).await;
         assert!(!result.starts_with("Error running git"));
+    }
+
+    #[tokio::test]
+    async fn git_diff_splits_multiple_args() {
+        // B13: "--staged --stat" must become two argv elements, not one broken arg.
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        tokio::fs::write(dir.path().join("a.txt"), "hello\n").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "a.txt"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+        let ctx = ctx_in(dir.path());
+        let result = diff(&ctx, &json!({"args": "--staged --stat"})).await;
+        // A single broken arg "--staged --stat" would error; split args succeed.
+        assert!(!result.starts_with("Error"), "got: {result}");
+        assert!(result.contains("a.txt"), "got: {result}");
     }
 
     #[tokio::test]

@@ -92,13 +92,13 @@ async fn spawn_mock_runtime(
     // .create handler
     let c = client.clone();
     tokio::spawn(async move {
-        if let Some(msg) = create_sub.next().await {
-            if let Some(reply) = msg.reply {
-                let resp = serde_json::json!({ "terminalId": tid });
-                c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = create_sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            let resp = serde_json::json!({ "terminalId": tid });
+            c.publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
         }
     });
 
@@ -322,8 +322,10 @@ async fn call_tool_reuses_existing_terminal_id() {
     let mock_client = nats_client(port).await;
 
     let store = MemorySessionStore::new();
-    let mut state = SessionState::default();
-    state.terminal_id = Some("existing-term".to_string());
+    let state = SessionState {
+        terminal_id: Some("existing-term".to_string()),
+        ..Default::default()
+    };
     store.save("sess5", &state).await.unwrap();
 
     let term_base = "wp.session.sess5.client.terminal";
@@ -434,13 +436,13 @@ async fn call_tool_times_out_when_marker_never_arrives() {
 
     let mc = mock_client.clone();
     tokio::spawn(async move {
-        if let Some(msg) = create_sub.next().await {
-            if let Some(reply) = msg.reply {
-                let resp = serde_json::json!({ "terminalId": "t-timeout" });
-                mc.publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = create_sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            let resp = serde_json::json!({ "terminalId": "t-timeout" });
+            mc.publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
         }
     });
 
@@ -506,13 +508,13 @@ async fn call_tool_timeout_includes_partial_output() {
 
     let mc = mock_client.clone();
     tokio::spawn(async move {
-        if let Some(msg) = create_sub.next().await {
-            if let Some(reply) = msg.reply {
-                let resp = serde_json::json!({ "terminalId": "t-partial" });
-                mc.publish(reply, serde_json::to_vec(&resp).unwrap().into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = create_sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            let resp = serde_json::json!({ "terminalId": "t-partial" });
+            mc.publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
         }
     });
 

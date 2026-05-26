@@ -267,9 +267,11 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
     assert!(diff.contains("3 lines"), "diff must contain line count");
 }
 
-/// ToolCall(Bash) → only StreamEvent::ToolCall, no Diff (Bash has no diff rendering)
+/// ToolCall(Bash) → StreamEvent::ToolCall plus a `[bash: <cmd>]` Diff preview.
+/// The preview arm was added in the 2026-05-22 trogon-tools tool-name rendering
+/// (PR 7), after this test was first written; the test now reflects that behavior.
 #[tokio::test]
-async fn tool_call_bash_emits_only_tool_call_no_diff() {
+async fn tool_call_bash_emits_tool_call_and_diff_preview() {
     let (_container, port) = start_nats().await;
     let nats = connect(port).await;
 
@@ -307,8 +309,12 @@ async fn tool_call_bash_emits_only_tool_call_no_diff() {
     let tc = events.iter().find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Bash"));
     assert!(tc.is_some(), "expected ToolCall(Bash), got: {events:?}");
 
-    let has_diff = events.iter().any(|e| matches!(e, StreamEvent::Diff(_)));
-    assert!(!has_diff, "Bash tool must not emit a Diff event");
+    let diff = events.iter().find_map(|e| {
+        if let StreamEvent::Diff(d) = e { Some(d.as_str()) } else { None }
+    });
+    let diff = diff.expect("Bash tool should emit a [bash: <cmd>] Diff preview");
+    assert!(diff.contains("bash:"), "diff should contain bash preview, got: {diff}");
+    assert!(diff.contains("ls -la"), "diff should include the command, got: {diff}");
 }
 
 /// cancel() publishes to the correct NATS cancel subject.
