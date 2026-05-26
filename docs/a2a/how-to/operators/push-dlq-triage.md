@@ -6,12 +6,12 @@ Short runbook for the per-Account JetStream dead-letter stream used when termina
 
 | Document | Purpose |
 |----------|---------|
-| [A2A plan](./A2A_ARCHITECTURE.md) | Push delivery semantics, Bridge dispatch |
-| [A2A TODO](./A2A_ARCHITECTURE.md) | Remaining phased work (gateway, exactly-once, …) |
-| [Push exactly-once sketch](./A2A_PUSH_EXACTLY_ONCE_SKETCH.md) | Opt-in idempotency keys, JetStream dedupe, HTTP cooperation, `subject:` best-effort |
-| [A2A per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) | Stream provisioning reference alongside **`A2A_EVENTS`** |
-| [Auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md) | Minted User JWT → stable **`caller_id`** for ACL + DLQ segments |
-| [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md) | Ingress futures (JWT, Tier 1, ingress audit); gateway does **not** emit DLQ today |
+| [A2A plan](../../explanation/architecture.md) | Push delivery semantics, Bridge dispatch |
+| [A2A TODO](../../explanation/architecture.md) | Remaining phased work (gateway, exactly-once, …) |
+| [Push exactly-once sketch](../../explanation/push-exactly-once-sketch.md) | Opt-in idempotency keys, JetStream dedupe, HTTP cooperation, `subject:` best-effort |
+| [A2A per-Account JetStream assets](../../reference/jetstream-account-streams.md) | Stream provisioning reference alongside **`A2A_EVENTS`** |
+| [Auth callout design](../../explanation/auth-callout-design.md) | Minted User JWT → stable **`caller_id`** for ACL + DLQ segments |
+| [Gateway roadmap](../../explanation/gateway-roadmap.md) | Ingress futures (JWT, Tier 1, ingress audit); gateway does **not** emit DLQ today |
 
 ---
 
@@ -41,7 +41,7 @@ Confirm the output includes:
 - Stream name **`{PREFIX}_PUSH_DLQ`** (default: **`A2A_PUSH_DLQ`**)
 - Subject filter **`{prefix}.push.dlq.*.*`** (default: **`a2a.push.dlq.*.*`**)
 
-If the stream is missing, provision it during Account bootstrap — see [A2A per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) or run in-tree **`provision_streams`** from **`a2a-nats`.
+If the stream is missing, provision it during Account bootstrap — see [A2A per-Account JetStream assets](../../reference/jetstream-account-streams.md) or run in-tree **`provision_streams`** from **`a2a-nats`.
 
 ---
 
@@ -138,7 +138,7 @@ Agents using **`Bridge`** run **`apply_timeout_overrides`** from **`a2a-nats`** 
 
 | Mechanism | Notes |
 |-----------|-------|
-| **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | Fallback when no gateway principal arrives; whitespace-only values fall back to **`_`**. Superseded per-request when **`X-A2a-Spicedb-Principal`** carries a principal with **`spicedb_subject`** ([auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md)). |
+| **`A2A_PUSH_DLQ_CALLER_SEGMENT`** | Fallback when no gateway principal arrives; whitespace-only values fall back to **`_`**. Superseded per-request when **`X-A2a-Spicedb-Principal`** carries a principal with **`spicedb_subject`** ([auth callout design](../../explanation/auth-callout-design.md)). |
 | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** | Caps concurrent **`Bridge`** streaming tasks (**`Semaphore`**). **`0`** normalizes to **`1`**. Invalid integers are ignored with a warning. |
 | **`Config::with_push_dlq_caller_segment`** | Programmatic override when constructing **`Config`**. |
 

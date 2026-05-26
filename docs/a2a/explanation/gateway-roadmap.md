@@ -1,16 +1,16 @@
 # A2A Gateway Roadmap
 
-Engineering checklist for [`a2a-gateway`](../rsworkspace/crates/a2a-gateway/) beyond today's opaque forward. The gateway is the ingress decision site for `{prefix}.gateway.>` — auth, policy, and audit land here before agent RPC subjects.
+Engineering checklist for [`a2a-gateway`](../../../rsworkspace/crates/a2a-gateway) beyond today's opaque forward. The gateway is the ingress decision site for `{prefix}.gateway.>` — auth, policy, and audit land here before agent RPC subjects.
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
-| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Architecture, subject shapes, policy tiers, SpiceDB tuples, audit schema |
-| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Open engineering items and suggested ordering (auth callout, Tier 1, gateway audit) |
-| [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md) | Task event egress — pull consumer flow control, `A2A_EVENTS` policy, agent `Bridge` limits |
-| [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) | Per-Account NSC provisioning, caller/gateway/registrar ACL templates |
-| [`../rsworkspace/crates/a2a-gateway/src/lib.rs`](../rsworkspace/crates/a2a-gateway/src/lib.rs) | Crate entrypoint and Rustdoc (ingress role, future seams) |
+| [`./A2A_ARCHITECTURE.md`](architecture.md) | Architecture, subject shapes, policy tiers, SpiceDB tuples, audit schema |
+| [`./A2A_ARCHITECTURE.md`](architecture.md) | Open engineering items and suggested ordering (auth callout, Tier 1, gateway audit) |
+| [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](../how-to/operators/streaming-backpressure.md) | Task event egress — pull consumer flow control, `A2A_EVENTS` policy, agent `Bridge` limits |
+| [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../how-to/operators/nsc-account-bootstrap.md) | Per-Account NSC provisioning, caller/gateway/registrar ACL templates |
+| [`../rsworkspace/crates/a2a-gateway/src/lib.rs`](../../../rsworkspace/crates/a2a-gateway/src/lib.rs) | Crate entrypoint and Rustdoc (ingress role, future seams) |
 
 ---
 
@@ -27,14 +27,14 @@ Opaque request/reply forward with Tier-1 SpiceDB, Tier-2 CEL, and authoritative 
   - `caller_id` — reserved (`tracing::field::Empty` until JWT extraction)
   - `agent_subject` — mapped target (success paths)
   - `routing_outcome` — `forwarded` \| `ingress_error` \| `ignored_no_reply` \| `forward_failed`
-- [x] **Wasmtime policy substrate** — `src/policy/{mod,wasmtime_substrate,tier2,tier3_redaction,spicedb_tier1,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator`) with Tier 3 (`a2a_redaction::WasmRedactorHost`). Tier-2 predicate and Tier-3 authoritative redaction invoke from ingress when `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set; Tier-3 gated by `A2A_GATEWAY_TIER3_REDACTION_ENABLED` (see [`./A2A_TIER3_REDACTION.md`](./A2A_TIER3_REDACTION.md)).
+- [x] **Wasmtime policy substrate** — `src/policy/{mod,wasmtime_substrate,tier2,tier3_redaction,spicedb_tier1,error}.rs`. `WasmtimeSubstrate` composes Tier 2 (`Tier2CelEvaluator`) with Tier 3 (`a2a_redaction::WasmRedactorHost`). Tier-2 predicate and Tier-3 authoritative redaction invoke from ingress when `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set; Tier-3 gated by `A2A_GATEWAY_TIER3_REDACTION_ENABLED` (see [`./A2A_TIER3_REDACTION.md`](../reference/policy/tier3-redaction.md)).
 - [x] **Tier-1 SpiceDB gate** — `src/policy/spicedb_tier1.rs` reuses `a2a-nats` Authzed client types; env-gated via `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` (+ endpoint/token/TTL). Dispatch order: unary deadline guard → Tier-1 `BulkCheckPermission` → Tier-2 predicate → Tier-3 redaction → forward. Deny/transport error → JSON-RPC `-32801` with `gateway.tier1.spicedb_denied`; allow populates audit `zed_token_snapshot`. Owner tuples on `message/send` accept via `WriteRelationships` (best-effort).
 
 Run: `cargo run -p a2a-gateway` from `rsworkspace/` (`NATS_URL`, `A2A_PREFIX`, optional queue group).
 
 ### Tier 1 SpiceDB
 
-Env knobs (see [`./A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md)):
+Env knobs (see [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md)):
 
 | Variable | Default | Role |
 |----------|---------|------|
@@ -60,11 +60,11 @@ ZedToken cache: session-scoped moka cache; fresh tokens attached as `AtLeastAsFr
 
 ## Next
 
-Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates from the bootstrap runbook are in place. Track ordering in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Suggested ordering.
+Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates from the bootstrap runbook are in place. Track ordering in [`./A2A_ARCHITECTURE.md`](architecture.md) §Suggested ordering.
 
 ### NATS `$SYS` / auth-callout integration
 
-- [ ] Wire gateway to expect **Account-bound User JWTs** minted by an auth-callout subscriber on **`$SYS.REQ.USER.AUTH`** (OIDC primary, mTLS service-to-service, API keys transitional). See [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) Phase 0 and [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) §Auth callout service — **reference only; do not implement callout in `a2a-gateway`.**
+- [ ] Wire gateway to expect **Account-bound User JWTs** minted by an auth-callout subscriber on **`$SYS.REQ.USER.AUTH`** (OIDC primary, mTLS service-to-service, API keys transitional). See [`./A2A_ARCHITECTURE.md`](architecture.md) Phase 0 and [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../how-to/operators/nsc-account-bootstrap.md) §Auth callout service — **reference only; do not implement callout in `a2a-gateway`.**
 - [ ] Extract caller identity from the connection/JWT and populate span field `caller_id` plus audit attribution fields.
 
 ### JWT minting posture
@@ -81,7 +81,7 @@ Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates
 
 ### Unary deadlines
 
-- [ ] Enforce **30s gateway deadline** on unary `message/send` request/reply; longer work must use `message/stream` (see [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §6).
+- [ ] Enforce **30s gateway deadline** on unary `message/send` request/reply; longer work must use `message/stream` (see [`./A2A_ARCHITECTURE.md`](architecture.md) §6).
 - [ ] On timeout: structured JSON-RPC error to caller inbox + ingress audit outcome.
 
 ### Coordination with SpiceDB Tier 1
@@ -99,8 +99,8 @@ These are owned elsewhere; do not expand gateway scope to cover them unless the 
 | Area | Owner | Notes |
 |------|-------|-------|
 | **Push delivery & DLQ** | Agent `Bridge` / `a2a-nats::push::dlq` | Terminal push failures JetStream-publish to `{prefix}.push.dlq.{caller_id}.{task_id}` from the streaming pump — not from gateway ingress. |
-| **AgentCard validation at gateway** | `a2a-nats-discovery` / KV catalog | Schema validation on registrar write and KV read defense-in-depth today. Gateway re-validation only if an **edge path materializes AgentCards outside NATS KV** ([`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) Phase 0). |
-| **JetStream provisioning** | `a2a-nats` provision / discovery processes | Gateway does not provision streams or manage streaming back-pressure yet (Phase 2). See [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md). |
+| **AgentCard validation at gateway** | `a2a-nats-discovery` / KV catalog | Schema validation on registrar write and KV read defense-in-depth today. Gateway re-validation only if an **edge path materializes AgentCards outside NATS KV** ([`./A2A_ARCHITECTURE.md`](architecture.md) Phase 0). |
+| **JetStream provisioning** | `a2a-nats` provision / discovery processes | Gateway does not provision streams or manage streaming back-pressure yet (Phase 2). See [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](../how-to/operators/streaming-backpressure.md). |
 | **Tier 2 CEL / Tier 3 WASM** | Gateway Wasmtime substrate (scaffolded) | Substrate type lives in `src/policy/`; CEL→WASM compile path and request-path call sites still future. Tier 3 redaction engine ships in `a2a-redaction`. |
 | **HTTPS termination** | `a2a-bridge` sidecar (runtime landed) | Crate ships axum HTTPS, auth-callout client, NATS publish/consume, SSE↔JetStream framing. Production-mode wiring against a deployed auth-callout still future. |
 

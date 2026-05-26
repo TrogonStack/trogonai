@@ -4,12 +4,12 @@ Environment variables and CLI flags for A2A binaries and embedders. Shared timeo
 
 ## Shared `a2a_nats` configuration
 
-Embedders build an [`a2a_nats::Config`](../../rsworkspace/crates/a2a-nats/src/config.rs) (prefix + `trogon_nats::NatsConfig`), then apply runtime overrides:
+Embedders build an [`a2a_nats::Config`](../../../rsworkspace/crates/a2a-nats/src/config.rs) (prefix + `trogon_nats::NatsConfig`), then apply runtime overrides:
 
 | Function | Purpose |
 |----------|---------|
-| [`apply_timeout_overrides`](../../rsworkspace/crates/a2a-nats/src/config.rs) | Reads env and overrides operation timeout, task timeout, max concurrent client tasks, and push DLQ caller segment on an existing `Config`. |
-| [`nats_connect_timeout`](../../rsworkspace/crates/a2a-nats/src/config.rs) | Returns NATS dial timeout from env (independent of `Config`). |
+| [`apply_timeout_overrides`](../../../rsworkspace/crates/a2a-nats/src/config.rs) | Reads env and overrides operation timeout, task timeout, max concurrent client tasks, and push DLQ caller segment on an existing `Config`. |
+| [`nats_connect_timeout`](../../../rsworkspace/crates/a2a-nats/src/config.rs) | Returns NATS dial timeout from env (independent of `Config`). |
 
 ### Exported env constant names (`a2a_nats`)
 
@@ -24,7 +24,7 @@ Rust identifiers map to these **process environment variable names** (string val
 | `ENV_PUSH_DLQ_CALLER_SEGMENT` | `A2A_PUSH_DLQ_CALLER_SEGMENT` | `_` |
 | `ENV_MAX_CONCURRENT_CLIENT_TASKS` | `A2A_MAX_CONCURRENT_CLIENT_TASKS` | `256` (`0` normalizes to `1`) |
 
-Constants are defined in [`constants.rs`](../../rsworkspace/crates/a2a-nats/src/constants.rs). The crate root re-exports `ENV_A2A_PREFIX`, `ENV_MAX_CONCURRENT_CLIENT_TASKS`, and `ENV_PUSH_DLQ_CALLER_SEGMENT`; the timeout env names are used internally by `apply_timeout_overrides` and `nats_connect_timeout`.
+Constants are defined in [`constants.rs`](../../../rsworkspace/crates/a2a-nats/src/constants.rs). The crate root re-exports `ENV_A2A_PREFIX`, `ENV_MAX_CONCURRENT_CLIENT_TASKS`, and `ENV_PUSH_DLQ_CALLER_SEGMENT`; the timeout env names are used internally by `apply_timeout_overrides` and `nats_connect_timeout`.
 
 Timeout overrides require integer values ≥ 1; invalid or sub-minimum values log a warning and keep the prior/default value.
 
@@ -63,13 +63,13 @@ NATS agent bridge: subscribes on `{prefix}.agent.{agent_id}.*`, provisions JetSt
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 | `A2A_EVENTS_MAX_AGE_SECS` | no | 86400 (24h) | Per-Account **`A2A_EVENTS`** JetStream `max_age` at provision time |
 
-Source: [`a2a-nats-agent/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-agent/src/runtime.rs).
+Source: [`a2a-nats-agent/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-agent/src/runtime.rs).
 
 ---
 
 ### `a2a-nats-server`
 
-HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run instructions and route notes: [`a2a-nats-server/README.md`](../../rsworkspace/crates/a2a-nats-server/README.md).
+HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run instructions and route notes: [`a2a-nats-server/README.md`](../../../rsworkspace/crates/a2a-nats-server/README.md).
 
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
@@ -77,7 +77,7 @@ HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run in
 | `A2A_PREFIX` | no | `a2a` | Subject prefix |
 | `A2A_HTTP_BIND` | no | `0.0.0.0:8080` | TCP listen address (`ENV_HTTP_BIND` in server runtime) |
 | `A2A_USE_GATEWAY` | no | off | Truthy (`1`, `true`, `yes`, `on`) routes unary traffic via `{prefix}.gateway.{agent_id}.*` for `a2a-gateway` |
-| `A2A_GATEWAY_CALLER_JWT` | when gateway on | — | Auth-callout-minted User JWT attached as [`A2a-Caller-Jwt`](../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) on every `{prefix}.gateway.*` publish (typically the same JWT as the NATS connection credential) |
+| `A2A_GATEWAY_CALLER_JWT` | when gateway on | — | Auth-callout-minted User JWT attached as [`A2a-Caller-Jwt`](../../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) on every `{prefix}.gateway.*` publish (typically the same JWT as the NATS connection credential) |
 | `NATS_URL` | no | `localhost:4222` | NATS servers |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth |
 | `A2A_OPERATION_TIMEOUT_SECS` | no | 30 | Via `apply_timeout_overrides` |
@@ -88,7 +88,7 @@ HTTP JSON-RPC (and SSE streaming) front-end over `a2a_nats::Client`. Full run in
 | `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 
-Source: [`a2a-nats-server/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-server/src/runtime.rs).
+Source: [`a2a-nats-server/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-server/src/runtime.rs).
 
 ---
 
@@ -110,7 +110,7 @@ Line-delimited JSON-RPC over stdin/stdout using `a2a_nats::Client` (no HTTP).
 | `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` when provisioning **`A2A_PUSH_DLQ`** |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
 
-Source: [`a2a-nats-stdio/src/runtime.rs`](../../rsworkspace/crates/a2a-nats-stdio/src/runtime.rs).
+Source: [`a2a-nats-stdio/src/runtime.rs`](../../../rsworkspace/crates/a2a-nats-stdio/src/runtime.rs).
 
 ---
 
@@ -130,7 +130,7 @@ Agent catalog discovery and registrar over NATS KV. Configuration is via **clap 
 | `A2A_DISCOVERY_OPERATOR_KEYS` | no | — | Comma-separated operator Ed25519 registry (`key_id:hexpubkey,...`) for federated discover export signatures; unset ⇒ lab `AllowAllOperatorSignatureGate` |
 | `A2A_DISCOVERY_SIGNATURE_MAX_AGE_SECS` | no | 604800 (7 days) | Maximum age for operator-signed discover export envelopes |
 
-Source: [`a2a-nats-discovery/src/config.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs), [`signed_export/`](../../rsworkspace/crates/a2a-nats-discovery/src/signed_export/), [`operator_signature_gate.rs`](../../rsworkspace/crates/a2a-nats-discovery/src/operator_signature_gate.rs), [`a2a-nats/src/catalog/import_gate/spicedb/`](../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/).
+Source: [`a2a-nats-discovery/src/config.rs`](../../../rsworkspace/crates/a2a-nats-discovery/src/config.rs), [`runtime.rs`](../../../rsworkspace/crates/a2a-nats-discovery/src/runtime.rs), [`signed_export/`](../../../rsworkspace/crates/a2a-nats-discovery/src/signed_export), [`operator_signature_gate.rs`](../../../rsworkspace/crates/a2a-nats-discovery/src/operator_signature_gate.rs), [`a2a-nats/src/catalog/import_gate/spicedb/`](../../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb).
 
 ---
 
@@ -145,14 +145,14 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `--queue-group` / `A2A_GATEWAY_QUEUE_GROUP` | no | — | Optional NATS queue group for gateway subscribers; unset ⇒ ephemeral subscriber |
 | `NATS_CREDS` / `NATS_NKEY` / `NATS_USER` / `NATS_PASSWORD` / `NATS_TOKEN` | no | — | NATS auth via `NatsConfig::from_env` |
 | `A2A_CONNECT_TIMEOUT_SECS` | no | 10 | Via `nats_connect_timeout` |
-| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | no | — | Enables Wasmtime-hosted substrate Tier-3 redaction + Tier-2 policy seam on ingress; also the root for `<skill_id>.skill.toml` manifests (see [Tier-3 skills catalog](./A2A_TIER3_SKILLS_CATALOG.md)) |
-| `A2A_GATEWAY_TIER2_CEL_ENABLED` | no | off | Truthy loads `{bundle_dir}/tier2/*.cel` and runs the CEL evaluator; off keeps noop Tier-2 (see [Tier-2 CEL](./A2A_TIER2_CEL.md)) |
-| `A2A_GATEWAY_TIER3_REDACTION_ENABLED` | no | off | Truthy runs authoritative Tier-3 WASM redaction on ingress after Tier-2 (see [Tier-3 redaction](./A2A_TIER3_REDACTION.md)); requires `A2A_GATEWAY_POLICY_BUNDLE_DIR` + preloaded skills |
+| `A2A_GATEWAY_POLICY_BUNDLE_DIR` | no | — | Enables Wasmtime-hosted substrate Tier-3 redaction + Tier-2 policy seam on ingress; also the root for `<skill_id>.skill.toml` manifests (see [Tier-3 skills catalog](policy/tier3-skills-catalog.md)) |
+| `A2A_GATEWAY_TIER2_CEL_ENABLED` | no | off | Truthy loads `{bundle_dir}/tier2/*.cel` and runs the CEL evaluator; off keeps noop Tier-2 (see [Tier-2 CEL](policy/tier2-cel.md)) |
+| `A2A_GATEWAY_TIER3_REDACTION_ENABLED` | no | off | Truthy runs authoritative Tier-3 WASM redaction on ingress after Tier-2 (see [Tier-3 redaction](policy/tier3-redaction.md)); requires `A2A_GATEWAY_POLICY_BUNDLE_DIR` + preloaded skills |
 | `A2A_GATEWAY_POLICY_SKILLS` | no | — | Comma-separated skill slugs; preload `{skill}.wasm` and `{skill}.manifest.json` from `A2A_GATEWAY_POLICY_BUNDLE_DIR` (missing files skipped) |
-| `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` | no | — | Hex-encoded 32-byte ed25519 public key (no `0x` prefix); when set, every preloaded skill must ship a valid `{skill}.sig` envelope verified at preload (see [Tier-3 redaction](./A2A_TIER3_REDACTION.md)) |
-| `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
-| `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
-| `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](./A2A_PUSH_DLQ_OPS.md)) |
+| `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` | no | — | Hex-encoded 32-byte ed25519 public key (no `0x` prefix); when set, every preloaded skill must ship a valid `{skill}.sig` envelope verified at preload (see [Tier-3 redaction](policy/tier3-redaction.md)) |
+| `A2A_GATEWAY_UNARY_DEADLINE_SECS` | no | inherits [`DEFAULT_OPERATION_TIMEOUT`](../../../rsworkspace/crates/a2a-nats/src/constants.rs) | Applies to `message.send` unary forwards |
+| `A2A_GATEWAY_AUDIT_PUBLISH` | no | off | Truthy publishes gateway ingress [`AuditEnvelope`](../../../rsworkspace/crates/a2a-nats/src/audit/envelope.rs) JSON |
+| `A2A_GATEWAY_PUSH_DLQ_MIRROR` | no | off | When **`on`**, runs a JetStream pull consumer that mirrors agent push DLQ envelopes to **`{prefix}.push.dlq.mirror.{caller_id}.{task_id}`** (see [push DLQ ops](../how-to/operators/push-dlq-triage.md)) |
 | `A2A_GATEWAY_PUSH_DLQ_DURABLE` | no | `a2a-gateway-push-dlq-mirror` | Durable name for the gateway push DLQ mirror consumer when mirror mode is enabled |
 | `A2A_PUSH_DLQ_DEDUP_LRU_SIZE` | no | `1024` | In-process LRU capacity for suppressing duplicate push DLQ publishes (agent `Bridge` + gateway mirror) |
 | `A2A_PUSH_DLQ_DEDUP_WINDOW_SECS` | no | `120` | JetStream `duplicate_window` on **`A2A_PUSH_DLQ`** stream provisioning |
@@ -165,15 +165,15 @@ Subscribes on `{prefix}.gateway.>` and forwards ingress to mapped `{prefix}.agen
 | `A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT` | when Tier-1 on | — | Authzed/SpiceDB gRPC endpoint for gateway Tier-1 gate |
 | `A2A_GATEWAY_TIER1_SPICEDB_TOKEN` | when Tier-1 on | — | Bearer token for gateway Tier-1 Authzed client |
 | `A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS` | no | `60` | Session ZedToken cache TTL for Tier-1 bulk checks (keyed by JWT `sub` + Account) |
-| `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | no | off | Truthy loads `*.tier1.toml` declarative allow/deny matrices from `A2A_GATEWAY_TIER1_BUNDLE_DIR`; runs after SpiceDB Tier-1 (see [Tier-1 declarative](./A2A_TIER1_DECLARATIVE.md)) |
+| `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | no | off | Truthy loads `*.tier1.toml` declarative allow/deny matrices from `A2A_GATEWAY_TIER1_BUNDLE_DIR`; runs after SpiceDB Tier-1 (see [Tier-1 declarative](policy/tier1-declarative.md)) |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | when declarative on | — | Directory of `*.tier1.toml` bundle files for Tier-1 declarative policy |
-| `A2A_GATEWAY_JWT_AUDIENCE` | no | `A2A_PREFIX` | Expected `aud` on minted User JWTs in [`CALLER_JWT_HEADER_NAME`](../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) (`A2a-Caller-Jwt`) |
+| `A2A_GATEWAY_JWT_AUDIENCE` | no | `A2A_PREFIX` | Expected `aud` on minted User JWTs in [`CALLER_JWT_HEADER_NAME`](../../../rsworkspace/crates/a2a-auth-callout/src/caller_jwt_header.rs) (`A2a-Caller-Jwt`) |
 | `AUTH_CALLOUT_SIGNING_KEY_SOURCE` | no | `env` | Gateway JWT verification uses the same signing-key custody as `a2a-auth-callout` (`env` \| `file`; see auth-callout section) |
-| `A2A_GATEWAY_TRUST_CALLER_HEADERS` | no | off | **Deprecated.** Labs-only fallback: honor [`GATEWAY_PRINCIPAL_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) / [`GATEWAY_CALLER_ID_HEADER`](../../rsworkspace/crates/a2a-nats/src/constants.rs) only when no verified `A2a-Caller-Jwt` is present. Scheduled for removal once all publishers attach the JWT header. |
+| `A2A_GATEWAY_TRUST_CALLER_HEADERS` | no | off | **Deprecated.** Labs-only fallback: honor [`GATEWAY_PRINCIPAL_HEADER`](../../../rsworkspace/crates/a2a-nats/src/constants.rs) / [`GATEWAY_CALLER_ID_HEADER`](../../../rsworkspace/crates/a2a-nats/src/constants.rs) only when no verified `A2a-Caller-Jwt` is present. Scheduled for removal once all publishers attach the JWT header. |
 
-Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token). In-tree **`a2a-nats::Client`** carries a `MintedUserJwt` when [`routing_via_gateway_ingress`](../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is enabled (`a2a-nats-server` supplies it via `A2A_GATEWAY_CALLER_JWT` when `A2A_USE_GATEWAY` is on). External NATS-native publishers that bypass `a2a-nats::Client` must attach the header themselves; until they do, `A2A_GATEWAY_TRUST_CALLER_HEADERS` remains the labs-only fallback.
+Caller attribution: publishers attach the auth-callout-minted User JWT in **`A2a-Caller-Jwt`** on every publish to `{prefix}.gateway.>`. The gateway verifies signature, expiry, and audience via `JwtHeaderCallerIdentitySource`. `a2a-bridge` sets this header from the per-request mint (same JWT used for the NATS connection token). In-tree **`a2a-nats::Client`** carries a `MintedUserJwt` when [`routing_via_gateway_ingress`](../../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is enabled (`a2a-nats-server` supplies it via `A2A_GATEWAY_CALLER_JWT` when `A2A_USE_GATEWAY` is on). External NATS-native publishers that bypass `a2a-nats::Client` must attach the header themselves; until they do, `A2A_GATEWAY_TRUST_CALLER_HEADERS` remains the labs-only fallback.
 
-CLI/env wiring: [`a2a-gateway/src/config.rs`](../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
+CLI/env wiring: [`a2a-gateway/src/config.rs`](../../../rsworkspace/crates/a2a-gateway/src/config.rs). Runtime: [`a2a-gateway/src/runtime.rs`](../../../rsworkspace/crates/a2a-gateway/src/runtime.rs).
 
 ---
 
@@ -199,9 +199,9 @@ NATS auth callout subscriber on `$SYS.REQ.USER.AUTH`; mints short-lived User JWT
 | `AUTH_CALLOUT_OIDC_AUDIENCES` | when OIDC on | — | Comma-separated allowed `aud` values |
 | `AUTH_CALLOUT_MTLS_TRUST_ANCHORS` | no | — | PEM bundle path for mTLS client cert verification |
 
-Deployment notes: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
+Deployment notes: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
 
-Source: [`a2a-auth-callout/src/main.rs`](../../rsworkspace/crates/a2a-auth-callout/src/main.rs).
+Source: [`a2a-auth-callout/src/main.rs`](../../../rsworkspace/crates/a2a-auth-callout/src/main.rs).
 
 ---
 
@@ -219,14 +219,14 @@ HTTPS shim that exchanges NATS-signed JWT mints for gateway unary + SSE task str
 | `BRIDGE_GATEWAY_RPC_TIMEOUT_SECS` | no | `180` | Unary RPC + SSE consumer wiring budget |
 | `AUTH_CALLOUT_MINT_SUBJECT` | no | `a2a.bridge.auth.callout.request` | Override JSON-RPC mint NATS subject (`AuthCalloutJsonMintClient::<AsyncNatsAuthMintWire>::default_mint_subject()`) |
 
-Source: [`a2a-bridge/src/main.rs`](../../rsworkspace/crates/a2a-bridge/src/main.rs), [`inbound.rs`](../../rsworkspace/crates/a2a-bridge/src/inbound.rs).
+Source: [`a2a-bridge/src/main.rs`](../../../rsworkspace/crates/a2a-bridge/src/main.rs), [`inbound.rs`](../../../rsworkspace/crates/a2a-bridge/src/inbound.rs).
 
 ---
 
 ## Related docs
 
-- [Documentation index](./A2A_DOCS_INDEX.md)
-- [Push DLQ operations](./A2A_PUSH_DLQ_OPS.md)
-- [NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)
-- [Architecture plan](./A2A_ARCHITECTURE.md)
-- [Open work tracker](./A2A_ARCHITECTURE.md)
+- [Documentation index](../../A2A_DOCS_INDEX.md)
+- [Push DLQ operations](../how-to/operators/push-dlq-triage.md)
+- [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md)
+- [Architecture plan](../explanation/architecture.md)
+- [Open work tracker](../explanation/architecture.md)

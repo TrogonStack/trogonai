@@ -1,6 +1,6 @@
 # A2A auth callout — deployment reference
 
-Operator runbook for the `a2a-auth-callout` service on NATS `$SYS.REQ.USER.AUTH`. Design context: [A2A auth callout design](./A2A_AUTH_CALLOUT_DESIGN.md).
+Operator runbook for the `a2a-auth-callout` service on NATS `$SYS.REQ.USER.AUTH`. Design context: [A2A auth callout design](../../explanation/auth-callout-design.md).
 
 ## Pinned versions
 
@@ -80,11 +80,11 @@ Structured audit logs on denial include `reason_category`, `server_id`, `caller_
 | `AUTH_CALLOUT_USER_JWT_TTL_SECS` | no | TTL for minted user JWT (default 300). |
 | `AUTH_CALLOUT_OIDC_*` / `AUTH_CALLOUT_MTLS_*` | per verifier | See credential modules. |
 
-Full env reference: [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md).
+Full env reference: [`A2A_RUNTIME_ENV.md`](../../reference/runtime-env.md).
 
 ## Sample `nats-server` config (centralized)
 
-Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../scripts/a2a-auth-callout-bootstrap.sh). **Local end-to-end reference implementation:** the `a2a-bootstrap` init container in [`devops/docker/compose/compose.a2a.smoke.yml`](../devops/docker/compose/compose.a2a.smoke.yml) wraps those scripts, renders `nats-server.conf`, and populates the shared volume (see [`docs/A2A_DEVELOPMENT.md`](./A2A_DEVELOPMENT.md)). Production deployment unit: [`scripts/a2a-auth-callout.service`](../scripts/a2a-auth-callout.service).
+Committed reference (placeholders, runnable after bootstrap substitutions): [`scripts/a2a-auth-callout-nats-server.conf`](../../../../scripts/a2a-auth-callout-nats-server.conf). Keys and env block: [`scripts/a2a-auth-callout-bootstrap.sh`](../../../../scripts/a2a-auth-callout-bootstrap.sh). **Local end-to-end reference implementation:** the `a2a-bootstrap` init container in [`devops/docker/compose/compose.a2a.smoke.yml`](../../../../devops/docker/compose/compose.a2a.smoke.yml) wraps those scripts, renders `nats-server.conf`, and populates the shared volume (see [`docs/A2A_DEVELOPMENT.md`](../../tutorials/development.md)). Production deployment unit: [`scripts/a2a-auth-callout.service`](../../../../scripts/a2a-auth-callout.service).
 
 ```hcl
 accounts {
@@ -111,8 +111,8 @@ Generate production keys with `nsc generate nkey --account` and `nsc generate nk
 
 ## Open questions
 
-- **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per [A2A architecture](./A2A_ARCHITECTURE.md)).
+- **Operator mode**: multi-account `issuer_account` and signing-key scoping are not implemented in this service (single-tenant centralized model per [A2A architecture](../../explanation/architecture.md)).
 
 ## Related
 
-- Runtime env reference: [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md)
+- Runtime env reference: [`A2A_RUNTIME_ENV.md`](../../reference/runtime-env.md)

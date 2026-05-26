@@ -9,7 +9,7 @@ Operator-facing reference for the Wasmtime-hosted Tier-3 redaction skill matrix.
 | `rsworkspace/crates/a2a-redaction/src/skill_manifest.rs` | `SkillManifest`, `SkillManifestRegistry`, `SkillSelectionPlan` |
 | `rsworkspace/crates/a2a-pack/skills/` | First-party reference manifests + README stubs (no compiled WASM) |
 
-Gateway preload continues to use `A2A_GATEWAY_POLICY_BUNDLE_DIR` for `.wasm` binaries and `A2A_GATEWAY_POLICY_SKILLS` for explicit preload slugs. Skill manifests are loaded from the same bundle directory (or a subdirectory — see [Runtime env](./A2A_RUNTIME_ENV.md)).
+Gateway preload continues to use `A2A_GATEWAY_POLICY_BUNDLE_DIR` for `.wasm` binaries and `A2A_GATEWAY_POLICY_SKILLS` for explicit preload slugs. Skill manifests are loaded from the same bundle directory (or a subdirectory — see [Runtime env](../runtime-env.md)).
 
 ## Skill id naming
 
@@ -108,5 +108,5 @@ let plan = a2a_redaction::SkillSelectionPlan::plan(
 
 ## Related docs
 
-- [Runtime environment](./A2A_RUNTIME_ENV.md) — `A2A_GATEWAY_POLICY_BUNDLE_DIR`, `A2A_GATEWAY_POLICY_SKILLS`
-- [Open work tracker](./A2A_ARCHITECTURE.md) — Phase 2 skill matrix status
+- [Runtime environment](../runtime-env.md) — `A2A_GATEWAY_POLICY_BUNDLE_DIR`, `A2A_GATEWAY_POLICY_SKILLS`
+- [Open work tracker](../../explanation/architecture.md) — Phase 2 skill matrix status

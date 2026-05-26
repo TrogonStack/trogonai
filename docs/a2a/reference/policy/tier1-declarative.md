@@ -87,7 +87,7 @@ Declarative semantics:
 | `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | off | Truthy loads the declarative evaluator; off uses noop (always allow) |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | — | Directory of `*.tier1.toml` bundle files (required when enabled) |
 
-See [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) for the full `a2a-gateway` table.
+See [`A2A_RUNTIME_ENV.md`](../runtime-env.md) for the full `a2a-gateway` table.
 
 ## Audit `rules_fired`
 
@@ -130,6 +130,6 @@ pattern = "service/internal-*"
 
 ## Related docs
 
-- [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) — env reference
-- [`A2A_TIER2_CEL.md`](./A2A_TIER2_CEL.md) — Tier-2 CEL bundle layout (design template)
-- [`A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) — gateway policy roadmap
+- [`A2A_RUNTIME_ENV.md`](../runtime-env.md) — env reference
+- [`A2A_TIER2_CEL.md`](tier2-cel.md) — Tier-2 CEL bundle layout (design template)
+- [`A2A_GATEWAY_ROADMAP.md`](../../explanation/gateway-roadmap.md) — gateway policy roadmap
