@@ -441,10 +441,23 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let resp_subject =
                 format!("{prefix}.session.{session_id}.agent.prompt.response.{req_id}");
 
-            let mut notif_rx = nats
-                .subscribe_bytes(notif_subject)
+            // MED-35: prefer a durable JetStream ordered consumer so tool-call
+            // notifications published during a brief NATS reconnect are replayed
+            // (the *_CLIENT_OPS stream captures `{prefix}.session.*.client.>`). Fall
+            // back to core pub-sub if the stream isn't available, so behavior never
+            // regresses. Stream name normalization mirrors AcpStream::stream_name.
+            let client_ops_stream =
+                format!("{}_CLIENT_OPS", prefix.to_uppercase().replace('.', "_"));
+            let mut notif_rx = match nats
+                .subscribe_jetstream_bytes(client_ops_stream, notif_subject.clone())
                 .await
-                .map_err(|e| anyhow::anyhow!("subscribe notifications: {e}"))?;
+            {
+                Ok(rx) => rx,
+                Err(_) => nats
+                    .subscribe_bytes(notif_subject)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("subscribe notifications: {e}"))?,
+            };
 
             let mut resp_rx = nats
                 .subscribe_bytes(resp_subject)
