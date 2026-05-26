@@ -5925,6 +5925,406 @@ async def test_programming_edit_cycle():
             mock.stop()
 
 
+async def test_xai_programming_cycle():
+    """Spec (programming.md PR1+xai): xAI runner handles multi-step tool loop:
+    read_file → str_replace → git_diff → final text."""
+    print("\n\033[1mTest 116: xAI programming cycle: read_file → str_replace → git_diff\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+        code_path = os.path.join(tmpdir, "calc.py")
+        with open(code_path, "w") as f:
+            f.write("def add():\n    return 1\n")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True)
+
+        def sse(n):
+            if n == 1:
+                return xai_function_call_sse("c1", "read_file", json.dumps({"path": "calc.py"}))
+            if n == 2:
+                return xai_function_call_sse("c2", "str_replace",
+                    json.dumps({"path": "calc.py", "old_str": "return 1", "new_str": "return 42"}))
+            if n == 3:
+                return xai_function_call_sse("c3", "git_diff", json.dumps({}))
+            return xai_text_sse("edit complete")
+
+        mock = MockHttpServer(30116, sse).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t116",
+                   "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30116",
+                   "XAI_MODELS": "grok-t116:grok-t116"}
+            proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t116", tmpdir, "update the return value", timeout=25)
+
+            content = open(code_path).read()
+            file_ok = "return 42" in content and "return 1" not in content
+            loop_ok = len(mock.received) >= 4
+            diff_in_call4 = False
+            if len(mock.received) >= 4:
+                body4_str = json.dumps(json.loads(mock.received[3]))
+                diff_in_call4 = "return 42" in body4_str or "-return 1" in body4_str or "+return 42" in body4_str
+            print(f"    calls={len(mock.received)} file_ok={file_ok} diff_in_call4={diff_in_call4}", flush=True)
+
+            if file_ok and loop_ok and diff_in_call4:
+                ok("xAI programming cycle: read_file→str_replace→git_diff chain works end-to-end")
+            elif file_ok and loop_ok:
+                fail("xAI programming cycle: file edited and loop complete but git_diff result absent from call 4",
+                     f"calls={len(mock.received)}")
+            elif file_ok:
+                fail("xAI programming cycle: str_replace worked but tool loop stopped early",
+                     f"calls={len(mock.received)}")
+            else:
+                fail("xAI programming cycle: str_replace did not modify the file",
+                     f"content={content!r}")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+async def test_openrouter_programming_cycle():
+    """Spec (programming.md PR1+openrouter): openrouter runner handles multi-step tool loop:
+    read_file → str_replace → git_diff → final text."""
+    print("\n\033[1mTest 117: openrouter programming cycle: read_file → str_replace → git_diff\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+        code_path = os.path.join(tmpdir, "util.py")
+        with open(code_path, "w") as f:
+            f.write("def compute():\n    return 0\n")
+        subprocess.run(["git", "add", "."], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=tmpdir, capture_output=True)
+
+        def sse(n):
+            if n == 1:
+                return or_tool_calls_sse("c1", "read_file", json.dumps({"path": "util.py"}))
+            if n == 2:
+                return or_tool_calls_sse("c2", "str_replace",
+                    json.dumps({"path": "util.py", "old_str": "return 0", "new_str": "return 99"}))
+            if n == 3:
+                return or_tool_calls_sse("c3", "git_diff", json.dumps({}))
+            return or_text_sse("edit complete")
+
+        mock = MockHttpServer(30117, sse).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t117",
+                   "OPENROUTER_API_KEY": "test",
+                   "OPENROUTER_BASE_URL": "http://127.0.0.1:30117",
+                   "OPENROUTER_MODELS": "gpt-t117:gpt-t117"}
+            proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t117", tmpdir, "update the return value", timeout=25)
+
+            content = open(code_path).read()
+            file_ok = "return 99" in content and "return 0" not in content
+            loop_ok = len(mock.received) >= 4
+            diff_in_call4 = False
+            if len(mock.received) >= 4:
+                body4_str = json.dumps(json.loads(mock.received[3]))
+                diff_in_call4 = "return 99" in body4_str or "-return 0" in body4_str or "+return 99" in body4_str
+            print(f"    calls={len(mock.received)} file_ok={file_ok} diff_in_call4={diff_in_call4}", flush=True)
+
+            if file_ok and loop_ok and diff_in_call4:
+                ok("openrouter programming cycle: read_file→str_replace→git_diff chain works end-to-end")
+            elif file_ok and loop_ok:
+                fail("openrouter programming cycle: file edited but git_diff result absent from call 4",
+                     f"calls={len(mock.received)}")
+            elif file_ok:
+                fail("openrouter programming cycle: str_replace worked but tool loop stopped early",
+                     f"calls={len(mock.received)}")
+            else:
+                fail("openrouter programming cycle: str_replace did not modify the file",
+                     f"content={content!r}")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+async def test_trogon_md_after_cross_runner_switch():
+    """Spec (PR4+PR7): after cross-runner switch (acp→xAI), the new xAI session uses the same
+    cwd and must inject TROGON.md on the first prompt — same as a fresh xAI session would."""
+    print("\n\033[1mTest 118: TROGON.md injection after cross-runner switch (acp→xAI)\033[0m")
+    with tempfile.TemporaryDirectory() as cwd:
+        with open(os.path.join(cwd, "TROGON.md"), "w") as f:
+            f.write("# TROGON_SWITCH_MARKER_T118\nYou are a programming assistant.\n")
+
+        acp_mock = MockHttpServer(30118, lambda n: acp_text_sse("acp t118 turn")).start()
+        xai_mock = MockHttpServer(30119, lambda n: xai_text_sse("xai t118 turn")).start()
+
+        try:
+            env_acp = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t118a",
+                       "PROXY_URL": "http://127.0.0.1:30118",
+                       "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6"}
+            env_xai = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t118x",
+                       "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30119",
+                       "XAI_MODELS": "grok-t118:grok-t118"}
+
+            proc_acp = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env_acp,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                # acp session + one turn
+                r = await nc.request("acp.t118a.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(), timeout=5)
+                acp_sid = json.loads(r.data)["sessionId"]
+                req_id = str(uuid.uuid4())
+                resp_sub = await nc.subscribe(
+                    f"acp.t118a.session.{acp_sid}.agent.prompt.response.{req_id}")
+                async def _noop1(m): pass
+                await nc.subscribe(f"acp.t118a.session.{acp_sid}.client.session.update", cb=_noop1)
+                await nc.publish(
+                    f"acp.t118a.session.{acp_sid}.agent.prompt",
+                    json.dumps({"sessionId": acp_sid,
+                                "prompt": [{"type": "text", "text": "hello"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+                await asyncio.wait_for(resp_sub.next_msg(), timeout=8)
+
+                # Export from acp
+                r = await nc.request("acp.t118a.agent.ext.session/export",
+                                     json.dumps({"sessionId": acp_sid}).encode(), timeout=5)
+                messages = json.loads(r.data)
+                if isinstance(messages, dict):
+                    messages = messages.get("messages", [])
+                print(f"    exported {len(messages)} messages from acp", flush=True)
+
+                # xAI session with SAME cwd
+                r = await nc.request("acp.t118x.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(), timeout=5)
+                xai_sid = json.loads(r.data)["sessionId"]
+
+                # Import acp history into xAI
+                r = await nc.request("acp.t118x.agent.ext.session/import",
+                                     json.dumps({"sessionId": xai_sid,
+                                                 "messages": messages}).encode(), timeout=5)
+
+                # xAI first prompt after import — TROGON.md must be injected
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t118x.session.{xai_sid}.agent.prompt.response.{req_id2}")
+                async def _noop2(m): pass
+                await nc.subscribe(f"acp.t118x.session.{xai_sid}.client.session.update", cb=_noop2)
+                await nc.publish(
+                    f"acp.t118x.session.{xai_sid}.agent.prompt",
+                    json.dumps({"sessionId": xai_sid,
+                                "prompt": [{"type": "text", "text": "continue"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=8)
+
+                if not xai_mock.received:
+                    fail("TROGON.md after switch", "xAI mock received no calls")
+                else:
+                    body = json.loads(xai_mock.received[0])
+                    input_items = body.get("input", [])
+                    system_items = [it for it in input_items
+                                    if isinstance(it, dict) and it.get("role") == "system"]
+                    body_str = json.dumps(body)
+                    if system_items and "TROGON_SWITCH_MARKER_T118" in json.dumps(system_items):
+                        ok("TROGON.md injection after cross-runner switch: marker in xAI system input")
+                    elif "TROGON_SWITCH_MARKER_T118" in body_str:
+                        fail("TROGON.md present after switch but NOT in system role item",
+                             f"system_items={system_items!r}")
+                    else:
+                        fail("TROGON.md NOT injected after cross-runner switch to xAI",
+                             f"input preview={json.dumps(input_items)[:200]!r}")
+            finally:
+                await nc.close()
+        finally:
+            for p in (proc_acp, proc_xai):
+                try: p.terminate(); p.wait(timeout=3)
+                except Exception: pass
+            acp_mock.stop(); xai_mock.stop()
+
+
+async def test_acp_export_preserves_portable_blocks():
+    """Spec (PR7): acp session/export converts to PortableBlock format.
+    ToolUse → PortableBlock::ToolCall, ToolResult → PortableBlock::ToolResult (both preserved).
+    Only Thinking blocks are dropped. The export must include all 4 messages of a tool loop."""
+    print("\n\033[1mTest 119: acp export — tool_call/tool_result blocks preserved as PortableBlocks\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("t1", "write_file",
+                    json.dumps({"path": "exported.txt", "content": "hello from tool\n"}))
+            return acp_text_sse("file written successfully")
+
+        mock = MockHttpServer(30120, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30120, 119, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "write a file", timeout=20)
+            print(f"    done={done} calls={len(mock.received)}", flush=True)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(f"{prefix}.agent.ext.session/export",
+                                     json.dumps({"sessionId": sid}).encode(), timeout=5)
+                messages = json.loads(r.data)
+                if isinstance(messages, dict):
+                    messages = messages.get("messages", [])
+                print(f"    exported {len(messages)} msgs: {json.dumps(messages)[:300]!r}", flush=True)
+            finally:
+                await nc.close()
+
+            exported_str = json.dumps(messages)
+            # ToolUse → PortableBlock::ToolCall — must be present
+            has_tool_call = '"type": "tool_call"' in exported_str or '"type":"tool_call"' in exported_str
+            # ToolResult → PortableBlock::ToolResult — must be present
+            has_tool_result = '"type": "tool_result"' in exported_str or '"type":"tool_result"' in exported_str
+            # Anthropic-native "tool_use" type must NOT appear (already converted)
+            has_raw_tool_use = '"type": "tool_use"' in exported_str or '"type":"tool_use"' in exported_str
+            user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
+            asst_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "assistant"]
+            has_user_text = any("write a file" in json.dumps(m) for m in user_msgs)
+            has_asst_text = any("file written successfully" in json.dumps(m) for m in asst_msgs)
+            file_written = os.path.exists(os.path.join(tmpdir, "exported.txt"))
+
+            print(f"    has_tool_call={has_tool_call} has_tool_result={has_tool_result} "
+                  f"file_written={file_written}", flush=True)
+
+            if has_raw_tool_use:
+                fail("acp export: raw 'tool_use' type in export — should be converted to 'tool_call'",
+                     f"preview={exported_str[:300]!r}")
+            elif not has_tool_call:
+                fail("acp export: tool_call block missing — ToolUse not converted to PortableBlock::ToolCall",
+                     f"preview={exported_str[:300]!r}")
+            elif not has_tool_result:
+                fail("acp export: tool_result block missing — ToolResult not preserved in export",
+                     f"preview={exported_str[:300]!r}")
+            elif not file_written:
+                fail("acp export: write_file tool was not actually executed (file missing)",
+                     f"done={done!r}")
+            elif not (has_user_text and has_asst_text):
+                fail("acp export: user text or final assistant text missing from export",
+                     f"user_text={has_user_text} asst_text={has_asst_text}")
+            else:
+                ok("acp export: tool_call+tool_result preserved as PortableBlocks, file written, text preserved")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+async def test_cross_runner_switch_after_programming():
+    """Spec (PR7+PR8): after acp programming session with tool calls, switch to xAI.
+    The file must be correctly modified (by acp tools before switch), and xAI must
+    receive the acp text history (lossy: tool calls appear as text or are dropped)."""
+    print("\n\033[1mTest 120: Cross-runner switch after programming — acp→xAI with tool history\033[0m")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        code_path = os.path.join(tmpdir, "prog.py")
+        with open(code_path, "w") as f:
+            f.write("def old_func():\n    pass\n")
+
+        def acp_sse(n):
+            if n == 1:
+                return acp_tool_use_sse("t1", "write_file",
+                    json.dumps({"path": "prog.py",
+                                "content": "def new_func():\n    return 42\n"}))
+            return acp_text_sse("function updated")
+
+        acp_mock = MockHttpServer(30122, acp_sse).start()
+        xai_mock = MockHttpServer(30123, lambda n: xai_text_sse("xai continuing")).start()
+
+        auto_approve, proc_acp, prefix = await _start_acp_tool_runner(30122, 120, tmpdir)
+        proc_xai = subprocess.Popen(
+            [f"{BIN}/trogon-xai-runner"],
+            env={**os.environ,
+                 "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t120x",
+                 "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30123",
+                 "XAI_MODELS": "grok-t120:grok-t120"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(1)
+
+        try:
+            # acp programming turn
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "update the function", timeout=20)
+            print(f"    acp done={done} calls={len(acp_mock.received)}", flush=True)
+
+            file_content = open(code_path).read()
+            file_updated = "new_func" in file_content and "old_func" not in file_content
+            print(f"    file updated: {file_updated} content={file_content!r}", flush=True)
+
+            # Export from acp
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(f"{prefix}.agent.ext.session/export",
+                                     json.dumps({"sessionId": sid}).encode(), timeout=5)
+                messages = json.loads(r.data)
+                if isinstance(messages, dict):
+                    messages = messages.get("messages", [])
+                print(f"    exported {len(messages)} messages", flush=True)
+
+                # xAI session + import
+                r = await nc.request("acp.t120x.agent.session.new",
+                                     json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+                xai_sid = json.loads(r.data)["sessionId"]
+                r = await nc.request("acp.t120x.agent.ext.session/import",
+                                     json.dumps({"sessionId": xai_sid,
+                                                 "messages": messages}).encode(), timeout=5)
+
+                # xAI turn
+                req_id = str(uuid.uuid4())
+                resp_sub = await nc.subscribe(
+                    f"acp.t120x.session.{xai_sid}.agent.prompt.response.{req_id}")
+                async def _noop(m): pass
+                await nc.subscribe(
+                    f"acp.t120x.session.{xai_sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t120x.session.{xai_sid}.agent.prompt",
+                    json.dumps({"sessionId": xai_sid,
+                                "prompt": [{"type": "text",
+                                            "text": "what did we just do?"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+                await asyncio.wait_for(resp_sub.next_msg(), timeout=10)
+            finally:
+                await nc.close()
+
+            if not xai_mock.received:
+                fail("cross-runner after programming", "xAI mock received no calls")
+            else:
+                body = json.loads(xai_mock.received[0])
+                combined = json.dumps(body.get("input", []))
+                acp_history_present = ("update the function" in combined
+                                       or "function updated" in combined)
+
+                if file_updated and acp_history_present:
+                    ok("cross-runner after programming: file edited by acp, history visible to xAI after switch")
+                elif file_updated:
+                    fail("cross-runner after programming: file correct but acp history missing from xAI",
+                         f"input preview={combined[:200]!r}")
+                else:
+                    fail("cross-runner after programming: acp did not edit the file",
+                         f"content={file_content!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc_acp.terminate(); proc_acp.wait(timeout=3)
+            except Exception: pass
+            try: proc_xai.terminate(); proc_xai.wait(timeout=3)
+            except Exception: pass
+            acp_mock.stop(); xai_mock.stop()
+
+
 def test_sse_helpers():
     """Unit tests for SSE helpers — verify each produces parseable JSON with correct content fields."""
     print("\n\033[1mSSE Helper Unit Tests\033[0m")
@@ -6160,6 +6560,11 @@ async def main():
     await test_granular_permissions_allow_path()
     await test_granular_permissions_deny_command()
     await test_programming_edit_cycle()
+    await test_xai_programming_cycle()
+    await test_openrouter_programming_cycle()
+    await test_trogon_md_after_cross_runner_switch()
+    await test_acp_export_preserves_portable_blocks()
+    await test_cross_runner_switch_after_programming()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
