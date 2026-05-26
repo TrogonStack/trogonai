@@ -1183,7 +1183,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
             if tool_rounds >= MAX_TOOL_ROUNDS {
                 warn!(session_id, "openrouter: max tool rounds reached");
-                break StopReason::Cancelled;
+                break StopReason::MaxTurnRequests;
             }
 
             let tool_calls_msg = Message::assistant_tool_calls(&assembled_calls);
@@ -2646,7 +2646,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn max_tool_rounds_returns_cancelled() {
+    async fn max_tool_rounds_returns_max_turn_requests() {
         let agent = make_agent_with_key("k");
         for _ in 0..=10 {
             agent.client.push_response(vec![
@@ -2663,8 +2663,8 @@ mod tests {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
             let resp = agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
             assert!(
-                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
-                "must return Cancelled after max tool rounds"
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::MaxTurnRequests),
+                "must return MaxTurnRequests after max tool rounds"
             );
         }).await;
     }

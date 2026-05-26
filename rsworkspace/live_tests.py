@@ -8300,11 +8300,11 @@ async def test_acp_max_iterations_stop_reason():
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def test_xai_max_tool_rounds_stop_reason():
-    """Spec (PR3/xai-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop runs
+    """Spec (xai-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop runs
     10 times, the 11th check (tool_rounds >= MAX_TOOL_ROUNDS) triggers
-    StopReason::Cancelled serialised as 'cancelled'. The mock always returns a
-    function_call, forcing 11 total API calls before the runner stops."""
-    print("\n\033[1mTest 156: xai-runner MAX_TOOL_ROUNDS=10 → stop_reason 'cancelled'\033[0m")
+    StopReason::MaxTurnRequests serialised as 'max_turn_requests'. The mock always
+    returns a function_call, forcing 11 total API calls before the runner stops."""
+    print("\n\033[1mTest 156: xai-runner MAX_TOOL_ROUNDS=10 → stop_reason 'max_turn_requests'\033[0m")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         mock = MockHttpServer(
@@ -8331,9 +8331,9 @@ async def test_xai_max_tool_rounds_stop_reason():
             api_calls   = len(mock.received)
 
             # 10 tool executions → 11 total API calls → break on 11th check
-            if stop_reason == "cancelled" and api_calls == 11:
-                ok("xai MAX_TOOL_ROUNDS: stop_reason='cancelled', exactly 11 API calls")
-            elif stop_reason == "cancelled":
+            if stop_reason == "max_turn_requests" and api_calls == 11:
+                ok("xai MAX_TOOL_ROUNDS: stop_reason='max_turn_requests', exactly 11 API calls")
+            elif stop_reason == "max_turn_requests":
                 ok(f"xai MAX_TOOL_ROUNDS: stop_reason correct; api_calls={api_calls} (expected 11)")
             else:
                 fail("xai MAX_TOOL_ROUNDS: wrong stop_reason",
@@ -8349,11 +8349,11 @@ async def test_xai_max_tool_rounds_stop_reason():
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def test_openrouter_max_tool_rounds_stop_reason():
-    """Spec (PR4/openrouter-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop
+    """Spec (openrouter-runner agent.rs MAX_TOOL_ROUNDS=10): when the tool loop
     executes 10 rounds, the 11th check (tool_rounds >= MAX_TOOL_ROUNDS) triggers
-    StopReason::Cancelled serialised as 'cancelled'. The mock always returns a
-    tool_calls SSE, forcing 11 total API calls before the runner stops."""
-    print("\n\033[1mTest 157: openrouter-runner MAX_TOOL_ROUNDS=10 → stop_reason 'cancelled'\033[0m")
+    StopReason::MaxTurnRequests serialised as 'max_turn_requests'. The mock always
+    returns a tool_calls SSE, forcing 11 total API calls before the runner stops."""
+    print("\n\033[1mTest 157: openrouter-runner MAX_TOOL_ROUNDS=10 → stop_reason 'max_turn_requests'\033[0m")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         mock = MockHttpServer(
@@ -8380,9 +8380,9 @@ async def test_openrouter_max_tool_rounds_stop_reason():
             stop_reason = done.get("stopReason")
             api_calls   = len(mock.received)
 
-            if stop_reason == "cancelled" and api_calls == 11:
-                ok("openrouter MAX_TOOL_ROUNDS: stop_reason='cancelled', exactly 11 API calls")
-            elif stop_reason == "cancelled":
+            if stop_reason == "max_turn_requests" and api_calls == 11:
+                ok("openrouter MAX_TOOL_ROUNDS: stop_reason='max_turn_requests', exactly 11 API calls")
+            elif stop_reason == "max_turn_requests":
                 ok(f"openrouter MAX_TOOL_ROUNDS: stop_reason correct; api_calls={api_calls} (expected 11)")
             else:
                 fail("openrouter MAX_TOOL_ROUNDS: wrong stop_reason",
