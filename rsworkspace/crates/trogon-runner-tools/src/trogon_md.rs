@@ -71,6 +71,20 @@ pub struct TrogonMdLayer {
     pub label: String,
 }
 
+/// Walk up from `cwd` to find the nearest ancestor directory containing `.git`.
+/// Returns `None` when no `.git` directory is found before reaching the filesystem root.
+fn find_git_root(cwd: &Path) -> Option<PathBuf> {
+    let mut dir = cwd.to_path_buf();
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 /// List TROGON.md paths from global config through ancestors of `cwd` (root-first).
 pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
     let mut layers = Vec::new();
@@ -94,12 +108,17 @@ pub async fn list_trogon_md_hierarchy(cwd: &str) -> Vec<TrogonMdLayer> {
     }
     candidates.reverse();
 
-    let count = candidates.len();
-    for (i, path) in candidates.into_iter().enumerate() {
-        let label = if i + 1 == count {
+    // Determine the "project root" label: the nearest ancestor containing `.git`,
+    // or fall back to `cwd` if no git root is found (preserves previous behaviour).
+    let cwd_path = PathBuf::from(cwd);
+    let git_root = find_git_root(&cwd_path).unwrap_or_else(|| cwd_path.clone());
+
+    for path in candidates {
+        let dir_path = path.parent().map(PathBuf::from).unwrap_or_default();
+        let label = if dir_path == git_root {
             "project root".into()
         } else {
-            format!("ancestor {}", path.parent().map(|p| p.display().to_string()).unwrap_or_default())
+            format!("ancestor {}", dir_path.display())
         };
         layers.push(TrogonMdLayer {
             exists: tokio::fs::metadata(&path).await.is_ok(),
