@@ -198,6 +198,35 @@ def or_tool_calls_sse(call_id, tool_name, arguments_str):
         'data: [DONE]\n\n'
     )
 
+def acp_two_tool_use_sse(tool_id1, name1, args1, tool_id2, name2, args2):
+    """acp SSE: two tool_use content blocks in a single response (parallel dispatch)."""
+    return (
+        'event: message_start\ndata: {"type":"message_start","message":{"usage":'
+        '{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n\n'
+        f'event: content_block_start\ndata: {{"type":"content_block_start","index":0,'
+        f'"content_block":{{"type":"tool_use","id":"{tool_id1}","name":"{name1}","input":{{}}}}}}\n\n'
+        f'event: content_block_delta\ndata: {{"type":"content_block_delta","index":0,'
+        f'"delta":{{"type":"input_json_delta","partial_json":{json.dumps(args1)}}}}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+        f'event: content_block_start\ndata: {{"type":"content_block_start","index":1,'
+        f'"content_block":{{"type":"tool_use","id":"{tool_id2}","name":"{name2}","input":{{}}}}}}\n\n'
+        f'event: content_block_delta\ndata: {{"type":"content_block_delta","index":1,'
+        f'"delta":{{"type":"input_json_delta","partial_json":{json.dumps(args2)}}}}}\n\n'
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":1}\n\n'
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},'
+        '"usage":{"output_tokens":15}}\n\n'
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    )
+
+def xai_text_sse_with_id(text, resp_id):
+    """xai SSE with specific response ID — used to test last_response_id tracking."""
+    return (
+        f'data: {{"type":"message.delta","id":"{resp_id}","delta":{{"text":{json.dumps(text)}}}}}\n\n'
+        f'data: {{"type":"response.completed","response":{{"id":"{resp_id}","status":"completed"}},'
+        '"usage":{"input_tokens":10,"output_tokens":5}}\n\n'
+        'data: [DONE]\n\n'
+    )
+
 
 class MockJsonServer:
     """HTTP mock that returns plain JSON (not SSE) — used for spawn handler tests."""
@@ -6981,6 +7010,380 @@ async def test_git_log_limit():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 138 — Parallel tool execution: 2 tool_use blocks in one LLM response
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_parallel_tool_execution():
+    """Spec (PR10/agent_loop.rs): when LLM response contains 2 tool_use blocks,
+    both are dispatched (join_all). Both files must exist and both tool_results
+    must appear in HTTP call 2."""
+    print("\n\033[1mTest 138: Parallel tool execution — 2 tool_use blocks dispatched\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return acp_two_tool_use_sse(
+                    "p138a", "write_file",
+                    json.dumps({"path": "alpha_t138.txt", "content": "ALPHA_T138"}),
+                    "p138b", "write_file",
+                    json.dumps({"path": "beta_t138.txt", "content": "BETA_T138"}),
+                )
+            return acp_text_sse("both files written")
+
+        mock = MockHttpServer(30160, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30160, 138, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "write two files", timeout=20)
+
+            alpha_ok = os.path.exists(os.path.join(tmpdir, "alpha_t138.txt"))
+            beta_ok  = os.path.exists(os.path.join(tmpdir, "beta_t138.txt"))
+
+            both_results = False
+            if len(mock.received) >= 2:
+                call2 = json.dumps(json.loads(mock.received[1]))
+                both_results = "p138a" in call2 and "p138b" in call2
+            print(f"    alpha={alpha_ok} beta={beta_ok} both_results_in_call2={both_results} "
+                  f"calls={len(mock.received)}", flush=True)
+
+            if alpha_ok and beta_ok and both_results:
+                ok("parallel tool execution: both tool_use blocks dispatched, "
+                   "both files written, both tool_results in call 2")
+            elif alpha_ok and beta_ok:
+                preview = json.dumps(json.loads(mock.received[1]))[:200] if len(mock.received) >= 2 else "n/a"
+                fail("parallel tool execution: files written but both tool_results missing from call 2",
+                     f"calls={len(mock.received)} call2_preview={preview!r}")
+            else:
+                fail("parallel tool execution: not all files written",
+                     f"alpha={alpha_ok} beta={beta_ok} calls={len(mock.received)}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 139 — xai session/import clears last_response_id
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_xai_import_clears_response_id():
+    """Spec (PR7 Known Limitations): xai-runner session/import clears last_response_id.
+    After a prompt establishes a response ID, import must reset it so the next
+    prompt does NOT send previous_response_id in the request body."""
+    print("\n\033[1mTest 139: xai import clears last_response_id\033[0m")
+
+    resp_id = "resp-t139-unique-marker"
+
+    def sse(n):
+        if n == 1:
+            return xai_text_sse_with_id("xai t139 first", resp_id)
+        return xai_text_sse("xai t139 second")
+
+    mock = MockHttpServer(30161, sse).start()
+    try:
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t139",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30161",
+               "XAI_MODELS": "grok-t139:grok-t139"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        with tempfile.TemporaryDirectory() as cwd:
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request("acp.t139.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(), timeout=5)
+                sid = json.loads(r.data)["sessionId"]
+
+                # First prompt — establishes last_response_id = resp_id
+                req_id1 = str(uuid.uuid4())
+                resp_sub1 = await nc.subscribe(
+                    f"acp.t139.session.{sid}.agent.prompt.response.{req_id1}")
+                async def _noop(m): pass
+                await nc.subscribe(f"acp.t139.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t139.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "first-t139"}]}).encode(),
+                    headers={"X-Req-Id": req_id1})
+                await asyncio.wait_for(resp_sub1.next_msg(), timeout=10)
+                print(f"    first prompt done; runner stored last_response_id={resp_id!r}", flush=True)
+
+                # Import history — must clear last_response_id
+                r = await nc.request(
+                    "acp.t139.agent.ext.session/import",
+                    json.dumps({"sessionId": sid,
+                                "messages": [{"role": "user", "text": "imported-t139"},
+                                             {"role": "assistant", "text": "reply-t139"}]}).encode(),
+                    timeout=5)
+                print(f"    import done: {r.data[:60]}", flush=True)
+
+                # Second prompt — must NOT have previous_response_id in request
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t139.session.{sid}.agent.prompt.response.{req_id2}")
+                await nc.subscribe(f"acp.t139.session.{sid}.client.session.update", cb=_noop)
+                await nc.publish(
+                    f"acp.t139.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "second-t139"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=10)
+
+                if len(mock.received) < 2:
+                    fail("xai import clears response_id", "second prompt made no HTTP call")
+                else:
+                    body2 = json.loads(mock.received[1])
+                    has_prev_id = "previous_response_id" in body2
+                    print(f"    call2 has previous_response_id: {has_prev_id} "
+                          f"keys={list(body2.keys())}", flush=True)
+                    if not has_prev_id:
+                        ok("xai import clears last_response_id: "
+                           "no previous_response_id in request body after import")
+                    else:
+                        fail("xai import did NOT clear last_response_id — "
+                             "previous_response_id still present after import",
+                             f"previous_response_id={body2.get('previous_response_id')!r}")
+            finally:
+                await nc.close()
+    finally:
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 140 — git_status uses session cwd, not runner process cwd
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_git_status_uses_session_cwd():
+    """Spec (PR1/git.rs): git commands run with current_dir(&ctx.cwd) — the session's
+    cwd, not the runner process's cwd. Runner starts in a different directory;
+    only files in session.cwd must appear in git_status output."""
+    print("\n\033[1mTest 140: git_status uses session cwd (not process cwd)\033[0m")
+
+    with tempfile.TemporaryDirectory() as git_dir, \
+         tempfile.TemporaryDirectory() as other_dir:
+
+        # Set up git repo in git_dir with a unique untracked file
+        subprocess.run(["git", "init"], cwd=git_dir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=git_dir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=git_dir, capture_output=True)
+        with open(os.path.join(git_dir, "unique_t140.txt"), 'w') as f:
+            f.write("# unique marker for T140\n")
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("gs140", "git_status", json.dumps({}))
+            return acp_text_sse("status done")
+
+        mock = MockHttpServer(30162, sse).start()
+
+        # Start runner with process cwd = other_dir (NOT the git repo)
+        auto_approve = subprocess.Popen(
+            ["python3", "/tmp/auto_approve.py", NATS_JS],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(0.5)
+        prefix = "acp.t140"
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": prefix,
+               "PROXY_URL": "http://127.0.0.1:30162",
+               "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6",
+               "AGENT_MAX_ITERATIONS": "5"}
+        proc = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env, cwd=other_dir,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        try:
+            # Session created with cwd=git_dir — tools must use this, not other_dir
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, git_dir, "check git status", timeout=20)
+
+            tool_result = get_tool_result_content(mock.received)
+            print(f"    tool_result: {tool_result!r}", flush=True)
+
+            if tool_result and "unique_t140" in tool_result:
+                ok("git_status uses session cwd: "
+                   "untracked file from session cwd found in output (not from process cwd)")
+            else:
+                fail("git_status did not use session cwd",
+                     f"expected 'unique_t140' in result but got: {tool_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 141 — list_dir capped at 500 entries
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_list_dir_500_limit():
+    """Spec (PR1/fs.rs list_dir): listing limited to 500 entries.
+    With 501 files, result must contain at most 500 entries."""
+    print("\n\033[1mTest 141: list_dir capped at 500 entries\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(501):
+            with open(os.path.join(tmpdir, f"file_{i:04d}_t141.txt"), 'w') as f:
+                f.write(f"{i}\n")
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("ld141", "list_dir", json.dumps({}))
+            return acp_text_sse("listing done")
+
+        mock = MockHttpServer(30163, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30163, 141, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "list the directory", timeout=20)
+
+            tool_result = get_tool_result_content(mock.received)
+            if tool_result is None:
+                fail("list_dir 500 limit: no tool result received",
+                     f"calls={len(mock.received)} done={done!r}")
+            else:
+                # Count file entries only; exclude the "... (truncated at 500 entries)" notice
+                file_lines = [l for l in tool_result.splitlines()
+                              if l.strip() and "truncated" not in l]
+                has_truncation = "truncated" in tool_result
+                print(f"    file entry count: {len(file_lines)} has_truncation={has_truncation}",
+                      flush=True)
+                if len(file_lines) <= 500 and has_truncation:
+                    ok(f"list_dir 500 limit: {len(file_lines)} file entries returned (≤500) "
+                       "with truncation notice")
+                elif len(file_lines) > 500:
+                    fail(f"list_dir 500 limit: {len(file_lines)} file entries — cap not enforced",
+                         f"first few: {file_lines[:5]!r}")
+                else:
+                    fail("list_dir 500 limit: ≤500 entries but truncation notice absent",
+                         f"file_lines={len(file_lines)} result_preview={tool_result[:200]!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 142 — cross-runner switch: tools use original session cwd after switch
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_cross_runner_tools_use_original_cwd():
+    """Spec (PR8 CrossRunnerSwitcher): new session on target runner gets the same
+    cwd as the original session. Tool execution (git_status) after acp→xai switch
+    must report files from the original session cwd."""
+    print("\n\033[1mTest 142: cross-runner switch — xai git_status uses original cwd\033[0m")
+
+    with tempfile.TemporaryDirectory() as project_dir:
+        subprocess.run(["git", "init"], cwd=project_dir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=project_dir,
+                       capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=project_dir, capture_output=True)
+        with open(os.path.join(project_dir, "unique_t142.txt"), 'w') as f:
+            f.write("# unique marker for T142\n")
+
+        acp_mock = MockHttpServer(30164, lambda n: acp_text_sse("acp t142 hello")).start()
+
+        def xai_sse(n):
+            if n == 1:
+                return xai_function_call_sse("gs142", "git_status", json.dumps({}))
+            return xai_text_sse("git status done")
+
+        xai_mock = MockHttpServer(30165, xai_sse).start()
+
+        try:
+            env_acp = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t142a",
+                       "PROXY_URL": "http://127.0.0.1:30164",
+                       "ANTHROPIC_TOKEN": "test", "AGENT_MODEL": "claude-opus-4-6"}
+            env_xai = {**os.environ,
+                       "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t142x",
+                       "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30165",
+                       "XAI_MODELS": "grok-t142:grok-t142"}
+
+            proc_acp = subprocess.Popen([f"{BIN}/trogon-acp-runner"], env=env_acp,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                # acp session in project_dir + one turn
+                r = await nc.request("acp.t142a.agent.session.new",
+                                     json.dumps({"cwd": project_dir, "mcpServers": []}).encode(),
+                                     timeout=5)
+                acp_sid = json.loads(r.data)["sessionId"]
+
+                req_id1 = str(uuid.uuid4())
+                resp_sub1 = await nc.subscribe(
+                    f"acp.t142a.session.{acp_sid}.agent.prompt.response.{req_id1}")
+                async def _noop(m): pass
+                await nc.subscribe(f"acp.t142a.session.{acp_sid}.client.session.update",
+                                   cb=_noop)
+                await nc.publish(
+                    f"acp.t142a.session.{acp_sid}.agent.prompt",
+                    json.dumps({"sessionId": acp_sid,
+                                "prompt": [{"type": "text", "text": "hello"}]}).encode(),
+                    headers={"X-Req-Id": req_id1})
+                await asyncio.wait_for(resp_sub1.next_msg(), timeout=8)
+
+                # Export from acp
+                r = await nc.request("acp.t142a.agent.ext.session/export",
+                                     json.dumps({"sessionId": acp_sid}).encode(), timeout=5)
+                messages = json.loads(r.data)
+                if isinstance(messages, dict):
+                    messages = messages.get("messages", [])
+                print(f"    exported {len(messages)} messages from acp", flush=True)
+
+                # xai session with SAME cwd = project_dir (simulates CrossRunnerSwitcher)
+                r = await nc.request("acp.t142x.agent.session.new",
+                                     json.dumps({"cwd": project_dir,
+                                                 "mcpServers": []}).encode(), timeout=5)
+                xai_sid = json.loads(r.data)["sessionId"]
+
+                # Import acp history into xai
+                await nc.request("acp.t142x.agent.ext.session/import",
+                                 json.dumps({"sessionId": xai_sid,
+                                             "messages": messages}).encode(), timeout=5)
+
+                # xai turn: LLM requests git_status — must run in project_dir
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t142x.session.{xai_sid}.agent.prompt.response.{req_id2}")
+                await nc.subscribe(f"acp.t142x.session.{xai_sid}.client.session.update",
+                                   cb=_noop)
+                await nc.publish(
+                    f"acp.t142x.session.{xai_sid}.agent.prompt",
+                    json.dumps({"sessionId": xai_sid,
+                                "prompt": [{"type": "text",
+                                            "text": "check git status"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=15)
+
+                if len(xai_mock.received) < 2:
+                    fail("cross-runner tools use original cwd",
+                         f"xai made only {len(xai_mock.received)} calls — tool result not sent back")
+                else:
+                    # tool result is in xai call 2 body (function_call_output)
+                    call2 = json.loads(xai_mock.received[1])
+                    call2_str = json.dumps(call2)
+                    print(f"    xai call2 preview: {call2_str[:200]!r}", flush=True)
+                    if "unique_t142" in call2_str:
+                        ok("cross-runner tools use original cwd: "
+                           "git_status after acp→xai switch reports files from original cwd")
+                    else:
+                        fail("cross-runner tools: git_status did not use original cwd after switch",
+                             f"call2_preview={call2_str[:300]!r}")
+            finally:
+                await nc.close()
+        finally:
+            for p in (proc_acp, proc_xai):
+                try: p.terminate(); p.wait(timeout=3)
+                except Exception: pass
+            acp_mock.stop(); xai_mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -7113,6 +7516,11 @@ async def main():
     await test_list_dir_with_path()
     await test_model_switch_multiple_prompts()
     await test_git_log_limit()
+    await test_parallel_tool_execution()
+    await test_xai_import_clears_response_id()
+    await test_git_status_uses_session_cwd()
+    await test_list_dir_500_limit()
+    await test_cross_runner_tools_use_original_cwd()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
