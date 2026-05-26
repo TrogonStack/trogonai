@@ -1,13 +1,13 @@
 # A2A over NATS — developer guide
 
-Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md) and the navigation hub [`./A2A_DOCS_INDEX.md`](../../A2A_DOCS_INDEX.md).
+Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md) and the navigation hub [`./README.md`](../README.md).
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
 | [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md) | Env vars and CLI flags for every A2A binary and `a2a_nats` embedders |
-| [`./A2A_DOCS_INDEX.md`](../../A2A_DOCS_INDEX.md) | Full documentation index — operators, gateway, auth sketches |
+| [`./README.md`](../README.md) | Full documentation index — operators, gateway, auth sketches |
 | [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md) | Open engineering work and suggested ordering |
 
 ---

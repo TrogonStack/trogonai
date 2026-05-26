@@ -11,7 +11,7 @@ Tenancy is **one NATS Account per tenant**. Subjects carry **no `{tenant}` segme
 Architectural context and landed decisions:
 
 - [A2A plan](../../explanation/architecture.md) — subject topology, component layout, phased delivery.
-- [A2A docs index](../../../A2A_DOCS_INDEX.md) — navigation hub under `docs/`.
+- [A2A docs index](../../README.md) — navigation hub under `docs/`.
 - [A2A per-Account JetStream assets](../../reference/jetstream-account-streams.md) — **`A2A_EVENTS`**, **`A2A_AGENT_CARDS`** KV, **`A2A_PUSH_DLQ`** reference targets.
 - [Subject ACL quick reference](../../reference/subject-acl-quickref.md) — one-page Caller / Gateway / Registrar patterns (derived from this runbook).
 

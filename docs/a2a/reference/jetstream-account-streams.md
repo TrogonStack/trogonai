@@ -13,7 +13,7 @@ Operator reference for the JetStream streams and KV bucket the A2A-over-NATS bin
 | [Auth callout design](../explanation/auth-callout-design.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
 | [Gateway roadmap](../explanation/gateway-roadmap.md) | Ingress futures; not a JetStream asset owner |
 | [Subject ACL quick ref](subject-acl-quickref.md) | Caller / Gateway / Registrar publish-subscribe one-pager |
-| [Documentation index](../../A2A_DOCS_INDEX.md) | Hub linking operator and design docs |
+| [Documentation index](../README.md) | Hub linking operator and design docs |
 | [AgentCard catalog — KV watch](../how-to/catalog/kv-watch.md) | Client-side KV watch pattern for push-driven discovery |
 
 ---

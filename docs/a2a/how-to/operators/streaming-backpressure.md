@@ -12,7 +12,7 @@ How task event streaming stays non-blocking for agents, what JetStream policy to
 | [Per-Account JetStream assets](../../reference/jetstream-account-streams.md) | **`A2A_EVENTS`** provisioning reference |
 | [Gateway roadmap](../../explanation/gateway-roadmap.md) | Gateway streaming egress (env-gated pull consumer) |
 | [Runtime env](../../reference/runtime-env.md) | **`A2A_MAX_CONCURRENT_CLIENT_TASKS`** for agent **`Bridge`** |
-| [Documentation index](../../../A2A_DOCS_INDEX.md) | Hub linking operator and design docs |
+| [Documentation index](../../README.md) | Hub linking operator and design docs |
 
 ---
 

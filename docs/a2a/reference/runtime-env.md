@@ -225,7 +225,7 @@ Source: [`a2a-bridge/src/main.rs`](../../../rsworkspace/crates/a2a-bridge/src/ma
 
 ## Related docs
 
-- [Documentation index](../../A2A_DOCS_INDEX.md)
+- [Documentation index](../README.md)
 - [Push DLQ operations](../how-to/operators/push-dlq-triage.md)
 - [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md)
 - [Architecture plan](../explanation/architecture.md)
