@@ -5,6 +5,9 @@
 //! Run with:
 //!   cargo test -p trogon-cli --test session_integration
 
+// Test scaffolding (fake-runner NATS handlers) reads cleaner as nested `if let`.
+#![allow(clippy::collapsible_if)]
+
 use std::time::Duration;
 
 use futures::StreamExt as _;
