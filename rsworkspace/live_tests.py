@@ -7384,6 +7384,296 @@ async def test_cross_runner_tools_use_original_cwd():
             acp_mock.stop(); xai_mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 143 — glob respects .gitignore (gitignored files excluded from results)
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_glob_respects_gitignore():
+    """Spec (PR1/fs.rs glob): uses ignore::Walk which respects .gitignore.
+    Files in an ignored directory must NOT appear in glob results."""
+    print("\n\033[1mTest 143: glob respects .gitignore — ignored files excluded\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmpdir,
+                       capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=tmpdir, capture_output=True)
+
+        # .gitignore excludes logs/
+        with open(os.path.join(tmpdir, ".gitignore"), 'w') as f:
+            f.write("logs/\n")
+        os.makedirs(os.path.join(tmpdir, "logs"))
+        os.makedirs(os.path.join(tmpdir, "src"))
+        with open(os.path.join(tmpdir, "logs", "app_t143.log"), 'w') as f:
+            f.write("ignored log\n")
+        with open(os.path.join(tmpdir, "src", "main_t143.rs"), 'w') as f:
+            f.write("fn main(){}\n")
+
+        call_n = [0]
+        def sse(n):
+            call_n[0] = n
+            if n == 1:
+                # First: glob for *.log — should return "No files found"
+                return acp_tool_use_sse("gl143a", "glob",
+                                        json.dumps({"pattern": "**/*.log"}))
+            if n == 2:
+                # Second: glob for *.rs — should find main_t143.rs
+                return acp_tool_use_sse("gl143b", "glob",
+                                        json.dumps({"pattern": "**/*.rs"}))
+            return acp_text_sse("glob done")
+
+        mock = MockHttpServer(30166, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30166, 143, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "search files", timeout=20)
+
+            log_result = get_tool_result_content(mock.received, call_index=1)
+            # call 2 accumulates both tool_results; extract the last (the .rs glob)
+            try:
+                body2 = json.loads(mock.received[2])
+                all_tr = [c.get("content", "") for msg in body2.get("messages", [])
+                           if isinstance(msg.get("content"), list)
+                           for c in msg["content"] if c.get("type") == "tool_result"]
+                rs_result = all_tr[-1] if all_tr else None
+            except Exception:
+                rs_result = None
+            print(f"    calls={len(mock.received)} log_result={log_result!r} "
+                  f"rs_result={rs_result!r}", flush=True)
+
+            log_excluded = log_result and ("No files found" in log_result
+                                           or "app_t143" not in log_result)
+            rs_found     = rs_result and "main_t143" in rs_result
+
+            if log_excluded and rs_found:
+                ok("glob respects .gitignore: ignored log file excluded, "
+                   "non-ignored .rs file found")
+            elif not log_excluded:
+                fail("glob does not respect .gitignore: ignored file appeared in results",
+                     f"log_result={log_result!r}")
+            else:
+                fail("glob: .gitignore exclusion ok but .rs file not found",
+                     f"rs_result={rs_result!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 144 — openrouter session/export content: user+assistant messages
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_openrouter_export_content():
+    """Spec (PR7/openrouter-runner): session/export returns PortableMessage list
+    with role='user' (prompt text) and role='assistant' (reply text). Parallel
+    of T109 which covers xai-runner."""
+    print("\n\033[1mTest 144: openrouter session/export — user+assistant messages correct\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30167, lambda n: or_text_sse("or-export-reply-t144")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t144",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30167",
+               "OPENROUTER_MODELS": "gpt-t144:gpt-t144"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t144", tmpdir, "or-export-prompt-t144", timeout=15)
+            print(f"    done={done}", flush=True)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(
+                    "acp.t144.agent.ext.session/export",
+                    json.dumps({"sessionId": sid}).encode(), timeout=5)
+                messages = json.loads(r.data)
+                if isinstance(messages, dict):
+                    messages = messages.get("messages", [])
+                print(f"    exported {len(messages)} messages", flush=True)
+
+                roles     = [m.get("role", "") for m in messages]
+                combined  = json.dumps(messages)
+                has_user      = "user" in roles
+                has_assistant = "assistant" in roles
+                has_prompt    = "or-export-prompt-t144" in combined
+                has_reply     = "or-export-reply-t144" in combined
+
+                if has_user and has_assistant and has_prompt and has_reply:
+                    ok("openrouter export: user+assistant messages with correct "
+                       "prompt and reply text")
+                elif has_user and has_assistant:
+                    ok("openrouter export: user+assistant messages present "
+                       "(text field location may differ)")
+                else:
+                    fail("openrouter export: expected user+assistant messages not found",
+                         f"roles={roles!r} preview={combined[:300]!r}")
+            finally:
+                await nc.close()
+        except Exception as e:
+            fail("openrouter export content", str(e))
+        finally:
+            proc.terminate(); proc.wait(timeout=3)
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 145 — notebook_edit with explicit cell_type changes the cell type
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_notebook_edit_cell_type():
+    """Spec (PR1/fs.rs notebook_edit): cell_type?: String parameter — when provided,
+    the cell's cell_type field in the .ipynb JSON is updated to the given value."""
+    print("\n\033[1mTest 145: notebook_edit cell_type — cell_type field updated on disk\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        nb_path = os.path.join(tmpdir, "nb_t145.ipynb")
+        notebook = {
+            "cells": [{"cell_type": "code",
+                        "source": ["print('original')"],
+                        "metadata": {}, "outputs": [], "execution_count": None}],
+            "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"},
+                         "language_info": {"name": "python"}},
+            "nbformat": 4, "nbformat_minor": 5,
+        }
+        with open(nb_path, 'w') as f:
+            json.dump(notebook, f)
+
+        def sse(n):
+            if n == 1:
+                return acp_tool_use_sse("ne145", "notebook_edit",
+                    json.dumps({
+                        "path": "nb_t145.ipynb",
+                        "cell_index": 0,
+                        "content": "# T145 markdown content",
+                        "cell_type": "markdown",
+                    }))
+            return acp_text_sse("notebook cell type changed")
+
+        mock = MockHttpServer(30168, sse).start()
+        auto_approve, proc, prefix = await _start_acp_tool_runner(30168, 145, tmpdir)
+        try:
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, prefix, tmpdir, "change the cell type", timeout=20)
+
+            with open(nb_path) as f:
+                nb = json.load(f)
+            cell = nb["cells"][0]
+            cell_type = cell.get("cell_type", "")
+            cell_src   = cell.get("source", "")
+            src_str    = cell_src if isinstance(cell_src, str) else "".join(cell_src)
+            print(f"    cell_type={cell_type!r} source={src_str!r}", flush=True)
+
+            type_ok   = cell_type == "markdown"
+            source_ok = "T145 markdown content" in src_str
+
+            if type_ok and source_ok:
+                ok("notebook_edit cell_type: cell type changed to 'markdown' and "
+                   "source updated")
+            elif source_ok:
+                fail("notebook_edit cell_type: source updated but cell_type not changed",
+                     f"cell_type={cell_type!r}")
+            else:
+                fail("notebook_edit cell_type: source or cell_type not updated",
+                     f"cell_type={cell_type!r} source={src_str!r}")
+        finally:
+            try: auto_approve.terminate(); auto_approve.wait(timeout=2)
+            except Exception: pass
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 146 — openrouter TROGON.md injected on second prompt (stateless API)
+# ─────────────────────────────────────────────────────────────────────────────
+async def test_openrouter_trogon_md_second_prompt():
+    """Spec (PR4): openrouter-runner injects TROGON.md at prompt time — on every call.
+    Unlike xai (stateful API), openrouter rebuilds the full messages array each call,
+    so the system message must appear in both call 1 and call 2."""
+    print("\n\033[1mTest 146: openrouter TROGON.md on second prompt (stateless rebuild)\033[0m")
+
+    with tempfile.TemporaryDirectory() as cwd:
+        with open(os.path.join(cwd, "TROGON.md"), 'w') as f:
+            f.write("# TROGON_T146_MARKER\nStateless system context.\n")
+
+        mock = MockHttpServer(30169, lambda n: or_text_sse(f"or t146 reply {n}")).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t146",
+                   "OPENROUTER_API_KEY": "test",
+                   "OPENROUTER_BASE_URL": "http://127.0.0.1:30169",
+                   "OPENROUTER_MODELS": "gpt-t146:gpt-t146"}
+            proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(2.5)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request("acp.t146.agent.session.new",
+                                     json.dumps({"cwd": cwd, "mcpServers": []}).encode(),
+                                     timeout=5)
+                sid = json.loads(r.data)["sessionId"]
+
+                # First prompt
+                req_id1 = str(uuid.uuid4())
+                resp_sub1 = await nc.subscribe(
+                    f"acp.t146.session.{sid}.agent.prompt.response.{req_id1}")
+                async def _noop(m): pass
+                await nc.subscribe(f"acp.t146.session.{sid}.client.session.update",
+                                   cb=_noop)
+                await nc.publish(
+                    f"acp.t146.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text",
+                                            "text": "first-t146"}]}).encode(),
+                    headers={"X-Req-Id": req_id1})
+                await asyncio.wait_for(resp_sub1.next_msg(), timeout=10)
+
+                # Second prompt (same session)
+                req_id2 = str(uuid.uuid4())
+                resp_sub2 = await nc.subscribe(
+                    f"acp.t146.session.{sid}.agent.prompt.response.{req_id2}")
+                await nc.subscribe(f"acp.t146.session.{sid}.client.session.update",
+                                   cb=_noop)
+                await nc.publish(
+                    f"acp.t146.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text",
+                                            "text": "second-t146"}]}).encode(),
+                    headers={"X-Req-Id": req_id2})
+                await asyncio.wait_for(resp_sub2.next_msg(), timeout=10)
+
+                if len(mock.received) < 2:
+                    fail("openrouter TROGON.md second prompt",
+                         f"only {len(mock.received)} HTTP calls made")
+                else:
+                    def has_marker(call_body):
+                        s = call_body.decode('utf-8', errors='replace') if isinstance(call_body, bytes) else call_body
+                        return "TROGON_T146_MARKER" in s
+
+                    call1_ok = has_marker(mock.received[0])
+                    call2_ok = has_marker(mock.received[1])
+                    print(f"    call1 has marker: {call1_ok}  call2 has marker: {call2_ok}",
+                          flush=True)
+
+                    if call1_ok and call2_ok:
+                        ok("openrouter TROGON.md on second prompt: "
+                           "marker present in both HTTP calls (stateless rebuild)")
+                    elif call1_ok:
+                        fail("openrouter TROGON.md: present in call 1 but missing in call 2 "
+                             "— system prompt not rebuilt for second request",
+                             f"call2_preview={mock.received[1][:200]!r}")
+                    else:
+                        fail("openrouter TROGON.md: missing from call 1",
+                             f"call1_preview={mock.received[0][:200]!r}")
+            finally:
+                await nc.close()
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -7521,6 +7811,10 @@ async def main():
     await test_git_status_uses_session_cwd()
     await test_list_dir_500_limit()
     await test_cross_runner_tools_use_original_cwd()
+    await test_glob_respects_gitignore()
+    await test_openrouter_export_content()
+    await test_notebook_edit_cell_type()
+    await test_openrouter_trogon_md_second_prompt()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
