@@ -43,11 +43,34 @@ impl Drop for KillOnDrop {
     }
 }
 
+/// Connect to NATS with an event callback that surfaces disconnects.
+///
+/// MED-35: prompt notifications (tool-call events) are core NATS pub-sub, so any
+/// published during a disconnection window are lost — and the loss is otherwise
+/// silent (the REPL just shows a response with no tool calls). Full durability
+/// would require consuming the existing `*_CLIENT_OPS` JetStream stream with a
+/// durable consumer (a transport change that needs integration testing). As a
+/// safe, immediate mitigation we make the gap visible: when the connection drops,
+/// the user is warned that streamed output may have been missed.
+async fn connect_with_events(url: &str) -> Result<async_nats::Client, async_nats::ConnectError> {
+    async_nats::ConnectOptions::new()
+        .event_callback(|event| async move {
+            if matches!(event, async_nats::Event::Disconnected) {
+                eprintln!(
+                    "warning: NATS disconnected — streamed tool output may be missed \
+                     until reconnect; the final response is unaffected"
+                );
+            }
+        })
+        .connect(url)
+        .await
+}
+
 pub async fn connect_or_start_nats(
     url: &str,
     timeout: Duration,
 ) -> anyhow::Result<(async_nats::Client, Option<KillOnDrop>)> {
-    if let Ok(client) = async_nats::connect(url).await {
+    if let Ok(client) = connect_with_events(url).await {
         return Ok((client, None));
     }
 
@@ -85,7 +108,7 @@ pub async fn connect_or_start_nats(
             ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
-        if let Ok(client) = async_nats::connect(url).await {
+        if let Ok(client) = connect_with_events(url).await {
             return Ok((client, Some(KillOnDrop(child))));
         }
     }
