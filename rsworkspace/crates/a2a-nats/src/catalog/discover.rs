@@ -1,11 +1,19 @@
+use std::sync::Arc;
+
+use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
+use async_nats::HeaderMap;
 use bytes::Bytes;
 use futures::StreamExt as _;
-use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
+use crate::constants::GATEWAY_CALLER_ID_HEADER;
+use crate::catalog::import_gate::SpiceDbPrincipal;
+use crate::catalog::spicedb_permission::{
+    AgentViewCheckOutcome, AgentViewGate, session_from_principal,
+};
 
 use super::store::CatalogStore;
 
@@ -59,6 +67,8 @@ pub struct DiscoverService<S, N> {
     prefix: A2aPrefix,
     store: S,
     nats: N,
+    view_gate: Arc<dyn AgentViewGate>,
+    session_account: String,
 }
 
 impl<S, N> DiscoverService<S, N>
@@ -67,7 +77,22 @@ where
     N: trogon_nats::SubscribeClient + trogon_nats::PublishClient + Clone + Send + Sync + 'static,
 {
     pub fn new(prefix: A2aPrefix, store: S, nats: N) -> Self {
-        Self { prefix, store, nats }
+        Self::with_view_gate(prefix, store, nats, Arc::new(crate::catalog::spicedb_permission::NoopAgentViewGate))
+    }
+
+    pub fn with_view_gate(
+        prefix: A2aPrefix,
+        store: S,
+        nats: N,
+        view_gate: Arc<dyn AgentViewGate>,
+    ) -> Self {
+        Self {
+            prefix,
+            store,
+            nats,
+            view_gate,
+            session_account: "discover".into(),
+        }
     }
 
     pub async fn run(self, shutdown: CancellationToken) -> Result<(), DiscoverServiceError> {
@@ -124,6 +149,55 @@ where
                                     continue;
                                 }
                             };
+
+                            if self.view_gate.is_enabled() {
+                                let principal = discover_principal_from_headers(msg.headers.as_ref());
+                                let Some(principal) = principal else {
+                                    if let Some(b) = error_reply(-32001, &format!("agent not found: {agent_id}"))
+                                        && let Err(e) = self.nats.publish_with_headers(
+                                            async_nats::Subject::from(reply.as_str()),
+                                            async_nats::HeaderMap::new(),
+                                            b,
+                                        ).await
+                                    {
+                                        warn!(error = %e, "failed to publish discover authz-deny reply");
+                                    }
+                                    continue;
+                                };
+                                let Some(session) =
+                                    session_from_principal(&principal, &self.session_account)
+                                else {
+                                    if let Some(b) = error_reply(-32001, &format!("agent not found: {agent_id}"))
+                                        && let Err(e) = self.nats.publish_with_headers(
+                                            async_nats::Subject::from(reply.as_str()),
+                                            async_nats::HeaderMap::new(),
+                                            b,
+                                        ).await
+                                    {
+                                        warn!(error = %e, "failed to publish discover session reply");
+                                    }
+                                    continue;
+                                };
+                                match self
+                                    .view_gate
+                                    .check_agent_view(&session, &principal, &agent_id)
+                                    .await
+                                {
+                                    AgentViewCheckOutcome::Allowed => {}
+                                    AgentViewCheckOutcome::Denied | AgentViewCheckOutcome::TransportError => {
+                                        if let Some(b) = error_reply(-32001, &format!("agent not found: {agent_id}"))
+                                            && let Err(e) = self.nats.publish_with_headers(
+                                                async_nats::Subject::from(reply.as_str()),
+                                                async_nats::HeaderMap::new(),
+                                                b,
+                                            ).await
+                                        {
+                                            warn!(error = %e, "failed to publish discover view-deny reply");
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
 
                             match self.store.get_card(&agent_id).await {
                                 Ok(Some(card)) => {
@@ -200,6 +274,19 @@ impl std::fmt::Display for DiscoverServiceError {
 }
 
 impl std::error::Error for DiscoverServiceError {}
+
+fn discover_principal_from_headers(headers: Option<&HeaderMap>) -> Option<SpiceDbPrincipal> {
+    let headers = headers?;
+    let caller = headers.get(GATEWAY_CALLER_ID_HEADER)?.as_str();
+    let caller = caller.split('/').next_back().unwrap_or(caller);
+    if caller.is_empty() {
+        return None;
+    }
+    Some(SpiceDbPrincipal(serde_json::json!({
+        "spicedb_subject": format!("user/{caller}"),
+        "sub": caller,
+    })))
+}
 
 #[cfg(test)]
 mod tests {
