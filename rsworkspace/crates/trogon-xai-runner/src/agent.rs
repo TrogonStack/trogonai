@@ -35,7 +35,8 @@ use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
-use trogon_runner_tools::session_store::ToolPolicy;
+use trogon_runner_tools::session_store::{AuditEntry, ToolPolicy};
+use trogon_runner_tools::permission::AuditBuf;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -184,6 +185,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     /// In-flight cancel channels, one per active prompt. Sending `()` stops the
     /// streaming loop and causes `prompt()` to return early.
     cancel_senders: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
+    /// MED-7: per-session audit trail of tool-permission decisions. Previously the
+    /// audit buffer was allocated per check and dropped, so no audit was retained.
+    session_audit: Arc<Mutex<HashMap<String, Vec<AuditEntry>>>>,
     default_model: String,
     /// Per-chunk inactivity timeout. Fires if no SSE chunk arrives within this
     /// window — a slow but continuously streaming response is NOT cut off.
@@ -336,6 +340,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
+            session_audit: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
@@ -378,6 +383,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             client: self.client,
             sessions: self.sessions,
             cancel_senders: self.cancel_senders,
+            session_audit: self.session_audit,
             default_model: self.default_model,
             prompt_timeout: self.prompt_timeout,
             available_models: self.available_models,
@@ -1133,6 +1139,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             )
         };
 
+        // MED-7: turn-scoped audit buffer shared across this turn's permission
+        // checks; drained into session_audit once the turn finishes.
+        let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
+
         let mut pre_turn_compacted = false;
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
@@ -1592,6 +1602,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             &call_id,
                             &name,
                             &tool_input,
+                            audit_buf.clone(),
                         )
                         .await
                     };
@@ -1699,6 +1710,18 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Remove cancel channel (sender may already be removed by cancel()).
         self.cancel_senders.lock().await.remove(&session_id);
+
+        // MED-7: record this turn's tool-permission decisions in the per-session
+        // audit trail (recorded even on cancel — the decisions still happened).
+        let audit_entries = std::mem::take(&mut *audit_buf.lock().unwrap());
+        if !audit_entries.is_empty() {
+            self.session_audit
+                .lock()
+                .await
+                .entry(session_id.clone())
+                .or_default()
+                .extend(audit_entries);
+        }
 
         // Update session history.
         //

@@ -37,7 +37,8 @@ use trogon_runner_tools::permission_rules::PermissionRules;
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
 };
-use trogon_runner_tools::session_store::ToolPolicy;
+use trogon_runner_tools::session_store::{AuditEntry, ToolPolicy};
+use trogon_runner_tools::permission::AuditBuf;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -176,6 +177,9 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     md_loader: M,
     sessions: Arc<Mutex<HashMap<String, OpenRouterSession>>>,
     cancel_senders: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
+    /// MED-7: per-session audit trail of tool-permission decisions (previously
+    /// the audit buffer was allocated per check and immediately discarded).
+    session_audit: Arc<Mutex<HashMap<String, Vec<AuditEntry>>>>,
     default_model: String,
     prompt_timeout: Duration,
     available_models: Vec<ModelInfo>,
@@ -294,6 +298,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             md_loader: FsTrogonMdLoader,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cancel_senders: Arc::new(Mutex::new(HashMap::new())),
+            session_audit: Arc::new(Mutex::new(HashMap::new())),
             default_model,
             prompt_timeout,
             available_models,
@@ -326,6 +331,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             client: self.client,
             sessions: self.sessions,
             cancel_senders: self.cancel_senders,
+            session_audit: self.session_audit,
             default_model: self.default_model,
             prompt_timeout: self.prompt_timeout,
             available_models: self.available_models,
@@ -1181,6 +1187,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             )
         };
 
+        // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.
+        let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
+
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let header = format!(
@@ -1460,6 +1469,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         &call.id,
                         &call.name,
                         &tool_input,
+                        audit_buf.clone(),
                     )
                     .await
                 };
@@ -1535,6 +1545,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         };
 
         self.cancel_senders.lock().await.remove(&session_id);
+
+        // MED-7: record this turn's tool-permission decisions in the per-session
+        // audit trail before the history write-back.
+        let audit_entries = std::mem::take(&mut *audit_buf.lock().unwrap());
+        if !audit_entries.is_empty() {
+            self.session_audit
+                .lock()
+                .await
+                .entry(session_id.clone())
+                .or_default()
+                .extend(audit_entries);
+        }
 
         // MED-21: compact and persist WITHOUT holding the global sessions mutex
         // across the NATS round-trips. Previously the lock was held for the whole
