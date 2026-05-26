@@ -264,10 +264,16 @@ where
                                 c.abort();
                             }
                         });
-                    } else if let Some(c) = t.output_collector.take() {
-                        // No LocalSet to drive the async kill — at least abort the
-                        // output collector synchronously; the terminal is dropped.
-                        c.abort();
+                    } else {
+                        // B15: no LocalSet to drive the async kill. `start_kill` is
+                        // sync and kills the native child (and aborts the WASM
+                        // collector), so the process isn't orphaned when we drop the
+                        // terminal here. Previously only the collector was aborted,
+                        // leaving the native child running.
+                        t.start_kill();
+                        if let Some(c) = t.output_collector.take() {
+                            c.abort();
+                        }
                     }
                 }
             }
@@ -975,7 +981,10 @@ where
                     if let Some(status) = arc.get().cloned() {
                         break status;
                     }
-                    tokio::task::yield_now().await;
+                    // B15: back off instead of a tight yield_now() loop, which
+                    // hot-spins the single-threaded executor and starves the
+                    // background task we're waiting on.
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             } else {
                 tracing::warn!(

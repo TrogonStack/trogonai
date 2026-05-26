@@ -473,11 +473,14 @@ mod tests {
 
     // ── RecordingBroker ───────────────────────────────────────────────────────
 
+    /// `(subject, payload)` pairs captured by the test broker.
+    type PublishedMessages = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+
     /// Captures every `publish` call; `subscribe` returns an empty stream so
     /// the dispatcher loop never blocks waiting for messages.
     #[derive(Clone)]
     struct RecordingBroker {
-        published: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+        published: PublishedMessages,
     }
 
     impl RecordingBroker {

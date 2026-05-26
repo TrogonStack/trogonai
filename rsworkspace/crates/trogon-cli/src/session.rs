@@ -482,9 +482,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
                         let _ = tx
-                            .send(StreamEvent::Error(
-                                "runner did not respond within 180 s — check that trogon-dev.sh is still running".to_string(),
-                            ))
+                            .send(StreamEvent::Error(format!(
+                                "runner did not respond within {} s — check that trogon-dev.sh is still running",
+                                prompt_timeout.as_secs(),
+                            )))
                             .await;
                         break;
                     }
@@ -499,9 +500,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                         }
                         _ = tokio::time::sleep(remaining) => {
                             let _ = tx
-                                .send(StreamEvent::Error(
-                                    "runner did not respond within 180 s — check that trogon-dev.sh is still running".to_string(),
-                                ))
+                                .send(StreamEvent::Error(format!(
+                                    "runner did not respond within {} s — check that trogon-dev.sh is still running",
+                                    prompt_timeout.as_secs(),
+                                )))
                                 .await;
                             break;
                         }
@@ -721,10 +723,10 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let resp: CompactResponse = serde_json::from_slice(&bytes)
                 .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
 
-            if !resp.compacted {
-                if let Some(err_msg) = &resp.error {
-                    return Err(anyhow::anyhow!("compactor error: {}", err_msg));
-                }
+            if !resp.compacted
+                && let Some(err_msg) = &resp.error
+            {
+                return Err(anyhow::anyhow!("compactor error: {}", err_msg));
             }
 
             let result = CompactResult {

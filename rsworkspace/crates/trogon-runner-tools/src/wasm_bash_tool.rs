@@ -15,6 +15,13 @@ use trogon_mcp::McpCallTool;
 
 use crate::session_store::SessionStore;
 
+type CreationLockMap = std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+
+fn creation_locks() -> &'static CreationLockMap {
+    static LOCKS: std::sync::OnceLock<CreationLockMap> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
 /// Returns a per-session async Mutex used to serialize terminal creation.
 ///
 /// Two concurrent bash calls for the same session both find `terminal_id == None`
@@ -22,15 +29,24 @@ use crate::session_store::SessionStore;
 /// the first one would be orphaned. Holding this lock across the check-create-save
 /// critical section ensures only one terminal is ever created per session.
 fn session_creation_lock(session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: std::sync::OnceLock<
-        std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    > = std::sync::OnceLock::new();
-    let map = LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    map.lock()
+    creation_locks()
+        .lock()
         .unwrap()
         .entry(session_id.to_string())
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
+}
+
+/// Drop the per-session creation lock from the global map once the terminal exists.
+///
+/// B9: the lock was inserted on first use and never removed, so the map grew without
+/// bound (one entry per session, forever). It is safe to remove here: a later caller
+/// either still holds an `Arc` clone (so the live lock keeps working) or creates a
+/// fresh, uncontended lock and immediately reloads the now-saved `terminal_id` —
+/// reusing the existing terminal rather than spawning a duplicate. Removing it only
+/// after the terminal is confirmed created preserves the creation-race guard.
+fn release_session_creation_lock(session_id: &str) {
+    creation_locks().lock().unwrap().remove(session_id);
 }
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -145,7 +161,7 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     state.terminal_cwd = None;
                 }
 
-                if let Some(tid) = &state.terminal_id {
+                let tid = if let Some(tid) = &state.terminal_id {
                     tid.clone()
                 } else {
                     let create_req = CreateTerminalRequest::new(session_id.clone(), "bash")
@@ -163,7 +179,14 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
                     state.terminal_cwd = Some(cwd_str);
                     store.save(&session_id, &state).await.map_err(|e| e.to_string())?;
                     tid
-                }
+                };
+                // B9: terminal now exists and its id is persisted; drop the per-session
+                // creation lock from the global map so it doesn't accumulate forever.
+                // Still inside the held lock + after save, so the creation-race guard
+                // is preserved. `_create_lock` (the Arc) keeps the live mutex valid
+                // until this scope ends.
+                release_session_creation_lock(&session_id);
+                tid
             };
 
             // ── Write command wrapped with unique start + exit markers ────────
@@ -183,8 +206,18 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
             let nonce = format!("{:x}{:x}{:x}", std::process::id(), nanos, seq);
             let start_marker = format!("{START_MARKER_PREFIX}{nonce}{START_MARKER_SUFFIX}");
             let exit_marker_prefix = format!("{EXIT_MARKER_PREFIX}{nonce}_");
+            // B8: run the user command as a single, fully-quoted `eval` argument
+            // instead of interpolating it raw between the markers. Raw interpolation
+            // means an unbalanced quote / trailing backslash / open heredoc leaves
+            // the persistent shell waiting for more input, so the exit marker never
+            // arrives (full-timeout hang) and the terminal stays poisoned for later
+            // commands. Single-quoting the command (escaping `'` as `'\''`) makes
+            // malformed input an instant `eval` syntax error, and `$?` still
+            // captures the user command's exit status because `eval` runs in the
+            // current shell.
+            let escaped_command = shell_single_quote(&command);
             let cmd_with_markers = format!(
-                "echo \"{start_marker}\"; {command}; echo \"{exit_marker_prefix}$?{EXIT_MARKER_SUFFIX}\"\n"
+                "echo \"{start_marker}\"; eval {escaped_command}; echo \"{exit_marker_prefix}$?{EXIT_MARKER_SUFFIX}\"\n"
             );
             let write_req = serde_json::json!({
                 "terminal_id": terminal_id,
@@ -235,6 +268,25 @@ impl<S: SessionStore> McpCallTool for WasmRuntimeBashTool<S> {
     }
 }
 
+
+/// Wrap `s` in single quotes for safe use as one POSIX-shell word, escaping any
+/// embedded single quote as the standard `'\''` sequence (close-quote, escaped
+/// quote, reopen-quote). The result is a single argv element no matter what `s`
+/// contains, so passing it to `eval '<escaped>'` either runs the exact command or
+/// fails with an instant syntax error — it can never leave the shell awaiting input.
+fn shell_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
 
 /// Parses a `terminal.output` NATS reply. Returns an error immediately when the
 /// wasm-runtime dispatcher published a JSON-RPC error (e.g. reply exceeded
@@ -323,6 +375,28 @@ fn find_before_exit_marker(output: &str, exit_prefix: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── shell_single_quote (B8) ───────────────────────────────────────────────
+
+    #[test]
+    fn shell_single_quote_wraps_plain_command() {
+        assert_eq!(shell_single_quote("ls -la"), "'ls -la'");
+    }
+
+    #[test]
+    fn shell_single_quote_escapes_embedded_single_quote() {
+        // echo 'hi' → '\''-escaped so it remains one shell word.
+        assert_eq!(shell_single_quote("echo 'hi'"), "'echo '\\''hi'\\'''");
+    }
+
+    #[test]
+    fn shell_single_quote_neutralizes_unbalanced_quote() {
+        // An unbalanced double-quote that would hang a raw shell becomes inert
+        // text inside the single-quoted eval argument.
+        let escaped = shell_single_quote("echo \"unbalanced");
+        assert!(escaped.starts_with('\'') && escaped.ends_with('\''));
+        assert!(escaped.contains("echo \"unbalanced"));
+    }
 
     // ── terminal_output_from_response ─────────────────────────────────────────
 

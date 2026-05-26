@@ -73,10 +73,10 @@ fn cancel_response() -> Bytes {
 fn spawn_responder(nats: async_nats::Client, reply_bytes: Bytes) {
     tokio::spawn(async move {
         let mut sub = nats.subscribe(subject()).await.unwrap();
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                nats.publish(reply, reply_bytes).await.unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            nats.publish(reply, reply_bytes).await.unwrap();
         }
     });
 }

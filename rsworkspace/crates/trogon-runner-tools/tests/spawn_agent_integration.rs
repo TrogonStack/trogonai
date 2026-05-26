@@ -116,13 +116,13 @@ async fn call_tool_uses_correct_subject_prefix() {
         .unwrap();
 
     tokio::spawn(async move {
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, "ack".into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            registry_client
+                .publish(reply, "ack".into())
+                .await
+                .unwrap();
         }
     });
 
@@ -292,13 +292,13 @@ async fn call_tool_returns_registry_reply_verbatim() {
 
     let mut sub = registry_client.subscribe("ns.agent.spawn").await.unwrap();
     tokio::spawn(async move {
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, expected.into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            registry_client
+                .publish(reply, expected.into())
+                .await
+                .unwrap();
         }
     });
 
@@ -324,13 +324,13 @@ async fn call_tool_handles_multiline_registry_reply() {
 
     let mut sub = registry_client.subscribe("ns2.agent.spawn").await.unwrap();
     tokio::spawn(async move {
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                registry_client
-                    .publish(reply, expected.into())
-                    .await
-                    .unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            registry_client
+                .publish(reply, expected.into())
+                .await
+                .unwrap();
         }
     });
 

@@ -230,6 +230,10 @@ mod tests {
         HOME_MUTEX.get_or_init(|| std::sync::Mutex::new(()))
     }
 
+    // Holding the std Mutex across awaits is intentional here: these tests mutate
+    // the process-global HOME env var and must run fully serialized. A newer clippy
+    // flags `await_holding_lock`; the test never contends a real async path.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn global_file_is_prepended_before_cwd_content() {
         let _guard = home_test_mutex().lock().unwrap();
@@ -321,6 +325,7 @@ mod tests {
         std::fs::remove_dir_all(inner.join(".git")).unwrap();
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn global_file_returned_when_no_local_file_exists() {
         let _guard = home_test_mutex().lock().unwrap();

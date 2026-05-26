@@ -15,6 +15,10 @@ REPO="${SCRIPT_DIR}/.."
 BIN="${REPO}/target/debug/trogon"
 RUNNER="${SCRIPT_DIR}/e2e-fake-runner.sh"
 
+# B6: the fake runner uses prefix "acp"; the CLI defaults to "acp.claude", so
+# export ACP_PREFIX=acp for every CLI invocation so the subjects line up.
+export ACP_PREFIX="${ACP_PREFIX:-acp}"
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; BOLD='\033[1m'; RESET='\033[0m'
 
 pass() { echo -e "${GREEN}✓${RESET} $1"; }
@@ -30,7 +34,7 @@ which nats &>/dev/null || { echo "nats CLI not in PATH"; exit 1; }
 # ── NATS server ───────────────────────────────────────────────────────────────
 
 echo -e "\n${BOLD}Starting NATS server...${RESET}"
-nats-server -p 4222 &>/tmp/nats-server-e2e.log &
+nats-server -p 4222 -js &>/tmp/nats-server-e2e.log &
 NATS_PID=$!
 trap 'echo "[cleanup] killing NATS ($NATS_PID)"; kill $NATS_PID 2>/dev/null; wait $NATS_PID 2>/dev/null || true' EXIT
 

@@ -46,12 +46,15 @@ fn subject() -> String {
 
 fn make_req(tool_name: &str) -> (PermissionReq, oneshot::Receiver<bool>) {
     let (tx, rx) = oneshot::channel();
+    let (started_tx, _started_rx) = oneshot::channel();
     let req = PermissionReq {
         session_id: SESSION.to_string(),
         tool_call_id: "tc-bridge-1".to_string(),
         tool_name: tool_name.to_string(),
         tool_input: serde_json::json!({"path": "/tmp/x"}),
         response_tx: tx,
+        started_tx,
+        always_allowed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
     };
     (req, rx)
 }
@@ -76,10 +79,10 @@ fn cancelled() -> Bytes {
 fn spawn_responder(nats: async_nats::Client, reply_bytes: Bytes) {
     tokio::spawn(async move {
         let mut sub = nats.subscribe(subject()).await.unwrap();
-        if let Some(msg) = sub.next().await {
-            if let Some(reply) = msg.reply {
-                nats.publish(reply, reply_bytes).await.unwrap();
-            }
+        if let Some(msg) = sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            nats.publish(reply, reply_bytes).await.unwrap();
         }
     });
 }
@@ -189,12 +192,15 @@ async fn request_payload_contains_tool_name_and_input() {
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
     let (tx, _rx) = oneshot::channel();
+    let (started_tx, _started_rx) = oneshot::channel();
     let req = PermissionReq {
         session_id: SESSION.to_string(),
         tool_call_id: "tc-payload-check".to_string(),
         tool_name: "SpecialTool".to_string(),
         tool_input: serde_json::json!({"key": "value-marker"}),
         response_tx: tx,
+        started_tx,
+        always_allowed: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
     };
     handle_permission_request_nats(req, nats, AcpPrefix::new(PREFIX).unwrap(), &store).await;
 

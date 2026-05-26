@@ -66,12 +66,55 @@ async fn connect_with_events(url: &str) -> Result<async_nats::Client, async_nats
         .await
 }
 
+/// Returns `true` when the NATS URL targets a loopback/localhost host, the only
+/// case where autostarting a local `nats-server` is appropriate (B7).
+///
+/// Accepts forms like `nats://127.0.0.1:4222`, `nats://localhost:4222`,
+/// `nats://[::1]:4222`, and bare `localhost:4222`.
+fn is_loopback_target(url: &str) -> bool {
+    // Strip an optional scheme (`nats://`, `tls://`, …).
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    // Drop any path / query (NATS URLs normally have none, but be defensive).
+    let authority = after_scheme
+        .split(['/', '?'])
+        .next()
+        .unwrap_or(after_scheme);
+    // Drop userinfo (`user:pass@host`).
+    let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+
+    // Extract the host, handling bracketed IPv6 (`[::1]:4222`).
+    let host = if let Some(rest) = host_port.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        // `host:port` → host is the part before the last ':'. A bare `host` works too.
+        host_port.rsplit_once(':').map(|(h, _)| h).unwrap_or(host_port)
+    };
+
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 pub async fn connect_or_start_nats(
     url: &str,
     timeout: Duration,
 ) -> anyhow::Result<(async_nats::Client, Option<KillOnDrop>)> {
     if let Ok(client) = connect_with_events(url).await {
         return Ok((client, None));
+    }
+
+    // B7: only autostart a local nats-server when the target is loopback. For a
+    // remote host the dial failed because that host is unreachable — binding a
+    // local server on the same port would silently connect the user to the wrong
+    // (local) server instead of surfacing the real connection error.
+    if !is_loopback_target(url) {
+        return Err(anyhow::anyhow!(
+            "Could not connect to NATS at {url}. The host is not local, so no local \
+             server was started; check the address and that the remote NATS server is reachable."
+        ));
     }
 
     // MED-38: bind the autostarted server to the port the client will dial,
@@ -111,5 +154,29 @@ pub async fn connect_or_start_nats(
         if let Ok(client) = connect_with_events(url).await {
             return Ok((client, Some(KillOnDrop(child))));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_loopback_target;
+
+    #[test]
+    fn loopback_targets_are_local() {
+        assert!(is_loopback_target("nats://127.0.0.1:4222"));
+        assert!(is_loopback_target("nats://localhost:4222"));
+        assert!(is_loopback_target("nats://LOCALHOST:4222"));
+        assert!(is_loopback_target("nats://[::1]:4222"));
+        assert!(is_loopback_target("localhost:4222"));
+        assert!(is_loopback_target("127.0.0.1:4222"));
+        assert!(is_loopback_target("nats://user:pass@127.0.0.1:4222"));
+    }
+
+    #[test]
+    fn remote_targets_are_not_local() {
+        assert!(!is_loopback_target("nats://nats.example.com:4222"));
+        assert!(!is_loopback_target("nats://10.0.0.5:4222"));
+        assert!(!is_loopback_target("nats://192.168.1.10:4222"));
+        assert!(!is_loopback_target("nats://[2001:db8::1]:4222"));
     }
 }

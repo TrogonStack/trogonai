@@ -41,7 +41,7 @@ pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathB
     };
 
     let attempted = target.clone();
-    target
+    let canonical = target
         .canonicalize()
         .map_err(|e| format!("cd: {} ({e})", attempted.display()))
         .and_then(|p| {
@@ -50,7 +50,24 @@ pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathB
             } else {
                 Err(format!("not a directory: {}", attempted.display()))
             }
-        })
+        })?;
+
+    // Mirror `resolve_path`'s boundary check: the resolved (symlink-canonicalized)
+    // target must stay under the canonicalized cwd, otherwise a `cd /etc` (or a
+    // symlink that escapes) would let later reads/writes operate outside the sandbox.
+    let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or_else(|_| {
+        Path::new(cwd)
+            .components()
+            .filter(|c| !matches!(c, std::path::Component::CurDir))
+            .collect()
+    });
+    if !canonical.starts_with(&cwd_canonical) {
+        return Err(format!(
+            "cd: {} is outside the working directory",
+            attempted.display()
+        ));
+    }
+    Ok(canonical)
 }
 
 pub fn resolve_path(
@@ -456,12 +473,13 @@ mod tests {
     }
 
     #[test]
-    fn resolve_directory_target_empty_goes_home() {
+    fn resolve_directory_target_empty_outside_cwd_rejected() {
+        // B1: empty target resolves to $HOME, which is outside the sandbox cwd, so
+        // it must be rejected rather than letting the model escape via `cd`.
         let dir = TempDir::new().unwrap();
         let cwd = dir.path().to_string_lossy().into_owned();
-        let home = std::env::var("HOME").expect("HOME must be set for test");
-        let resolved = resolve_directory_target(&cwd, "").unwrap();
-        assert_eq!(resolved, std::path::PathBuf::from(home));
+        let err = resolve_directory_target(&cwd, "").unwrap_err();
+        assert!(err.contains("outside"), "got: {err}");
     }
 
     #[test]
@@ -475,12 +493,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_directory_target_tilde() {
+    fn resolve_directory_target_outside_cwd_rejected() {
+        // B1: `cd /etc` (or any absolute path outside cwd) must be rejected.
         let dir = TempDir::new().unwrap();
         let cwd = dir.path().to_string_lossy().into_owned();
-        let home = std::env::var("HOME").expect("HOME must be set for test");
-        let resolved = resolve_directory_target(&cwd, "~").unwrap();
-        assert_eq!(resolved, std::path::PathBuf::from(home));
+        let err = resolve_directory_target(&cwd, "/etc").unwrap_err();
+        assert!(err.contains("outside"), "got: {err}");
     }
 
     #[test]
@@ -494,10 +512,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_directory_target_absolute() {
+    fn resolve_directory_target_absolute_within_cwd() {
         let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
         let cwd = dir.path().to_string_lossy().into_owned();
-        let abs = dir.path().canonicalize().unwrap();
+        let abs = sub.canonicalize().unwrap();
         let resolved = resolve_directory_target(&cwd, abs.to_str().unwrap()).unwrap();
         assert_eq!(resolved, abs);
     }

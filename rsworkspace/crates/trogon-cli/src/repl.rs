@@ -477,12 +477,26 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         Err(e) => eprintln!("Error setting model: {e}"),
                                     }
                                 } else {
+                                    // B5: shut down the OLD session's MCP bridges before
+                                    // switching, otherwise their child processes are leaked
+                                    // across the runner switch (mirrors /clear and /resume).
+                                    let old_session_id = session.session_id().to_string();
+                                    mcp_manager.shutdown_session(&old_session_id).await;
                                     session.close().await;
                                     session =
                                         factory.attach_session(&outcome.new_prefix, outcome.new_session_id);
                                     prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
+                                    // B5: the cross-runner session was created with NO
+                                    // mcp_servers, so MCP tools would be missing. Rebind MCP
+                                    // for the new session (shutdown + spawn_pending +
+                                    // commit_pending + load_session) so its tools are available.
+                                    if let Err(e) =
+                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
+                                    {
+                                        eprintln!("warning: could not bind MCP for new session: {e}");
+                                    }
                                     // MED-5: the new runner starts a session with mode
                                     // initialized from TROGON_MODE; keep the REPL's tracked
                                     // mode in sync so /status and permission prompts match.
@@ -536,6 +550,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     fmt_tokens(tokens_before as u64),
                                     fmt_tokens(tokens_after as u64),
                                 );
+                                // B10: refresh the tracked usage so /status, /cost, and the
+                                // token bar reflect the post-compaction total instead of the
+                                // stale pre-compaction count. The context window is unchanged.
+                                session_used_tokens = tokens_after as u64;
                             }
                             Ok(CompactResult { compacted: false, tokens_before, .. }) => {
                                 if tokens_before > 0 {
