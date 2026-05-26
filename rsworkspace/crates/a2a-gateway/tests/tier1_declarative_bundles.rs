@@ -44,7 +44,7 @@ fn ingress_subject(agent: &str, method_dots: &str) -> String {
 #[test]
 fn per_method_allowlist_reference_bundle_loads() {
     let bundle = load_reference_bundle("per-method-allowlist.tier1.toml");
-    assert_eq!(bundle.rules().len(), 4);
+    assert_eq!(bundle.rules().len(), 6);
 }
 
 #[test]
@@ -52,7 +52,13 @@ fn per_method_allowlist_allows_enumerated_methods() {
     let gate = RealTier1DeclarativeGate::new(load_reference_bundle("per-method-allowlist.tier1.toml"));
     let subject = ingress_subject("planner", "message.send");
 
-    for method in [A2aMethod::MessageSend, A2aMethod::TasksGet, A2aMethod::TasksList] {
+    for method in [
+        A2aMethod::MessageSend,
+        A2aMethod::MessageStream,
+        A2aMethod::TasksGet,
+        A2aMethod::TasksList,
+        A2aMethod::PushNotificationSet,
+    ] {
         let decision = gate.evaluate(&ctx(
             method,
             "planner",
