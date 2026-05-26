@@ -549,13 +549,23 @@ async def test_cross_runner_switch():
                 await asyncio.wait_for(resp_sub2.next_msg(), timeout=8)
                 print(f"    xai turn 2 done", flush=True)
 
-                # Check: xai API call contains imported history content
+                # Check: xai API call contains imported history with correct roles
                 if xai_mock.received:
                     body = json.loads(xai_mock.received[0])
                     input_items = body.get("input", [])
                     combined    = json.dumps(input_items)
-                    if "tell me about Python" in combined and "acp turn 1" in combined:
+                    user_items  = [it for it in input_items
+                                   if isinstance(it, dict) and it.get("role") == "user"]
+                    asst_items  = [it for it in input_items
+                                   if isinstance(it, dict) and it.get("role") == "assistant"]
+                    user_has_prompt = any("tell me about Python" in json.dumps(it) for it in user_items)
+                    asst_has_reply  = any("acp turn 1" in json.dumps(it) for it in asst_items)
+                    if user_has_prompt and asst_has_reply:
                         ok("cross-runner: acp→xai history transferred — original text present in xai input")
+                    elif "tell me about Python" in combined and "acp turn 1" in combined:
+                        fail("cross-runner: text present but role structure wrong",
+                             f"user_items={len(user_items)} asst_items={len(asst_items)} "
+                             f"preview={combined[:200]!r}")
                     else:
                         fail("cross-runner: history text missing from xai HTTP body",
                              f"exported={len(messages)} msgs, input_items={len(input_items)}, "
@@ -686,9 +696,19 @@ async def test_cross_runner_registry():
 
                 if xai_mock.received:
                     body = json.loads(xai_mock.received[0])
-                    combined = json.dumps(body.get("input", []))
-                    if "hello from acp t8" in combined and "acp t8 turn" in combined:
+                    input_items = body.get("input", [])
+                    combined    = json.dumps(input_items)
+                    user_items  = [it for it in input_items
+                                   if isinstance(it, dict) and it.get("role") == "user"]
+                    asst_items  = [it for it in input_items
+                                   if isinstance(it, dict) and it.get("role") == "assistant"]
+                    user_has_prompt = any("hello from acp t8" in json.dumps(it) for it in user_items)
+                    asst_has_reply  = any("acp t8 turn" in json.dumps(it) for it in asst_items)
+                    if user_has_prompt and asst_has_reply:
                         ok(f"registry-confirmed cross-runner switch: history transferred ({len(messages)} msgs)")
+                    elif "hello from acp t8" in combined and "acp t8 turn" in combined:
+                        fail("registry switch: text present but role structure wrong",
+                             f"user_items={len(user_items)} asst_items={len(asst_items)}")
                     else:
                         fail("registry switch", f"xai input: {combined[:200]!r}")
                 else:
@@ -1135,9 +1155,19 @@ async def test_import_into_acp():
 
                 if acp_mock.received:
                     body = json.loads(acp_mock.received[0])
-                    msgs_str = json.dumps(body.get("messages", []))
-                    if "hello from xai t15" in msgs_str and "xai t15 turn" in msgs_str:
+                    messages_body = body.get("messages", [])
+                    msgs_str  = json.dumps(messages_body)
+                    user_msgs = [m for m in messages_body
+                                 if isinstance(m, dict) and m.get("role") == "user"]
+                    asst_msgs = [m for m in messages_body
+                                 if isinstance(m, dict) and m.get("role") == "assistant"]
+                    user_has_prompt = any("hello from xai t15" in json.dumps(m) for m in user_msgs)
+                    asst_has_reply  = any("xai t15 turn" in json.dumps(m) for m in asst_msgs)
+                    if user_has_prompt and asst_has_reply:
                         ok("import into acp-runner: xai history present in acp Anthropic API call")
+                    elif "hello from xai t15" in msgs_str and "xai t15 turn" in msgs_str:
+                        fail("import into acp: text present but role structure wrong",
+                             f"user_msgs={len(user_msgs)} asst_msgs={len(asst_msgs)}")
                     else:
                         fail("import into acp: xai history missing from acp HTTP body",
                              f"msgs={msgs_str[:200]!r}")
@@ -1497,10 +1527,20 @@ async def test_import_from_openrouter():
 
                 if acp_mock.received:
                     body = json.loads(acp_mock.received[0])
-                    msgs_str = json.dumps(body.get("messages", []))
+                    messages_body = body.get("messages", [])
+                    msgs_str  = json.dumps(messages_body)
                     print(f"    acp body preview: {msgs_str[:300]!r}", flush=True)
-                    if "hello from openrouter t21" in msgs_str and "or t21 turn" in msgs_str:
+                    user_msgs = [m for m in messages_body
+                                 if isinstance(m, dict) and m.get("role") == "user"]
+                    asst_msgs = [m for m in messages_body
+                                 if isinstance(m, dict) and m.get("role") == "assistant"]
+                    user_has_prompt = any("hello from openrouter t21" in json.dumps(m) for m in user_msgs)
+                    asst_has_reply  = any("or t21 turn" in json.dumps(m) for m in asst_msgs)
+                    if user_has_prompt and asst_has_reply:
                         ok("or→acp: openrouter history present in acp Anthropic API call")
+                    elif "hello from openrouter t21" in msgs_str and "or t21 turn" in msgs_str:
+                        fail("or→acp: text present but role structure wrong",
+                             f"user_msgs={len(user_msgs)} asst_msgs={len(asst_msgs)}")
                     else:
                         fail("or→acp: openrouter history missing from acp body",
                              f"msgs={msgs_str[:300]!r}")
