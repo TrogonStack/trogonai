@@ -698,7 +698,10 @@ fn add_trogon_host_functions<N: NatsBroker + Send + Sync + 'static>(
                         Some(s) => s.to_owned(),
                         None => { results[0] = wasmtime::Val::I32(-1); return Ok(()); }
                     };
-                    let opts: Vec<String> = serde_json::from_str(&json_str).unwrap_or_default();
+                    let opts: Vec<String> = serde_json::from_str(&json_str).unwrap_or_else(|e| {
+                        tracing::warn!("malformed options_json in request_permission: {e}");
+                        vec![]
+                    });
                     let auto = caller.data().auto_allow_permissions;
                     let nats = caller.data().nats.clone();
                     let sid = caller.data().session_id.clone();

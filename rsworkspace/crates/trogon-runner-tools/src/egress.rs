@@ -72,7 +72,11 @@ fn is_link_local(host: &str) -> bool {
 fn pattern_matches(pattern: &str, host: &str) -> bool {
     let pattern_lower = pattern.to_lowercase();
     if let Some(suffix) = pattern_lower.strip_prefix("*.") {
+        // Leading-asterisk: *.example.com matches sub.example.com and example.com
         host == suffix || host.ends_with(&format!(".{suffix}"))
+    } else if let Some(prefix) = pattern_lower.strip_suffix(".*") {
+        // Trailing-asterisk: 169.254.* matches any host starting with "169.254."
+        host.starts_with(&format!("{prefix}."))
     } else {
         host == pattern_lower.as_str()
     }

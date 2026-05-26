@@ -903,7 +903,9 @@ where
                     }
                 };
                 if let Some(c) = collector {
-                    let _ = c.await;
+                    if let Err(e) = c.await {
+                        tracing::warn!("stdout collector task panicked: {e}");
+                    }
                 }
                 s
             } else {
@@ -915,7 +917,9 @@ where
                 {
                     Ok(Ok(exit_status)) => {
                         if let Some(c) = collector {
-                            let _ = c.await;
+                            if let Err(e) = c.await {
+                                tracing::warn!("stdout collector task panicked: {e}");
+                            }
                         }
                         crate::terminal::exit_status_from_std(&exit_status)
                     }
@@ -943,7 +947,9 @@ where
             }
         } else if let Some(c) = collector {
             // WASM background task: wait for the task to finish.
-            let _ = c.await;
+            if let Err(e) = c.await {
+                tracing::warn!("stdout collector task panicked: {e}");
+            }
             // Ensure exit_arc is populated even if the task panicked before setting it.
             // Any concurrent wait_for_terminal_exit caller spinning on arc.get() will
             // unblock once this set() call succeeds.
