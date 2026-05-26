@@ -1,6 +1,6 @@
 # A2A over NATS — developer guide
 
-Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [`../A2A_PLAN.md`](../A2A_PLAN.md) and the navigation hub [`./A2A_DOCS_INDEX.md`](./A2A_DOCS_INDEX.md).
+Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) and the navigation hub [`./A2A_DOCS_INDEX.md`](./A2A_DOCS_INDEX.md).
 
 ## Related links
 
@@ -8,7 +8,7 @@ Local setup and day-to-day commands for working on the A2A-over-NATS binding in 
 |----------|---------|
 | [`./A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) | Env vars and CLI flags for every A2A binary and `a2a_nats` embedders |
 | [`./A2A_DOCS_INDEX.md`](./A2A_DOCS_INDEX.md) | Full documentation index — operators, gateway, auth sketches |
-| [`../A2A_TODO.md`](../A2A_TODO.md) | Open engineering work and suggested ordering |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Open engineering work and suggested ordering |
 
 ---
 
@@ -151,4 +151,4 @@ make smoke-full-down  # compose down -v (smoke-full profile)
 - **Operators / NSC bootstrap:** [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)
 - **Subject ACL quick reference:** [`./A2A_SUBJECT_ACL_QUICKREF.md`](./A2A_SUBJECT_ACL_QUICKREF.md)
 - **HTTPS interop sidecar (future):** [`./A2A_BRIDGE_SKETCH.md`](./A2A_BRIDGE_SKETCH.md)
-- **Open work tracker:** [`../A2A_TODO.md`](../A2A_TODO.md)
+- **Open work tracker:** [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md)

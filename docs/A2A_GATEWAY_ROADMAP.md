@@ -6,8 +6,8 @@ Engineering checklist for [`a2a-gateway`](../rsworkspace/crates/a2a-gateway/) be
 
 | Document | Purpose |
 |----------|---------|
-| [`../A2A_PLAN.md`](../A2A_PLAN.md) | Architecture, subject shapes, policy tiers, SpiceDB tuples, audit schema |
-| [`../A2A_TODO.md`](../A2A_TODO.md) | Open engineering items and suggested ordering (auth callout, Tier 1, gateway audit) |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Architecture, subject shapes, policy tiers, SpiceDB tuples, audit schema |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Open engineering items and suggested ordering (auth callout, Tier 1, gateway audit) |
 | [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md) | Task event egress — pull consumer flow control, `A2A_EVENTS` policy, agent `Bridge` limits |
 | [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) | Per-Account NSC provisioning, caller/gateway/registrar ACL templates |
 | [`../rsworkspace/crates/a2a-gateway/src/lib.rs`](../rsworkspace/crates/a2a-gateway/src/lib.rs) | Crate entrypoint and Rustdoc (ingress role, future seams) |
@@ -60,11 +60,11 @@ ZedToken cache: session-scoped moka cache; fresh tokens attached as `AtLeastAsFr
 
 ## Next
 
-Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates from the bootstrap runbook are in place. Track ordering in [`../A2A_TODO.md`](../A2A_TODO.md) §Suggested ordering.
+Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates from the bootstrap runbook are in place. Track ordering in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Suggested ordering.
 
 ### NATS `$SYS` / auth-callout integration
 
-- [ ] Wire gateway to expect **Account-bound User JWTs** minted by an auth-callout subscriber on **`$SYS.REQ.USER.AUTH`** (OIDC primary, mTLS service-to-service, API keys transitional). See [`../A2A_TODO.md`](../A2A_TODO.md) Phase 0 and [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) §Auth callout service — **reference only; do not implement callout in `a2a-gateway`.**
+- [ ] Wire gateway to expect **Account-bound User JWTs** minted by an auth-callout subscriber on **`$SYS.REQ.USER.AUTH`** (OIDC primary, mTLS service-to-service, API keys transitional). See [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) Phase 0 and [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) §Auth callout service — **reference only; do not implement callout in `a2a-gateway`.**
 - [ ] Extract caller identity from the connection/JWT and populate span field `caller_id` plus audit attribution fields.
 
 ### JWT minting posture
@@ -81,7 +81,7 @@ Do not implement auth-callout or SpiceDB in this crate until NSC + ACL templates
 
 ### Unary deadlines
 
-- [ ] Enforce **30s gateway deadline** on unary `message/send` request/reply; longer work must use `message/stream` (see [`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) §6).
+- [ ] Enforce **30s gateway deadline** on unary `message/send` request/reply; longer work must use `message/stream` (see [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §6).
 - [ ] On timeout: structured JSON-RPC error to caller inbox + ingress audit outcome.
 
 ### Coordination with SpiceDB Tier 1
@@ -99,7 +99,7 @@ These are owned elsewhere; do not expand gateway scope to cover them unless the 
 | Area | Owner | Notes |
 |------|-------|-------|
 | **Push delivery & DLQ** | Agent `Bridge` / `a2a-nats::push::dlq` | Terminal push failures JetStream-publish to `{prefix}.push.dlq.{caller_id}.{task_id}` from the streaming pump — not from gateway ingress. |
-| **AgentCard validation at gateway** | `a2a-nats-discovery` / KV catalog | Schema validation on registrar write and KV read defense-in-depth today. Gateway re-validation only if an **edge path materializes AgentCards outside NATS KV** ([`../A2A_TODO.md`](../A2A_TODO.md) Phase 0). |
+| **AgentCard validation at gateway** | `a2a-nats-discovery` / KV catalog | Schema validation on registrar write and KV read defense-in-depth today. Gateway re-validation only if an **edge path materializes AgentCards outside NATS KV** ([`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) Phase 0). |
 | **JetStream provisioning** | `a2a-nats` provision / discovery processes | Gateway does not provision streams or manage streaming back-pressure yet (Phase 2). See [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md). |
 | **Tier 2 CEL / Tier 3 WASM** | Gateway Wasmtime substrate (scaffolded) | Substrate type lives in `src/policy/`; CEL→WASM compile path and request-path call sites still future. Tier 3 redaction engine ships in `a2a-redaction`. |
 | **HTTPS termination** | `a2a-bridge` sidecar (runtime landed) | Crate ships axum HTTPS, auth-callout client, NATS publish/consume, SSE↔JetStream framing. Production-mode wiring against a deployed auth-callout still future. |

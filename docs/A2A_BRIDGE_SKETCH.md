@@ -1,6 +1,6 @@
 # A2A bridge — HTTPS sidecar sketch
 
-Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge is the HTTPS↔NATS interop sidecar that lets standard A2A HTTP clients participate in the NATS binding without rewriting their transport stack. It is **not** implemented in-tree yet; shape is decided in [`../A2A_PENDING_DECISION.md`](../A2A_PENDING_DECISION.md) and tracked in [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 4.
+Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge is the HTTPS↔NATS interop sidecar that lets standard A2A HTTP clients participate in the NATS binding without rewriting their transport stack. It is **not** implemented in-tree yet; shape is decided in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) and tracked in [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Phase 4.
 
 ## Related links
 
@@ -8,7 +8,7 @@ Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge i
 |----------|---------|
 | [`./A2A_GATEWAY_ROADMAP.md`](./A2A_GATEWAY_ROADMAP.md) | Gateway ingress checklist — auth-callout, policy, audit on `{prefix}.gateway.>` |
 | [`./A2A_PUSH_DLQ_OPS.md`](./A2A_PUSH_DLQ_OPS.md) | Push DLQ triage — terminal failures publish from the agent `Bridge`, not from gateway or bridge ingress |
-| [`../A2A_TODO.md`](../A2A_TODO.md) | Open engineering items and suggested ordering |
+| [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) | Open engineering items and suggested ordering |
 | [`./A2A_AUTH_CALLOUT_DESIGN.md`](./A2A_AUTH_CALLOUT_DESIGN.md) | Auth callout contract the bridge reuses for credential minting |
 
 ---
@@ -111,7 +111,7 @@ Unary **`message/send`** inherits the gateway **30s deadline** once wired; longe
 
 ## Implementation tracker
 
-See [`../A2A_TODO.md`](../A2A_TODO.md) §Phase 4 — `a2a-bridge` crate, federated discovery exports, and cross-binding collaboration tests. Suggested ordering places bridge work after auth callout, gateway auth integration, and hardened push DLQ caller attribution.
+See [`./A2A_ARCHITECTURE.md`](./A2A_ARCHITECTURE.md) §Phase 4 — `a2a-bridge` crate, federated discovery exports, and cross-binding collaboration tests. Suggested ordering places bridge work after auth callout, gateway auth integration, and hardened push DLQ caller attribution.
 
 ---
 

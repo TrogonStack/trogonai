@@ -228,5 +228,5 @@ Source: [`a2a-bridge/src/main.rs`](../../rsworkspace/crates/a2a-bridge/src/main.
 - [Documentation index](./A2A_DOCS_INDEX.md)
 - [Push DLQ operations](./A2A_PUSH_DLQ_OPS.md)
 - [NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)
-- [Architecture plan](../A2A_PLAN.md)
-- [Open work tracker](../A2A_TODO.md)
+- [Architecture plan](./A2A_ARCHITECTURE.md)
+- [Open work tracker](./A2A_ARCHITECTURE.md)
