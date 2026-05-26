@@ -322,10 +322,16 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
 
                 let mut tier1_zed_token: Option<String> = None;
                 if tier1.is_enabled() {
-                    let account = config.a2a_prefix.as_str();
-                    let caller_slug = audit_caller_id.as_str();
-                    let principal = tier1_principal_from_caller(caller_slug, account);
-                    let Some(session) = tier1_session_from_principal(&principal, account) else {
+                    let publisher_account = std::env::var("A2A_GATEWAY_JWT_AUDIENCE")
+                        .unwrap_or_else(|_| config.a2a_prefix.as_str().to_owned());
+                    let caller_slug = audit_caller_id
+                        .split_once('/')
+                        .map(|(_, id)| id)
+                        .unwrap_or(audit_caller_id.as_str());
+                    let principal = tier1_principal_from_caller(caller_slug, publisher_account.as_str());
+                    let Some(session) =
+                        tier1_session_from_principal(&principal, publisher_account.as_str())
+                    else {
                         tracing::Span::current().record("routing_outcome", "tier1_denied");
                         deny_tier1(
                             client,
@@ -1238,7 +1244,12 @@ fn tier1_declarative_context_from_ingress(
     nats_subject: &str,
 ) -> Option<Tier1DeclarativeContext> {
     let method = a2a_method_from_dots(method_dots)?;
-    let principal = tier1_principal_from_caller(caller_slug.unwrap_or("_"), account);
+    let raw_slug = caller_slug.unwrap_or("_");
+    let slug = raw_slug
+        .split_once('/')
+        .map(|(_, id)| id)
+        .unwrap_or(raw_slug);
+    let principal = tier1_principal_from_caller(slug, account);
     let caller_subject = principal.spicedb_subject();
     Some(Tier1DeclarativeContext::new(
         method,

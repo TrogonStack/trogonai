@@ -116,6 +116,36 @@ Common failures: starting gateway before `auth-callout-ready` (race on `$SYS.REQ
 
 ---
 
+## Full-stack smoke (Docker)
+
+[`../devops/docker/compose/compose.a2a.full.yml`](../devops/docker/compose/compose.a2a.full.yml) includes the minimal smoke stack and adds policy + federation plumbing:
+
+| Service | Role |
+|---------|------|
+| `spicedb` | In-memory Authzed/SpiceDB (`serve --grpc-preshared-key=devkey`) |
+| `a2a-spicedb-seed` | One-shot `zed schema write` + `zed import` of [`schema.zed`](../devops/docker/compose/services/spicedb/schema.zed) and [`relationships.yaml`](../devops/docker/compose/services/spicedb/relationships.yaml); writes `.spicedb-seed-complete` on the shared volume. Re-runs on every `up` because SpiceDB uses an in-memory datastore (schema is lost when the container restarts). |
+| `a2a-bootstrap` (`A2A_COMPOSE_PROFILE=full`) | Copies Tier-1 `per-method-allowlist.tier1.toml`, stages Tier-3 WASM + manifests (`$.params.message.parts[0].text` matches protobuf JSON), signs skills with `a2a-sign-bundle`, writes gateway env (`A2A_GATEWAY_TIER1_SPICEDB_*`, declarative/Tier-3 dirs, `A2A_DISCOVERY_OPERATOR_KEYS`) |
+
+```bash
+make smoke-full       # down -v, up --build, run a2a-smoke-test --profile full, down -v
+make smoke-full-down  # compose down -v (smoke-full profile)
+```
+
+`a2a-smoke-test --profile full` checks: Tier-1 declarative deny (`agent.card` → `-32801`), Tier-3 refusal (`SMOKE_T3_REFUSE_ME` → `-32802` + audit `refusal_skill`), allow-path `message/send` audit (`rules_fired` includes `gateway.tier1.spicedb_allowed` and `gateway.tier3.evaluated_allow` / `gateway.tier3.redacted`), and operator-signed `SignedDiscoveryExport` verification.
+
+**Reading audits:** Gateway publishes `{prefix}.audit.ok|err.{method-dots}` (slashes become dots). Policy decisions appear in `rules_fired` (for example `gateway.tier1.declarative.denied.*`, `gateway.tier3.refused.*`). There are no separate `tier1_decision` / `tier3_decision` fields on [`AuditEnvelope`](../rsworkspace/crates/a2a-nats/src/audit/envelope.rs).
+
+**Tier-3 WASM build cost:** The bootstrap image compiles `pii-regex-redactor` and `smoke-tier3-refuse` for `wasm32-unknown-unknown` via [`a2a-pack/skills/build.sh`](../rsworkspace/crates/a2a-pack/skills/build.sh). First `make smoke-full` can take several minutes; later rebuilds reuse the shared `cargo chef` layer from service images.
+
+**Common failures:**
+
+- SpiceDB schema missing after restart — in-memory SpiceDB loses data when the container is recreated; `a2a-spicedb-seed` must run before gateway (compose ordering). If Tier-1 denies with `object definition not found`, run `make smoke-full` (it clears volumes) or `make smoke-full-down` then `make smoke-full`.
+- SpiceDB schema/relationship mismatch — edit `schema.zed` / `relationships.yaml`, then `make smoke-full-down` and `make smoke-full`.
+- WASM build failure — missing `wasm32-unknown-unknown` in the bootstrap build stage; inspect `a2a-bootstrap` build logs.
+- Signature verification failure — `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` must match the seed used by `a2a-sign-bundle` in bootstrap; regenerate volume with `make smoke-full-down`.
+
+---
+
 ## Where to go next
 
 - **Operators / NSC bootstrap:** [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)

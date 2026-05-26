@@ -188,7 +188,7 @@ pub fn spicedb_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(S
         .and_then(parse_subject_reference)
 }
 
-fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
+pub fn parse_subject_reference(raw: &str) -> Option<(String, String)> {
     if let Some((object_type, object_id)) = raw.split_once('/')
         && !object_type.is_empty()
         && !object_id.is_empty()

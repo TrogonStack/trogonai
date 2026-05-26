@@ -1,0 +1,18 @@
+definition user {}
+
+definition agent {
+  relation caller: user
+  permission invoke = caller
+  permission discover = caller
+}
+
+definition task {
+  relation owner: user
+  permission read = owner
+  permission cancel = owner
+}
+
+definition agent_card {
+  relation viewer: user
+  permission view = viewer
+}

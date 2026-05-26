@@ -1,0 +1,3 @@
+relationships: |-
+  agent:echo#caller@user:smoke-caller-1
+  agent_card:SMOKE/echo#viewer@user:smoke-caller-1
