@@ -55,6 +55,7 @@ pub enum Tier1ResourceKind {
     AgentId,
     CallerSubject,
     NatsSubjectPattern,
+    TimeOfDay,
 }
 
 impl Tier1ResourceKind {
@@ -64,6 +65,7 @@ impl Tier1ResourceKind {
             "agent_id" => Ok(Self::AgentId),
             "caller_subject" => Ok(Self::CallerSubject),
             "nats_subject_pattern" => Ok(Self::NatsSubjectPattern),
+            "time_of_day" => Ok(Self::TimeOfDay),
             other => Err(Tier1DeclarativeSchemaError::UnknownKind(other.into())),
         }
     }
@@ -146,6 +148,7 @@ pub enum Tier1DeclarativeSchemaError {
     EmptyPattern,
     UnknownKind(String),
     UnknownEffect(String),
+    InvalidTimeOfDayPattern(String),
 }
 
 impl fmt::Display for Tier1DeclarativeSchemaError {
@@ -155,6 +158,7 @@ impl fmt::Display for Tier1DeclarativeSchemaError {
             Self::EmptyPattern => write!(f, "match pattern must not be empty"),
             Self::UnknownKind(kind) => write!(f, "unknown match kind `{kind}`"),
             Self::UnknownEffect(effect) => write!(f, "unknown rule effect `{effect}`"),
+            Self::InvalidTimeOfDayPattern(msg) => write!(f, "invalid time_of_day pattern: {msg}"),
         }
     }
 }
