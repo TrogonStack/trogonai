@@ -1,6 +1,6 @@
 //! NATS auth-callout wire format (server `$SYS.REQ.USER.AUTH` path).
 //!
-//! Pinned against NATS server **2.14.x** (see `docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md`).
+//! Pinned against NATS server **2.14.x** (see `docs/a2a/how-to/operators/auth-callout-deployment.md`).
 
 mod bridge_adapter;
 mod callout_auth_response_claims;

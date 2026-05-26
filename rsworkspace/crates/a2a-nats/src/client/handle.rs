@@ -58,7 +58,7 @@ impl<N, J> Client<N, J> {
     /// **`{prefix}.gateway.{agent_id}.{method…}`** (`gateway_ingress_subject_from_agent_subject`), then the
     /// gateway forwards to **`{prefix}.agent.{agent_id}.{method…}`**.
     ///
-    /// Tenancy is the caller's **NATS Account** (see [`docs/A2A_ARCHITECTURE.md`](../../../../docs/A2A_ARCHITECTURE.md) §Decisions), not an extra subject token.
+    /// Tenancy is the caller's **NATS Account** (see [`docs/a2a/explanation/architecture.md`](../../../../../docs/a2a/explanation/architecture.md) §Decisions), not an extra subject token.
     ///
     /// **`message/stream`** and **`tasks/resubscribe`** still attach to JetStream **`{prefix}.task.…`** event
     /// subjects after their gateway-routed bootstrap/snapshot RPC; only the JSON-RPC ingress hop uses
