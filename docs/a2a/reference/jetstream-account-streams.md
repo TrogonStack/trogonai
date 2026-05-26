@@ -6,15 +6,15 @@ Operator reference for the JetStream streams and KV bucket the A2A-over-NATS bin
 
 | Document | Purpose |
 |----------|---------|
-| [A2A plan](./A2A_ARCHITECTURE.md) | Subject topology, streaming semantics, phased delivery |
-| [A2A pending decisions](./A2A_ARCHITECTURE.md) | Landed decisions: stream topology, retention, push DLQ |
-| [A2A NSC account bootstrap](A2A_NSC_ACCOUNT_BOOTSTRAP.md) | Full operator runbook: NSC hierarchy, User ACL templates, bootstrap order |
-| [Push DLQ ops](A2A_PUSH_DLQ_OPS.md) | Stream verification, consumption, envelope schema |
-| [Auth callout design](A2A_AUTH_CALLOUT_DESIGN.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
-| [Gateway roadmap](A2A_GATEWAY_ROADMAP.md) | Ingress futures; not a JetStream asset owner |
-| [Subject ACL quick ref](A2A_SUBJECT_ACL_QUICKREF.md) | Caller / Gateway / Registrar publish-subscribe one-pager |
-| [Documentation index](A2A_DOCS_INDEX.md) | Hub linking operator and design docs |
-| [AgentCard catalog — KV watch](catalog-kv-watch.md) | Client-side KV watch pattern for push-driven discovery |
+| [A2A plan](../explanation/architecture.md) | Subject topology, streaming semantics, phased delivery |
+| [A2A pending decisions](../explanation/architecture.md) | Landed decisions: stream topology, retention, push DLQ |
+| [A2A NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md) | Full operator runbook: NSC hierarchy, User ACL templates, bootstrap order |
+| [Push DLQ ops](../how-to/operators/push-dlq-triage.md) | Stream verification, consumption, envelope schema |
+| [Auth callout design](../explanation/auth-callout-design.md) | Minted User JWT + stable **`caller_id`** (DLQ + ACL alignment) |
+| [Gateway roadmap](../explanation/gateway-roadmap.md) | Ingress futures; not a JetStream asset owner |
+| [Subject ACL quick ref](subject-acl-quickref.md) | Caller / Gateway / Registrar publish-subscribe one-pager |
+| [Documentation index](../../A2A_DOCS_INDEX.md) | Hub linking operator and design docs |
+| [AgentCard catalog — KV watch](../how-to/catalog/kv-watch.md) | Client-side KV watch pattern for push-driven discovery |
 
 ---
 
@@ -32,7 +32,7 @@ This is the shared per-Account stream for all task event traffic. It backs `mess
 
 **In-tree reference:** stream config and naming live under `rsworkspace/crates/a2a-nats/src/jetstream/` (`streams.rs`, `provision.rs`) and `rsworkspace/crates/a2a-nats/src/nats/subjects/stream.rs` (`A2aStream::Events`).
 
-**Operator defaults** (from [landed decisions](./A2A_ARCHITECTURE.md)):
+**Operator defaults** (from [landed decisions](../explanation/architecture.md)):
 
 | Setting | Target value | Notes |
 |---------|--------------|-------|
@@ -60,7 +60,7 @@ Stores semi-static AgentCard payloads for discovery. The `a2a-nats-discovery` re
 | `history` | `1` | Only the latest revision per key is retained — sufficient for catalog use |
 | `max_value_size` | `65536` | Covers typical AgentCard payloads |
 
-For client-side watch ergonomics, see [catalog-kv-watch.md](catalog-kv-watch.md).
+For client-side watch ergonomics, see [catalog-kv-watch.md](../how-to/catalog/kv-watch.md).
 
 ---
 
@@ -70,7 +70,7 @@ For client-side watch ergonomics, see [catalog-kv-watch.md](catalog-kv-watch.md)
 **Name:** `A2A_PUSH_DLQ`  
 **Subject shape:** `{prefix}.push.dlq.{caller_id}.{task_id}` — e.g. `a2a.push.dlq.{caller_id}.{task_id}`
 
-Per-Account DLQ for terminal push delivery failures. After HTTPS in-process retries exhaust (`HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS`), the agent **`Bridge`** publishes a structured JSON envelope (see **[push DLQ operator playbook](A2A_PUSH_DLQ_OPS.md)**) onto `{prefix}.push.dlq.{caller_id}.{task_id}` via JetStream. The `{caller_id}` segment defaults to **`_`** (`Config::push_dlq_caller_segment` / **`DEFAULT_PUSH_DLQ_CALLER_SEGMENT`**) until auth-callout or gateway propagation supplies a minted caller identity token-safe segment. Operators consume the DLQ to remediate.
+Per-Account DLQ for terminal push delivery failures. After HTTPS in-process retries exhaust (`HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS`), the agent **`Bridge`** publishes a structured JSON envelope (see **[push DLQ operator playbook](../how-to/operators/push-dlq-triage.md)**) onto `{prefix}.push.dlq.{caller_id}.{task_id}` via JetStream. The `{caller_id}` segment defaults to **`_`** (`Config::push_dlq_caller_segment` / **`DEFAULT_PUSH_DLQ_CALLER_SEGMENT`**) until auth-callout or gateway propagation supplies a minted caller identity token-safe segment. Operators consume the DLQ to remediate.
 
 **Provisioning & publish status:** `provision_streams` creates `A2A_PUSH_DLQ` alongside `A2A_EVENTS`. Agent-side publish is active on the `message/stream` terminal push path (`a2a-nats`). The **`a2a-gateway`** forwarder does not emit DLQ messages (see **`rsworkspace/crates/a2a-gateway/src/lib.rs`** crate-level Rustdoc).
 
@@ -101,7 +101,7 @@ Official references:
 - [JetStream — key-value store](https://docs.nats.io/nats-concepts/jetstream/key-value-store)
 - [Configuring JetStream — account resource limits](https://docs.nats.io/running-a-nats-service/configuration/resource_management)
 
-For NSC JWT hierarchy, User ACL templates, and step-by-step bootstrap order, use [A2A_NSC_ACCOUNT_BOOTSTRAP.md](A2A_NSC_ACCOUNT_BOOTSTRAP.md).
+For NSC JWT hierarchy, User ACL templates, and step-by-step bootstrap order, use [A2A_NSC_ACCOUNT_BOOTSTRAP.md](../how-to/operators/nsc-account-bootstrap.md).
 
 ---
 

@@ -16,7 +16,7 @@ Provide a transport binding where:
 
 The result is opaque agent-to-agent collaboration with the same semantics as HTTP A2A, but with NATS' operational model: queue-group horizontal scaling, JetStream-backed task event retention, KV-backed discovery, and replay/resubscribe as a first-class primitive instead of a webhook bolt-on.
 
-Navigation: [`./A2A_DOCS_INDEX.md`](./A2A_DOCS_INDEX.md) · env reference [`./A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) · streaming back-pressure [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](./A2A_STREAMING_BACKPRESSURE_OPS.md).
+Navigation: [`./A2A_DOCS_INDEX.md`](../../A2A_DOCS_INDEX.md) · env reference [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md) · streaming back-pressure [`./A2A_STREAMING_BACKPRESSURE_OPS.md`](../how-to/operators/streaming-backpressure.md).
 
 ## Protocol Mapping
 
