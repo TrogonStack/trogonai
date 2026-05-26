@@ -2,9 +2,9 @@
 
 Stable design reference for the **`a2a-auth-callout`** service (`rsworkspace/crates/a2a-auth-callout`). It describes what shipped on the NATS perimeter and how that wiring connects to the rest of the A2A-over-NATS binding.
 
-**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
+**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
 
-Related decisions: [A2A architecture §Decisions](./A2A_ARCHITECTURE.md) (auth callout deployment, subject ACL, push DLQ).
+Related decisions: [A2A architecture §Decisions](architecture.md) (auth callout deployment, subject ACL, push DLQ).
 
 ---
 
@@ -44,9 +44,9 @@ Implementation lives in `rsworkspace/crates/a2a-auth-callout/src/wire/` and is p
 | **Request JWT** | Server-signed NKey JWT (`ed25519-nkey`) with `aud` = `nats-authorization-request` and a `nats` block carrying `server_id`, `user_nkey`, `client_info`, `connect_opts`, optional `client_tls`. Verified with `AUTH_CALLOUT_SERVER_NKEY_PUBLIC` (public NKey of `authorization.auth_callout.issuer`). |
 | **Response JWT** | Callout-signed NKey JWT whose `sub` is the request `user_nkey`, `aud` is `server_id.id`, and `nats.jwt` holds the minted user credential (or `nats.error` on denial). Signed with `AUTH_CALLOUT_ISSUER_NKEY_SEED`. |
 | **XKey envelope** | Optional. When `auth_callout.xkey` is set on the server, the request payload may be encrypted with the account XKey; the callout decrypts with `AUTH_CALLOUT_XKEY_SEED` and seals responses using the server **one-time** public key from header `Nats-Server-Xkey`. Request decryption also uses `AUTH_CALLOUT_SERVER_XKEY_PUBLIC` (server **persistent** XKey). |
-| **Denial** | Signed authorization-response JWT **without** `nats.jwt`; `nats.error` carries an opaque [`DenialCategory`](../../rsworkspace/crates/a2a-auth-callout/src/denial_category.rs) string (never OIDC/x509/verifier exception text). |
+| **Denial** | Signed authorization-response JWT **without** `nats.jwt`; `nats.error` carries an opaque [`DenialCategory`](../../../rsworkspace/crates/a2a-auth-callout/src/denial_category.rs) string (never OIDC/x509/verifier exception text). |
 
-Full wire walkthrough, version pins, and sample `nats-server` config: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](./A2A_AUTH_CALLOUT_DEPLOYMENT.md).
+Full wire walkthrough, version pins, and sample `nats-server` config: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
 
 ### Bridge path (internal JSON)
 
@@ -54,7 +54,7 @@ The HTTPS bridge does **not** speak the server JWT envelope. It request/replies 
 
 ### Credential sources (preference order)
 
-Landed in [A2A architecture §Decisions](./A2A_ARCHITECTURE.md); implemented in `credentials/`:
+Landed in [A2A architecture §Decisions](architecture.md); implemented in `credentials/`:
 
 1. **OIDC** — primary (`AUTH_CALLOUT_OIDC_ISSUER`, `AUTH_CALLOUT_OIDC_AUDIENCES`). JWKS discovery; map claims → tenant Account + `caller_id`.
 2. **mTLS** — service-to-service (`AUTH_CALLOUT_MTLS_TRUST_ANCHORS`). Map certificate subject / SAN → Account principal.
@@ -120,7 +120,7 @@ Inner User JWTs are signed through the pluggable **`SigningKeySource`** trait (`
 
 **Rotation:** `KeyVersion` labels (`current`, `previous`) identify overlap keys. Mint always uses `current()`; `accepted()` returns both during overlap. Minted JWTs carry `kid` (and matching JWS header `kid`). Verifiers select the decoding key from `accepted()` using `kid`, with trial verification only when `kid` is absent.
 
-Operator rotation steps: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md` § Signing key custody](./A2A_AUTH_CALLOUT_DEPLOYMENT.md#signing-key-custody).
+Operator rotation steps: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md` § Signing key custody](../how-to/operators/auth-callout-deployment.md#signing-key-custody).
 
 ---
 
@@ -132,7 +132,7 @@ Operator rotation steps: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md` § Signing key custod
 
 ## 6. Operator wiring
 
-Account provisioning, User role templates, and JetStream bootstrap are documented in **[A2A NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md)**. The auth callout **replaces static per-caller `nsc add user`** for production human/OIDC identities; NSC steps remain the reference for **gateway**, **registrar**, and **caller ACL shape**.
+Account provisioning, User role templates, and JetStream bootstrap are documented in **[A2A NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md)**. The auth callout **replaces static per-caller `nsc add user`** for production human/OIDC identities; NSC steps remain the reference for **gateway**, **registrar**, and **caller ACL shape**.
 
 ### Phase 0 ACL rows (caller vs gateway)
 
@@ -143,7 +143,7 @@ From the bootstrap ACL table — substitute `{prefix}` if not using default `a2a
 | **Caller User** | `{prefix}.gateway.>` | `_INBOX.{caller_id}.>` | **Auth callout** (dynamic) |
 | **Gateway User** | `{prefix}.agent.>`, `{prefix}.task.>`, `{prefix}.push.>` | `{prefix}.gateway.>` | **NSC** (long-lived service User) |
 
-Additional bootstrap roles (registrar, agents) are unchanged; see the full table in [A2A NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md).
+Additional bootstrap roles (registrar, agents) are unchanged; see the full table in [A2A NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md).
 
 ### Callout operator checklist (summary)
 
@@ -170,9 +170,9 @@ Where auth callout work meets in-tree crates.
 ### `a2a-gateway` — ingress
 
 - **Crate:** `rsworkspace/crates/a2a-gateway`
-- **Today:** Queue-group subscriber on `{prefix}.gateway.>`; opaque forward to `{prefix}.agent.{agent_id}.{method}`. Caller identity from verified `A2a-Caller-Jwt` message header (`MessageCallerIdentitySource`); deprecated `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1` and no JWT header verifies. **`a2a-nats::Client`** (NATS-native HTTP adapter and direct embedders) attaches the same header on gateway ingress publishes when [`routing_via_gateway_ingress`](../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is configured with a `MintedUserJwt` carrier.
+- **Today:** Queue-group subscriber on `{prefix}.gateway.>`; opaque forward to `{prefix}.agent.{agent_id}.{method}`. Caller identity from verified `A2a-Caller-Jwt` message header (`MessageCallerIdentitySource`); deprecated `X-A2a-Spicedb-Principal` / `X-A2a-Caller-Id` only when `A2A_GATEWAY_TRUST_CALLER_HEADERS=1` and no JWT header verifies. **`a2a-nats::Client`** (NATS-native HTTP adapter and direct embedders) attaches the same header on gateway ingress publishes when [`routing_via_gateway_ingress`](../../../rsworkspace/crates/a2a-nats/src/client/handle.rs) is configured with a `MintedUserJwt` carrier.
 - **Target:** Parse minted User JWT / connection identity on each ingress message; extract **`caller_id`** for spans and Phase 1 audit; thread identity into SpiceDB checks.
-- **Non-goal:** gateway does **not** publish push DLQ messages; terminal DLQ originates from the agent `Bridge` (see [A2A push DLQ ops](./A2A_PUSH_DLQ_OPS.md)).
+- **Non-goal:** gateway does **not** publish push DLQ messages; terminal DLQ originates from the agent `Bridge` (see [A2A push DLQ ops](../how-to/operators/push-dlq-triage.md)).
 
 ### `a2a-nats` — `Config::push_dlq_caller_segment`
 
@@ -201,16 +201,16 @@ External client ──OIDC/mTLS/API key──► a2a-auth-callout ($SYS.REQ.USER
 ### Out of scope for this design doc
 
 - SpiceDB client wiring (Phase 1) beyond carrying `data` on the mint
-- `a2a-bridge` HTTPS sidecar production NATS transport — same callout contract, different ingress ([`A2A_BRIDGE_SKETCH.md`](./A2A_BRIDGE_SKETCH.md))
+- `a2a-bridge` HTTPS sidecar production NATS transport — same callout contract, different ingress ([`A2A_BRIDGE_SKETCH.md`](bridge-sketch.md))
 - Tier 1–3 policy bundles (`a2a-pack`)
 
 ---
 
 ## See also
 
-- [A2A auth callout deployment](./A2A_AUTH_CALLOUT_DEPLOYMENT.md) — operator runbook
-- [A2A runtime env](./A2A_RUNTIME_ENV.md) — `AUTH_CALLOUT_*` env reference
-- [A2A TODO](./A2A_ARCHITECTURE.md) — Phase 0 checklist
-- [A2A NSC account bootstrap](./A2A_NSC_ACCOUNT_BOOTSTRAP.md) — Operator / Account / User hierarchy and ACL table
-- [A2A per-Account JetStream assets](./A2A_JETSTREAM_ACCOUNT_STREAMS.md) — `A2A_PUSH_DLQ` subject shape
-- [A2A push DLQ ops](./A2A_PUSH_DLQ_OPS.md) — operator consumption of `{caller_id}` segments
+- [A2A auth callout deployment](../how-to/operators/auth-callout-deployment.md) — operator runbook
+- [A2A runtime env](../reference/runtime-env.md) — `AUTH_CALLOUT_*` env reference
+- [A2A TODO](architecture.md) — Phase 0 checklist
+- [A2A NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md) — Operator / Account / User hierarchy and ACL table
+- [A2A per-Account JetStream assets](../reference/jetstream-account-streams.md) — `A2A_PUSH_DLQ` subject shape
+- [A2A push DLQ ops](../how-to/operators/push-dlq-triage.md) — operator consumption of `{caller_id}` segments

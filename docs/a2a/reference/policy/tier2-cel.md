@@ -21,7 +21,7 @@ Compiled programs are cached in memory keyed by path and file mtime; edits to a 
 | `A2A_GATEWAY_POLICY_BUNDLE_DIR` | — | Enables the Wasmtime policy substrate (Tier-3 preload + Tier-2 seam). Required parent directory for `tier2/`. |
 | `A2A_GATEWAY_TIER2_CEL_ENABLED` | off | When truthy (`on`, `true`, `1`, `yes`) **and** `A2A_GATEWAY_POLICY_BUNDLE_DIR` is set, loads `tier2/*.cel` and runs `RealTier2CelEvaluator`. When off, Tier-2 stays on `NoopTier2Evaluator` (always allow). |
 
-See also [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) for the full `a2a-gateway` table.
+See also [`A2A_RUNTIME_ENV.md`](../runtime-env.md) for the full `a2a-gateway` table.
 
 ## CEL evaluation context
 
@@ -58,6 +58,6 @@ Successful allow paths emit `gateway.tier2.evaluated_allow` when CEL is enabled,
 
 ## Related docs
 
-- [Runtime env reference](./A2A_RUNTIME_ENV.md)
-- [Gateway roadmap](./A2A_GATEWAY_ROADMAP.md)
-- [Architecture plan](./A2A_ARCHITECTURE.md)
+- [Runtime env reference](../runtime-env.md)
+- [Gateway roadmap](../../explanation/gateway-roadmap.md)
+- [Architecture plan](../../explanation/architecture.md)
