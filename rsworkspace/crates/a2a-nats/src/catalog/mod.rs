@@ -1,6 +1,6 @@
 //! AgentCard catalog (KV-backed storage, `{prefix}.discover.*`, and `{prefix}.catalog.register.*`).
 //!
-//! For push-model catalog freshness via JetStream KV watches, see the repository file `docs/catalog-kv-watch.md`.
+//! For push-model catalog freshness via JetStream KV watches, see the repository file `docs/a2a/how-to/catalog/kv-watch.md`.
 
 pub mod discover;
 pub mod import_gate;

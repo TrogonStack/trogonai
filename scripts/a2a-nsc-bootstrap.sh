@@ -3,8 +3,8 @@
 #
 # Provisions one NATS Account and three service Users (caller-template, gateway,
 # registrar) with the Phase 0 subject ACLs defined in:
-#   docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md
-#   docs/A2A_SUBJECT_ACL_QUICKREF.md
+#   docs/a2a/how-to/operators/nsc-account-bootstrap.md
+#   docs/a2a/reference/subject-acl-quickref.md
 #
 # ACL subjects are declared in scripts/acl-templates/{caller,gateway,registrar}.acl
 # but the nsc flags below are derived directly from those files so the script is
@@ -29,7 +29,7 @@
 #   A2A_OPERATOR_NAME=myop A2A_ACCOUNT_NAME=tenant1 A2A_NSC_DIR=/home/nsc \
 #     ./scripts/a2a-nsc-bootstrap.sh
 #
-# Automated path: this script. Manual path: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md.
+# Automated path: this script. Manual path: docs/a2a/how-to/operators/nsc-account-bootstrap.md.
 # Auth callout fleet keys / AUTH·APP·SYS layout: scripts/a2a-auth-callout-bootstrap.sh.
 #
 # nsc flag references (all flags used below are from these sources):
@@ -39,7 +39,7 @@
 #   nsc push         : https://docs.nats.io/using-nats/nats-tools/nsc/basics
 #
 # NOTE: nsc was not available in the build environment when this script was
-# written. All flags are taken verbatim from docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md
+# written. All flags are taken verbatim from docs/a2a/how-to/operators/nsc-account-bootstrap.md
 # (which itself cites the official nsc docs) and the official nsc CLI reference
 # at https://nats-io.github.io/nsc/. Do NOT add flags beyond those cited above
 # without verifying against `nsc <subcommand> --help`.
@@ -226,7 +226,7 @@ run_nsc add user ${NSC_DIR_FLAGS} \
 #
 # KV write exclusivity: catalog bucket `${A2A_CATALOG_KV_BUCKET}` data-plane publishes are
 # enumerated via `--allow-pub` on `$KV.<bucket>.>` — keep gateway/caller Users off that class
-# and still validate fleet IAM (docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §JetStream/KV).
+# and still validate fleet IAM (docs/a2a/how-to/operators/nsc-account-bootstrap.md §JetStream/KV).
 #
 # Flags used:
 #   --allow-pub          — JetStream KV `$KV.<bucket>.>` publishes (AgentCard payloads)
@@ -278,12 +278,12 @@ fi
 #   KV       A2A_AGENT_CARDS   history: 1   max_value_size: 65536
 #   Stream   A2A_PUSH_DLQ      subject: ${PREFIX}.push.dlq.*.*
 #
-# See docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §JetStream and KV assets.
+# See docs/a2a/how-to/operators/nsc-account-bootstrap.md §JetStream and KV assets.
 log "Step 8: JetStream assets are NOT managed by nsc."
 log "  After JWT push, create using 'nats' CLI or application bootstrap:"
 log "    Stream   ${PREFIX}_EVENTS       subject: ${PREFIX}.task.*.events.*  (max_age 24h)"
 log "    KV       ${PREFIX}_AGENT_CARDS  history: 1  max_value_size: 65536"
 log "    Stream   ${PREFIX}_PUSH_DLQ     subject: ${PREFIX}.push.dlq.*.*"
-log "  Reference: docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md §JetStream and KV assets"
+log "  Reference: docs/a2a/how-to/operators/nsc-account-bootstrap.md §JetStream and KV assets"
 
 log "Bootstrap complete for Account '${A2A_ACCOUNT_NAME}'."

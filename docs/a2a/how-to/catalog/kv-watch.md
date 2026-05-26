@@ -29,8 +29,8 @@ Agents (or automation) can publish JSON **AgentCard** documents via NATS **`requ
 ## Limitations today
 
 - **Keyed wildcard KV watch.** JetStream KV **watch** has no `>` wildcard analogue; curate agent ids explicitly, run multiple `watch(&agent_key)` handles, or reconcile via periodic `keys()` / policy lists.
-- **Tenancy and federation.** Multi-tenant isolation is **NATS Account**–scoped subject prefixes (no `{tenant}` segment in catalog keys or watch subjects). Cross-Account catalog visibility is opt-in via operator-signed Account exports/imports — see [`./A2A_ARCHITECTURE.md`](../../explanation/architecture.md) (§8 federated discovery). KV watch callers still connect to the Account that hosts `A2A_AGENT_CARDS`; there is no built-in cross-Account KV replication in this pattern.
-- **Semantics / durability** ([`./A2A_ARCHITECTURE.md`](../../explanation/architecture.md) §§2–§3): retries, quotas, SpiceDB‑gated catalogs are still future.
+- **Tenancy and federation.** Multi-tenant isolation is **NATS Account**–scoped subject prefixes (no `{tenant}` segment in catalog keys or watch subjects). Cross-Account catalog visibility is opt-in via operator-signed Account exports/imports — see [A2A architecture](../../explanation/architecture.md) (§8 federated discovery). KV watch callers still connect to the Account that hosts `A2A_AGENT_CARDS`; there is no built-in cross-Account KV replication in this pattern.
+- **Semantics / durability** ([A2A architecture](../../explanation/architecture.md) §§2–§3): retries, quotas, SpiceDB‑gated catalogs are still future.
 - **Catalog payload shape.** `KvCatalogStore` validates AgentCard payloads against the bundled **`a2a-pack` JSON Schema** on **KV get/put**. Legacy junk bytes in KV will surface as `CatalogStoreError::AgentCardSchema` on read. Non-KV read paths (federated import lists, discover replies, agent handler cards, gateway surface) re-validate via `a2a_pack::agent_card_read` — see **`a2a-pack` README** §Read-side enforcement.
 
 See [`async-nats` KV module docs](https://docs.rs/async-nats/latest/async_nats/jetstream/kv/index.html).

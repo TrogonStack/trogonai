@@ -1,6 +1,6 @@
 //! Gateway pull consumer for task-event egress (`A2A_EVENTS`) with JetStream flow control.
 //!
-//! Operator guide: [`../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md`](../../../../docs/A2A_STREAMING_BACKPRESSURE_OPS.md).
+//! Operator guide: [`../../../../docs/a2a/how-to/operators/streaming-backpressure.md`](../../../../docs/a2a/how-to/operators/streaming-backpressure.md).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

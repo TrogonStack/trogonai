@@ -1,6 +1,6 @@
 //! Map `{prefix}.gateway…` ingress NATS subjects to `{prefix}.agent.{agent_id}.{method}` shapes.
 //!
-//! Tenant isolation uses **one NATS Account per tenant** (see [`docs/A2A_ARCHITECTURE.md`](../../../../docs/A2A_ARCHITECTURE.md) §Decisions); there is no `{tenant}`
+//! Tenant isolation uses **one NATS Account per tenant** (see [`docs/a2a/explanation/architecture.md`](../../../../docs/a2a/explanation/architecture.md) §Decisions); there is no `{tenant}`
 //! token on gateway subjects inside an Account — only **`{prefix}.gateway.{agent_id}.{method…}`**.
 //!
 //! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agent…`), use

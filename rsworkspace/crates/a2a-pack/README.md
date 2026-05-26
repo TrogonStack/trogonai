@@ -27,7 +27,7 @@ KV get/put remains validated in `KvCatalogStore`; read helpers drop invalid card
 
 | Module | Purpose |
 |--------|---------|
-| `resource_tuples` | SpiceDB resource-tuple derivation table for A2A JSON-RPC methods (see [A2A architecture](../../../docs/A2A_ARCHITECTURE.md) §SpiceDB resource tuples). |
+| `resource_tuples` | SpiceDB resource-tuple derivation table for A2A JSON-RPC methods (see [A2A architecture](../../../docs/a2a/explanation/architecture.md) §SpiceDB resource tuples). |
 | `catalog` | Catalog shaping rules — filter AgentCards in `a2a.discover` responses by caller permission. |
 | `agent_card_schema` | AgentCard JSON Schema for registration-time validation. |
 | `redaction` | Schema-driven redaction over `Message.parts[*]` and `Artifact.parts[*]`, keyed by AgentCard skill id. |
@@ -40,6 +40,6 @@ Bundle version is exposed as `a2a_pack::VERSION` (`0.0.0-skeleton` until real po
 
 ## Related docs
 
-- [`docs/catalog-kv-watch.md`](../../../docs/catalog-kv-watch.md) — registrar **`{prefix}.catalog.register.*`** ingress, **`KvCatalogStore`** get/put, and **`a2a-pack`** schema enforcement at the KV boundary.
-- [`docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../../../docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md) — NSC Account bootstrap, registrar service User ACLs, **`A2A_AGENT_CARDS`** bucket provisioning.
-- [A2A architecture](../../../docs/A2A_ARCHITECTURE.md) — policy bundle layout, catalog write path, audit extensions.
+- [`docs/a2a/how-to/catalog/kv-watch.md`](../../../docs/a2a/how-to/catalog/kv-watch.md) — registrar **`{prefix}.catalog.register.*`** ingress, **`KvCatalogStore`** get/put, and **`a2a-pack`** schema enforcement at the KV boundary.
+- [`docs/a2a/how-to/operators/nsc-account-bootstrap.md`](../../../docs/a2a/how-to/operators/nsc-account-bootstrap.md) — NSC Account bootstrap, registrar service User ACLs, **`A2A_AGENT_CARDS`** bucket provisioning.
+- [A2A architecture](../../../docs/a2a/explanation/architecture.md) — policy bundle layout, catalog write path, audit extensions.

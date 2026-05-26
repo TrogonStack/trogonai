@@ -1,15 +1,15 @@
 # A2A bridge — HTTPS sidecar sketch
 
-Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge is the HTTPS↔NATS interop sidecar that lets standard A2A HTTP clients participate in the NATS binding without rewriting their transport stack. It is **not** implemented in-tree yet; shape is decided in [`./A2A_ARCHITECTURE.md`](architecture.md) and tracked in [`./A2A_ARCHITECTURE.md`](architecture.md) §Phase 4.
+Engineering sketch for the future **`a2a-bridge`** crate (Phase 4). The bridge is the HTTPS↔NATS interop sidecar that lets standard A2A HTTP clients participate in the NATS binding without rewriting their transport stack. It is **not** implemented in-tree yet; shape is decided in [A2A architecture](architecture.md) and tracked in [A2A architecture](architecture.md) §Phase 4.
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
-| [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md) | Gateway ingress checklist — auth-callout, policy, audit on `{prefix}.gateway.>` |
-| [`./A2A_PUSH_DLQ_OPS.md`](../how-to/operators/push-dlq-triage.md) | Push DLQ triage — terminal failures publish from the agent `Bridge`, not from gateway or bridge ingress |
-| [`./A2A_ARCHITECTURE.md`](architecture.md) | Open engineering items and suggested ordering |
-| [`./A2A_AUTH_CALLOUT_DESIGN.md`](auth-callout-design.md) | Auth callout contract the bridge reuses for credential minting |
+| [Gateway roadmap](gateway-roadmap.md) | Gateway ingress checklist — auth-callout, policy, audit on `{prefix}.gateway.>` |
+| [Push DLQ triage](../how-to/operators/push-dlq-triage.md) | Push DLQ triage — terminal failures publish from the agent `Bridge`, not from gateway or bridge ingress |
+| [A2A architecture](architecture.md) | Open engineering items and suggested ordering |
+| [Auth callout design](auth-callout-design.md) | Auth callout contract the bridge reuses for credential minting |
 
 ---
 
@@ -50,7 +50,7 @@ Tenancy remains **one NATS Account per tenant**. Subjects carry **no `{tenant}` 
                                               [a2a-gateway] ──► {prefix}.agent.{agent_id}.{method}
 ```
 
-This aligns with the **NATS CONNECT URL security model** described in [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md): external credentials terminate at the perimeter, the auth callout mints an Account-scoped User JWT, and all subsequent NATS traffic uses the same subject ACL templates as a natively connected client (`{prefix}.gateway.>` publish, `_INBOX.{caller_id}.>` subscribe). Bridge outbound NATS connections use the same `NATS_URL` / creds env conventions documented in [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md).
+This aligns with the **NATS CONNECT URL security model** described in [Gateway roadmap](gateway-roadmap.md): external credentials terminate at the perimeter, the auth callout mints an Account-scoped User JWT, and all subsequent NATS traffic uses the same subject ACL templates as a natively connected client (`{prefix}.gateway.>` publish, `_INBOX.{caller_id}.>` subscribe). Bridge outbound NATS connections use the same `NATS_URL` / creds env conventions documented in [Runtime env](../reference/runtime-env.md).
 
 ---
 
@@ -59,7 +59,7 @@ This aligns with the **NATS CONNECT URL security model** described in [`./A2A_GA
 The bridge terminates **HTTPS-facing** auth before any NATS publish:
 
 1. Validate the caller's external credential — OIDC bearer token (primary), mTLS client certificate (service-to-service), or transitional API key.
-2. Resolve the target **tenant Account** and stable **`caller_id`** (same mapping contract as [`./A2A_AUTH_CALLOUT_DESIGN.md`](auth-callout-design.md)).
+2. Resolve the target **tenant Account** and stable **`caller_id`** (same mapping contract as [Auth callout design](auth-callout-design.md)).
 3. Call the auth callout (or an equivalent minting API with the same JWT shape) to obtain a **short-lived User JWT** bound to that Account.
 4. Open (or reuse from a pool keyed by caller session) a NATS connection authenticated with the minted User.
 
@@ -79,7 +79,7 @@ Once authenticated inside the tenant Account, the bridge behaves like a first-cl
 | **Streaming** | Attach a JetStream pull consumer on `{prefix}.task.{task_id}.events.>` and map events to **SSE** on the HTTPS response. |
 | **NATS in → HTTPS out** | Gateway forwards agent RPC to a proxied HTTPS endpoint; bridge adapts SSE from the external agent back into JetStream events on the task subject. |
 
-Gateway policy, SpiceDB Tier 1, and ingress audit land on **`a2a-gateway`** per [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md). The bridge's job is transport interop and credential re-mint, not policy evaluation.
+Gateway policy, SpiceDB Tier 1, and ingress audit land on **`a2a-gateway`** per [Gateway roadmap](gateway-roadmap.md). The bridge's job is transport interop and credential re-mint, not policy evaluation.
 
 Unary **`message/send`** inherits the gateway **30s deadline** once wired; longer work must transition to **`message/stream`**.
 
@@ -92,8 +92,8 @@ Unary **`message/send`** inherits the gateway **30s deadline** once wired; longe
 | **Prefix** | Shared `{prefix}` (default `a2a`) inside each Account — set via `A2A_PREFIX` / bridge config. No tenant segment in subjects. |
 | **Gateway publish** | `{prefix}.gateway.{agent_id}.{method…}` only; ACL bounds the minted caller User to `{prefix}.gateway.>`. |
 | **Reply inbox** | `_INBOX.{caller_id}.>` subscribe ACL on the minted User; bridge generates per-request inbox tokens under that namespace. |
-| **Task events** | Consumer on `{prefix}.task.{task_id}.events.>` for SSE egress; stream **`A2A_EVENTS`** is Account-scoped (see [`./A2A_JETSTREAM_ACCOUNT_STREAMS.md`](../reference/jetstream-account-streams.md)). |
-| **Push DLQ** | Terminal push failures publish to `{prefix}.push.dlq.{caller_id}.{task_id}` from the agent **`Bridge`** streaming pump — see [`./A2A_PUSH_DLQ_OPS.md`](../how-to/operators/push-dlq-triage.md). Bridge ingress does not own DLQ. |
+| **Task events** | Consumer on `{prefix}.task.{task_id}.events.>` for SSE egress; stream **`A2A_EVENTS`** is Account-scoped (see [JetStream account streams](../reference/jetstream-account-streams.md)). |
+| **Push DLQ** | Terminal push failures publish to `{prefix}.push.dlq.{caller_id}.{task_id}` from the agent **`Bridge`** streaming pump — see [Push DLQ triage](../how-to/operators/push-dlq-triage.md). Bridge ingress does not own DLQ. |
 | **Federation** | Cross-Account discovery is opt-in via operator-signed exports of `{prefix}.discover.>`; bridge deployments in separate clusters still connect to one Account per tenant. |
 
 ---
@@ -111,7 +111,7 @@ Unary **`message/send`** inherits the gateway **30s deadline** once wired; longe
 
 ## Implementation tracker
 
-See [`./A2A_ARCHITECTURE.md`](architecture.md) §Phase 4 — `a2a-bridge` crate, federated discovery exports, and cross-binding collaboration tests. Suggested ordering places bridge work after auth callout, gateway auth integration, and hardened push DLQ caller attribution.
+See [A2A architecture](architecture.md) §Phase 4 — `a2a-bridge` crate, federated discovery exports, and cross-binding collaboration tests. Suggested ordering places bridge work after auth callout, gateway auth integration, and hardened push DLQ caller attribution.
 
 ---
 

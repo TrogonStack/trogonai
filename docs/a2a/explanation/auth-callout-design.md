@@ -2,7 +2,7 @@
 
 Stable design reference for the **`a2a-auth-callout`** service (`rsworkspace/crates/a2a-auth-callout`). It describes what shipped on the NATS perimeter and how that wiring connects to the rest of the A2A-over-NATS binding.
 
-**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
+**Operator runbook** (pinned versions, env tables, NSC sample config, rotation): [Auth callout deployment](../how-to/operators/auth-callout-deployment.md).
 
 Related decisions: [A2A architecture §Decisions](architecture.md) (auth callout deployment, subject ACL, push DLQ).
 
@@ -46,7 +46,7 @@ Implementation lives in `rsworkspace/crates/a2a-auth-callout/src/wire/` and is p
 | **XKey envelope** | Optional. When `auth_callout.xkey` is set on the server, the request payload may be encrypted with the account XKey; the callout decrypts with `AUTH_CALLOUT_XKEY_SEED` and seals responses using the server **one-time** public key from header `Nats-Server-Xkey`. Request decryption also uses `AUTH_CALLOUT_SERVER_XKEY_PUBLIC` (server **persistent** XKey). |
 | **Denial** | Signed authorization-response JWT **without** `nats.jwt`; `nats.error` carries an opaque [`DenialCategory`](../../../rsworkspace/crates/a2a-auth-callout/src/denial_category.rs) string (never OIDC/x509/verifier exception text). |
 
-Full wire walkthrough, version pins, and sample `nats-server` config: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md`](../how-to/operators/auth-callout-deployment.md).
+Full wire walkthrough, version pins, and sample `nats-server` config: [Auth callout deployment](../how-to/operators/auth-callout-deployment.md).
 
 ### Bridge path (internal JSON)
 
@@ -120,7 +120,7 @@ Inner User JWTs are signed through the pluggable **`SigningKeySource`** trait (`
 
 **Rotation:** `KeyVersion` labels (`current`, `previous`) identify overlap keys. Mint always uses `current()`; `accepted()` returns both during overlap. Minted JWTs carry `kid` (and matching JWS header `kid`). Verifiers select the decoding key from `accepted()` using `kid`, with trial verification only when `kid` is absent.
 
-Operator rotation steps: [`A2A_AUTH_CALLOUT_DEPLOYMENT.md` § Signing key custody](../how-to/operators/auth-callout-deployment.md#signing-key-custody).
+Operator rotation steps: [Auth callout deployment § Signing key custody](../how-to/operators/auth-callout-deployment.md#signing-key-custody).
 
 ---
 
@@ -201,7 +201,7 @@ External client ──OIDC/mTLS/API key──► a2a-auth-callout ($SYS.REQ.USER
 ### Out of scope for this design doc
 
 - SpiceDB client wiring (Phase 1) beyond carrying `data` on the mint
-- `a2a-bridge` HTTPS sidecar production NATS transport — same callout contract, different ingress ([`A2A_BRIDGE_SKETCH.md`](bridge-sketch.md))
+- `a2a-bridge` HTTPS sidecar production NATS transport — same callout contract, different ingress ([Bridge sketch](bridge-sketch.md))
 - Tier 1–3 policy bundles (`a2a-pack`)
 
 ---

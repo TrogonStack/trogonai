@@ -1,14 +1,14 @@
 # A2A over NATS — developer guide
 
-Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md) and the navigation hub [`./README.md`](../README.md).
+Local setup and day-to-day commands for working on the A2A-over-NATS binding in this repository. For architecture and phased delivery, start with [A2A architecture](../explanation/architecture.md) and the navigation hub [`./README.md`](../README.md).
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
-| [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md) | Env vars and CLI flags for every A2A binary and `a2a_nats` embedders |
+| [Runtime env](../reference/runtime-env.md) | Env vars and CLI flags for every A2A binary and `a2a_nats` embedders |
 | [`./README.md`](../README.md) | Full documentation index — operators, gateway, auth sketches |
-| [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md) | Open engineering work and suggested ordering |
+| [A2A architecture](../explanation/architecture.md) | Open engineering work and suggested ordering |
 
 ---
 
@@ -50,7 +50,7 @@ Fix or allow lints locally; do not weaken workspace lint levels for convenience.
 
 ### Run a binary locally
 
-Examples (require a reachable NATS server — see env vars in [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md)):
+Examples (require a reachable NATS server — see env vars in [Runtime env](../reference/runtime-env.md)):
 
 ```bash
 cargo run -p a2a-gateway
@@ -76,7 +76,7 @@ Use this before large refactors that touch shared types in `a2a-nats` or `a2a-pa
 | Crate | Role |
 |-------|------|
 | **`a2a-nats`** | Core protocol binding — subject layout, `Client`, agent `Bridge`, catalog, push dispatch, audit emitter, JetStream helpers. Peer of `mcp-nats`. |
-| **`a2a-gateway`** | NATS ingress on `{prefix}.gateway.>` — opaque forward to `{prefix}.agent.{id}.{method}` today; auth, policy, and audit per [`./A2A_GATEWAY_ROADMAP.md`](../explanation/gateway-roadmap.md). |
+| **`a2a-gateway`** | NATS ingress on `{prefix}.gateway.>` — opaque forward to `{prefix}.agent.{id}.{method}` today; auth, policy, and audit per [Gateway roadmap](../explanation/gateway-roadmap.md). |
 | **`a2a-pack`** | Policy bundle skeleton — AgentCard JSON Schema, future SpiceDB tuples, redaction, and audit schema extensions consumed by the gateway. |
 | **`a2a-nats-stdio`** | MCP-style **stdio** helper — line-delimited JSON-RPC over stdin/stdout using `a2a_nats::Client` (no HTTP). Useful for editor and subprocess integrations. |
 | **`a2a-nats-agent`** | Daemon shell wrapping a user-supplied `A2aHandler`; subscribes on `{prefix}.agent.{agent_id}.*`. |
@@ -89,7 +89,7 @@ Shared infrastructure: **`trogon-nats`** (connection management, test mocks via 
 
 ## Configuration during development
 
-Binaries read NATS connection settings from **`trogon_nats`** env vars (`NATS_URL`, `NATS_CREDS`, …) and A2A-specific knobs from **`a2a_nats::Config`** overrides (`A2A_PREFIX`, timeouts, push DLQ caller segment). The consolidated reference is [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md) — use it instead of hunting per-crate `runtime.rs` files.
+Binaries read NATS connection settings from **`trogon_nats`** env vars (`NATS_URL`, `NATS_CREDS`, …) and A2A-specific knobs from **`a2a_nats::Config`** overrides (`A2A_PREFIX`, timeouts, push DLQ caller segment). The consolidated reference is [Runtime env](../reference/runtime-env.md) — use it instead of hunting per-crate `runtime.rs` files.
 
 Typical local loop:
 
@@ -148,7 +148,7 @@ make smoke-full-down  # compose down -v (smoke-full profile)
 
 ## Where to go next
 
-- **Operators / NSC bootstrap:** [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../how-to/operators/nsc-account-bootstrap.md)
-- **Subject ACL quick reference:** [`./A2A_SUBJECT_ACL_QUICKREF.md`](../reference/subject-acl-quickref.md)
-- **HTTPS interop sidecar (future):** [`./A2A_BRIDGE_SKETCH.md`](../explanation/bridge-sketch.md)
-- **Open work tracker:** [`./A2A_ARCHITECTURE.md`](../explanation/architecture.md)
+- **Operators / NSC bootstrap:** [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md)
+- **Subject ACL quick reference:** [Subject ACL quickref](../reference/subject-acl-quickref.md)
+- **HTTPS interop sidecar (future):** [Bridge sketch](../explanation/bridge-sketch.md)
+- **Open work tracker:** [A2A architecture](../explanation/architecture.md)

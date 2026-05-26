@@ -60,7 +60,7 @@ Stores semi-static AgentCard payloads for discovery. The `a2a-nats-discovery` re
 | `history` | `1` | Only the latest revision per key is retained — sufficient for catalog use |
 | `max_value_size` | `65536` | Covers typical AgentCard payloads |
 
-For client-side watch ergonomics, see [catalog-kv-watch.md](../how-to/catalog/kv-watch.md).
+For client-side watch ergonomics, see [KV watch](../how-to/catalog/kv-watch.md).
 
 ---
 
@@ -101,7 +101,7 @@ Official references:
 - [JetStream — key-value store](https://docs.nats.io/nats-concepts/jetstream/key-value-store)
 - [Configuring JetStream — account resource limits](https://docs.nats.io/running-a-nats-service/configuration/resource_management)
 
-For NSC JWT hierarchy, User ACL templates, and step-by-step bootstrap order, use [A2A_NSC_ACCOUNT_BOOTSTRAP.md](../how-to/operators/nsc-account-bootstrap.md).
+For NSC JWT hierarchy, User ACL templates, and step-by-step bootstrap order, use [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md).
 
 ---
 

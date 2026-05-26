@@ -1,18 +1,18 @@
 # A2A federated discovery — Phase 4 sketch
 
-Engineering sketch for **cross-Account AgentCard discovery** (Phase 4). Federation is **off by default**; operators opt in by signing NATS Account exports of `{prefix}.discover.>` and matching imports. **`a2a-nats::catalog::import_gate::SpiceDbImportGate`** applies **Authzed `CheckBulkPermissions`** at the federated catalog import boundary (`KvCatalogStore::list_cards_gated`); gateway Tier 1 request-path SpiceDB remains future. Not fully implemented in-tree yet — operator export contract and gateway merge are tracked in [`./A2A_ARCHITECTURE.md`](architecture.md) §8 and [`./A2A_ARCHITECTURE.md`](architecture.md) §Phase 4.
+Engineering sketch for **cross-Account AgentCard discovery** (Phase 4). Federation is **off by default**; operators opt in by signing NATS Account exports of `{prefix}.discover.>` and matching imports. **`a2a-nats::catalog::import_gate::SpiceDbImportGate`** applies **Authzed `CheckBulkPermissions`** at the federated catalog import boundary (`KvCatalogStore::list_cards_gated`); gateway Tier 1 request-path SpiceDB remains future. Not fully implemented in-tree yet — operator export contract and gateway merge are tracked in [A2A architecture](architecture.md) §8 and [A2A architecture](architecture.md) §Phase 4.
 
 ## Related links
 
 | Document | Purpose |
 |----------|---------|
-| [`./A2A_ARCHITECTURE.md`](architecture.md) | Master architecture — tenancy model, discovery rationale (KV vs scatter-gather), SpiceDB tuple table, Phase 4 delivery |
-| [`./A2A_ARCHITECTURE.md`](architecture.md) | Phase 4 tracker — federated discovery exports, `a2a-bridge`, cross-binding tests |
-| [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../how-to/operators/nsc-account-bootstrap.md) | Per-Account NSC bootstrap — registrar/discover ACLs; cross-Account export/import is explicitly future |
-| [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md) | Gateway SpiceDB Tier 1 + `BulkCheckPermission` for catalog shaping (same engine gates federated cards) |
-| [`./A2A_BRIDGE_SKETCH.md`](bridge-sketch.md) | HTTPS sidecar — multi-cluster callers still connect to one Account; federation is a discover visibility concern, not a bridge substitute |
-| [`./catalog-kv-watch.md`](../how-to/catalog/kv-watch.md) | Push-driven catalog freshness inside a single Account |
-| [`./A2A_JETSTREAM_ACCOUNT_STREAMS.md`](../reference/jetstream-account-streams.md) | `A2A_AGENT_CARDS` KV — authoritative per Account |
+| [A2A architecture](architecture.md) | Master architecture — tenancy model, discovery rationale (KV vs scatter-gather), SpiceDB tuple table, Phase 4 delivery |
+| [A2A architecture](architecture.md) | Phase 4 tracker — federated discovery exports, `a2a-bridge`, cross-binding tests |
+| [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md) | Per-Account NSC bootstrap — registrar/discover ACLs; cross-Account export/import is explicitly future |
+| [Gateway roadmap](gateway-roadmap.md) | Gateway SpiceDB Tier 1 + `BulkCheckPermission` for catalog shaping (same engine gates federated cards) |
+| [Bridge sketch](bridge-sketch.md) | HTTPS sidecar — multi-cluster callers still connect to one Account; federation is a discover visibility concern, not a bridge substitute |
+| [KV watch](../how-to/catalog/kv-watch.md) | Push-driven catalog freshness inside a single Account |
+| [JetStream account streams](../reference/jetstream-account-streams.md) | `A2A_AGENT_CARDS` KV — authoritative per Account |
 
 ---
 
@@ -122,7 +122,7 @@ Cross-Account NATS JWT export/import proves operator intent at the wire boundary
 
 Trusted operator public keys load from `A2A_DISCOVERY_OPERATOR_KEYS` (`key_id:hexpubkey,...`). When unset, labs use [`AllowAllOperatorSignatureGate`](../../../rsworkspace/crates/a2a-nats-discovery/src/operator_signature_gate.rs). Reference signer: `sign_discovery_export` in [`signed_export/signing.rs`](../../../rsworkspace/crates/a2a-nats-discovery/src/signed_export/signing.rs).
 
-Detailed per-Account ACL templates for registrar/gateway/caller Users: [`./A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../how-to/operators/nsc-account-bootstrap.md). Cross-Account federation steps remain **out of scope** for that bootstrap outline until Phase 4 automation lands.
+Detailed per-Account ACL templates for registrar/gateway/caller Users: [NSC account bootstrap](../how-to/operators/nsc-account-bootstrap.md). Cross-Account federation steps remain **out of scope** for that bootstrap outline until Phase 4 automation lands.
 
 ---
 
@@ -135,7 +135,7 @@ Two distinct read paths coexist in a federated consumer Account:
 | **Local authoritative** | `A2A_AGENT_CARDS` KV in consumer Account | `{prefix}.catalog.register.{agent_id}` → `CatalogRegistrarService` → `KvCatalogStore::put_card` | KV get/watch, `{prefix}.discover.{agent_id}` (local `DiscoverService`) | Native agents for this org |
 | **Imported (federated)** | Publisher Account's KV (via publisher `DiscoverService`) | **None in consumer Account** — read-only via NATS import | Gateway-initiated discover to imported `{prefix}.discover.{agent_id}` on publisher Account | Foreign org agents |
 
-**Design rule:** the consumer Account **does not mirror** federated AgentCards into local KV. Reasons aligned with [`./A2A_ARCHITECTURE.md`](architecture.md) §AgentCard discovery:
+**Design rule:** the consumer Account **does not mirror** federated AgentCards into local KV. Reasons aligned with [A2A architecture](architecture.md) §AgentCard discovery:
 
 - **Single writer per card** — publisher registrar + schema validation remain authoritative; stale replicas in consumer KV would fight KV watch semantics.
 - **Revocation stays operator-simple** — drop import → federated agents disappear without tombstone sweeps in consumer KV.
@@ -150,15 +150,15 @@ When Phase 1 catalog shaping ships on `a2a-gateway`:
 3. **`BulkCheckPermission`** — `user:{sub}` / `view` / `agent:{agent_id}` for each candidate, including federated ids namespaced per `a2a-pack` tuple conventions (e.g. `agent:{publisher_account}:{agent_id}` — exact encoding belongs in bundle).
 4. Return shaped AgentCard list / single-card discover responses; deny or omit unauthorized federated entries.
 
-Local `DiscoverService` in `a2a-nats-discovery` remains a thin KV read for **non-gateway** callers inside the Account; gateway federation merge is an **ingress policy** concern per [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md).
+Local `DiscoverService` in `a2a-nats-discovery` remains a thin KV read for **non-gateway** callers inside the Account; gateway federation merge is an **ingress policy** concern per [Gateway roadmap](gateway-roadmap.md).
 
 ---
 
 ## SpiceDB at the federation boundary
 
-SpiceDB gates the **import side** — only authorized callers see imported AgentCards ([`./A2A_ARCHITECTURE.md`](architecture.md) §8). **`SpiceDbImportGate`** in `a2a-nats::catalog::import_gate` (Authzed gRPC client, env-gated) evaluates federated imports at `list_cards_gated`; the gateway holds a separate org-standard client for Tier 1 ingress ([`./A2A_ARCHITECTURE.md`](architecture.md) §SpiceDB, [`./A2A_GATEWAY_ROADMAP.md`](gateway-roadmap.md) §Coordination with SpiceDB Tier 1).
+SpiceDB gates the **import side** — only authorized callers see imported AgentCards ([A2A architecture](architecture.md) §8). **`SpiceDbImportGate`** in `a2a-nats::catalog::import_gate` (Authzed gRPC client, env-gated) evaluates federated imports at `list_cards_gated`; the gateway holds a separate org-standard client for Tier 1 ingress ([A2A architecture](architecture.md) §SpiceDB, [Gateway roadmap](gateway-roadmap.md) §Coordination with SpiceDB Tier 1).
 
-**Runtime env** (see [`./A2A_RUNTIME_ENV.md`](../reference/runtime-env.md)): `A2A_SPICEDB_ENDPOINT`, `A2A_SPICEDB_TOKEN`, optional `A2A_SPICEDB_ZEDTOKEN_TTL_SECS` (default 30). When unset, the gate is **deny-only** (safe default); labs may inject [`AllowAllImportGate`](../../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/allow_all.rs).
+**Runtime env** (see [Runtime env](../reference/runtime-env.md)): `A2A_SPICEDB_ENDPOINT`, `A2A_SPICEDB_TOKEN`, optional `A2A_SPICEDB_ZEDTOKEN_TTL_SECS` (default 30). When unset, the gate is **deny-only** (safe default); labs may inject [`AllowAllImportGate`](../../../rsworkspace/crates/a2a-nats/src/catalog/import_gate/allow_all.rs).
 
 ### Tuple model (sketch)
 
@@ -187,13 +187,13 @@ Audit: federated discover allow/deny uses the same ingress `AuditEnvelope` shape
 
 ## Interaction with `a2a-bridge`
 
-[`./A2A_BRIDGE_SKETCH.md`](bridge-sketch.md) covers HTTPS clients that re-mint into the **caller's tenant Account**. Federation does not change bridge placement:
+[Bridge sketch](bridge-sketch.md) covers HTTPS clients that re-mint into the **caller's tenant Account**. Federation does not change bridge placement:
 
 - Bridge publishes on `{prefix}.gateway.{agent_id}.{method}` inside the caller Account.
 - Discover for HTTPS clients flows through the same gateway/catalog path as native NATS clients.
 - Multi-cluster bridge deployments still connect **one Account per tenant**; cross-region discover visibility is governed by Account export contracts, not by bridge routing.
 
-Invoke of a **federated** agent may require bridge or gateway to reach the **publisher Account's** gateway (separate export decision — out of scope for discover-only federation). Phase 4 cross-binding tests in [`./A2A_ARCHITECTURE.md`](architecture.md) validate discover + invoke stories once `a2a-bridge` exists.
+Invoke of a **federated** agent may require bridge or gateway to reach the **publisher Account's** gateway (separate export decision — out of scope for discover-only federation). Phase 4 cross-binding tests in [A2A architecture](architecture.md) validate discover + invoke stories once `a2a-bridge` exists.
 
 ---
 
@@ -203,7 +203,7 @@ Invoke of a **federated** agent may require bridge or gateway to reach the **pub
 |------|----------------|
 | KV replication across Accounts | Rejected — imported discover is live request/reply |
 | Federated `{prefix}.gateway.>` / task / push exports | Not part of discover federation; separate operator decision if ever needed |
-| Scatter-gather discovery | Health/`$SRV.PING` tooling is Phase 4 ops, not the catalog primitive ([`./A2A_ARCHITECTURE.md`](architecture.md)) |
+| Scatter-gather discovery | Health/`$SRV.PING` tooling is Phase 4 ops, not the catalog primitive ([A2A architecture](architecture.md)) |
 | Automated `nsc` export/import CI | Future operator tooling; this sketch is the contract |
 | Registrar changes for federation | Publisher `a2a-nats-discovery` unchanged; consumer may run local registrar for native agents only |
 
@@ -211,13 +211,13 @@ Invoke of a **federated** agent may require bridge or gateway to reach the **pub
 
 ## Implementation tracker
 
-See [`./A2A_ARCHITECTURE.md`](architecture.md) §Phase 4:
+See [A2A architecture](architecture.md) §Phase 4:
 
 - [ ] Federated discovery — operator-signed Account export contract for `{prefix}.discover.>`; SpiceDB gating at import boundary
 - [ ] `a2a-bridge` crate (prerequisite for cross-binding collaboration tests)
 - [ ] Cross-binding collaboration tests
 
-**Suggested ordering** (from [`./A2A_ARCHITECTURE.md`](architecture.md)):
+**Suggested ordering** (from [A2A architecture](architecture.md)):
 
 1. Single-Account catalog hardening — registrar ACL, schema validation, gateway `BulkCheckPermission` on **local** agents (Phase 0–1).
 2. Document and test operator export/import contract in staging (two Accounts).

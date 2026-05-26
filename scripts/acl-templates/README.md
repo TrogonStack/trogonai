@@ -6,7 +6,7 @@ Each `.acl` file lists subject lines grouped by intended NSC flag (`--allow-pub`
 
 The automated consumer is [`scripts/a2a-nsc-bootstrap.sh`](../a2a-nsc-bootstrap.sh), which substitutes `A2A_PREFIX` and related env vars rather than rewriting these templates at runtime — keep the meanings aligned when you extend either side.
 
-Operational background: [`docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md`](../../docs/A2A_NSC_ACCOUNT_BOOTSTRAP.md), [`docs/A2A_SUBJECT_ACL_QUICKREF.md`](../../docs/A2A_SUBJECT_ACL_QUICKREF.md).
+Operational background: [`docs/a2a/how-to/operators/nsc-account-bootstrap.md`](../../docs/a2a/how-to/operators/nsc-account-bootstrap.md), [`docs/a2a/reference/subject-acl-quickref.md`](../../docs/a2a/reference/subject-acl-quickref.md).
 
 ## Substitution variables
 

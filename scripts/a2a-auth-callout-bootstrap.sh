@@ -263,7 +263,7 @@ emit_next_steps() {
     log "       cargo build --release -p a2a-auth-callout --manifest-path rsworkspace/Cargo.toml"
     log "       # or: systemctl start a2a-auth-callout  (scripts/a2a-auth-callout.service)"
     log "  5. Provision tenant ACLs: ./scripts/a2a-nsc-bootstrap.sh (per tenant Account)."
-    log "  Reference: docs/A2A_AUTH_CALLOUT_DEPLOYMENT.md"
+    log "  Reference: docs/a2a/how-to/operators/auth-callout-deployment.md"
 }
 
 # ---------------------------------------------------------------------------

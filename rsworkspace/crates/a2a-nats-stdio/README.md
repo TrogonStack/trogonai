@@ -24,6 +24,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tasks/list","params":{}}' | \
 
 ## Environment
 
-Required and shared knobs mirror [`docs/A2A_RUNTIME_ENV.md`](../../../docs/A2A_RUNTIME_ENV.md) (**`a2a-nats-stdio`** section). At minimum, set **`A2A_AGENT_ID`**; NATS URL/auth and timeout overrides follow the shared **`a2a_nats`** / **`trogon_nats`** conventions documented there.
+Required and shared knobs mirror [`docs/a2a/reference/runtime-env.md`](../../../docs/a2a/reference/runtime-env.md) (**`a2a-nats-stdio`** section). At minimum, set **`A2A_AGENT_ID`**; NATS URL/auth and timeout overrides follow the shared **`a2a_nats`** / **`trogon_nats`** conventions documented there.
 
-**Navigation hub:** [`docs/A2A_DOCS_INDEX.md`](../../../docs/A2A_DOCS_INDEX.md).
+**Navigation hub:** [`docs/a2a/README.md`](../../../docs/a2a/README.md).
