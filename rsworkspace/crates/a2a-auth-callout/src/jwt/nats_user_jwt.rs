@@ -90,13 +90,15 @@ pub(crate) fn mint_nats_user_jwt(
     let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
     let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
 
-    let mut user = User::default();
-    user.generic_fields = GenericFields {
-        claim_type: ClaimType::User,
-        version: 2,
-        tags: None,
+    let mut user = User {
+        generic_fields: GenericFields {
+            claim_type: ClaimType::User,
+            version: 2,
+            tags: None,
+        },
+        issuer_account: Some(material.issuer_public()),
+        ..Default::default()
     };
-    user.issuer_account = Some(material.issuer_public());
     let perm_claims = NatsPermissionClaims::from(&claims.nats_permissions);
     user.permissions.permissions.publish.allow = perm_claims.publish.allow.clone();
     user.permissions.permissions.subscribe.allow = perm_claims.subscribe.allow.clone();
@@ -198,7 +200,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
     let decoded_sig = URL_SAFE_NO_PAD
         .decode(parts[2].as_bytes())
         .map_err(|e| JwtError::Decode(e.to_string()))?;
-    let signing_input = token[0..token.len() - parts[2].len() - 1].as_bytes();
+    let signing_input = &token.as_bytes()[0..token.len() - parts[2].len() - 1];
     material
         .issuer_keypair()
         .verify(signing_input, &decoded_sig)
@@ -234,7 +236,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .publish
             .allow
             .into_iter()
-            .map(|s| crate::permissions::SubjectPattern::new(s))
+            .map(crate::permissions::SubjectPattern::new)
             .collect::<Result<_, _>>()
             .map_err(|e| JwtError::Decode(e.to_string()))?,
         subscribe_allow: payload
@@ -242,7 +244,7 @@ fn verify_with_material(token: &str, material: &MintingMaterial) -> Result<UserJ
             .subscribe
             .allow
             .into_iter()
-            .map(|s| crate::permissions::SubjectPattern::new(s))
+            .map(crate::permissions::SubjectPattern::new)
             .collect::<Result<_, _>>()
             .map_err(|e| JwtError::Decode(e.to_string()))?,
     };
