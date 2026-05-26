@@ -96,30 +96,33 @@ pub enum SnapshotDecision {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DecideSnapshot<'a, State, Event> {
+pub struct DecideSnapshot<'a, C: Decider> {
+    /// The command that produced the execution result.
+    pub command: &'a C,
     /// The stream high-watermark after the append that may trigger a snapshot.
     ///
-    /// Use this as the checkpoint position if the policy decides to snapshot.
+    /// Use this as the position for a new snapshot if the policy decides to snapshot.
     /// Do not use it as a gapless event count.
     pub stream_position: StreamPosition,
-    /// Number of events this execution applied since the loaded snapshot.
+    /// Snapshot position before this execution replayed trailing events.
     ///
-    /// Frequency-based policies use this value instead of `stream_position`
-    /// because stream positions may be sparse.
-    pub events_since_snapshot: u64,
-    pub state: &'a State,
-    pub events: &'a Events<Event>,
+    /// `None` means execution started without a snapshot.
+    pub snapshot_position: Option<StreamPosition>,
+    pub state: &'a C::State,
+    pub events: &'a Events<C::Event>,
+    /// Number of persisted stream events read after the snapshot position.
+    pub replayed_event_count: u64,
 }
 
-pub trait SnapshotPolicy<State, Event> {
-    fn decide_snapshot(&self, context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision;
+pub trait SnapshotPolicy<C: Decider> {
+    fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision;
 }
 
 pub trait CommandSnapshotPolicy: Decider
 where
     Self::State: SnapshotType,
 {
-    type SnapshotPolicy: SnapshotPolicy<Self::State, Self::Event>;
+    type SnapshotPolicy: SnapshotPolicy<Self>;
 
     const SNAPSHOT_POLICY: Self::SnapshotPolicy;
 
@@ -131,8 +134,8 @@ where
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoSnapshot;
 
-impl<State, Event> SnapshotPolicy<State, Event> for NoSnapshot {
-    fn decide_snapshot(&self, _context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision {
+impl<C: Decider> SnapshotPolicy<C> for NoSnapshot {
+    fn decide_snapshot(&self, _context: DecideSnapshot<'_, C>) -> SnapshotDecision {
         SnapshotDecision::Skip
     }
 }
@@ -152,9 +155,9 @@ impl FrequencySnapshot {
     }
 }
 
-impl<State, Event> SnapshotPolicy<State, Event> for FrequencySnapshot {
-    fn decide_snapshot(&self, context: DecideSnapshot<'_, State, Event>) -> SnapshotDecision {
-        if context.events_since_snapshot >= self.frequency.get() {
+impl<C: Decider> SnapshotPolicy<C> for FrequencySnapshot {
+    fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision {
+        if context.replayed_event_count + context.events.len() as u64 >= self.frequency.get() {
             SnapshotDecision::Take
         } else {
             SnapshotDecision::Skip
@@ -696,7 +699,7 @@ where
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
-    P: SnapshotPolicy<C::State, C::Event>,
+    P: SnapshotPolicy<C>,
     Spawn: SnapshotTaskScheduler + Send + Sync,
     G: NowV7,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
@@ -743,15 +746,17 @@ where
 
         let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let events_since_snapshot = stream_read.events.len() as u64 + events.len() as u64;
+        let replayed_event_count = stream_read.events.len() as u64;
 
         // Keep the policy decision inline: for frequency policies it is cheaper
         // than spawning, and only the storage mutation needs to be best-effort.
         let snapshot_decision = self.snapshots.policy.decide_snapshot(DecideSnapshot {
+            command: self.command,
             stream_position: append_outcome.stream_position,
-            events_since_snapshot,
+            snapshot_position,
             state: &state,
             events: &events,
+            replayed_event_count,
         });
 
         if snapshot_decision == SnapshotDecision::Take {
@@ -1216,6 +1221,29 @@ mod tests {
             }
 
             serde_json::from_slice(event.payload).map(EventDecodeOutcome::Decoded)
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct RecordSnapshotPosition(Arc<Mutex<Option<Option<StreamPosition>>>>);
+
+    impl<C: Decider> SnapshotPolicy<C> for RecordSnapshotPosition {
+        fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision {
+            *self.0.lock().unwrap() = Some(context.snapshot_position);
+            SnapshotDecision::Skip
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    struct SnapshotOnDisable;
+
+    impl SnapshotPolicy<TestCommand> for SnapshotOnDisable {
+        fn decide_snapshot(&self, context: DecideSnapshot<'_, TestCommand>) -> SnapshotDecision {
+            if matches!(context.command.action, TestAction::Disable) {
+                SnapshotDecision::Take
+            } else {
+                SnapshotDecision::Skip
+            }
         }
     }
 
@@ -2104,7 +2132,7 @@ mod tests {
     }
 
     #[test]
-    fn frequency_snapshot_writes_after_enough_events_since_snapshot() {
+    fn frequency_snapshot_writes_after_enough_replayed_and_emitted_events() {
         const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
         assert_eq!(FrequencySnapshot::new(EVERY_TWO_EVENTS).frequency(), EVERY_TWO_EVENTS);
         let runtime = FakeRuntime {
@@ -2134,7 +2162,7 @@ mod tests {
     }
 
     #[test]
-    fn frequency_snapshot_skips_before_enough_events_since_snapshot() {
+    fn frequency_snapshot_skips_before_enough_replayed_and_emitted_events() {
         const EVERY_TWO_EVENTS: NonZeroU64 = NonZeroU64::new(2).expect("snapshot cadence must be non-zero");
         let runtime = FakeRuntime {
             stream_position: position(2),
@@ -2189,6 +2217,107 @@ mod tests {
         assert_eq!(result.stream_position, position(1));
         assert_eq!(result.state, TestState::Present { enabled: true });
         assert!(runtime.written_snapshots.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn command_aware_snapshot_policy_snapshots_based_on_command_action() {
+        let runtime = FakeRuntime {
+            current_position: Some(position(1)),
+            stream_events: vec![stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            )],
+            stream_position: position(2),
+            ..Default::default()
+        };
+        let disable_command = TestCommand::new("alpha", TestAction::Disable);
+        let register_command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &disable_command)
+                .with_snapshot(test_snapshots(&runtime, SnapshotOnDisable))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            runtime.written_snapshots.lock().unwrap().as_slice(),
+            &[Snapshot::new(position(2), TestState::Present { enabled: false })]
+        );
+
+        runtime.written_snapshots.lock().unwrap().clear();
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &register_command)
+                .with_snapshot(test_snapshots(&runtime, SnapshotOnDisable))
+                .execute(),
+        )
+        .unwrap();
+
+        assert!(runtime.written_snapshots.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn snapshot_position_is_none_without_loaded_snapshot() {
+        let runtime = FakeRuntime {
+            stream_position: position(1),
+            ..Default::default()
+        };
+        let snapshot_position = Arc::new(Mutex::new(None));
+        let command = TestCommand::new("alpha", TestAction::Register);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_snapshot(test_snapshots(
+                    &runtime,
+                    RecordSnapshotPosition(snapshot_position.clone()),
+                ))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(*snapshot_position.lock().unwrap(), Some(None));
+    }
+
+    #[test]
+    fn snapshot_position_matches_loaded_snapshot_position() {
+        let loaded_snapshot_position = position(2);
+        let runtime = FakeRuntime {
+            snapshot: Some(Snapshot::new(
+                loaded_snapshot_position,
+                TestState::Present { enabled: true },
+            )),
+            current_position: Some(position(3)),
+            stream_events: vec![stream_event(
+                3,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            )],
+            stream_position: position(4),
+            ..Default::default()
+        };
+        let snapshot_position = Arc::new(Mutex::new(None));
+        let command = TestCommand::new("alpha", TestAction::Disable);
+
+        let _ = block_on(
+            CommandExecution::new(&runtime, &command)
+                .with_snapshot(test_snapshots(
+                    &runtime,
+                    RecordSnapshotPosition(snapshot_position.clone()),
+                ))
+                .execute(),
+        )
+        .unwrap();
+
+        assert_eq!(*snapshot_position.lock().unwrap(), Some(Some(loaded_snapshot_position)));
     }
 
     #[test]
