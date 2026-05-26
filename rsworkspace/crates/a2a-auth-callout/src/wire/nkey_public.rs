@@ -65,7 +65,7 @@ fn decode_server_auth_request_jwt(token: &str) -> Result<Claims<AuthRequest>, Au
         AuthCalloutError::WireFormat(format!("authorization request issuer NKey: {e}"))
     })?;
     kp.verify(
-        token[0..token.len() - signature.len() - 1].as_bytes(),
+        &token.as_bytes()[0..token.len() - signature.len() - 1],
         &decoded_sig,
     )
     .map_err(|e| AuthCalloutError::WireFormat(format!("authorization request JWT signature: {e}")))?;
