@@ -83,6 +83,11 @@ pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
             }
         };
         let prompt = req["prompt"].as_str().unwrap_or("").to_string();
+        if prompt.is_empty() {
+            let err = serde_json::json!({"error": "missing or empty prompt field"}).to_string();
+            nats.publish(reply, err.into()).await.ok();
+            continue;
+        }
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
         let nats2 = nats.clone();
         let key2 = api_key.clone();

@@ -503,9 +503,9 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         SessionModelState::new(current, self.available_models.clone())
     }
 
-    fn maybe_evict_oldest(sessions: &mut HashMap<String, OpenRouterSession>) {
+    fn maybe_evict_oldest(sessions: &mut HashMap<String, OpenRouterSession>) -> Option<String> {
         if sessions.len() < MAX_SESSIONS {
-            return;
+            return None;
         }
         if let Some(oldest_id) = sessions
             .iter()
@@ -517,7 +517,9 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
                   "openrouter: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
+            return Some(oldest_id);
         }
+        None
     }
 }
 
@@ -800,8 +802,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
         let created_at_iso = now_iso();
+        let evicted_id = {
+            let mut sessions = self.sessions.lock().await;
+            Self::maybe_evict_oldest(&mut sessions)
+        };
+        if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+            store.remove(&self.tenant_id, &evicted).await;
+        }
         let mut sessions = self.sessions.lock().await;
-        Self::maybe_evict_oldest(&mut sessions);
         sessions.insert(
             session_id.clone(),
             OpenRouterSession {
@@ -886,8 +894,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let api_key = self.global_api_key.clone();
                 let system_prompt = self.system_prompt.clone();
 
+                let evicted_id = {
+                    let mut sessions = self.sessions.lock().await;
+                    Self::maybe_evict_oldest(&mut sessions)
+                };
+                if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+                    store.remove(&self.tenant_id, &evicted).await;
+                }
                 let mut sessions = self.sessions.lock().await;
-                Self::maybe_evict_oldest(&mut sessions);
                 sessions.insert(
                     session_id.clone(),
                     OpenRouterSession {
@@ -979,8 +993,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
 
         let new_session_id = Uuid::new_v4().to_string();
+        let evicted_id = {
+            let mut sessions = self.sessions.lock().await;
+            Self::maybe_evict_oldest(&mut sessions)
+        };
+        if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+            store.remove(&self.tenant_id, &evicted).await;
+        }
         let mut sessions = self.sessions.lock().await;
-        Self::maybe_evict_oldest(&mut sessions);
         sessions.insert(
             new_session_id.clone(),
             OpenRouterSession {

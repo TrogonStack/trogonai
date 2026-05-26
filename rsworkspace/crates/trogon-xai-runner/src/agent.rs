@@ -549,9 +549,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     ///
     /// Called before inserting a new session so the map never exceeds
     /// `MAX_SESSIONS`. The evicted session is logged as a warning.
-    fn maybe_evict_oldest(sessions: &mut HashMap<String, XaiSession>) {
+    fn maybe_evict_oldest(sessions: &mut HashMap<String, XaiSession>) -> Option<String> {
         if sessions.len() < MAX_SESSIONS {
-            return;
+            return None;
         }
         if let Some(oldest_id) = sessions
             .iter()
@@ -564,7 +564,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
                   "xai: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
+            return Some(oldest_id);
         }
+        None
     }
 
     /// Build `SessionConfigOption`s for all known server-side tools.
@@ -715,7 +717,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
-        Self::maybe_evict_oldest(&mut sessions);
+        let evicted_id = Self::maybe_evict_oldest(&mut sessions);
+        drop(sessions);
+        if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+            store.remove(&self.tenant_id, &evicted).await;
+        }
+        let mut sessions = self.sessions.lock().await;
         sessions.insert(
             session_id.clone(),
             XaiSession {
@@ -809,8 +816,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 let api_key = self.global_api_key.clone();
                 let system_prompt = self.system_prompt.clone();
 
+                let evicted_id = {
+                    let mut sessions = self.sessions.lock().await;
+                    Self::maybe_evict_oldest(&mut sessions)
+                };
+                if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+                    store.remove(&self.tenant_id, &evicted).await;
+                }
                 let mut sessions = self.sessions.lock().await;
-                Self::maybe_evict_oldest(&mut sessions);
                 sessions.insert(
                     session_id.clone(),
                     XaiSession {
@@ -863,7 +876,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             self.load_session(load_req).await
                 .map_err(|_| not_found(format!("session {session_id} not found")))?;
         }
-        Ok(ResumeSessionResponse::new())
+        let sessions = self.sessions.lock().await;
+        let s = sessions
+            .get(&session_id)
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+        Ok(ResumeSessionResponse::new()
+            .config_options(Self::all_tool_config_options(&s.enabled_tools)))
     }
 
     async fn fork_session(
@@ -899,8 +917,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         let new_session_id = Uuid::new_v4().to_string();
+        let evicted_id = {
+            let mut sessions = self.sessions.lock().await;
+            Self::maybe_evict_oldest(&mut sessions)
+        };
+        if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
+            store.remove(&self.tenant_id, &evicted).await;
+        }
         let mut sessions = self.sessions.lock().await;
-        Self::maybe_evict_oldest(&mut sessions);
         sessions.insert(
             new_session_id.clone(),
             XaiSession {

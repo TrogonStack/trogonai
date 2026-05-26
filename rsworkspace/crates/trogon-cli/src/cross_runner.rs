@@ -1,11 +1,20 @@
 use std::collections::HashMap;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
-use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest};
+use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification};
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
+use tokio::sync::mpsc;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
+
+// LOW-7: Bundle each bridge with its notification receiver in a single tuple.
+// The receiver is never polled here — CrossRunnerSwitcher only calls new_session
+// and ext_method, which never trigger notifications.  Storing them as a pair
+// makes it structurally impossible to drop the receiver without also dropping
+// the bridge (two parallel HashMaps can silently diverge; one map of tuples
+// cannot).
+type BridgeSlot = (ConcreteBridge, mpsc::Receiver<SessionNotification>);
 
 // ── RunnerSwitcher trait ──────────────────────────────────────────────────────
 
@@ -25,7 +34,9 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
     nats: async_nats::Client,
     base_config: Config,
     registry: Registry<S>,
-    bridges: HashMap<String, ConcreteBridge>,
+    /// Each entry is `(Bridge, notification_rx)`.  The receiver is kept alive
+    /// for exactly as long as the bridge; they are inserted and removed together.
+    bridges: HashMap<String, BridgeSlot>,
 }
 
 impl<S: RegistryStore> CrossRunnerSwitcher<S> {
@@ -68,7 +79,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         )
         .map_err(|e| e.to_string())?;
         let messages_json = {
-            let bridge = self.bridges.get(current_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(current_prefix).unwrap();
             bridge
                 .ext_method(ExtRequest::new("session/export", export_params.into()))
                 .await
@@ -78,7 +89,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
 
         // 4. Open new session on target runner (same workspace path)
         let new_session_id = {
-            let bridge = self.bridges.get(&target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
             bridge
                 .new_session(NewSessionRequest::new(cwd))
                 .await
@@ -101,7 +112,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         ))
         .map_err(|e| e.to_string())?;
         {
-            let bridge = self.bridges.get(&target_prefix).unwrap();
+            let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
             if let Err(import_err) = bridge
                 .ext_method(ExtRequest::new("session/import", import_params.into()))
                 .await
@@ -126,10 +137,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         let acp_prefix = AcpPrefix::new(prefix).map_err(|e| e.to_string())?;
         let config = self.base_config.for_prefix(acp_prefix);
         let js = NatsJetStreamClient::new(async_nats::jetstream::new(self.nats.clone()));
-        // LOW-7: The notification receiver is intentionally dropped here. The Bridge only sends
-        // notifications during an active prompt stream; new_session and ext_method never
-        // trigger notifications, so dropping the receiver is safe for this use-case.
-        let (notification_tx, _notification_rx_intentionally_dropped) = tokio::sync::mpsc::channel(1);
+        let (notification_tx, notification_rx) = mpsc::channel(1);
         let bridge = Bridge::new(
             self.nats.clone(),
             js,
@@ -138,7 +146,7 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
             config,
             notification_tx,
         );
-        self.bridges.insert(prefix.to_string(), bridge);
+        self.bridges.insert(prefix.to_string(), (bridge, notification_rx));
         Ok(())
     }
 }

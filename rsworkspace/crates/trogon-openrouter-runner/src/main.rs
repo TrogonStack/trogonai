@@ -61,12 +61,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         current_load: 0,
         metadata: serde_json::json!({ "acp_prefix": &cfg.prefix, "models": model_ids }),
     };
-    registry
-        .register(&cap)
-        .await
-        .map_err(|e| format!("initial registry registration failed: {e}"))?;
-    info!(agent_type = cfg.agent_type, prefix = cfg.prefix, "registered in agent registry");
     let registry_for_agent = registry.clone();
+    let registry_for_register = registry.clone();
+    let agent_type_for_log = cfg.agent_type.clone();
+    let prefix_for_log = cfg.prefix.clone();
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -163,6 +161,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
                     tokio::task::spawn_local(fut);
                 });
+            // LOW-16: register AFTER the ACP subscription is established so
+            // incoming requests are not received before we can handle them.
+            if let Err(e) = registry_for_register.register(&cap).await {
+                return Err(acp_nats_agent::ConnectionError::Subscribe(
+                    format!("initial registry registration failed: {e}").into(),
+                ));
+            }
+            info!(agent_type = agent_type_for_log, prefix = prefix_for_log, "registered in agent registry");
             info!("openrouter-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,
