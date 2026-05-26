@@ -4,7 +4,7 @@ Work tracker for the gap between [`A2A_PLAN.md`](./A2A_PLAN.md) and what is in-t
 
 Every item below is open work. Shipped work lives in `A2A_PLAN.md` §Implementation Status — not duplicated here. All architectural decisions are landed (see `A2A_PLAN.md` §Decisions).
 
-Docker-only end-to-end harness work (compose stack, bootstrap container, smoke test) lives in [`A2A_INFRA_TODO.md`](./A2A_INFRA_TODO.md) — that's the path to validating the JWT plumbing locally before the operator-infra items below need to ship.
+Docker-only end-to-end harness work (compose stack, bootstrap container, smoke tests `make smoke` + `make smoke-full`) is shipped — see `devops/docker/compose/compose.a2a.smoke.yml`, `compose.a2a.full.yml`, and the `a2a-smoke-test` crate.
 
 Partial items state the in-tree code surface and what remains before the item is fully effective. They stay open until the remaining work lands.
 
