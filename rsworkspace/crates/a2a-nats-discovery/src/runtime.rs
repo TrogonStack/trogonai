@@ -2,8 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use a2a_nats::catalog::{
-    CatalogRegistrarService, CatalogRegistrarServiceError, DiscoverService, DiscoverServiceError, KvCatalogStore,
-    catalog_bucket_config,
+    AgentViewGateLayer, CatalogRegistrarService, CatalogRegistrarServiceError, DiscoverService, DiscoverServiceError,
+    KvCatalogStore, catalog_bucket_config,
 };
 use a2a_nats::{A2aPrefix, NatsConfig};
 use tokio_util::sync::CancellationToken;
@@ -45,6 +45,7 @@ pub enum RuntimeError {
     Provision(ProvisionCatalogError),
     Discover(DiscoverServiceError),
     Registrar(CatalogRegistrarServiceError),
+    ViewGate(a2a_nats::catalog::SpiceDbImportGateBuildError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -55,6 +56,7 @@ impl fmt::Display for RuntimeError {
             Self::Provision(error) => write!(f, "catalog bucket provisioning failed: {error}"),
             Self::Discover(error) => write!(f, "{error}"),
             Self::Registrar(error) => write!(f, "{error}"),
+            Self::ViewGate(error) => write!(f, "discovery view gate: {error}"),
         }
     }
 }
@@ -67,6 +69,7 @@ impl std::error::Error for RuntimeError {
             Self::Provision(error) => Some(error),
             Self::Discover(error) => Some(error),
             Self::Registrar(error) => Some(error),
+            Self::ViewGate(error) => Some(error),
         }
     }
 }
@@ -120,8 +123,16 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         shutdown_for_task.cancel();
     });
 
+    let view_gate = AgentViewGateLayer::from_env(env).await.map_err(RuntimeError::ViewGate)?;
+
     let (discover_res, registrar_res) = tokio::join!(
-        DiscoverService::new(prefix.clone(), catalog.clone(), nats_client.clone()).run(shutdown.clone()),
+        DiscoverService::with_view_gate(
+            prefix.clone(),
+            catalog.clone(),
+            nats_client.clone(),
+            view_gate.gate,
+        )
+        .run(shutdown.clone()),
         CatalogRegistrarService::new(prefix.clone(), catalog, nats_client).run(shutdown.clone()),
     );
     discover_res.map_err(RuntimeError::Discover)?;

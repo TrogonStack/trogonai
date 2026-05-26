@@ -16,6 +16,7 @@ pub(crate) mod wire;
 
 pub use error::ClientError;
 pub use event_stream::TypedEventStream;
+pub use crate::catalog::{AgentCardWatchError, AgentCardWatchEvent, AgentCardWatchStream};
 pub use a2a_auth_callout::{caller_jwt_header::CALLER_JWT_HEADER_NAME, MintedUserJwt};
 pub use handle::Client;
 

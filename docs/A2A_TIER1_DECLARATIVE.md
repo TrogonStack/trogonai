@@ -98,7 +98,7 @@ See [`A2A_RUNTIME_ENV.md`](./A2A_RUNTIME_ENV.md) for the full `a2a-gateway` tabl
 | Allow (no match) | `gateway.tier1.declarative.no_match_default_allow` |
 | Layer disabled | `gateway.tier1.declarative.layer_disabled` |
 
-Deny returns JSON-RPC **`-32801`** to the caller reply inbox.
+Deny returns JSON-RPC **`-32803`** (`tier1_declarative_denied`) to the caller reply inbox. SpiceDB and Tier-2 denials remain **`-32801`** (`policy_denied`); Tier-3 engine errors also use **`-32801`**.
 
 ## Example rules
 

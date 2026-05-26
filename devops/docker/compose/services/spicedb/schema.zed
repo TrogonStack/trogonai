@@ -4,6 +4,7 @@ definition agent {
   relation caller: user
   permission invoke = caller
   permission discover = caller
+  permission view = caller
 }
 
 definition task {

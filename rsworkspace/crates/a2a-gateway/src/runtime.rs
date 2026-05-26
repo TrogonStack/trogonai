@@ -4,13 +4,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use a2a_nats::audit::emitter::{AuditEmitter, NatsAuditEmitter};
-use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome};
+use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::constants::DEFAULT_OPERATION_TIMEOUT;
 use a2a_nats::push::PushDlqDedupGate;
 use a2a_nats::{
     gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
-    ingress_invalid_request_response_bytes, NatsConfig,
+    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
+    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes, NatsConfig,
 };
 use a2a_redaction::wasm_bundle_path::WasmBundlePath;
 use a2a_redaction::{Ed25519PublicKey, SkillId};
@@ -24,6 +24,10 @@ use uuid::Uuid;
 use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, Config, ConfigError, config_from_args};
+use crate::gw_ingress_stream::{
+    self, GatewayStreamingIngressConfig, StreamingIngressMethod, StreamingIngressSpawn,
+    gateway_streaming_ingress_enabled,
+};
 use crate::gw_pull_backpressure;
 use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
 
@@ -189,6 +193,9 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
         );
     }
 
+    let streaming_ingress_config = GatewayStreamingIngressConfig::from_env(env);
+    let streaming_ingress_enabled = gateway_streaming_ingress_enabled(env);
+
     if gw_pull_backpressure::gateway_events_pull_enabled(env) {
         let pull_client = client.clone();
         let pull_prefix = config.a2a_prefix.clone();
@@ -227,6 +234,9 @@ pub async fn run_with_config<E: trogon_std::env::ReadEnv>(
                             &policy_stack,
                             &message_caller_identity,
                             caller_identity_policy,
+                            streaming_ingress_enabled,
+                            streaming_ingress_config,
+                            shutdown.clone(),
                             env,
                             msg,
                         )
@@ -257,6 +267,9 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
     policy: &GatewayPolicyStack,
     message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: crate::jwt_caller_identity::GatewayCallerIdentityPolicy,
+    streaming_ingress_enabled: bool,
+    streaming_ingress_config: GatewayStreamingIngressConfig,
+    shutdown: CancellationToken,
     env: &E,
     msg: async_nats::Message,
 ) {
@@ -490,7 +503,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                             routing_outcome = "policy_denied",
                             "gateway tier-1 declarative policy rejected ingress envelope",
                         );
-                        let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                        let Ok(body) = ingress_gateway_declarative_denied_response_bytes(
                             payload.as_ref(),
                             "tier-1 declarative policy rejected envelope",
                         ) else {
@@ -509,13 +522,14 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                 started_wall_ms,
                                 started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
                                 AuditOutcome::Err {
-                                    code: -32_801,
+                                    code: -32_803,
                                     message: "tier-1 declarative policy rejected envelope".into(),
                                 },
                                 Some(payload.as_ref()),
                                 AuditEnvelopeFields {
                                     trace_id: Some(trace_id.clone()),
                                     rules_fired: Some(vec![rule_fired]),
+                                    tier1_decision: Some(Tier1Decision::Deny),
                                     zed_token_snapshot: tier1_zed_token.clone(),
                                     ..Default::default()
                                 },
@@ -690,6 +704,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     rules_fired: Some(vec![format!("gateway.tier3.refused.{}", rule.as_str())]),
                                     rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
                                     refusal_skill: Some(rule.as_str().to_owned()),
+                                    tier3_decision: Some(Tier3Decision::Refuse),
                                     ..Default::default()
                                 },
                             ),
@@ -733,6 +748,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                     trace_id: Some(trace_id.clone()),
                                     rules_fired: Some(vec!["gateway.tier3.engine_error".into()]),
                                     rewrites: tier3_redaction_audit_rewrites(&tier3_rewrites),
+                                    tier3_decision: Some(Tier3Decision::Error),
                                     ..Default::default()
                                 },
                             ),
@@ -775,7 +791,7 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                         .publish_with_reply_and_headers(
                             async_nats::Subject::from(agent_subject.clone().as_str()),
                             reply.clone(),
-                            headers_owned,
+                            headers_owned.clone(),
                             payload.clone(),
                         )
                         .await
@@ -828,6 +844,19 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                 match disposition {
                     ForwardDisposition::Ok => {
                         tracing::Span::current().record("routing_outcome", "forwarded");
+                        if streaming_ingress_enabled {
+                            maybe_spawn_streaming_ingress_pump(
+                                client,
+                                config,
+                                streaming_ingress_config,
+                                shutdown.clone(),
+                                method_dots.as_str(),
+                                &headers_owned,
+                                payload.as_ref(),
+                                reply.clone(),
+                                audit_caller_id.clone(),
+                            );
+                        }
                         spawn_gateway_audit_publish(
                             audit_enabled,
                             client.clone(),
@@ -848,6 +877,11 @@ async fn dispatch_gateway_ingress<E: ReadEnv>(
                                         rewrites,
                                         stream_consumer,
                                         zed_token_snapshot: tier1_zed_token.clone(),
+                                        tier1_decision: tier1
+                                            .is_enabled()
+                                            .then_some(Tier1Decision::Allow),
+                                        tier3_decision: gateway_tier3_redaction_enabled(env)
+                                            .then_some(Tier3Decision::Allow),
                                         ..Default::default()
                                     },
                                     &audit_caller_id,
@@ -1076,6 +1110,7 @@ async fn deny_tier1(
                 AuditEnvelopeFields {
                     trace_id: Some(ctx.trace_id.to_owned()),
                     rules_fired: Some(vec!["gateway.tier1.spicedb_denied".into()]),
+                    tier1_decision: Some(Tier1Decision::Deny),
                     ..Default::default()
                 },
                 ctx.audit_caller_id,
@@ -1271,6 +1306,54 @@ fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
     a2a_nats::extract_request_id(payload).map(|id| id.to_string())
 }
 
+fn maybe_spawn_streaming_ingress_pump(
+    client: &async_nats::Client,
+    config: &Config,
+    streaming_ingress_config: GatewayStreamingIngressConfig,
+    shutdown: CancellationToken,
+    method_dots: &str,
+    headers: &HeaderMap,
+    payload: &[u8],
+    reply: async_nats::Subject,
+    caller_key: String,
+) {
+    let Some(req_id) = gw_ingress_stream::req_id_from_headers_or_payload(headers, payload) else {
+        return;
+    };
+    let spawn = match method_dots {
+        "message.stream" => StreamingIngressSpawn {
+            method: StreamingIngressMethod::MessageStream,
+            req_id,
+            task_id: None,
+            last_seq: None,
+            reply,
+            caller_key,
+        },
+        "tasks.resubscribe" => {
+            let params = json_rpc_params(payload);
+            let Some(task_id) = gw_ingress_stream::task_id_from_resubscribe_params(&params) else {
+                return;
+            };
+            StreamingIngressSpawn {
+                method: StreamingIngressMethod::TasksResubscribe,
+                req_id,
+                task_id: Some(task_id),
+                last_seq: gw_ingress_stream::last_seq_from_resubscribe_params(&params),
+                reply,
+                caller_key,
+            }
+        }
+        _ => return,
+    };
+    gw_ingress_stream::spawn_streaming_ingress_pump(
+        client.clone(),
+        config.a2a_prefix.clone(),
+        streaming_ingress_config,
+        spawn,
+        shutdown,
+    );
+}
+
 async fn reply_error(client: &async_nats::Client, reply: async_nats::Subject, hdrs: HeaderMap, body: Bytes) {
     if let Err(error) = client.publish_with_headers(reply, hdrs, body).await {
         warn!(error=%error, routing_outcome = "error_reply_publish_failed");
@@ -1298,6 +1381,7 @@ fn spawn_gateway_audit_publish(
 mod gateway_dispatch_tests {
     use a2a_nats::agent_id::A2aAgentId;
     use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, gateway_forward_audit_extras};
+    use a2a_nats::ingress_gateway_declarative_denied_response_bytes;
     use a2a_nats::ingress_gateway_policy_denied_response_bytes;
     use a2a_nats::resolve_gateway_ingress_subject;
     use async_nats::HeaderMap;
@@ -1551,13 +1635,13 @@ pattern = "planner"
             }
         );
 
-        let denied_body = ingress_gateway_policy_denied_response_bytes(
+        let denied_body = ingress_gateway_declarative_denied_response_bytes(
             payload,
             "tier-1 declarative policy rejected envelope",
         )
         .expect("deny response");
         let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
-        assert_eq!(denied_json["error"]["code"], -32_801);
+        assert_eq!(denied_json["error"]["code"], -32_803);
 
         let rule_fired = tier1_declarative_audit_rule_fired(&decision);
         assert_eq!(rule_fired, "gateway.tier1.declarative.denied.deny-planner");
