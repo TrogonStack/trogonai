@@ -14,7 +14,7 @@ use axum::Router;
 use tracing::info;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
-use crate::config::ResolvedConfig;
+use crate::config::{ResolvedConfig, SourceIntegration};
 
 pub type SourceId = &'static str;
 
@@ -44,42 +44,71 @@ pub struct MicrosoftGraphPlugin;
 pub struct NotionPlugin;
 pub struct SentryPlugin;
 
+async fn provision_integrations<C, T, F>(
+    integrations: &[SourceIntegration<T>],
+    source: SourceId,
+    client: &C,
+    provision_fn: F,
+) -> Result<(), C::Error>
+where
+    C: JetStreamContext,
+    F: AsyncFn(&C, &T) -> Result<(), C::Error>,
+{
+    for integration in integrations {
+        provision_fn(client, &integration.config).await?;
+        info!(source, integration = integration.id.as_str(), "stream provisioned");
+    }
+    Ok(())
+}
+
+fn mount_integrations<P, S, T, F>(
+    integrations: &[SourceIntegration<T>],
+    mut app: Router,
+    publisher: ClaimCheckPublisher<P, S>,
+    source: SourceId,
+    path_prefix: &str,
+    router_fn: F,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    F: Fn(ClaimCheckPublisher<P, S>, &T) -> Router,
+{
+    for integration in integrations {
+        let path = format!("{}/{}", path_prefix, integration.id);
+        app = app.nest(&path, router_fn(publisher.clone(), &integration.config));
+        info!(
+            source,
+            integration = integration.id.as_str(),
+            path,
+            "mounted source integration"
+        );
+    }
+    app
+}
+
 impl SourcePlugin for GithubPlugin {
     fn id(&self) -> SourceId {
         "github"
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.github {
-            crate::source::github::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.github, self.id(), client, crate::source::github::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.github {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::github::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.github,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::github::router(p, cfg),
+        )
     }
 }
 
@@ -89,15 +118,7 @@ impl SourcePlugin for SlackPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.slack {
-            crate::source::slack::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.slack, self.id(), client, crate::source::slack::provision).await
     }
 
     fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
@@ -133,36 +154,22 @@ impl SourcePlugin for TelegramPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.telegram {
-            crate::source::telegram::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.telegram, self.id(), client, crate::source::telegram::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.telegram {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::telegram::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.telegram,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::telegram::router(p, cfg),
+        )
     }
 }
 
@@ -172,36 +179,22 @@ impl SourcePlugin for TwitterPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.twitter {
-            crate::source::twitter::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.twitter, self.id(), client, crate::source::twitter::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.twitter {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::twitter::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.twitter,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::twitter::router(p, cfg),
+        )
     }
 }
 
@@ -211,36 +204,22 @@ impl SourcePlugin for GitlabPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.gitlab {
-            crate::source::gitlab::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.gitlab, self.id(), client, crate::source::gitlab::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.gitlab {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::gitlab::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.gitlab,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::gitlab::router(p, cfg),
+        )
     }
 }
 
@@ -250,36 +229,28 @@ impl SourcePlugin for IncidentioPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.incidentio {
-            crate::source::incidentio::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(
+            &config.incidentio,
+            self.id(),
+            client,
+            crate::source::incidentio::provision,
+        )
+        .await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.incidentio {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::incidentio::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.incidentio,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::incidentio::router(p, cfg),
+        )
     }
 }
 
@@ -289,36 +260,22 @@ impl SourcePlugin for LinearPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.linear {
-            crate::source::linear::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.linear, self.id(), client, crate::source::linear::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.linear {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::linear::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.linear,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::linear::router(p, cfg),
+        )
     }
 }
 
@@ -328,36 +285,28 @@ impl SourcePlugin for MicrosoftGraphPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.microsoft_graph {
-            crate::source::microsoft_graph::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(
+            &config.microsoft_graph,
+            self.id(),
+            client,
+            crate::source::microsoft_graph::provision,
+        )
+        .await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.microsoft_graph {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::microsoft_graph::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.microsoft_graph,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::microsoft_graph::router(p, cfg),
+        )
     }
 }
 
@@ -367,36 +316,22 @@ impl SourcePlugin for NotionPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.notion {
-            crate::source::notion::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.notion, self.id(), client, crate::source::notion::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.notion {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::notion::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.notion,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::notion::router(p, cfg),
+        )
     }
 }
 
@@ -406,36 +341,22 @@ impl SourcePlugin for SentryPlugin {
     }
 
     async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-        for integration in &config.sentry {
-            crate::source::sentry::provision(client, &integration.config).await?;
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                "stream provisioned"
-            );
-        }
-        Ok(())
+        provision_integrations(&config.sentry, self.id(), client, crate::source::sentry::provision).await
     }
 
-    fn mount<P, S>(&self, mut app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
     where
         P: JetStreamPublisher,
         S: ObjectStorePut,
     {
-        for integration in &config.sentry {
-            let path = format!("{}/{}", self.path_prefix(), integration.id);
-            app = app.nest(
-                &path,
-                crate::source::sentry::router(publisher.clone(), &integration.config),
-            );
-            info!(
-                source = self.id(),
-                integration = integration.id.as_str(),
-                path,
-                "mounted source integration"
-            );
-        }
-        app
+        mount_integrations(
+            &config.sentry,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::sentry::router(p, cfg),
+        )
     }
 }
 
