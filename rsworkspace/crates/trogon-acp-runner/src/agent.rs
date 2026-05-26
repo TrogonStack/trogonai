@@ -478,6 +478,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
         };
 
+        // MED-17: remember the cwd/mode at load time so the final save can tell
+        // which fields this prompt actually changed and re-apply only those on top
+        // of a fresh read (preserving concurrent writes to todos/model/config/etc.).
+        let orig_cwd = state.cwd.clone();
+        let orig_mode = state.mode.clone();
+
         // Capture the first prompt as the session title
         if state.title.is_empty() {
             let title_source = req
@@ -792,27 +798,46 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         if let Some(updated) = final_messages {
-            // Reload to pick up concurrent writes: allowed_tools (permission bridge),
-            // terminal_id (bash tool), etc.
-            let in_memory_title = state.title.clone();
-            if let Ok(fresh) = self.store.load(&session_id).await {
-                state.allowed_tools = fresh.allowed_tools;
-                if state.terminal_id.is_none() {
-                    state.terminal_id = fresh.terminal_id;
-                }
+            // MED-17: compaction and the turn itself are long; meanwhile other ops
+            // write the session KV (permission bridge → allowed_tools, bash →
+            // terminal_id, todo_write → todos, set_session_model/config → model/
+            // config, load_session → mcp_servers, …). The old code only merged
+            // allowed_tools/terminal_id back, so every other concurrent write was
+            // clobbered by this save. Instead, start from the freshest persisted
+            // state and re-apply ONLY the fields this prompt owns.
+            let prompt_title = state.title.clone();
+            let cwd_changed = state.cwd != orig_cwd;
+            let mode_changed = state.mode != orig_mode;
+            let prompt_cwd = state.cwd.clone();
+            let prompt_terminal_cwd = state.terminal_cwd.clone();
+            let prompt_mode = state.mode.clone();
+
+            let mut merged = match self.store.load(&session_id).await {
+                Ok(fresh) => fresh,
+                // Reload failed — fall back to the in-memory state we already hold.
+                Err(_) => state,
+            };
+            merged.messages = updated;
+            merged.updated_at = now_iso8601();
+            // The prompt assigns the title on the first turn; carry it if set.
+            if !prompt_title.is_empty() {
+                merged.title = prompt_title;
             }
-            // Title is set in-memory before the first save; preserve it across the reload.
-            if state.title.is_empty() && !in_memory_title.is_empty() {
-                state.title = in_memory_title;
+            // change_directory during the turn updates cwd + clears terminal_cwd.
+            if cwd_changed {
+                merged.cwd = prompt_cwd;
+                merged.terminal_cwd = prompt_terminal_cwd;
             }
-            state.messages = updated;
-            state.updated_at = now_iso8601();
+            // ExitPlanMode flow flips mode to "plan" mid-turn.
+            if mode_changed {
+                merged.mode = prompt_mode;
+            }
             let new_entries = audit_buf
                 .lock()
                 .map(|mut g| g.drain(..).collect::<Vec<_>>())
                 .unwrap_or_default();
-            append_audit_entries(&mut state.audit_log, new_entries);
-            if let Err(e) = self.store.save(&session_id, &state).await {
+            append_audit_entries(&mut merged.audit_log, new_entries);
+            if let Err(e) = self.store.save(&session_id, &merged).await {
                 warn!(session_id, error = %e, "agent: failed to save session");
             }
         }
