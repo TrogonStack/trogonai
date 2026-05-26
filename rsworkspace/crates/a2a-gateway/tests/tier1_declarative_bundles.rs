@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use a2a_auth_callout::SpiceDbSubject;
+use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
+
 use a2a_gateway::policy::tier1_declarative::{
-    RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeContext, Tier1DeclarativeDecision,
-    Tier1DeclarativeGate, Tier1DeclarativeRuleId, tier1_declarative_audit_rule_fired,
+    FixedTier1Clock, RealTier1DeclarativeGate, Tier1DeclarativeBundle, Tier1DeclarativeContext,
+    Tier1DeclarativeDecision, Tier1DeclarativeGate, Tier1DeclarativeRuleId, tier1_declarative_audit_rule_fired,
 };
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::ingress_gateway_policy_denied_response_bytes;
@@ -168,9 +171,20 @@ fn time_of_day_reference_bundle_loads() {
     assert_eq!(bundle.rules().len(), 1);
 }
 
+fn utc_instant(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> std::time::SystemTime {
+    let datetime = time::Date::from_calendar_date(year, time::Month::try_from(month).unwrap(), day)
+        .unwrap()
+        .with_hms(hour, minute, 0)
+        .unwrap()
+        .assume_utc();
+    UNIX_EPOCH + Duration::from_secs(datetime.unix_timestamp() as u64)
+}
+
 #[test]
-fn time_of_day_after_hours_profile_denies_all_methods() {
-    let gate = RealTier1DeclarativeGate::new(load_reference_bundle("time-of-day.tier1.toml"));
+fn time_of_day_after_hours_profile_denies_outside_window() {
+    let bundle = load_reference_bundle("time-of-day.tier1.toml");
+    let after_hours = utc_instant(2026, 5, 25, 20, 0);
+    let gate = RealTier1DeclarativeGate::with_clock(bundle, Arc::new(FixedTier1Clock::new(after_hours)));
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
@@ -180,16 +194,16 @@ fn time_of_day_after_hours_profile_denies_all_methods() {
     assert_eq!(
         decision,
         Tier1DeclarativeDecision::Deny {
-            rule: Tier1DeclarativeRuleId::new("deny-all-after-hours")
+            rule: Tier1DeclarativeRuleId::new("deny-outside-business-hours")
         }
     );
 }
 
 #[test]
-fn time_of_day_open_hours_proxy_defaults_allow_with_empty_bundle_dir() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("empty bundle dir");
-    let gate = RealTier1DeclarativeGate::new(bundle);
+fn time_of_day_inside_business_hours_defaults_allow() {
+    let bundle = load_reference_bundle("time-of-day.tier1.toml");
+    let open_hours = utc_instant(2026, 5, 25, 10, 0);
+    let gate = RealTier1DeclarativeGate::with_clock(bundle, Arc::new(FixedTier1Clock::new(open_hours)));
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
