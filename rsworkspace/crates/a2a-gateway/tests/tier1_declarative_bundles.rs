@@ -6,7 +6,7 @@ use a2a_gateway::policy::tier1_declarative::{
     Tier1DeclarativeGate, Tier1DeclarativeRuleId, tier1_declarative_audit_rule_fired,
 };
 use a2a_nats::agent_id::A2aAgentId;
-use a2a_nats::ingress_gateway_policy_denied_response_bytes;
+use a2a_nats::ingress_gateway_declarative_denied_response_bytes;
 use a2a_nats::A2aMethod;
 
 fn reference_policies_dir() -> PathBuf {
@@ -93,10 +93,10 @@ fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
     assert!(matches!(decision, Tier1DeclarativeDecision::Deny { .. }));
 
     let denied_body =
-        ingress_gateway_policy_denied_response_bytes(payload, "tier-1 declarative policy rejected envelope")
+        ingress_gateway_declarative_denied_response_bytes(payload, "tier-1 declarative policy rejected envelope")
             .expect("deny response");
     let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
-    assert_eq!(denied_json["error"]["code"], -32_801);
+    assert_eq!(denied_json["error"]["code"], -32_803);
     assert_eq!(
         tier1_declarative_audit_rule_fired(&decision),
         "gateway.tier1.declarative.denied.deny-other-methods"
