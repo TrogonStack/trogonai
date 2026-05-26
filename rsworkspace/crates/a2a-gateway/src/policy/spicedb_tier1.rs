@@ -1,17 +1,18 @@
 use std::fmt;
-use std::hash::Hash;
-use std::sync::{Arc, LazyLock};
-use std::time::Instant;
+use std::sync::Arc;
 
 use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_pack::resource_tuples::{Tier1A2aMethodSlug, Tier1ResourceTupleTable};
 use a2a_nats::catalog::import_gate::{
     BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
-    ZedTokenSnapshot, ZedTokenTtl,
+    ZedTokenTtl,
 };
 use a2a_nats::catalog::import_gate::LiveBulkImportPermissionClient;
 use a2a_nats::catalog::import_gate::parse_subject_reference;
+use a2a_nats::catalog::spicedb_permission::{
+    AgentViewCheckOutcome, AgentViewGate, LiveAgentViewGate, SpiceDbSessionCache, SpiceDbSessionKey,
+};
 use async_trait::async_trait;
 use authzed::v1::check_bulk_permissions_pair;
 use authzed::v1::check_permission_response::Permissionship;
@@ -20,7 +21,6 @@ use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, Relationship,
     RelationshipUpdate, SubjectReference, WriteRelationshipsRequest, ZedToken,
 };
-use moka::future::Cache;
 use serde_json::Value;
 use tonic::Status;
 use trogon_std::env::ReadEnv;
@@ -31,7 +31,6 @@ pub const ENV_TIER1_SPICEDB_TOKEN: &str = "A2A_GATEWAY_TIER1_SPICEDB_TOKEN";
 pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS";
 
 const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
-const SESSION_CACHE_CAPACITY: u64 = 4096;
 
 static TIER1_RESOURCE_TUPLE_TABLE: LazyLock<Tier1ResourceTupleTable> =
     LazyLock::new(Tier1ResourceTupleTable::bundled);
@@ -66,28 +65,8 @@ impl Tier1OwnerTuple {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Tier1SessionKey {
-    sub: String,
-    account: String,
-}
-
-impl Tier1SessionKey {
-    pub fn new(sub: impl Into<String>, account: impl Into<String>) -> Self {
-        Self {
-            sub: sub.into(),
-            account: account.into(),
-        }
-    }
-
-    pub fn sub(&self) -> &str {
-        &self.sub
-    }
-
-    pub fn account(&self) -> &str {
-        &self.account
-    }
-}
+pub type Tier1SessionKey = SpiceDbSessionKey;
+pub type SpiceDbTier1SessionCache = SpiceDbSessionCache;
 
 pub fn a2a_method_from_dots(method_dots: &str) -> Option<A2aMethod> {
     match method_dots {
@@ -129,40 +108,55 @@ fn task_id_from_params(params: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-#[derive(Clone)]
-pub struct SpiceDbTier1SessionCache {
-    inner: Cache<Tier1SessionKey, ZedTokenSnapshot>,
-    ttl: ZedTokenTtl,
-}
-
-impl SpiceDbTier1SessionCache {
-    pub fn new(ttl: ZedTokenTtl) -> Self {
-        Self {
-            inner: Cache::builder().max_capacity(SESSION_CACHE_CAPACITY).build(),
-            ttl,
+pub fn derive_tuple(
+    method: &A2aMethod,
+    agent_id: &A2aAgentId,
+    publisher_account: &str,
+    params: &Value,
+) -> Result<Tier1ResourceTuple, Tier1DeriveError> {
+    match method {
+        A2aMethod::AgentCard => Ok(Tier1ResourceTuple::new(
+            "agent_card",
+            format!("{publisher_account}/{}", agent_id.as_str()),
+            "view",
+        )),
+        A2aMethod::MessageSend | A2aMethod::MessageStream => Ok(Tier1ResourceTuple::new(
+            "agent",
+            agent_id.as_str(),
+            "invoke",
+        )),
+        A2aMethod::TasksList => Ok(Tier1ResourceTuple::new(
+            "agent",
+            agent_id.as_str(),
+            "discover",
+        )),
+        A2aMethod::TasksGet | A2aMethod::TasksResubscribe => {
+            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
+            Ok(Tier1ResourceTuple::new(
+                "task",
+                format!("{}:{task_id}", agent_id.as_str()),
+                "read",
+            ))
         }
-    }
-
-    pub async fn get(&self, key: &Tier1SessionKey) -> Option<ZedTokenSnapshot> {
-        let snapshot = self.inner.get(key).await?;
-        if snapshot.is_fresh(self.ttl.as_duration()) {
-            Some(snapshot)
-        } else {
-            self.inner.invalidate(key).await;
-            None
+        A2aMethod::TasksCancel => {
+            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
+            Ok(Tier1ResourceTuple::new(
+                "task",
+                format!("{}:{task_id}", agent_id.as_str()),
+                "cancel",
+            ))
         }
-    }
-
-    pub async fn insert(&self, key: Tier1SessionKey, token: String) {
-        self.inner
-            .insert(
-                key,
-                ZedTokenSnapshot {
-                    token,
-                    observed_at: Instant::now(),
-                },
-            )
-            .await;
+        A2aMethod::PushNotificationSet
+        | A2aMethod::PushNotificationGet
+        | A2aMethod::PushNotificationList
+        | A2aMethod::PushNotificationDelete => {
+            let task_id = task_id_from_params(params).ok_or(Tier1DeriveError::MissingTaskId)?;
+            Ok(Tier1ResourceTuple::new(
+                "task",
+                format!("{}:{task_id}", agent_id.as_str()),
+                "configure_push",
+            ))
+        }
     }
 }
 
@@ -258,6 +252,7 @@ pub struct Tier1SpiceDbConfig;
 pub struct GatewayTier1Layer {
     pub gate: Arc<dyn SpiceDbTier1Gate>,
     pub owner_emitter: Option<Arc<dyn OwnerTupleEmitter>>,
+    pub discovery_view: Arc<dyn AgentViewGate>,
 }
 
 impl Tier1SpiceDbConfig {
@@ -267,6 +262,7 @@ impl Tier1SpiceDbConfig {
             return Ok(GatewayTier1Layer {
                 gate: Arc::new(NoopSpiceDbTier1Gate),
                 owner_emitter: None,
+                discovery_view: Arc::new(a2a_nats::catalog::spicedb_permission::NoopAgentViewGate),
             });
         }
 
@@ -277,13 +273,14 @@ impl Tier1SpiceDbConfig {
         };
 
         let client = LiveBulkImportPermissionClient::connect(&endpoint, &token).await?;
-        let live = Arc::new(LiveSpiceDbTier1Gate::new(
-            Arc::new(client),
-            SpiceDbTier1SessionCache::new(ttl),
-        ));
+        let session_cache = SpiceDbTier1SessionCache::new(ttl);
+        let client = Arc::new(client);
+        let discovery_view = Arc::new(LiveAgentViewGate::new(client.clone(), session_cache.clone()));
+        let live = Arc::new(LiveSpiceDbTier1Gate::new(client, session_cache));
         Ok(GatewayTier1Layer {
             gate: live.clone(),
             owner_emitter: Some(live),
+            discovery_view,
         })
     }
 }
@@ -306,6 +303,13 @@ pub trait SpiceDbTier1Gate: Send + Sync {
         principal: &SpiceDbPrincipal,
         tuple: &Tier1ResourceTuple,
     ) -> Tier1AuthorizeOutcome;
+
+    async fn bulk_check_agent_view(
+        &self,
+        session: &Tier1SessionKey,
+        principal: &SpiceDbPrincipal,
+        agent_ids: &[A2aAgentId],
+    ) -> Vec<AgentViewCheckOutcome>;
 }
 
 #[async_trait]
@@ -330,18 +334,30 @@ impl SpiceDbTier1Gate for NoopSpiceDbTier1Gate {
     ) -> Tier1AuthorizeOutcome {
         Tier1AuthorizeOutcome::Allowed { zed_token: None }
     }
+
+    async fn bulk_check_agent_view(
+        &self,
+        _session: &Tier1SessionKey,
+        _principal: &SpiceDbPrincipal,
+        agent_ids: &[A2aAgentId],
+    ) -> Vec<AgentViewCheckOutcome> {
+        vec![AgentViewCheckOutcome::Allowed; agent_ids.len()]
+    }
 }
 
 pub struct LiveSpiceDbTier1Gate {
     client: Arc<dyn BulkImportPermissionCheck>,
     session_cache: SpiceDbTier1SessionCache,
+    view_gate: LiveAgentViewGate,
 }
 
 impl LiveSpiceDbTier1Gate {
     pub fn new(client: Arc<dyn BulkImportPermissionCheck>, session_cache: SpiceDbTier1SessionCache) -> Self {
+        let view_gate = LiveAgentViewGate::new(client.clone(), session_cache.clone());
         Self {
             client,
             session_cache,
+            view_gate,
         }
     }
 }
@@ -484,6 +500,17 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
 
         Tier1AuthorizeOutcome::Allowed { zed_token }
     }
+
+    async fn bulk_check_agent_view(
+        &self,
+        session: &Tier1SessionKey,
+        principal: &SpiceDbPrincipal,
+        agent_ids: &[A2aAgentId],
+    ) -> Vec<AgentViewCheckOutcome> {
+        self.view_gate
+            .bulk_check_agent_view(session, principal, agent_ids)
+            .await
+    }
 }
 
 fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
@@ -496,30 +523,7 @@ fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
 }
 
 pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_account: &str) -> Option<Tier1SessionKey> {
-    let sub = principal
-        .0
-        .get("sub")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            principal
-                .0
-                .get("spicedb_subject")
-                .and_then(Value::as_str)
-                .and_then(parse_subject_id)
-        })?;
-
-    let account = principal
-        .0
-        .get("session_account")
-        .or_else(|| principal.0.get("account"))
-        .or_else(|| principal.0.get("aud"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback_account);
-
-    Some(Tier1SessionKey::new(sub, account))
+    a2a_nats::catalog::spicedb_permission::session_from_principal(principal, fallback_account)
 }
 
 pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
@@ -536,24 +540,6 @@ fn spicedb_tier1_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<
         .get("spicedb_subject")
         .and_then(serde_json::Value::as_str)
         .and_then(parse_subject_reference)
-}
-
-fn parse_subject_id(raw: &str) -> Option<String> {
-    if let Some((_object_type, object_id)) = raw.split_once('/')
-        && !object_id.is_empty()
-    {
-        return Some(object_id.to_owned());
-    }
-    if let Some((_object_type, object_id)) = raw.split_once(':')
-        && !object_id.is_empty()
-    {
-        return Some(object_id.to_owned());
-    }
-    if !raw.is_empty() {
-        Some(raw.to_owned())
-    } else {
-        None
-    }
 }
 
 pub fn owner_tuple_for_message_send(
@@ -701,6 +687,7 @@ mod tests {
         let layer = Tier1SpiceDbConfig::from_env(&env).await.expect("disabled env");
         assert!(!layer.gate.is_enabled());
         assert!(layer.owner_emitter.is_none());
+        assert!(!layer.discovery_view.is_enabled());
     }
 
     #[tokio::test]
