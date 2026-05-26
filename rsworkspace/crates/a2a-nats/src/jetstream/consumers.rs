@@ -39,18 +39,32 @@ pub fn gateway_events_consumer(
 }
 
 pub fn stream_events_consumer(prefix: &A2aPrefix, req_id: &ReqId) -> Config {
+    gateway_stream_events_consumer(prefix, req_id, 256)
+}
+
+pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, req_id: &ReqId, max_ack_pending: i64) -> Config {
     let pfx = prefix.as_str();
     Config {
         filter_subject: format!("{pfx}.task.*.events.{req_id}"),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
+        max_ack_pending,
         inactive_threshold: INACTIVE_THRESHOLD,
         ..Default::default()
     }
 }
 
 pub fn resubscribe_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId, last_seq: u64) -> Config {
+    resubscribe_consumer_with_flow(prefix, task_id, last_seq, 256)
+}
+
+pub fn resubscribe_consumer_with_flow(
+    prefix: &A2aPrefix,
+    task_id: &A2aTaskId,
+    last_seq: u64,
+    max_ack_pending: i64,
+) -> Config {
     let pfx = prefix.as_str();
     Config {
         filter_subject: format!("{pfx}.task.{task_id}.events.*"),
@@ -59,6 +73,7 @@ pub fn resubscribe_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId, last_seq: u
         },
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
+        max_ack_pending,
         inactive_threshold: INACTIVE_THRESHOLD,
         ..Default::default()
     }
