@@ -39,6 +39,14 @@ struct CompactorMessage {
     content: Vec<Value>,
 }
 
+/// A response from the compactor service.
+///
+/// Unifies the success and error shapes into one struct so that a response that
+/// happens to contain an `error` field (e.g. a partial-success diagnostic) is
+/// never misinterpreted as a failure. The rule is:
+///   - `compacted == true`  → success; use `messages`, `tokens_before`, `tokens_after`
+///   - `compacted == false` AND `error.is_some()` → failure; surface the error message
+///   - `compacted == false` AND `error.is_none()` → compaction was skipped (short history)
 #[derive(Deserialize)]
 struct CompactResponse {
     messages: Vec<CompactorMessage>,
@@ -48,21 +56,9 @@ struct CompactResponse {
     tokens_before: usize,
     #[serde(default)]
     tokens_after: usize,
-}
-
-#[derive(Deserialize)]
-struct CompactErrorResponse {
-    error: String,
-}
-
-fn portable_to_compactor(messages: &[PortableMessage]) -> Vec<CompactorMessage> {
-    messages
-        .iter()
-        .map(|m| CompactorMessage {
-            role: m.role.clone(),
-            content: vec![json!({ "type": "text", "text": m.text })],
-        })
-        .collect()
+    /// Present only on failure responses; ignored when `compacted` is `true`.
+    #[serde(default)]
+    error: Option<String>,
 }
 
 fn compactor_content_to_text(content: &[Value]) -> String {
@@ -85,6 +81,89 @@ fn compactor_to_portable(messages: &[CompactorMessage]) -> Vec<PortableMessage> 
             text: compactor_content_to_text(&m.content),
         })
         .collect()
+}
+
+// ── MED-27: structure-preserving compaction (V2) ───────────────────────────────
+//
+// The compactor keeps a recent tail of messages verbatim, so if we send the
+// structured V2 blocks (instead of flattening to text) it returns the recent
+// tool_use/tool_result blocks with their pairing intact. We map between the V2
+// `PortableBlock` shape and the compactor's `ContentBlock` JSON shape (which use
+// different field names) on the way out and back.
+
+/// Map a V2 export block to the compactor's `ContentBlock` JSON shape.
+fn v2_block_to_compactor_json(block: &trogon_runner_tools::PortableBlock) -> Value {
+    use trogon_runner_tools::PortableBlock as B;
+    match block {
+        B::Text { text } => json!({ "type": "text", "text": text }),
+        B::ToolUse { id, name, input_summary } => json!({
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            // The compactor's `input` is an arbitrary JSON value; the V2 export
+            // already carries a summarized string, so pass it as a string value.
+            "input": input_summary,
+        }),
+        B::ToolResult { id, output_summary } => json!({
+            "type": "tool_result",
+            "tool_use_id": id,
+            "content": output_summary,
+        }),
+        B::Thinking { text } => json!({ "type": "thinking", "thinking": text }),
+    }
+}
+
+/// Map a compactor `ContentBlock` JSON value back to a V2 export block.
+fn compactor_json_to_v2_block(v: &Value) -> Option<trogon_runner_tools::PortableBlock> {
+    use trogon_runner_tools::PortableBlock as B;
+    let value_to_summary = |val: Option<&Value>| -> String {
+        match val {
+            Some(Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => String::new(),
+        }
+    };
+    match v.get("type").and_then(|t| t.as_str())? {
+        "text" => Some(B::Text {
+            text: v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        }),
+        "tool_use" => Some(B::ToolUse {
+            id: v.get("id").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            name: v.get("name").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            input_summary: value_to_summary(v.get("input")),
+        }),
+        "tool_result" => Some(B::ToolResult {
+            id: v.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            output_summary: v.get("content").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        }),
+        "thinking" => Some(B::Thinking {
+            text: v.get("thinking").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        }),
+        // The text-only V2 block type carries images as a placeholder.
+        "image" => Some(B::Text { text: "[image]".to_string() }),
+        _ => None,
+    }
+}
+
+/// Build the structured compactor request messages from a parsed export.
+fn export_to_compactor(parsed: &trogon_runner_tools::ParsedExport) -> Vec<CompactorMessage> {
+    match parsed {
+        trogon_runner_tools::ParsedExport::V1(v1) => v1
+            .iter()
+            .map(|m| CompactorMessage {
+                role: m.role.clone(),
+                content: vec![json!({ "type": "text", "text": m.text })],
+            })
+            .collect(),
+        trogon_runner_tools::ParsedExport::V2(v2) => v2
+            .messages
+            .iter()
+            .map(|m| CompactorMessage {
+                role: m.role.clone(),
+                content: m.blocks.iter().map(v2_block_to_compactor_json).collect(),
+            })
+            .collect(),
+    }
 }
 
 async fn ext_method<N: NatsClient>(
@@ -593,25 +672,14 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 ext_method(nats, &prefix, "session/export", export_params).await?;
             let export_str = serde_json::to_string(&export_val)
                 .map_err(|e| anyhow::anyhow!("session/export encode error: {e}"))?;
-            let portable: Vec<PortableMessage> =
-                match trogon_runner_tools::parse_export_json(&export_str)
-                    .map_err(|e| anyhow::anyhow!("session/export returned invalid messages: {e}"))?
-                {
-                    trogon_runner_tools::ParsedExport::V1(v1) => v1
-                        .into_iter()
-                        .map(|m| PortableMessage { role: m.role, text: m.text })
-                        .collect(),
-                    trogon_runner_tools::ParsedExport::V2(v2) => v2
-                        .messages
-                        .iter()
-                        .map(|m| {
-                            let pm = trogon_runner_tools::v2_message_to_text(m);
-                            PortableMessage { role: pm.role, text: pm.text }
-                        })
-                        .collect(),
-                };
+            let parsed = trogon_runner_tools::parse_export_json(&export_str)
+                .map_err(|e| anyhow::anyhow!("session/export returned invalid messages: {e}"))?;
+            // MED-27: send STRUCTURED messages so the compactor preserves the recent
+            // tail's tool_use/tool_result pairing instead of flattening to text.
+            let is_v2 = matches!(parsed, trogon_runner_tools::ParsedExport::V2(_));
+            let compactor_msgs = export_to_compactor(&parsed);
 
-            if portable.is_empty() {
+            if compactor_msgs.is_empty() {
                 return Ok(CompactResult {
                     compacted: false,
                     tokens_before: 0,
@@ -620,7 +688,7 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             }
 
             let compact_payload =
-                serde_json::to_vec(&json!({ "messages": portable_to_compactor(&portable) }))?;
+                serde_json::to_vec(&json!({ "messages": compactor_msgs }))?;
             let bytes = tokio::time::timeout(
                 COMPACT_TIMEOUT,
                 nats.request_bytes(COMPACT_SUBJECT.to_string(), compact_payload.into()),
@@ -634,16 +702,16 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             })?
             .map_err(|e| anyhow::anyhow!("NATS error calling compactor: {e}"))?;
 
-            // Parse as the success type first. Only treat it as an error when `compacted` is
-            // absent/false AND an `error` field is present — a successful CompactResponse may
-            // also contain an `error` key and must not be misread as a failure.
+            // A single parse into `CompactResponse` handles both success and error shapes.
+            // `error` is only surfaced when `compacted == false`; a successful response that
+            // happens to include an `error` diagnostic field is never misread as a failure.
             let resp: CompactResponse = serde_json::from_slice(&bytes)
                 .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
 
-            if !resp.compacted
-                && let Ok(err) = serde_json::from_slice::<CompactErrorResponse>(&bytes)
-            {
-                return Err(anyhow::anyhow!("compactor error: {}", err.error));
+            if !resp.compacted {
+                if let Some(err_msg) = &resp.error {
+                    return Err(anyhow::anyhow!("compactor error: {}", err_msg));
+                }
             }
 
             let result = CompactResult {
@@ -653,9 +721,36 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             };
 
             if resp.compacted {
+                // MED-27: re-import preserving structure. For a V2 session rebuild a
+                // V2 export (so tool_use/tool_result blocks survive); for a V1 session
+                // keep the text-only array shape.
+                let messages_val = if is_v2 {
+                    let v2_msgs: Vec<Value> = resp
+                        .messages
+                        .iter()
+                        .map(|m| {
+                            let blocks: Vec<trogon_runner_tools::PortableBlock> = m
+                                .content
+                                .iter()
+                                .filter_map(compactor_json_to_v2_block)
+                                .collect();
+                            json!({
+                                "version": trogon_runner_tools::EXPORT_VERSION_V2,
+                                "role": m.role,
+                                "blocks": blocks,
+                            })
+                        })
+                        .collect();
+                    json!({
+                        "version": trogon_runner_tools::EXPORT_VERSION_V2,
+                        "messages": v2_msgs,
+                    })
+                } else {
+                    json!(compactor_to_portable(&resp.messages))
+                };
                 let import_params = json!({
                     "sessionId": session_id,
-                    "messages": compactor_to_portable(&resp.messages),
+                    "messages": messages_val,
                 });
                 ext_method(nats, &prefix, "session/import", import_params).await?;
             }
