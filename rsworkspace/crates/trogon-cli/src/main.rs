@@ -155,7 +155,10 @@ async fn main() -> anyhow::Result<()> {
         let nats_config = NatsConfig::new(vec![args.nats_url.clone()], NatsAuth::None);
         let acp_config = Config::new(acp_prefix, nats_config);
         let js = async_nats::jetstream::new(nats.clone());
-        let reg_store = trogon_registry::provision(&js).await
+        // MED-36: use a store that re-provisions the (in-memory) AGENT_REGISTRY
+        // bucket on failure, so /model and /status keep working after a NATS server
+        // restart instead of erroring until the CLI is restarted.
+        let reg_store = trogon_registry::ReprovisioningStore::new(js).await
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();

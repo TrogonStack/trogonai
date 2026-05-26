@@ -54,12 +54,14 @@ pub mod capability;
 pub mod error;
 pub mod provision;
 pub mod registry;
+pub mod reprovisioning_store;
 pub mod store;
 
 pub use capability::AgentCapability;
 pub use error::RegistryError;
 pub use provision::{BUCKET_NAME, ENTRY_TTL, HEARTBEAT_INTERVAL, provision};
 pub use registry::Registry;
+pub use reprovisioning_store::ReprovisioningStore;
 pub use store::RegistryStore;
 
 /// Convenience alias for the production registry backed by NATS KV.
