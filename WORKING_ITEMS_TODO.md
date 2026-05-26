@@ -16,9 +16,9 @@ Source: `A2A_PLAN.md` §Implementation Status — Shipped crates / `a2a-pack`.
 
 Source: smoke-full assertions (`a2a-smoke-test --profile full`) currently fall back to `rules_fired` because dedicated decision fields don't exist.
 
-- [ ] **`tier1_decision` field on `AuditEnvelope`** — `allow` / `deny` per Tier-1 evaluation (SpiceDB + declarative), populated from `a2a-gateway/src/policy/`.
-- [ ] **`tier3_decision` field on `AuditEnvelope`** — `allow` / `refuse` / `error` per Tier-3 evaluation.
-- [ ] **Distinct JSON-RPC error code for declarative `agent.card` deny** — today the path returns `-32801` (same code as engine error). Either carve out a new code per `docs/A2A_TIER1_DECLARATIVE.md` or document why `-32801` is the contract.
+- [x] **`tier1_decision` field on `AuditEnvelope`** — `allow` / `deny` per Tier-1 evaluation (SpiceDB + declarative), populated from `a2a-gateway/src/policy/`.
+- [x] **`tier3_decision` field on `AuditEnvelope`** — `allow` / `refuse` / `error` per Tier-3 evaluation.
+- [x] **Distinct JSON-RPC error code for declarative `agent.card` deny** — declarative deny uses **`-32803`**; documented in `docs/A2A_TIER1_DECLARATIVE.md` (SpiceDB/Tier-2/Tier-3 engine remain **`-32801`**).
 
 Once these land, the `a2a-smoke-test --profile full` assertions can read these fields directly instead of inferring from `rules_fired`.
 
@@ -26,13 +26,13 @@ Once these land, the `a2a-smoke-test --profile full` assertions can read these f
 
 Source: `A2A_PLAN.md` Phase 1 Pending.
 
-- [ ] **Discovery shaping via `BulkCheckPermission`** — on `a2a.discover.*` response, filter AgentCards by caller permission. Tuple shape per `A2A_PLAN.md` §SpiceDB-resource-tuples (`view` on `agent:{agent_id}`).
+- [x] **Discovery shaping via `BulkCheckPermission`** — on `a2a.discover.*` response, filter AgentCards by caller permission. Tuple shape per `A2A_PLAN.md` §SpiceDB-resource-tuples (`view` on `agent:{agent_id}`).
 
 ## Streaming back-pressure
 
 Source: `A2A_PLAN.md` §Decisions — Streaming back-pressure.
 
-- [ ] **Gateway ingress pipe** — the egress pull consumer ships env-gated (`A2A_GATEWAY_EVENTS_PULL`); the full ingress pipe (gateway → agent flow control + agent publish never-blocks invariant) is not wired end-to-end.
+- [x] **Gateway ingress pipe** — env-gated (`A2A_GATEWAY_STREAMING_INGRESS=on`) ephemeral pull consumers with flow control forward task events to the caller reply inbox after `message.stream` / `tasks.resubscribe` forward (see `a2a-gateway/src/gw_ingress_stream.rs`).
 
 ## Tier-1 declarative
 
@@ -44,7 +44,7 @@ Source: `a2a-pack/policies/time-of-day.tier1.toml` ships an approximation.
 
 Source: `A2A_PLAN.md` §Intentional simplifications — agent catalog.
 
-- [ ] **KV watch ergonomics for clients** — wrap `async-nats` KV watch in an A2A-shaped helper so discovery clients can subscribe to AgentCard changes without re-implementing watch semantics.
+- [x] **KV watch ergonomics for clients** — wrap `async-nats` KV watch in an A2A-shaped helper so discovery clients can subscribe to AgentCard changes without re-implementing watch semantics.
 
 ## Doc cleanup
 
