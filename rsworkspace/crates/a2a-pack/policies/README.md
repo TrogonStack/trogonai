@@ -15,7 +15,7 @@ SpiceDB Tier-1 (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) remains the authz floor; de
 
 | File | Denies | Notes |
 |------|--------|-------|
-| `per-method-allowlist.tier1.toml` | Any `agent_method` other than `message/send`, `tasks/get`, `tasks/list` | Catch-all `agent_method *` deny at priority 100 |
+| `per-method-allowlist.tier1.toml` | Any `agent_method` outside the common-caller allowlist (`message/send`, `message/stream`, `tasks/get`, `tasks/list`, `tasks/pushNotificationConfig/set`) | Catch-all `agent_method *` deny at priority 100 |
 | `per-agent-allowlist.tier1.toml` | `caller_subject` not in `user/alice`, `user/bob`, `service/internal-*` | Maps gateway caller slug → `user/{slug}` SpiceDB subject |
 | `time-of-day.tier1.toml` | Requests outside Mon–Fri 09:00–17:00 UTC | `time_of_day` match with pattern `Mon-Fri\|09:00-17:00\|UTC` and `negate = true` |
 
