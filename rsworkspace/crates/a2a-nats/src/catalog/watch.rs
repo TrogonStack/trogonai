@@ -10,7 +10,7 @@ use crate::agent_id::A2aAgentId;
 pub enum AgentCardWatchEvent {
     Put {
         agent_id: A2aAgentId,
-        card: a2a_types::AgentCard,
+        card: Box<a2a_types::AgentCard>,
         revision: u64,
     },
     Delete {
@@ -95,7 +95,7 @@ fn map_kv_entry(entry: kv::Entry) -> Result<AgentCardWatchEvent, AgentCardWatchE
                 serde_json::from_value(parsed).map_err(AgentCardWatchError::Deserialize)?;
             Ok(AgentCardWatchEvent::Put {
                 agent_id,
-                card,
+                card: Box::new(card),
                 revision,
             })
         }
