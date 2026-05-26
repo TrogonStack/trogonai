@@ -9,7 +9,7 @@ Bucket name: **`A2A_AGENT_CARDS`** — see `./rsworkspace/crates/a2a-nats/src/ca
 - [Subject ACL quick reference](../../reference/subject-acl-quickref.md)
 - [NSC account bootstrap](../operators/nsc-account-bootstrap.md)
 - [Runtime environment](../../reference/runtime-env.md)
-- [A2A docs index](../../../A2A_DOCS_INDEX.md)
+- [A2A docs index](../../README.md)
 
 ## Pattern
 
