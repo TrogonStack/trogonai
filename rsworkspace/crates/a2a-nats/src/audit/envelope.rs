@@ -59,6 +59,21 @@ pub enum AuditOutcome {
     Err { code: i32, message: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier1Decision {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier3Decision {
+    Allow,
+    Refuse,
+    Error,
+}
+
 /// Optional forward-compat fields for [`AuditEnvelope`].
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct AuditEnvelopeFields {
@@ -78,6 +93,10 @@ pub struct AuditEnvelopeFields {
     pub caller_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier1_decision: Option<Tier1Decision>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier3_decision: Option<Tier3Decision>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
