@@ -68,6 +68,8 @@ jobs:
         working-directory: rsworkspace
 
       - name: Coverage report and gate
+        # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
+        # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
         uses: insightsengineering/coverage-action@v3
         with:
           path: rsworkspace/coverage.xml
