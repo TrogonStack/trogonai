@@ -3882,9 +3882,9 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
 }
 
 /// After `MAX_TOOL_ROUNDS` (10) bash executions, the next bash call must cause
-/// the agent to return `StopReason::Cancelled` without executing the tool.
+/// the agent to return `StopReason::MaxTurnRequests` without executing the tool.
 #[tokio::test]
-async fn max_tool_rounds_cap_returns_cancelled() {
+async fn max_tool_rounds_cap_returns_max_turn_requests() {
     use agent_client_protocol::{
         CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
         WaitForTerminalExitResponse,
@@ -3968,8 +3968,8 @@ async fn max_tool_rounds_cap_returns_cancelled() {
 
     assert_eq!(
         resp.stop_reason,
-        StopReason::Cancelled,
-        "hitting MAX_TOOL_ROUNDS must return Cancelled"
+        StopReason::MaxTurnRequests,
+        "hitting MAX_TOOL_ROUNDS must return MaxTurnRequests"
     );
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 11, "expected exactly 11 HTTP calls (10 bash + 1 cap hit)");
