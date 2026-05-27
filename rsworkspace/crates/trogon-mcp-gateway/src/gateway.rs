@@ -442,18 +442,19 @@ async fn publish_audit_inner(
     gateway_identity: &GatewayIdentity,
     request_id: Option<serde_json::Value>,
 ) {
-    let audit_envelope = AuditEnvelope {
-        subject_in: subject_in.to_string(),
-        subject_out: subject_out.to_string(),
+    let audit_envelope = AuditEnvelope::new(
+        subject_in.to_string(),
+        subject_out.to_string(),
         outcome,
         direction,
-        jsonrpc_method: jsonrpc_method.to_string(),
-        tenant: gateway_identity.tenant.clone(),
-        caller_sub: gateway_identity.caller_sub.clone(),
-        jwt_issuer: gateway_identity.issuer.clone(),
-        identity_source: gateway_identity.source,
+        jsonrpc_method.to_string(),
+        gateway_identity.tenant.clone(),
+        gateway_identity.caller_sub.clone(),
+        gateway_identity.issuer.clone(),
+        gateway_identity.source,
         request_id,
-    };
+        None,
+    );
     let method_root = audit::jsonrpc_method_root(jsonrpc_method);
     let audit_subject = audit::audit_publish_subject(prefix, outcome, direction, &method_root);
     audit::publish_audit(jetstream, audit_subject, &audit_envelope, std::time::Duration::from_secs(5)).await;
@@ -488,18 +489,19 @@ async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
         )
         .await;
     }
-    let envelope = AuditEnvelope {
-        subject_in: params.msg.subject.to_string(),
-        subject_out: params.backend_subject.to_string(),
-        outcome: params.audit_outcome,
-        direction: "request",
-        jsonrpc_method: params.jsonrpc_method.to_string(),
-        tenant: params.gateway_identity.tenant.clone(),
-        caller_sub: params.gateway_identity.caller_sub.clone(),
-        jwt_issuer: params.gateway_identity.issuer.clone(),
-        identity_source: params.gateway_identity.source,
-        request_id: params.request_id.clone(),
-    };
+    let envelope = AuditEnvelope::new(
+        params.msg.subject.to_string(),
+        params.backend_subject.to_string(),
+        params.audit_outcome,
+        "request",
+        params.jsonrpc_method.to_string(),
+        params.gateway_identity.tenant.clone(),
+        params.gateway_identity.caller_sub.clone(),
+        params.gateway_identity.issuer.clone(),
+        params.gateway_identity.source,
+        params.request_id.clone(),
+        None,
+    );
     let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
     let subject = audit::audit_publish_subject(prefix, params.audit_outcome, "request", &method_root);
     audit::publish_audit(
