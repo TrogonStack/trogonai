@@ -10,19 +10,30 @@
 //! Run with:
 //!   OPENROUTER_TEST_KEY=sk-or-... cargo test -p trogon-openrouter-runner --test live_e2e -- --ignored
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use acp_nats::AcpPrefix;
 use acp_nats_agent::AgentSideNatsConnection;
+use async_trait::async_trait;
 use agent_client_protocol::{
-    AuthenticateRequest, CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest,
-    SetSessionModelRequest,
+    Agent, AuthenticateRequest, CloseSessionRequest, ContentBlock, McpServer, McpServerHttp,
+    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use futures_util::StreamExt as _;
 use serde_json::Value;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
-use trogon_openrouter_runner::{NatsSessionNotifier, OpenRouterAgent, OpenRouterClient};
+use trogon_openrouter_runner::{
+    NatsSessionNotifier, OpenRouterAgent, OpenRouterClient, SessionNotifier,
+};
+
+/// No-op session notifier for the in-memory live tests (drops notifications).
+struct NoopNotifier;
+#[async_trait(?Send)]
+impl SessionNotifier for NoopNotifier {
+    async fn notify(&self, _notification: SessionNotification) {}
+}
 
 fn test_key() -> String {
     std::env::var("OPENROUTER_TEST_KEY")
@@ -429,4 +440,207 @@ async fn agent_key_auth_uses_server_configured_key() {
     let full_text = collect_text_chunks(&mut notif_sub).await;
     eprintln!("agent-key full_text={full_text:?}");
     assert!(!full_text.is_empty(), "agent-key session must produce text chunks via NATS");
+}
+
+// ── In-memory LIVE tests (no Docker/NATS) — real model via OpenAI-compatible API ──
+//
+// These drive the OpenRouterAgent's own loop directly against a REAL model and a
+// REAL local HTTP MCP server / elicitation+permission channels — exercising the
+// MCP, ask_user, and permission code paths end-to-end. The OpenRouter client is
+// OpenAI-compatible, so any OpenAI-compatible endpoint works (real OpenRouter, or
+// xAI's `https://api.x.ai/v1` with a grok model). Configure via:
+//   OR_LIVE_KEY=<key>  OR_LIVE_BASE_URL=<https://api.x.ai/v1|...>  OR_LIVE_MODEL=<grok-3-mini|...>
+// Self-skip when OR_LIVE_KEY is unset. Run with --ignored.
+
+fn live_cfg() -> Option<(String, String, String)> {
+    let key = std::env::var("OR_LIVE_KEY").ok().filter(|k| !k.is_empty())?;
+    let base = std::env::var("OR_LIVE_BASE_URL")
+        .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+    let model = std::env::var("OR_LIVE_MODEL").unwrap_or_else(|_| "openai/gpt-4o-mini".to_string());
+    Some((key, base, model))
+}
+
+fn mcp_server() -> httpmock::MockServer {
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[{
+                "name":"search",
+                "description":"Search the web for a query and return a short result.",
+                "inputSchema":{"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"}
+                },"required":["query"]}
+            }]}
+        }));
+    });
+    mcp
+}
+
+/// LIVE: real model calls an MCP tool (dispatched over real HTTP) and `ask_user`
+/// (answer round-trips through the elicitation channel).
+#[tokio::test]
+#[ignore = "live: requires OR_LIVE_KEY and spends real money"]
+async fn live_inmem_mcp_and_ask_user() {
+    let Some((key, base, model)) = live_cfg() else {
+        eprintln!("SKIP live_inmem_mcp_and_ask_user: OR_LIVE_KEY not set");
+        return;
+    };
+
+    // ---- MCP ----
+    let mcp = mcp_server();
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust is a systems language"}],"isError":false}
+        }));
+    });
+    let agent = OpenRouterAgent::with_deps(
+        NoopNotifier,
+        model.clone(),
+        key.clone(),
+        OpenRouterClient::with_base_url(base.clone()),
+    );
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+    let p1 = "You have a tool named `web__search`. Call it with query \"rust\". \
+        You MUST call the web__search tool — do not answer from your own knowledge. \
+        After the tool result, reply with one short sentence.";
+    let r1 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from(p1)])),
+    )
+    .await
+    .expect("MCP prompt timed out")
+    .expect("MCP prompt failed");
+    let hits = call_mock.hits();
+    eprintln!("LIVE/MCP(openrouter): stop_reason={:?}, tools/call hits={hits}", r1.stop_reason);
+    assert!(hits >= 1, "real model did not call the MCP tool web__search (hits=0)");
+
+    // ---- ask_user ----
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let captured_q = Arc::new(Mutex::new(None::<String>));
+    let cq = Arc::clone(&captured_q);
+    let responder = tokio::spawn(async move {
+        if let Some(req) = elic_rx.recv().await {
+            *cq.lock().unwrap() = Some(req.request.message.clone());
+            let mut content = std::collections::BTreeMap::new();
+            content.insert(
+                "answer".to_string(),
+                agent_client_protocol::ElicitationContentValue::String("teal".to_string()),
+            );
+            let resp = agent_client_protocol::ElicitationResponse::new(
+                agent_client_protocol::ElicitationAction::Accept(
+                    agent_client_protocol::ElicitationAcceptAction::new().content(content),
+                ),
+            );
+            let _ = req.response_tx.send(Ok(resp));
+        }
+    });
+    let agent2 = OpenRouterAgent::with_deps(
+        NoopNotifier,
+        model,
+        key,
+        OpenRouterClient::with_base_url(base),
+    )
+    .with_elicitation(elic_tx);
+    let sid2 = agent2
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+    let p2 = "Use the `ask_user` tool to ask me exactly: What is your favorite color? \
+        You MUST call the ask_user tool. After I answer, reply telling me the color I chose.";
+    let r2 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent2.prompt(PromptRequest::new(sid2, vec![ContentBlock::from(p2)])),
+    )
+    .await
+    .expect("ask_user prompt timed out")
+    .expect("ask_user prompt failed");
+    let _ = responder.await;
+    let q = captured_q.lock().unwrap().clone();
+    eprintln!("LIVE/ask_user(openrouter): stop_reason={:?}, question={q:?}", r2.stop_reason);
+    assert!(q.is_some(), "real model did not call ask_user (no question forwarded)");
+}
+
+/// LIVE: in `default` mode an MCP tool requires approval; the real model's call
+/// fires a PermissionReq that the test approves, then the tool executes.
+#[tokio::test]
+#[ignore = "live: requires OR_LIVE_KEY and spends real money"]
+async fn live_inmem_permission_round_trip() {
+    let Some((key, base, model)) = live_cfg() else {
+        eprintln!("SKIP live_inmem_permission_round_trip: OR_LIVE_KEY not set");
+        return;
+    };
+    let mcp = mcp_server();
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust"}],"isError":false}
+        }));
+    });
+
+    let (perm_tx, mut perm_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+    let requested = Arc::new(Mutex::new(Vec::<String>::new()));
+    let rq = Arc::clone(&requested);
+    let approver = tokio::spawn(async move {
+        while let Some(req) = perm_rx.recv().await {
+            rq.lock().unwrap().push(req.tool_name.clone());
+            let _ = req.started_tx.send(());
+            let _ = req.response_tx.send(true);
+        }
+    });
+
+    let agent = OpenRouterAgent::with_deps(
+        NoopNotifier,
+        model,
+        key,
+        OpenRouterClient::with_base_url(base),
+    )
+    .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+    let p = "You have a tool named `web__search`. Call it with query \"rust\". \
+        You MUST call the web__search tool. After the result, reply with one short sentence.";
+    let r = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from(p)])),
+    )
+    .await
+    .expect("permission prompt timed out")
+    .expect("permission prompt failed");
+    approver.abort();
+    let reqs = requested.lock().unwrap().clone();
+    let hits = call_mock.hits();
+    eprintln!(
+        "LIVE/permission(openrouter): stop_reason={:?}, approvals={reqs:?}, tools/call hits={hits}",
+        r.stop_reason
+    );
+    assert!(
+        reqs.iter().any(|t| t == "web__search"),
+        "permission approval must be requested for web__search; got {reqs:?}"
+    );
+    assert!(hits >= 1, "MCP tool must execute after approval");
 }
