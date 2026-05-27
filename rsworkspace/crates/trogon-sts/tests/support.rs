@@ -1,7 +1,11 @@
 //! Shared test fixtures for STS exchange tests.
 
-use std::sync::{Arc, LazyLock};
+#![allow(dead_code)]
 
+use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use async_trait::async_trait;
 use base64::Engine;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -12,9 +16,14 @@ use serde_json::{Value, json};
 use trogon_sts::DEFAULT_MESH_ISSUER;
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
+use trogon_sts::chain_resolution::ChainResolutionMode;
+use trogon_sts::error::StsError;
 use trogon_sts::exchange::ExchangeService;
-use trogon_sts::registry::{AgentRegistryRecord, InMemoryRegistry};
+use trogon_sts::registry::{
+    AgentRegistryRecord, InMemoryRegistry, RegistryLookup, RegistryLookupRequest, RegistryLookupResponse,
+};
 use trogon_sts::signer::{DynSigner, FileSigner};
+use trogon_sts::spicedb::NoOpSpiceDb;
 use trogon_sts::types::StsExchangeRequest;
 
 pub struct TestKeys {
@@ -107,6 +116,14 @@ pub fn build_service(
     keys: &'static TestKeys,
     record: AgentRegistryRecord,
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
+    build_service_with_mode(keys, record, ChainResolutionMode::Off)
+}
+
+pub fn build_service_with_mode(
+    keys: &'static TestKeys,
+    record: AgentRegistryRecord,
+    chain_mode: ChainResolutionMode,
+) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
     let registry = RegistryCache::new(InMemoryRegistry::new([record]));
@@ -119,6 +136,8 @@ pub fn build_service(
         registry,
         keys.mesh_signer.clone(),
         audit,
+        NoOpSpiceDb,
+        chain_mode,
     )
 }
 
@@ -153,4 +172,62 @@ pub fn decode_payload(token: &str) -> Value {
         .decode(payload)
         .expect("b64");
     serde_json::from_slice(&bytes).expect("json")
+}
+
+#[derive(Clone)]
+pub struct CountingRegistry {
+    pub inner: InMemoryRegistry,
+    lookups: Arc<AtomicUsize>,
+}
+
+impl CountingRegistry {
+    pub fn new(records: impl IntoIterator<Item = AgentRegistryRecord>) -> Self {
+        Self {
+            inner: InMemoryRegistry::new(records),
+            lookups: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub fn lookup_count(&self) -> usize {
+        self.lookups.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl RegistryLookup for CountingRegistry {
+    async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        self.inner.lookup(request).await
+    }
+
+    async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        self.inner.lookup_raw(request).await
+    }
+}
+
+pub fn build_counting_service(
+    keys: &'static TestKeys,
+    registry: CountingRegistry,
+    chain_mode: ChainResolutionMode,
+) -> (
+    ExchangeService<CountingRegistry, RecordingAuditPublisher>,
+    Arc<RecordingAuditPublisher>,
+) {
+    let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
+    let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let registry = RegistryCache::new(registry);
+    let audit = Arc::new(RecordingAuditPublisher::new());
+    let service = ExchangeService::new(
+        DEFAULT_MESH_ISSUER.to_string(),
+        keys.bootstrap_iss.clone(),
+        jwks,
+        trust,
+        registry,
+        keys.mesh_signer.clone(),
+        Arc::clone(&audit),
+        NoOpSpiceDb,
+        chain_mode,
+    );
+    (service, audit)
 }
