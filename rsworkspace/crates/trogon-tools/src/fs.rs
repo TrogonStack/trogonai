@@ -22,6 +22,16 @@ pub(crate) fn unique_tmp_path(target: &std::path::Path) -> std::path::PathBuf {
     target.with_extension(format!("{ext}.{pid}.{nanos}.{seq}.tmp"))
 }
 
+/// When `TROGON_FS_UNRESTRICTED=1` (or `true`), the typed file/dir tools may operate
+/// on any path the OS user can access, not just under the session cwd. Opt-in: the
+/// default stays cwd-contained. (Bash is already unrestricted.)
+pub fn fs_unrestricted() -> bool {
+    matches!(
+        std::env::var("TROGON_FS_UNRESTRICTED").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
 /// Resolve a directory path from the session cwd (supports `~`, relative, and absolute).
 pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathBuf, String> {
     use std::path::{Path, PathBuf};
@@ -52,20 +62,21 @@ pub fn resolve_directory_target(cwd: &str, raw: &str) -> Result<std::path::PathB
             }
         })?;
 
-    // Mirror `resolve_path`'s boundary check: the resolved (symlink-canonicalized)
-    // target must stay under the canonicalized cwd, otherwise a `cd /etc` (or a
-    // symlink that escapes) would let later reads/writes operate outside the sandbox.
-    let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or_else(|_| {
-        Path::new(cwd)
-            .components()
-            .filter(|c| !matches!(c, std::path::Component::CurDir))
-            .collect()
-    });
-    if !canonical.starts_with(&cwd_canonical) {
-        return Err(format!(
-            "cd: {} is outside the working directory",
-            attempted.display()
-        ));
+    // Boundary check: the resolved (symlink-canonicalized) target must stay under the
+    // canonicalized cwd — unless TROGON_FS_UNRESTRICTED lets the tools roam freely.
+    if !fs_unrestricted() {
+        let cwd_canonical = std::fs::canonicalize(cwd).unwrap_or_else(|_| {
+            Path::new(cwd)
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .collect()
+        });
+        if !canonical.starts_with(&cwd_canonical) {
+            return Err(format!(
+                "cd: {} is outside the working directory",
+                attempted.display()
+            ));
+        }
     }
     Ok(canonical)
 }
@@ -88,6 +99,12 @@ pub fn resolve_path(
         let joined = Path::new(cwd).join(path);
         normalize_components(&joined)
     };
+
+    // TROGON_FS_UNRESTRICTED lets the typed tools operate on any path (matching bash's
+    // freedom, à la Claude Code). Default: stay contained under cwd.
+    if fs_unrestricted() {
+        return Ok(std::fs::canonicalize(&normalized).unwrap_or(normalized));
+    }
 
     if !normalized.starts_with(&cwd_norm) {
         return Err("path is outside the working directory".to_string());
@@ -203,6 +220,23 @@ pub async fn write_file(ctx: &ToolContext, input: &Value) -> String {
     }
 
     "OK".to_string()
+}
+
+pub async fn delete_file(ctx: &ToolContext, input: &Value) -> String {
+    let path = match input.get("path").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return "Error: missing required parameter 'path'".to_string(),
+    };
+
+    let full_path = match resolve_path(&ctx.cwd, path) {
+        Ok(p) => p,
+        Err(e) => return format!("Error: {e}"),
+    };
+
+    match tokio::fs::remove_file(&full_path).await {
+        Ok(()) => "OK".to_string(),
+        Err(e) => format!("Error deleting {path}: {e}"),
+    }
 }
 
 pub async fn list_dir(ctx: &ToolContext, input: &Value) -> String {

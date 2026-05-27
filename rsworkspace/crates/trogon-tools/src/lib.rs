@@ -103,6 +103,17 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "delete_file",
+            "Delete a file. Only works on files (not directories). Requires user approval.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to the file to delete, relative to the working directory" }
+                },
+                "required": ["path"]
+            }),
+        ),
+        tool_def(
             "str_replace",
             "Replace an exact string in a file. The old_str must appear exactly once — if it appears 0 or more than once, the edit is rejected. Returns a diff of the changes.",
             json!({
@@ -235,6 +246,7 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
     match name {
         "read_file"        => fs::read_file(ctx, input).await,
         "write_file"       => fs::write_file(ctx, input).await,
+        "delete_file"      => fs::delete_file(ctx, input).await,
         "list_dir"         => fs::list_dir(ctx, input).await,
         "glob"             => fs::glob_files(ctx, input).await,
         "str_replace"      => editor::str_replace(ctx, input).await,
