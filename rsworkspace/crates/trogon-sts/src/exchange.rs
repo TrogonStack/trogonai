@@ -7,10 +7,12 @@ use trogon_identity_types::{ActChainEntry, MAX_ACT_CHAIN_DEPTH};
 
 use crate::audit::{AuditPublisher, StsAuditEmit, emit_audit};
 use crate::cache::{JwksCache, RegistryCache, TrustBundleCache};
+use crate::chain_resolution::{ChainResolutionMode, ChainResolver};
 use crate::error::StsError;
 use crate::limits::RateLimiter;
 use crate::registry::RegistryLookup;
 use crate::signer::DynSigner;
+use crate::spicedb::{NoOpSpiceDb, SpiceDbCheck};
 use crate::token_verify::verify_subject_token;
 use crate::trust::verify_actor_token;
 use crate::types::{MintedClaimsSummary, StsExchangeRequest, StsExchangeResponse, StsTokenErrorResponse};
@@ -19,25 +21,30 @@ use crate::{DEFAULT_MESH_TOKEN_TTL_SECS, MAX_MESH_TOKEN_TTL_SECS, MIN_MESH_TOKEN
 pub type ExchangeRequest = StsExchangeRequest;
 pub type ExchangeSuccess = StsExchangeResponse;
 
-pub struct ExchangeService<R, A>
+pub struct ExchangeService<R, A, S = NoOpSpiceDb>
 where
     R: RegistryLookup,
+    S: SpiceDbCheck,
 {
     mesh_issuer: String,
     bootstrap_issuer: String,
     jwks: JwksCache,
     trust_bundle: TrustBundleCache,
     registry: RegistryCache<R>,
+    chain_resolver: ChainResolver<R>,
+    spicedb: S,
     signer: DynSigner,
     limits: RateLimiter,
     audit: Arc<A>,
 }
 
-impl<R, A> ExchangeService<R, A>
+impl<R, A, S> ExchangeService<R, A, S>
 where
-    R: RegistryLookup,
+    R: RegistryLookup + Clone,
     A: AuditPublisher,
+    S: SpiceDbCheck,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mesh_issuer: String,
         bootstrap_issuer: String,
@@ -46,13 +53,18 @@ where
         registry: RegistryCache<R>,
         signer: DynSigner,
         audit: Arc<A>,
+        spicedb: S,
+        chain_resolution_mode: ChainResolutionMode,
     ) -> Self {
+        let chain_resolver = ChainResolver::new(registry.clone(), chain_resolution_mode);
         Self {
             mesh_issuer,
             bootstrap_issuer,
             jwks,
             trust_bundle,
             registry,
+            chain_resolver,
+            spicedb,
             signer,
             limits: RateLimiter::new(),
             audit,
@@ -78,24 +90,34 @@ where
                         agent_id,
                         minted: Some(summary),
                         source_ip,
+                        offending_index: None,
+                        offending_agent_id: None,
                     },
                 )
                 .await;
                 Ok(response)
             }
             Err(err) => {
+                let (offending_index, offending_agent_id) = match &err {
+                    StsError::ActChainEntryRevoked { index, agent_id } => {
+                        (Some(*index), Some(agent_id.clone()))
+                    }
+                    _ => (None, None),
+                };
                 let outcome = err.audit_outcome();
                 emit_audit(
                     self.audit.as_ref(),
                     StsAuditEmit {
                         outcome,
-                        reason: err.error_description(),
+                        reason: err.audit_reason(),
                         latency: started.elapsed(),
                         request: &request,
                         wkl: None,
                         agent_id: None,
                         minted: None,
                         source_ip,
+                        offending_index,
+                        offending_agent_id,
                     },
                 )
                 .await;
@@ -118,6 +140,12 @@ where
         };
 
         let subject = verify_subject_token(&request.subject_token, &iss, &jwks)?;
+
+        self.spicedb.authorize_exchange().await?;
+
+        self.chain_resolver
+            .verify_inbound_chain(&subject.act_chain)
+            .await?;
 
         let trust_pem = self.trust_bundle.pem().await;
         let actor_wkl = verify_actor_token(&request.actor_token, &trust_pem)?;
