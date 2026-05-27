@@ -16,7 +16,11 @@ use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker};
-use crate::egress::{EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers, strip_inbound_credentials};
+use crate::egress::{
+    EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
+    strip_inbound_credentials,
+};
+use crate::ingress::IngressChainResolve;
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::rpc_codes;
@@ -49,6 +53,7 @@ pub struct GatewaySettings {
     pub init_audit_stream: bool,
     pub jwt: Arc<JwtValidator>,
     pub egress: Option<Arc<EgressMinter>>,
+    pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
 }
 
 pub async fn run<S>(
@@ -215,6 +220,31 @@ async fn handle_ingress_inner(
     };
     let gateway_identity = gateway_resolution.identity;
     let jwt_claims = gateway_resolution.claims;
+
+    if let Some(resolver) = settings.chain_resolver.as_ref()
+        && let Some(deny) = resolver
+            .resolve_inbound_chain(jwt_claims.act_chain.as_deref())
+            .await
+    {
+        finish_ingress_blocked(FinishIngressBlockedParams {
+            client,
+            jetstream,
+            mcp: &settings.mcp,
+            msg: &msg,
+            backend_subject: &backend_subject,
+            jsonrpc_method: &jsonrpc_method,
+            gateway_identity: gateway_identity.clone(),
+            request_id: request_id.clone(),
+            requires_spicedb,
+            spicedb_allowed: None,
+            traces,
+            audit_outcome: "error",
+            jsonrpc_code: deny.code,
+            jsonrpc_message: deny.message,
+        })
+        .await;
+        return Ok(());
+    }
 
     let span = tracing::Span::current();
     span.record("gateway.identity.source", gateway_identity.source.as_otel_snake_case());
