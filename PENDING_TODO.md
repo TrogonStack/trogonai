@@ -42,10 +42,11 @@ The auth-callout JWT is the **bootstrap credential** (ADR 0003 Accepted). The 20
 
 ## Verified branch snapshot — 2026-05-27
 
-Two swarm runs merged into `yordis/agentgateway`:
+Three swarm runs merged into `yordis/agentgateway`:
 
 - `20260527T055911Z-6d70` — shadow-mode parsing, audit envelope, identity specs (26 commits).
 - `20260527T074306Z-7416` — enforce-mode hardening, CEL `act_chain` surface, plan wire pins, overview/STS-exchange docs, and four new crates: `trogon-agent-registry`, `trogon-jwks-publisher`, `trogon-sts` (+ shared `trogon-identity-types`), `trogon-a2a-sdk` (21 commits).
+- `20260527T193237Z-1271` — production hardening across seven branches: registry controller + `agctl`, AWS KMS + Vault Transit signers for both JWKS publisher and STS, STS circuit breaker + latency probe + chain resolution, SDK live integration tests + serve-side OTel + CI lint, gateway egress STS minting + LRU cache, `trogon-traffic-view` spec + skeleton, and `ActChainEntry` unification.
 
 Workspace status: `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` all green.
 
@@ -87,58 +88,67 @@ Ordered for forward motion. Items 1–4 landed clean. Items 5–7 landed the dev
 5. **Agent registry.** Dev profile ✅ (runtime lookup, KV, audit hooks). Production-profile remaining work in **Carry-over §Registry control plane**.
 6. **JWKS publisher.** Dev profile ✅ (file PEM, all three publication channels). Production-profile remaining work in **Carry-over §JWKS production custody**.
 7. **`trogon-sts` v1.** Dev profile ✅ (exchange, registry, act_chain, caches, rate limits, audit). Production-profile remaining work in **Carry-over §STS production signer** and **§STS resilience**.
-8. **Gateway egress minting.** Replace verified-context propagation in the MCP gateway with an STS exchange before backend egress (call `trogon-sts` via `mcp.sts.exchange`). Cache key per ADR 0005; serve callback direction with `aud=client_id`. Same change in any A2A gateway hop. *Not started — next critical-path item.*
+8. **Gateway egress minting.** ✅ Closed. `trogon-mcp-gateway` calls `trogon-sts-client` before backend egress, attaches the minted token, drops the inbound credential. LRU cache keyed per ADR 0005; callback direction uses `aud=urn:trogon:mcp:client:{tenant}:{client_id}`. Mode-gated by `MCP_GATEWAY_AGENT_IDENTITY`.
 9. **A2A SDK v1 (Rust).** Skeleton ✅. Remaining work in **Carry-over §A2A SDK gaps**. Then TypeScript, then Python.
 10. **SPIRE wiring (production attestation).** Replace sentinel-`wkl` fallback for service workloads with real SVID attestation at STS ingress; trust-bundle distribution via NATS KV `mcp-trust-bundles`. Spec details live with Block 1.2 below.
 11. **Agent-traffic view.** Build the index on top of the already-populated audit envelope: timeline, chain explorer, top-N dashboards, SIEM export (Block 4). Pick CEF/OCSF format and stand up the JetStream durable consumer.
 12. **Adaptive access.** Step-up auth, human-in-the-loop approvals (new error `-32107 approval_required`, approval responses on `mcp.approvals.{request_id}`), context-aware rate limits keyed by `(agent_id, purpose, tenant)`, anomaly feature emission (Block 5).
 
-### Carry-over from `20260527T074306Z-7416` — open work this swarm created
+### Carry-over from `20260527T074306Z-7416` — closed by `20260527T193237Z-1271`
 
-These items finish what the swarm shipped as dev-profile. They are not blockers for **item 8 (gateway egress minting)**, but agent-identity v1 is not "done" until every box here is checked.
+The 2026-05-27 production-hardening swarm landed seven branches into `yordis/agentgateway` (see `.trogonai/agent-handoff/20260527T193237Z-1271/`). Every bullet below now ships; remaining production-readiness work is enumerated in the new "Open after 2026-05-27 swarm" section.
 
 **Registry control plane (closes roadmap item 5).**
-- [ ] Build `trogon-agent-registry-controller`: signer + Git sync loop. Reads signed manifests from a Git repo, validates owner / version monotonicity / definition digest, writes to KV `mcp-agent-registry` under the signer identity. Documented key-rotation runbook for the signer itself.
-- [ ] Restrict KV write ACL: only the signer's NATS account can `PUT` / `DELETE` against `mcp-agent-registry`; runtime lookup nodes are read-only. Test that a non-signer write is rejected.
-- [ ] Define the signed-manifest schema (TOML or YAML — pick one and pin it in `docs/identity/registry.md`) and an `agctl registry sync` command that validates locally before commit.
-- [ ] Emit registration / version-bump / deprecation / revocation events through the audit stream (`mcp.audit.registry.{registered,bumped,deprecated,revoked}`).
-- [ ] Author the operator runbook (`crates/trogon-agent-registry/README.md` or a new `docs/identity/registry-operations.md`) covering: bootstrap, rotating the signer, recovering from KV corruption, emergency revocation.
+- [x] `trogon-agent-registry-controller` landed: Ed25519 signer + Git sync loop reads signed TOML manifests, validates owner / version monotonicity / definition digest, writes to KV `mcp-agent-registry` under the signer identity.
+- [x] KV write ACL test for signer-only writes ships alongside the controller; non-signer writes are rejected.
+- [x] Signed-manifest schema pinned as TOML in `docs/identity/registry.md`; `agctl registry sync` validates locally before commit.
+- [x] Lifecycle events on `mcp.audit.registry.{registered,bumped,deprecated,revoked}` published by the controller.
+- [x] Operator runbook at `docs/identity/registry-operations.md` (bootstrap, signer rotation, KV corruption recovery, emergency revocation).
 
 **JWKS production custody (closes roadmap item 6).**
-- [ ] Pick the first-choice cloud KMS (AWS / GCP / Azure) and pin the decision in ADR 0006 §Implementation. Replace `KmsSigner` `todo!()` in `trogon-jwks-publisher` with a working signer against that backend.
-- [ ] Replace `VaultSigner` `todo!()` in `trogon-jwks-publisher` with a working Vault Transit implementation (sign + read public key via Transit API).
-- [ ] End-to-end rotation test: introduce a new active key, verify all three publication channels (KV / HTTPS / req-reply) converge within the overlap window, verify `iss` matches the mesh signer, verify retired key serves verification-only traffic for ≥ max mesh TTL + skew.
-- [ ] Document KMS and Vault recipes in `crates/trogon-jwks-publisher/README.md` with worked configuration examples.
+- [x] AWS KMS picked as the v1 cloud KMS (RSA_2048, PSS_SHA_256), pinned in ADR 0006 §Implementation; `KmsSigner` implemented behind the `kms-aws` feature.
+- [x] Vault Transit `VaultSigner` implemented behind the `vault` feature.
+- [x] End-to-end rotation test at `crates/trogon-jwks-publisher/tests/rotation_e2e.rs` validates KV / HTTPS / req-reply convergence and retired-key verification.
+- [x] KMS and Vault recipes documented in `crates/trogon-jwks-publisher/README.md`.
 
 **STS production signer (mirrors JWKS custody; closes roadmap item 7).**
-- [ ] Replace `KmsSigner` `todo!()` in `trogon-sts` with the same cloud KMS backend chosen above.
-- [ ] Replace `VaultSigner` `todo!()` in `trogon-sts` with Vault Transit.
-- [ ] Add an integration test that asserts the STS signer and the JWKS publisher reference identical `kid` and `iss` for the active key (otherwise gateway verification breaks the moment STS rotates).
+- [x] AWS KMS `KmsSigner` implemented in `trogon-sts` behind `kms-aws`.
+- [x] Vault Transit `VaultSigner` implemented behind `vault`.
+- [x] Integration test asserts identical `kid` / `iss` between STS and JWKS publisher for the active key.
 
 **STS resilience (closes roadmap item 7).**
-- [ ] Add circuit breaker around registry and SpiceDB calls inside `trogon-sts` (e.g. `tower::limit::RateLimit` + breaker crate) so a dependency outage trips fail-closed at the exchange level instead of hanging the queue.
-- [ ] Add a synthetic-exchange latency probe (separate binary or test workload) that fires every N seconds and alerts when P99 exceeds 40 ms. Decide alert routing.
-- [ ] Document the failure modes (registry down, JWKS stale, signer unreachable) and gateway-visible error codes in `docs/identity/sts-exchange.md`.
+- [x] Circuit breaker (closed / open / half-open, configurable cool-down) wraps registry and SpiceDB calls inside `trogon-sts`; trips fail-closed with `dependency_unavailable`.
+- [x] Synthetic-exchange latency probe ships as the `trogon-sts-probe` binary; emits to `mcp.metrics.sts.latency` and `mcp.audit.sts.latency_violation` on P99 > 40 ms.
+- [x] Failure-modes section in `docs/identity/sts-exchange.md` enumerates registry / SpiceDB / JWKS / signer / chain-entry-revoked triggers with audit reasons, JSON-RPC codes, and recovery actions.
 
 **Act-chain registry resolution (closes Block 2.2 acceptance).**
-- [ ] At gateway ingress (enforce mode) and at STS receipt: walk every entry in the inbound `act_chain`, resolve each entry's `agent_id` against the registry, reject if any entry is revoked / unknown. Today only the appending actor is verified.
-- [ ] Define the audit event shape for a mid-chain revocation rejection (suggest `mcp.audit.sts.deny` with `reason: "act_chain_entry_revoked"` and the offending index).
-- [ ] Bound the additional latency this adds to exchange; if it blows the 40 ms budget, add a TTL-bounded "chain-resolution" cache layer inside STS.
+- [x] STS receipt walks every entry in the inbound `act_chain`, resolves `agent_id` against the registry, and rejects revoked / unknown entries (`mcp.audit.sts.deny` with `reason: "act_chain_entry_revoked"`, `data.offending_index`, offending `agent_id`).
+- [x] TTL-bounded chain-resolution cache (default 60 s) keeps the additional latency under budget; `STS_CHAIN_RESOLUTION_MODE=off|cache|strict` env flag exposes the dial.
+- [ ] Gateway-ingress-side chain resolution still pending (STS-side is the higher-leverage gate). Track under "Open after 2026-05-27 swarm".
 
 **Purpose handling at the originator (closes Block 2.3 acceptance).**
-- [ ] In `trogon-a2a-sdk` `Client::call`: when the caller omits `purpose`, supply a tenant-default from the registry instead of forwarding whatever the request body contains. Decide whether the SDK should reject the call or synthesize `purpose:default` — pin the choice in `docs/identity/sdk.md`.
-- [ ] In `trogon-sts` enforce mode: reject exchanges with empty `purpose`; today only `purpose ∉ allowed_purposes` is rejected. Audit event `mcp.audit.sts.deny` with `reason: "purpose_missing"`.
+- [x] `trogon-a2a-sdk` `Client::call` resolves the caller's `allowed_purposes` from the registry when `purpose=None`: single-allowed → use it, multiple → `Error::PurposeRequired`, empty → synthesize `purpose:default`. Pinned in `docs/identity/sdk.md` §Default purpose handling.
+- [ ] STS-side empty-purpose rejection still tracked separately. Move to "Open after 2026-05-27 swarm".
 
 **A2A SDK gaps (closes roadmap item 9 — Rust track).**
-- [ ] Wire integration tests that boot a real `trogon-sts` + `trogon-agent-registry` (testcontainers or shared CI fixture) and exercise `Client::call` + `serve` end-to-end against a live NATS server.
-- [ ] Add `agent.id` / `agent.chain.depth` / `agent.purpose` attributes to the `serve`-side OpenTelemetry spans (client side already emits them). Verify with the SDK integration tests.
-- [ ] CI lint: fail the build if any non-SDK crate publishes on `mcp.gateway.request.*`. Implement as a workspace `cargo deny`-style custom rule or a small grep step in CI.
-- [ ] Quickstart + recipes in `crates/trogon-a2a-sdk/README.md` and `docs/identity/sdk.md`: bootstrap a new agent, verify chain inside a handler, attach a CEL-readable purpose.
+- [x] Live integration test (`crates/trogon-a2a-sdk/tests/integration_live.rs`, behind `--features live`) boots NATS + STS + registry in-process and exercises `Client::call` + `serve` end-to-end.
+- [x] `agent.id` / `agent.chain.depth` / `agent.purpose` attributes added to serve-side OTel spans.
+- [x] CI lint at `scripts/ci/check-direct-nats-publishes.sh` fails the build on non-SDK publishes to `mcp.gateway.request.*`; wired into `.github/workflows/ci-rust.yml`.
+- [x] Quickstart + recipes in `crates/trogon-a2a-sdk/README.md` and `docs/identity/sdk.md` (default purpose, telemetry attributes).
 
 **Crate-type unification.**
-- [ ] Replace `trogon-mcp-gateway::agent_identity::ActChainEntry` with `trogon-identity-types::ActChainEntry`; delete the gateway-local definition. Repoint `agent_identity` re-exports to the shared crate.
-- [ ] Drop the deliberate duplicate `ActChainEntry` in `trogon-a2a-sdk`; depend on `trogon-identity-types` directly.
-- [ ] Add a compile-time test that confirms the three crates use the same type (e.g. a doc-test or `assert_eq_size!`).
+- [x] `trogon-mcp-gateway::act_chain` re-exports `ActChainEntry` / `MAX_ACT_CHAIN_DEPTH` / `parse_act_chain` from `trogon-identity-types`; gateway-local definition removed.
+- [x] `trogon-a2a-sdk` drops its local `ActChainEntry`; depends on `trogon-identity-types` directly.
+- [x] `static_assertions::assert_type_eq_all!` test in `trogon-mcp-gateway` asserts the gateway-exposed type IS the shared type; SDK has the same guard.
+
+### Open after 2026-05-27 swarm
+
+- [ ] Agent-traffic view v1 implementation (spec + skeleton landed as `trogon-traffic-view`; `docs/identity/agent-traffic.md` covers schema, projector, OCSF export, `agctl traffic` CLI surface).
+- [ ] Gateway-ingress-side act-chain registry resolution (STS receipt resolution already landed).
+- [ ] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
+- [ ] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
+- [ ] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
+- [ ] A2A SDK TypeScript + Python tracks.
 
 ---
 
@@ -247,9 +257,9 @@ Spec at `docs/identity/act-chain.md` is the accepted contract. Shadow-mode heade
 
 ### 2.4 Gateway egress: mint, don't propagate
 
-- [ ] **Replace context propagation with STS exchange.** Gateway calls STS before backend egress, attaches the new token, drops the inbound one. Same change in any A2A gateway hop.
-- [ ] **Cache exchanges** by `{tenant}:{caller_sub}:{target_aud}:{session_id}:{scope_fingerprint}`, max age `min(floor(exp - now - 30s), TTL/2)`, per ADR 0005.
-- [x] **Callback direction — decided.** Server → client callbacks re-exchange with `aud=urn:trogon:mcp:client:{tenant}:{client_id}` (ADR 0005).
+- [x] **Replace context propagation with STS exchange.** `trogon-mcp-gateway` egress path now calls `trogon-sts-client` (request/reply on `mcp.sts.exchange`) before backend egress, attaches the minted mesh token as `Authorization: Bearer …`, and drops inbound `Authorization` / `A2a-Caller-Jwt`. Mode-gated by `MCP_GATEWAY_AGENT_IDENTITY=off|shadow|enforce`.
+- [x] **Cache exchanges** by `{tenant}:{caller_sub}:{target_aud}:{session_id}:{scope_fingerprint}`, age `min(floor(exp - now - 30s), TTL/2)`, default cap 60 s, bounded LRU (default 10 000, env `MCP_GATEWAY_MESH_CACHE_MAX_ENTRIES`). Proactive refresh at remaining TTL ≤ TTL/4. Metrics emitted for hit/miss/refresh/eviction.
+- [x] **Callback direction — implemented.** Server → client callbacks re-exchange with `aud=urn:trogon:mcp:client:{tenant}:{client_id}` (ADR 0005).
 
 **Acceptance:** Backend logs show `aud=<backend>`, `iss=<sts>`, `act_chain` includes the gateway as the last hop before the backend.
 
