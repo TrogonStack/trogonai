@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT** — for human review. Depends on [ADR 0003](0003-bootstrap-vs-mesh-tokens.md) (bootstrap vs. mesh) and [ADR 0004](0004-sts-form-factor.md) (STS form factor). Gates Block 2.1 (STS exchange) and Block 2.4 (gateway egress minting).
+**Accepted (2026-05-27).** Builds on [ADR 0003](0003-bootstrap-vs-mesh-tokens.md) and [ADR 0004](0004-sts-form-factor.md). Drives Block 2.1 (STS exchange) and Block 2.4 (gateway egress minting).
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT** — for human review. Does not authorize implementation.
+**Accepted (2026-05-27).** Authorizes a NATS-service implementation of STS on `mcp.sts.exchange` (Block 2.1).
 
 ## Context
 
