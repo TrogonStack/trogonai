@@ -55,6 +55,29 @@ pub enum RegistryLookupResponse {
 #[async_trait]
 pub trait RegistryLookup: Send + Sync + Clone {
     async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError>;
+
+    async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
+        match self.lookup(request).await {
+            Ok(record) => Ok(RegistryLookupResponse::Ok {
+                record: Box::new(record),
+                resolved_version: request.agent_id.clone(),
+                kv_revision: 0,
+            }),
+            Err(StsError::AccessDenied(reason)) if reason.contains("not found") => {
+                Ok(RegistryLookupResponse::NotFound {
+                    agent_id: request.agent_id.clone(),
+                    reason,
+                })
+            }
+            Err(StsError::AccessDenied(reason)) if reason.contains("revoked") => {
+                Ok(RegistryLookupResponse::Revoked {
+                    agent_id: request.agent_id.clone(),
+                    reason,
+                })
+            }
+            Err(err) => Err(err),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -75,16 +98,39 @@ impl InMemoryRegistry {
 #[async_trait]
 impl RegistryLookup for InMemoryRegistry {
     async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
+        match self.lookup_raw(request).await? {
+            RegistryLookupResponse::Ok { record, .. } => Ok(*record),
+            RegistryLookupResponse::NotFound { agent_id, reason } => {
+                Err(StsError::AccessDenied(format!("registry not_found for {agent_id}: {reason}")))
+            }
+            RegistryLookupResponse::Revoked { agent_id, reason } => {
+                Err(StsError::AccessDenied(format!("registry revoked for {agent_id}: {reason}")))
+            }
+            RegistryLookupResponse::Deprecated { agent_id, reason } => {
+                Err(StsError::AccessDenied(format!("registry deprecated for {agent_id}: {reason}")))
+            }
+            RegistryLookupResponse::Error { reason } => Err(StsError::RegistryUnavailable(reason)),
+        }
+    }
+
+    async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
         let Some(record) = self.records.get(&request.agent_id) else {
-            return Err(StsError::RegistryUnavailable(format!(
-                "agent {} not found",
-                request.agent_id
-            )));
+            return Ok(RegistryLookupResponse::NotFound {
+                agent_id: request.agent_id.clone(),
+                reason: format!("agent {} not found", request.agent_id),
+            });
         };
         if record.lifecycle_state == "revoked" {
-            return Err(StsError::AccessDenied(format!("agent {} is revoked", request.agent_id)));
+            return Ok(RegistryLookupResponse::Revoked {
+                agent_id: request.agent_id.clone(),
+                reason: format!("agent {} is revoked", request.agent_id),
+            });
         }
-        Ok(record.clone())
+        Ok(RegistryLookupResponse::Ok {
+            record: Box::new(record.clone()),
+            resolved_version: record.agent_version.clone(),
+            kv_revision: 0,
+        })
     }
 }
 
@@ -109,16 +155,7 @@ where
     C: trogon_nats::client::RequestClient + Send + Sync + Clone,
 {
     async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
-        let response: RegistryLookupResponse = trogon_nats::messaging::request_with_timeout(
-            &self.client,
-            &self.subject,
-            request,
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        .map_err(|e| StsError::RegistryUnavailable(format!("registry request failed: {e}")))?;
-
-        match response {
+        match self.lookup_raw(request).await? {
             RegistryLookupResponse::Ok { record, .. } => Ok(*record),
             RegistryLookupResponse::NotFound { agent_id, reason } => Err(StsError::AccessDenied(format!(
                 "registry not_found for {agent_id}: {reason}"
@@ -131,5 +168,57 @@ where
             ))),
             RegistryLookupResponse::Error { reason } => Err(StsError::RegistryUnavailable(reason)),
         }
+    }
+
+    async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
+        trogon_nats::messaging::request_with_timeout(
+            &self.client,
+            &self.subject,
+            request,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .map_err(|e| StsError::RegistryUnavailable(format!("registry request failed: {e}")))
+    }
+}
+
+#[derive(Clone)]
+pub struct ResilientRegistry<R> {
+    inner: R,
+    breaker: crate::circuit_breaker::CircuitBreaker,
+}
+
+impl<R> ResilientRegistry<R> {
+    pub fn new(inner: R, breaker: crate::circuit_breaker::CircuitBreaker) -> Self {
+        Self { inner, breaker }
+    }
+}
+
+#[async_trait]
+impl<R> RegistryLookup for ResilientRegistry<R>
+where
+    R: RegistryLookup + Send + Sync,
+{
+    async fn lookup(&self, request: &RegistryLookupRequest) -> Result<AgentRegistryRecord, StsError> {
+        map_breaker_error(
+            self.breaker
+                .call(|| async { self.inner.lookup(request).await })
+                .await,
+        )
+    }
+
+    async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
+        map_breaker_error(
+            self.breaker
+                .call(|| async { self.inner.lookup_raw(request).await })
+                .await,
+        )
+    }
+}
+
+fn map_breaker_error<T>(result: Result<T, StsError>) -> Result<T, StsError> {
+    match result {
+        Err(StsError::DependencyUnavailable(reason)) => Err(StsError::RegistryUnavailable(reason)),
+        other => other,
     }
 }
