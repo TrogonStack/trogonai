@@ -23,7 +23,10 @@ use agent_client_protocol::{
     ResourceLink, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModelRequest,
     StopReason, TextContent, TextResourceContents,
 };
-use trogon_xai_runner::{FinishReason, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent};
+use agent_client_protocol::{McpServer, McpServerHttp};
+use trogon_xai_runner::{
+    FinishReason, InputItem, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent,
+};
 
 // ── env-var lock ──────────────────────────────────────────────────────────────
 
@@ -5425,4 +5428,226 @@ async fn ext_method_import_clears_last_response_id() {
     let last_input = calls[1].input.last().unwrap();
     assert_eq!(last_input.role().unwrap(), "user");
     assert_eq!(last_input.content().unwrap(), "follow-up");
+}
+
+// ── MCP client support ──────────────────────────────────────────────────────────
+
+/// A function-call response that signals a tool round so the agent dispatches the
+/// call and makes a follow-up request with the tool output.
+fn tool_call_round(call_id: &str, name: &str, args: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId {
+            id: "resp_mcp".to_string(),
+        },
+        XaiEvent::FunctionCall {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
+        XaiEvent::Done,
+    ]
+}
+
+/// End-to-end: a session with an MCP server advertises its tool to the model;
+/// when the model calls `{server}__{tool}`, the runner dispatches it to the MCP
+/// server and feeds the result back into the follow-up model turn.
+#[tokio::test]
+async fn mcp_tool_call_dispatched_and_result_fed_back() {
+    let _guard = env_lock().lock().unwrap();
+
+    // Stand up a mock HTTP MCP server: initialize + tools/list + tools/call.
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[
+                {"name":"search","description":"Search the web","inputSchema":{"type":"object"}}
+            ]}
+        }));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust"}],"isError":false}
+        }));
+    });
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Round 1: model calls the prefixed MCP tool.
+    mock.push_response(tool_call_round("call_mcp", "web__search", r#"{"query":"rust"}"#));
+    // Round 2: model replies after receiving the tool output.
+    mock.push_response(text_response(&["all done"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search rust"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "agent must make a follow-up call after MCP tool execution"
+    );
+    let follow_up = &calls[1].input;
+    let mcp_output = follow_up.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_mcp" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        mcp_output.as_deref(),
+        Some("MCP RESULT: rust"),
+        "follow-up turn must carry the MCP tool result as FunctionCallOutput"
+    );
+}
+
+// ── elicitation (ask_user) ──────────────────────────────────────────────────────
+
+/// When the model calls `ask_user`, the runner round-trips the question through
+/// the elicitation channel and returns the answer as the tool output.
+#[tokio::test]
+async fn ask_user_round_trips_through_elicitation_channel() {
+    let _guard = env_lock().lock().unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Round 1: model asks the user a question.
+    mock.push_response(tool_call_round(
+        "call_ask",
+        "ask_user",
+        r#"{"question":"What is your favorite color?"}"#,
+    ));
+    // Round 2: model replies after receiving the answer.
+    mock.push_response(text_response(&["thanks"]));
+
+    // Inject an elicitation channel and a responder that answers "blue".
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let responder = tokio::spawn(async move {
+        if let Some(req) = elic_rx.recv().await {
+            // Capture the question text the runner forwarded.
+            let q = req.request.message.clone();
+            let mut content = std::collections::BTreeMap::new();
+            content.insert(
+                "answer".to_string(),
+                agent_client_protocol::ElicitationContentValue::String("blue".to_string()),
+            );
+            let resp = agent_client_protocol::ElicitationResponse::new(
+                agent_client_protocol::ElicitationAction::Accept(
+                    agent_client_protocol::ElicitationAcceptAction::new().content(content),
+                ),
+            );
+            let _ = req.response_tx.send(Ok(resp));
+            q
+        } else {
+            String::new()
+        }
+    });
+
+    let agent = make_agent(Arc::clone(&mock)).await.with_elicitation(elic_tx);
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("ask me"))],
+        ))
+        .await
+        .unwrap();
+
+    let question = responder.await.unwrap();
+    assert_eq!(
+        question, "What is your favorite color?",
+        "elicitation request must carry the model's question"
+    );
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "agent must make a follow-up call after ask_user is answered"
+    );
+    let answer = calls[1].input.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        answer.as_deref(),
+        Some("blue"),
+        "follow-up turn must carry the user's answer as the ask_user tool output"
+    );
+}
+
+/// Without an elicitation channel, `ask_user` is not advertised; if the model
+/// somehow calls it anyway, the runner returns a graceful unavailable message.
+#[tokio::test]
+async fn ask_user_unavailable_without_elicitation_channel() {
+    let _guard = env_lock().lock().unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(tool_call_round(
+        "call_ask",
+        "ask_user",
+        r#"{"question":"anything?"}"#,
+    ));
+    mock.push_response(text_response(&["ok"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await; // no with_elicitation
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("ask me"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let output = calls[1].input.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        output.as_deref(),
+        Some("ask_user is not available in this session."),
+    );
 }

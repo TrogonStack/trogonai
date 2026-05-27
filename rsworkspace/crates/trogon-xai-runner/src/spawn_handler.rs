@@ -138,15 +138,16 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    /// Captured `(model, api_key, base_url, prompt)` tuple from a spawn call.
+    type CapturedSpawn = Arc<Mutex<Option<(String, String, String, String)>>>;
+
     struct MockSpawnClient {
         response: String,
-        captured: Arc<Mutex<Option<(String, String, String, String)>>>,
+        captured: CapturedSpawn,
     }
 
     impl MockSpawnClient {
-        fn responding(
-            response: impl Into<String>,
-        ) -> (Self, Arc<Mutex<Option<(String, String, String, String)>>>) {
+        fn responding(response: impl Into<String>) -> (Self, CapturedSpawn) {
             let captured = Arc::new(Mutex::new(None));
             (
                 Self { response: response.into(), captured: Arc::clone(&captured) },

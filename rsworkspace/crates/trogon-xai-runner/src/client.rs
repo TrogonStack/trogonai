@@ -710,14 +710,14 @@ fn process_sse_line(
             // actual call_id and name from pending_fc which was keyed by item_id.
             let item_id = val["item_id"].as_str().unwrap_or("");
             let final_args = val["arguments"].as_str().unwrap_or("").to_string();
-            if let Some((call_id, name, _)) = pending_fc.remove(item_id) {
-                if !call_id.is_empty() || !name.is_empty() {
-                    pending.push_back(XaiEvent::FunctionCall {
-                        call_id,
-                        name,
-                        arguments: final_args,
-                    });
-                }
+            if let Some((call_id, name, _)) = pending_fc.remove(item_id)
+                && (!call_id.is_empty() || !name.is_empty())
+            {
+                pending.push_back(XaiEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments: final_args,
+                });
             }
         }
         // ── Server-side tool call lifecycle events ───────────────────────────

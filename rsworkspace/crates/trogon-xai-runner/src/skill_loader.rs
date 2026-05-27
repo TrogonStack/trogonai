@@ -128,6 +128,7 @@ pub mod mock {
     use super::SkillLoading;
     use std::collections::HashMap;
 
+    #[derive(Default)]
     pub struct MockSkillLoader {
         content: HashMap<String, String>,
     }

@@ -34,6 +34,10 @@ pub struct SessionSnapshot {
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// MCP servers attached to this session, persisted so they survive a runner
+    /// restart / KV reload. `#[serde(default)]` keeps older snapshots readable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
 }
 
 /// Per-message token usage written to the SESSIONS bucket.
@@ -210,6 +214,7 @@ pub mod mock {
     use super::{BoxFuture, SessionSnapshot, SessionStoring};
     use std::sync::Mutex;
 
+    #[derive(Default)]
     pub struct MockSessionStore {
         pub saves: Mutex<Vec<SessionSnapshot>>,
         pub removes: Mutex<Vec<(String, String)>>,
@@ -296,6 +301,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".into(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         };
         let json = serde_json::to_string(&snap).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -346,6 +352,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".into(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         }
     }
 

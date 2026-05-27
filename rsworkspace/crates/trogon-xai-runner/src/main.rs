@@ -164,6 +164,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nats_for_perm = nats.clone();
     let prefix_for_perm = acp_prefix.clone();
 
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    agent = agent.with_elicitation(elic_tx);
+    let nats_for_elic = nats.clone();
+    let prefix_for_elic = acp_prefix.clone();
+
     let result = local
         .run_until(async {
             tokio::task::spawn_local(async move {
@@ -173,6 +179,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         nats_for_perm.clone(),
                         prefix_for_perm.clone(),
                         &perm_store,
+                    )
+                    .await;
+                }
+            });
+
+            tokio::task::spawn_local(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    trogon_runner_tools::handle_elicitation_request_nats(
+                        req,
+                        nats_for_elic.clone(),
+                        prefix_for_elic.clone(),
                     )
                     .await;
                 }
