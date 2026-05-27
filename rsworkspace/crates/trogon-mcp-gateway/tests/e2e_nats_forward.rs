@@ -47,7 +47,11 @@ async fn gateway_forwards_tools_list_request_reply() {
                     continue;
                 };
                 backend_nats
-                    .publish_with_headers(reply.to_string(), async_nats::HeaderMap::new(), Bytes::from(backend_reply))
+                    .publish_with_headers(
+                        reply.to_string(),
+                        async_nats::HeaderMap::new(),
+                        Bytes::from(backend_reply),
+                    )
                     .await
                     .ok();
                 backend_nats.flush().await.ok();
@@ -72,15 +76,9 @@ async fn gateway_forwards_tools_list_request_reply() {
 
     let run_client = gateway_client.clone();
     let join = tokio::spawn(async move {
-        trogon_mcp_gateway::run(
-            run_client,
-            checker,
-            traces,
-            settings,
-            async {
-                shutdown_rx.await.ok();
-            },
-        )
+        trogon_mcp_gateway::run(run_client, checker, traces, settings, async {
+            shutdown_rx.await.ok();
+        })
         .await
     });
 
@@ -94,7 +92,11 @@ async fn gateway_forwards_tools_list_request_reply() {
         "params": {}
     });
     let response = gateway_client
-        .request_with_headers(ingress.clone(), async_nats::HeaderMap::new(), serde_json::to_vec(&payload).unwrap().into())
+        .request_with_headers(
+            ingress.clone(),
+            async_nats::HeaderMap::new(),
+            serde_json::to_vec(&payload).unwrap().into(),
+        )
         .await
         .expect("client request failed");
 

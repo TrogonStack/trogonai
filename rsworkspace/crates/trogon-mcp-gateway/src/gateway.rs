@@ -3,8 +3,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use async_nats::jetstream;
 use async_nats::Message;
+use async_nats::jetstream;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
@@ -73,8 +73,7 @@ where
 
     let js = jetstream::new((*client).clone());
     if settings.init_audit_stream
-        && let Err(e) =
-            audit::ensure_audit_stream(&js, &settings.audit_stream_name, settings.mcp.prefix_str()).await
+        && let Err(e) = audit::ensure_audit_stream(&js, &settings.audit_stream_name, settings.mcp.prefix_str()).await
     {
         warn!(error = %e, stream = %settings.audit_stream_name, "failed to ensure audit JetStream (continuing without stream guarantee)");
     }
@@ -108,26 +107,18 @@ async fn handle_ingress(
     settings: &GatewaySettings,
     msg: Message,
 ) -> Result<(), GatewayError> {
-    handle_ingress_inner(
-        client,
-        policy,
-        checker,
-        traces,
-        jetstream,
-        settings,
-        msg.clone(),
-    )
-    .instrument(tracing::info_span!(
-        "mcp_gateway.handle_ingress",
-        gateway.subject_in = %msg.subject,
-        gateway.jsonrpc.method = tracing::field::Empty,
-        gateway.identity.source = tracing::field::Empty,
-        gateway.identity.issuer_present = tracing::field::Empty,
-        gateway.jwt.required_for_gate = tracing::field::Empty,
-        gateway.spicedb.required = tracing::field::Empty,
-        gateway.spicedb.allowed = tracing::field::Empty,
-    ))
-    .await
+    handle_ingress_inner(client, policy, checker, traces, jetstream, settings, msg.clone())
+        .instrument(tracing::info_span!(
+            "mcp_gateway.handle_ingress",
+            gateway.subject_in = %msg.subject,
+            gateway.jsonrpc.method = tracing::field::Empty,
+            gateway.identity.source = tracing::field::Empty,
+            gateway.identity.issuer_present = tracing::field::Empty,
+            gateway.jwt.required_for_gate = tracing::field::Empty,
+            gateway.spicedb.required = tracing::field::Empty,
+            gateway.spicedb.allowed = tracing::field::Empty,
+        ))
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -157,25 +148,47 @@ async fn handle_ingress_inner(
         .map_err(|e| GatewayError(e.to_string()))?;
 
     tracing::Span::current().record("gateway.jsonrpc.method", jsonrpc_method.as_str());
-    tracing::Span::current().record(
-        "gateway.spicedb.required",
-        tracing::field::display(requires_spicedb),
-    );
+    tracing::Span::current().record("gateway.spicedb.required", tracing::field::display(requires_spicedb));
 
     let bearer_h = settings.jwt.bearer_header_name_normalized();
     let bearer = bearer_token_from_headers(msg.headers.as_ref(), bearer_h.as_str());
     let jwt_strict = settings.jwt.jwt_required_for_gate(requires_spicedb);
 
-    tracing::Span::current().record(
-        "gateway.jwt.required_for_gate",
-        tracing::field::display(jwt_strict),
-    );
-    let gateway_identity = match settings
+    tracing::Span::current().record("gateway.jwt.required_for_gate", tracing::field::display(jwt_strict));
+    let agent_identity_mode = settings.jwt.agent_identity_mode();
+    let act_chain_raw = act_chain::ingress_act_chain_raw(msg.headers.as_ref());
+    if let Some(deny) = crate::jwt::enforce_header_act_chain_violations(agent_identity_mode, act_chain_raw.as_deref()) {
+        finish_ingress_blocked(FinishIngressBlockedParams {
+            client,
+            jetstream,
+            mcp: &settings.mcp,
+            msg: &msg,
+            backend_subject: &backend_subject,
+            jsonrpc_method: &jsonrpc_method,
+            gateway_identity: anonymous_audit_identity(),
+            request_id: request_id.clone(),
+            requires_spicedb,
+            spicedb_allowed: None,
+            traces,
+            audit_outcome: "error",
+            jsonrpc_code: deny.code,
+            jsonrpc_message: deny.message,
+        })
+        .await;
+        return Ok(());
+    }
+
+    let gateway_resolution = match settings
         .jwt
-        .resolve(bearer.as_deref(), legacy_tenant_hdr.as_deref(), jwt_strict)
+        .resolve_with_claims(
+            bearer.as_deref(),
+            legacy_tenant_hdr.as_deref(),
+            jwt_strict,
+            Some(jsonrpc_method.as_str()),
+        )
         .await
     {
-        Ok(ident) => ident,
+        Ok(resolution) => resolution,
         Err(deny) => {
             finish_ingress_blocked(FinishIngressBlockedParams {
                 client,
@@ -197,12 +210,10 @@ async fn handle_ingress_inner(
             return Ok(());
         }
     };
+    let gateway_identity = gateway_resolution.identity;
 
     let span = tracing::Span::current();
-    span.record(
-        "gateway.identity.source",
-        gateway_identity.source.as_otel_snake_case(),
-    );
+    span.record("gateway.identity.source", gateway_identity.source.as_otel_snake_case());
     span.record(
         "gateway.identity.issuer_present",
         tracing::field::display(gateway_identity.issuer.is_some()),
@@ -289,26 +300,18 @@ async fn handle_ingress_inner(
     }
 
     if requires_spicedb && let Some(allowed) = spicedb_allowed {
-        tracing::Span::current().record(
-            "gateway.spicedb.allowed",
-            tracing::field::display(allowed),
-        );
+        tracing::Span::current().record("gateway.spicedb.allowed", tracing::field::display(allowed));
     }
 
     let base_headers = msg.headers.clone().unwrap_or_default();
-    let act_chain_raw = act_chain::ingress_act_chain_raw(msg.headers.as_ref());
     let mut outbound_headers = egress_header_map(base_headers, settings.jwt.jwt_controls_transport());
     append_verified_gateway_identity_headers(&mut outbound_headers, &gateway_identity);
-    act_chain::project_act_chain_header(&mut outbound_headers, act_chain_raw.as_deref());
+    act_chain::project_act_chain_header(&mut outbound_headers, act_chain_raw.as_deref(), agent_identity_mode);
     inject_trace_context(&mut outbound_headers);
 
     if msg.reply.is_none() {
         client
-            .publish_with_headers(
-                backend_subject.clone(),
-                outbound_headers,
-                msg.payload.clone(),
-            )
+            .publish_with_headers(backend_subject.clone(), outbound_headers, msg.payload.clone())
             .await
             .map_err(|e| GatewayError(e.to_string()))?;
         client.flush().await.map_err(|e| GatewayError(e.to_string()))?;
@@ -457,7 +460,13 @@ async fn publish_audit_inner(
     );
     let method_root = audit::jsonrpc_method_root(jsonrpc_method);
     let audit_subject = audit::audit_publish_subject(prefix, outcome, direction, &method_root);
-    audit::publish_audit(jetstream, audit_subject, &audit_envelope, std::time::Duration::from_secs(5)).await;
+    audit::publish_audit(
+        jetstream,
+        audit_subject,
+        &audit_envelope,
+        std::time::Duration::from_secs(5),
+    )
+    .await;
 }
 
 struct FinishIngressBlockedParams<'a> {
@@ -504,13 +513,7 @@ async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
     );
     let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
     let subject = audit::audit_publish_subject(prefix, params.audit_outcome, "request", &method_root);
-    audit::publish_audit(
-        params.jetstream,
-        subject,
-        &envelope,
-        std::time::Duration::from_secs(5),
-    )
-    .await;
+    audit::publish_audit(params.jetstream, subject, &envelope, std::time::Duration::from_secs(5)).await;
 
     if let Some(id) = params.request_id {
         params.traces.insert(
@@ -580,11 +583,7 @@ fn bearer_from_authorization_header_value(raw: &str) -> Option<String> {
     let plen = AUTHZ_BEARER_PREFIX.len();
     if s.len() >= plen && s[..plen].eq_ignore_ascii_case(AUTHZ_BEARER_PREFIX) {
         let tok = s[plen..].trim();
-        if tok.is_empty() {
-            None
-        } else {
-            Some(tok.to_string())
-        }
+        if tok.is_empty() { None } else { Some(tok.to_string()) }
     } else {
         None
     }
@@ -706,10 +705,7 @@ mod tests {
             "params": {"uri": "file:///tmp/x"}
         })
         .to_string();
-        assert_eq!(
-            resources_read_uri(payload.as_bytes()).as_deref(),
-            Some("file:///tmp/x")
-        );
+        assert_eq!(resources_read_uri(payload.as_bytes()).as_deref(), Some("file:///tmp/x"));
     }
 
     #[test]
