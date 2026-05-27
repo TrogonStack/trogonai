@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::Engine;
-use jsonwebtoken::{Algorithm, Header};
 use serde_json::Value;
+
+#[cfg(any(feature = "kms-aws", feature = "vault"))]
+use base64::Engine;
+#[cfg(any(feature = "kms-aws", feature = "vault"))]
+use jsonwebtoken::{Algorithm, Header};
 
 use crate::error::StsError;
 
@@ -28,6 +31,7 @@ pub trait Signer: Send + Sync {
 
 pub type DynSigner = Arc<dyn Signer>;
 
+#[cfg(any(feature = "kms-aws", feature = "vault"))]
 pub(crate) fn jwt_signing_input(algorithm: Algorithm, kid: &str, claims: &HashMap<String, Value>) -> Result<String, StsError> {
     let mut header = Header::new(algorithm);
     header.kid = Some(kid.to_string());
@@ -44,6 +48,7 @@ pub(crate) fn jwt_signing_input(algorithm: Algorithm, kid: &str, claims: &HashMa
     ))
 }
 
+#[cfg(any(feature = "kms-aws", feature = "vault"))]
 pub(crate) fn assemble_jwt(signing_input: &str, signature: &[u8]) -> String {
     let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
     format!("{}.{}", signing_input, engine.encode(signature))
