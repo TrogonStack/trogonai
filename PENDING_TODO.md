@@ -75,7 +75,12 @@ The 6 Block-0 ADRs are **Accepted** as of 2026-05-27. Implementation in the rest
 - **`trogon-jwks-publisher` v1 (file PEM).** RSA + Ed25519 file PEM key source, publishes mesh JWKS to KV `mcp-jwks/mesh/current`, HTTPS `/.well-known/jwks.json`, and request/reply `mcp.jwks.mesh.get`.
 - **`trogon-sts` v1 (file PEM signer).** Queue-group consumer on `mcp.sts.exchange`. Verifies bootstrap/mesh `subject_token` (separate JWKS caches), validates `actor_token` against a file trust bundle, looks up registry, appends `act_chain`, mints mesh JWT (TTL 120 s default, range 60–300 s via `mesh_token_ttl_s`). Rate limits 100/10 s/`wkl` + 500/10 s/`agent_id`, audit emit to `mcp.audit.sts.{outcome}`.
 - **`trogon-a2a-sdk` Rust skeleton.** Traits for `SvidSource`, `Sts`, `Registry`, `MessageTransport`, `Jwks`. NATS impls under `nats` feature. `Client::call` does lookup → exchange → publish; `serve` verifies JWT + `aud` + chain depth/loops and yields a typed `Caller { originator, chain, purpose }`. Mock-based unit tests pass; 33-line `examples/echo_agent.rs`.
-- **Shared `trogon-identity-types`.** Extracted `ActChainEntry` + `MAX_ACT_CHAIN_DEPTH`; used by `trogon-sts`.
+- **Shared `trogon-identity-types`.** Extracted `ActChainEntry` + `MAX_ACT_CHAIN_DEPTH`; used by `trogon-sts`, `trogon-mcp-gateway`, and `trogon-a2a-sdk` (unification closed by `20260527T193237Z-1271`).
+- **Production signers + resilience.** `trogon-jwks-publisher` and `trogon-sts` both ship AWS KMS (`kms-aws`) and Vault Transit (`vault`) signers; `trogon-sts` adds a circuit breaker on registry / SpiceDB, act-chain registry resolution with TTL cache, and the `trogon-sts-probe` latency sidecar.
+- **Registry control plane.** `trogon-agent-registry-controller` + `agctl` (signer, Git→KV sync, TOML manifest validation, lifecycle audit events); runbook at `docs/identity/registry-operations.md`.
+- **Gateway egress minting.** `trogon-mcp-gateway` calls `trogon-sts-client` before backend egress, attaches the minted token, drops the inbound credential, with an LRU cache keyed per ADR 0005 and mode-gated by `MCP_GATEWAY_AGENT_IDENTITY`.
+- **A2A SDK hardening.** Live NATS+STS+registry integration test, serve-side OTel attributes, registry-driven default purpose, CI lint forbidding non-SDK publishes to `mcp.gateway.request.*`.
+- **`trogon-traffic-view` skeleton + spec.** Crate skeleton (`AuditConsumer` / `TrafficIndex` / `SiemExporter` traits) and full spec at `docs/identity/agent-traffic.md` (OCSF v1 SIEM export, `agctl traffic` CLI surface).
 
 ### Execution roadmap (drives to completion, no gates)
 
@@ -180,7 +185,7 @@ Spec at `docs/identity/registry.md` is the accepted contract. Implementation tas
 
 - [x] **Agent entity — decided.** Fields per `docs/identity/registry.md`: `agent_id` (namespaced `{tenant}/{name}`), `agent_version`, `agent_definition_digest`, `owner_team`, `allowed_workloads` (SPIFFE IDs), `allowed_tools`, `allowed_audiences`, `allowed_purposes`, `mesh_token_ttl_s`, `metadata`.
 - [x] **Storage — decided.** NATS KV bucket `mcp-agent-registry` is the runtime cache; Git manifest is source of truth, synced by a control-plane signer.
-- [ ] **Lifecycle implementation.** Build the control-plane signer + sync loop: registration, version bump, deprecation, revocation via signed manifests. Writes restricted to the signer identity.
+- [x] **Lifecycle implementation.** `trogon-agent-registry-controller` ships the Ed25519 signer + Git sync loop (registration, version bump, deprecation, revocation via signed TOML manifests); KV writes restricted to the signer identity.
 - [x] **Lookup API implementation.** `mcp.registry.agent.lookup` queue-group consumer landed in `trogon-agent-registry`; returns the full record (or `not_found` / `revoked` reply) with cache-first reads against KV.
 - [x] **Audit hook implementation.** `mcp.audit.registry.{lookup.*,put,delete}` events emitted on every mutation and lookup outcome.
 
@@ -273,8 +278,8 @@ Uber's "Standardized A2A Client" is the thing that makes the secure path the onl
 - [x] **Language order — decided.** Rust first (matches gateway crates), then TypeScript (matches `tsworkspace/`), then Python.
 - [x] **Rust skeleton landed.** `trogon-a2a-sdk`: `SvidSource` / `Sts` / `Registry` / `MessageTransport` / `Jwks` traits; NATS impls behind `nats` feature; `Client::call` does lookup → exchange → publish with `A2a-Caller-Jwt`; `serve` verifies JWT + `aud` + chain depth/loops, yields typed `Caller`. Mock-based unit tests pass; 33-line `examples/echo_agent.rs`. (Live integration tests tracked in Carry-over §A2A SDK gaps.)
 - [x] **Telemetry implementation.** OpenTelemetry spans emitted from `Client::call` with `agent.id` / `agent.chain.depth` / `agent.purpose` attributes. (Serve-side span attribute coverage tracked in Carry-over §A2A SDK gaps.)
-- [ ] **Lint implementation.** CI lint that flags direct NATS publishes to `mcp.gateway.request.*` from agent code that isn't the SDK.
-- [ ] **Docs implementation.** Quickstart, recipe for adding a new agent, recipe for verifying chain in a handler.
+- [x] **Lint implementation.** `scripts/ci/check-direct-nats-publishes.sh` (wired into `.github/workflows/ci-rust.yml`) fails the build on non-SDK publishes to `mcp.gateway.request.*`.
+- [x] **Docs implementation.** Quickstart, "add a new agent" recipe, and "verify chain in a handler" recipe live in `crates/trogon-a2a-sdk/README.md`; `docs/identity/sdk.md` carries the default-purpose and telemetry-attributes sections.
 - [ ] **TypeScript SDK.** Next once Rust contract is exercised by real callers.
 - [ ] **Python SDK.** After TypeScript.
 
@@ -342,8 +347,9 @@ Cutover is incremental: keep the bootstrap path while shadow-mode validates the 
 - [x] Update `MCP_GATEWAY_PLAN.md` § Wire-Format Pins with `mcp-act-chain` header row and new claims.
 - [x] Update `MCP_GATEWAY_PLAN.md` § CEL variable namespace with `jwt.agent_id`, `jwt.act_chain`, `jwt.purpose`, etc., plus `chain.*` helpers.
 - [x] Update `MCP_GATEWAY_PLAN.md` § Audit envelope schema to document the optional identity fields.
-- [ ] `trogon-agent-registry` — control-plane signer + sync-loop runbook (still pending).
-- [ ] `trogon-jwks-publisher` — KMS / Vault custody recipes (file PEM is documented; cloud backends are `todo!()`).
+- [x] `trogon-agent-registry` — control-plane signer + sync-loop runbook lives at `docs/identity/registry-operations.md`.
+- [x] `trogon-jwks-publisher` — KMS / Vault custody recipes in `crates/trogon-jwks-publisher/README.md`; AWS KMS + Vault Transit signers shipped behind `kms-aws` / `vault` features.
+- [x] `docs/identity/agent-traffic.md` — agent-traffic view spec (index schema, timeline, chain explorer, OCSF export, `agctl traffic` CLI surface). v1 implementation tracked under "Open after 2026-05-27 swarm".
 
 ---
 
@@ -365,6 +371,12 @@ These are the residual open questions from the six ADRs. Each has a working defa
 
 ## Driving to completion
 
-Authoritative ordering lives in the **Execution roadmap** at the top of this file. Items 1–7 landed in the `20260527T074306Z-7416` swarm. **Item 8 (gateway egress minting) is next on the critical path** — it's the change that flips the gateway from propagating verified context to minting per-hop mesh tokens via `trogon-sts`. After 8: item 9 (wire the A2A SDK skeleton to live STS + registry, then TS/Python ports), then SPIRE wiring, then the traffic-view and adaptive-access blocks.
+Authoritative ordering lives in the **Execution roadmap** at the top of this file. Roadmap items 1–9 (Rust track) landed across the three 2026-05-27 swarm runs. The remaining critical path is:
+
+- **Item 10 (SPIRE wiring)** — replace the sentinel-`wkl` fallback for service workloads with real SVID attestation at STS ingress; trust-bundle distribution via NATS KV `mcp-trust-bundles`.
+- **Item 11 (Agent-traffic view)** — implement the indexer + projector + OCSF exporter against the spec already accepted at `docs/identity/agent-traffic.md`; the `trogon-traffic-view` crate skeleton is the home.
+- **Item 12 (Adaptive access)** — step-up auth, human-in-the-loop approvals (`-32107`), context-aware throttling, anomaly emission.
+
+Smaller residual items live in **Open after 2026-05-27 swarm**: gateway-ingress chain resolution, STS-side empty-purpose reject, A2A SDK TypeScript + Python tracks, and the remaining shadow-mode telemetry / backfill bullets in Block 6.
 
 Decisions are settled. Build.
