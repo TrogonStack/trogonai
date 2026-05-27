@@ -605,10 +605,10 @@ mod tests {
 
     #[test]
     fn stream_subject_accepts_valid_subjects() {
-        let subject = StreamSubject::new("cron.jobs.events.backup").unwrap();
+        let subject = StreamSubject::new("scheduler.schedules.events.backup").unwrap();
 
-        assert_eq!(subject.as_str(), "cron.jobs.events.backup");
-        assert_eq!(subject.to_string(), "cron.jobs.events.backup");
+        assert_eq!(subject.as_str(), "scheduler.schedules.events.backup");
+        assert_eq!(subject.to_string(), "scheduler.schedules.events.backup");
     }
 
     #[test]
@@ -622,18 +622,18 @@ mod tests {
     fn build_publish_message_sets_trogon_event_type_header() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
-            .outbound_message("cron.jobs.events.backup");
+            .outbound_message("scheduler.schedules.events.backup");
         let headers = message.headers.unwrap_or_default();
 
         assert_eq!(
             headers.get(TROGON_EVENT_TYPE).map(|value| value.as_str()),
-            Some("trogon.cron.jobs.v1.JobAdded")
+            Some("trogonai.scheduler.schedules.v1.ScheduleAdded")
         );
         assert_eq!(
             headers.get(NATS_MESSAGE_ID).map(|value| value.as_str()),
@@ -645,13 +645,13 @@ mod tests {
     fn build_publish_message_maps_headers_to_trogon_headers() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
             content: Vec::new(),
             headers: Headers::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-            .outbound_message("cron.jobs.events.backup")
+            .outbound_message("scheduler.schedules.events.backup")
             .headers
             .unwrap_or_default();
 
@@ -689,17 +689,17 @@ mod tests {
     fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
-            .outbound_message("cron.jobs.events.backup")
+            .outbound_message("scheduler.schedules.events.backup")
             .headers
             .unwrap_or_default();
         let second = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 1, 2)
-            .outbound_message("cron.jobs.events.backup")
+            .outbound_message("scheduler.schedules.events.backup")
             .headers
             .unwrap_or_default();
 
@@ -723,13 +723,13 @@ mod tests {
     fn build_publish_message_omits_occ_header_without_expected_sequence() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogon.cron.jobs.v1.JobAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
 
         let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-            .outbound_message("cron.jobs.events.backup")
+            .outbound_message("scheduler.schedules.events.backup")
             .headers
             .unwrap_or_default();
 

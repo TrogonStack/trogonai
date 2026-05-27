@@ -23,7 +23,10 @@ export default defineConfig({
     sidebar: [
       {
         text: "Docs",
-        items: [{ text: "Overview", link: "/get-started/" }],
+        items: [
+          { text: "Overview", link: "/get-started/" },
+          { text: "Event Metadata", link: "/architecture/event-metadata" },
+        ],
       },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/TrogonStack/trogonai" }],
