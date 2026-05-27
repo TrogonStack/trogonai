@@ -739,6 +739,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         agent_id: None,
         parent_session_id: None,
         branched_at_index: None,
+        mcp_servers: Vec::new(),
     };
     use trogon_openrouter_runner::SessionStoring as _;
     store.save(&snap).await;

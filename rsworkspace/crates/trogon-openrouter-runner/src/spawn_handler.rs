@@ -75,6 +75,7 @@ impl SpawnHttpClient for ReqwestSpawnClient {
 ///
 /// Runs until the NATS connection drops or the subscriber is closed. Spawn this
 /// in a `tokio::spawn` from `main`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_spawn_subscriber<C: SpawnHttpClient + Send + Sync + 'static>(
     nats: async_nats::Client,
     prefix: String,
@@ -164,6 +165,7 @@ async fn oneshot_call_with_client<C: SpawnHttpClient>(
 }
 
 #[cfg(test)]
+#[allow(clippy::type_complexity)]
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};

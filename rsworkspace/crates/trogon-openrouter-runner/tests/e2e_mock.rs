@@ -6,6 +6,7 @@
 //!
 //! Run with:
 //!   cargo test -p trogon-openrouter-runner --test e2e_mock
+#![allow(clippy::await_holding_lock)]
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -169,6 +170,19 @@ impl Harness {
     }
 
     fn with_api_key(key: &str) -> Self {
+        Self::build(key, None)
+    }
+
+    /// Build a harness whose agent has the `ask_user` elicitation bridge wired.
+    /// `elic_tx` is handed to the agent; the test owns the receiver and answers.
+    fn with_elicitation(
+        key: &str,
+        elic_tx: trogon_runner_tools::ElicitationTx,
+    ) -> Self {
+        Self::build(key, Some(elic_tx))
+    }
+
+    fn build(key: &str, elic_tx: Option<trogon_runner_tools::ElicitationTx>) -> Self {
         let nats = MockNatsClient::new();
         let http = TestHttpClient::new();
         let notifier = TestNotifier::new();
@@ -180,7 +194,10 @@ impl Harness {
         let notifier_clone = notifier.clone();
 
         let prefix = AcpPrefix::new("acp").unwrap();
-        let agent = OpenRouterAgent::with_deps(notifier_clone, "test-model", key, http_clone);
+        let mut agent = OpenRouterAgent::with_deps(notifier_clone, "test-model", key, http_clone);
+        if let Some(tx) = elic_tx {
+            agent = agent.with_elicitation(tx);
+        }
         let (_, io_task) = AgentSideNatsConnection::new(agent, nats.clone(), prefix, |fut| {
             tokio::task::spawn_local(fut);
         });
@@ -320,6 +337,22 @@ async fn create_session(h: &Harness) -> String {
         "acp.agent.session.new",
         NewSessionRequest::new("/tmp"),
         "r.new",
+    );
+    let payloads = h.expect_n_publishes(before + 1).await;
+    let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
+    val["sessionId"].as_str().unwrap().to_string()
+}
+
+/// Create a session whose `new_session` request carries the given HTTP MCP servers.
+async fn create_session_with_mcp(
+    h: &Harness,
+    servers: Vec<agent_client_protocol::McpServer>,
+) -> String {
+    let before = h.nats.published_payloads().len();
+    h.global(
+        "acp.agent.session.new",
+        NewSessionRequest::new("/tmp").mcp_servers(servers),
+        "r.new.mcp",
     );
     let payloads = h.expect_n_publishes(before + 1).await;
     let val: serde_json::Value = serde_json::from_slice(payloads.last().unwrap()).unwrap();
@@ -2277,7 +2310,7 @@ async fn response_exceeding_size_limit_stops_early_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -2377,7 +2410,7 @@ async fn fork_inherits_system_prompt_sent_to_http_client() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/src"), "r.src");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: source session.new");
                 tokio::task::yield_now().await;
             }
@@ -2677,7 +2710,7 @@ async fn prompt_stream_timeout_returns_end_turn_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -3572,7 +3605,7 @@ async fn prompt_fails_without_api_key_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -3673,7 +3706,7 @@ async fn response_exactly_at_size_limit_does_not_stop_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -3738,7 +3771,7 @@ async fn size_limit_guard_saves_partial_to_history_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -3823,7 +3856,7 @@ async fn loader_falls_back_to_with_system_prompt_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -4435,7 +4468,7 @@ async fn stream_timeout_in_second_http_call_of_tool_round_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -4562,7 +4595,7 @@ async fn max_response_bytes_guard_applies_after_tool_round_via_nats() {
             inject_req(&global_tx, "acp.agent.session.new", NewSessionRequest::new("/"), "r.new");
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             loop {
-                if nats.published_payloads().len() >= 1 { break; }
+                if !nats.published_payloads().is_empty() { break; }
                 assert!(tokio::time::Instant::now() < deadline, "timeout: session.new");
                 tokio::task::yield_now().await;
             }
@@ -4881,6 +4914,212 @@ async fn tool_notifications_carry_correct_call_id_and_title_via_nats() {
                 completed.tool_call_id.0.as_ref(),
                 "call_verify_id",
                 "ToolCallUpdate notification tool_call_id must match dispatched call id"
+            );
+        })
+        .await;
+}
+
+// ── MCP tool round-trip via NATS ──────────────────────────────────────────────
+
+/// A session created with an HTTP MCP server advertises the server's tools as
+/// `{server}__{tool}`; when the model calls one, the runner dispatches to the
+/// MCP server and feeds the result back into the conversation.
+#[tokio::test]
+async fn mcp_tool_round_trip_via_nats() {
+    use httpmock::prelude::*;
+
+    let mcp = MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[
+                {"name":"search","description":"Search the web","inputSchema":{"type":"object"}}
+            ]}
+        }));
+    });
+    mcp.mock(|when, then| {
+        when.method(POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP_SEARCH_RESULT"}]}
+        }));
+    });
+
+    let mcp_url = mcp.url("/mcp");
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let h = Harness::new();
+            let server = agent_client_protocol::McpServer::Http(
+                agent_client_protocol::McpServerHttp::new("web", mcp_url),
+            );
+            let sid = create_session_with_mcp(&h, vec![server]).await;
+
+            // First response: the model calls the prefixed MCP tool.
+            h.http.push(vec![OpenRouterEvent::ToolCallsReady {
+                calls: vec![AssembledToolCall {
+                    id: "call_mcp".to_string(),
+                    name: "web__search".to_string(),
+                    arguments: r#"{"query":"rust"}"#.to_string(),
+                }],
+            }]);
+            // Second response: final answer after the tool result.
+            h.http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("search rust")]),
+                "r.mcp_trip",
+            );
+
+            // new_session publish + prompt response publish.
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "MCP round-trip must resolve to EndTurn: {:?}",
+                resp.stop_reason
+            );
+
+            // The MCP tool def must have been advertised to the model (prefixed).
+            let advertised = h.http.recorded_tool_names.lock().unwrap();
+            assert!(
+                advertised.iter().any(|names| names.iter().any(|n| n == "web__search")),
+                "the MCP tool must be advertised as web__search; got {advertised:?}"
+            );
+            drop(advertised);
+
+            // The MCP result must be fed back into the conversation as a tool result.
+            let fed_back = h.http.last_messages();
+            assert!(
+                fed_back.iter().any(|m| m.content.contains("MCP_SEARCH_RESULT")),
+                "MCP tool result must be fed back into the model conversation"
+            );
+
+            // And surfaced in the ToolCallUpdate notification.
+            let notes = h.notifier.notifications.lock().unwrap();
+            let has_result = notes.iter().any(|n| {
+                if let SessionUpdate::ToolCallUpdate(tcu) = &n.update {
+                    tcu.fields
+                        .raw_output
+                        .as_ref()
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.contains("MCP_SEARCH_RESULT"))
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            });
+            assert!(has_result, "ToolCallUpdate must carry the MCP result text");
+        })
+        .await;
+}
+
+// ── ask_user elicitation round-trip ───────────────────────────────────────────
+
+/// When the model calls `ask_user`, the runner round-trips the question through
+/// the elicitation channel and feeds the user's answer back as the tool result.
+#[tokio::test]
+async fn ask_user_elicitation_round_trip() {
+    use agent_client_protocol::{
+        ElicitationAcceptAction, ElicitationAction, ElicitationContentValue, ElicitationResponse,
+    };
+    use std::collections::BTreeMap;
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (elic_tx, mut elic_rx) =
+                tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+
+            // Stand in for the ACP client: answer every elicitation with "BLUE".
+            tokio::task::spawn_local(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let mut content = BTreeMap::new();
+                    content.insert(
+                        "answer".to_string(),
+                        ElicitationContentValue::String("BLUE".to_string()),
+                    );
+                    let resp = ElicitationResponse::new(ElicitationAction::Accept(
+                        ElicitationAcceptAction::new().content(content),
+                    ));
+                    let _ = req.response_tx.send(Ok(resp));
+                }
+            });
+
+            let h = Harness::with_elicitation("test-key", elic_tx);
+            let sid = create_session(&h).await;
+
+            // First response: the model asks the user a question.
+            h.http.push(vec![OpenRouterEvent::ToolCallsReady {
+                calls: vec![AssembledToolCall {
+                    id: "call_ask".to_string(),
+                    name: "ask_user".to_string(),
+                    arguments: r#"{"question":"What is your favorite color?"}"#.to_string(),
+                }],
+            }]);
+            // Second response: final answer after the elicitation result.
+            h.http.push(vec![OpenRouterEvent::TextDelta { text: "noted".to_string() }]);
+
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("ask me")]),
+                "r.ask_trip",
+            );
+
+            let payloads = h.expect_n_publishes(2).await;
+            let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
+            assert!(
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "ask_user round-trip must resolve to EndTurn: {:?}",
+                resp.stop_reason
+            );
+
+            // ask_user must be advertised when the elicitation bridge is wired.
+            let advertised = h.http.recorded_tool_names.lock().unwrap();
+            assert!(
+                advertised.iter().any(|names| names.iter().any(|n| n == "ask_user")),
+                "ask_user must be advertised when elicitation is enabled; got {advertised:?}"
+            );
+            drop(advertised);
+
+            // The user's answer must be fed back as the tool result.
+            let fed_back = h.http.last_messages();
+            assert!(
+                fed_back.iter().any(|m| m.content.contains("BLUE")),
+                "the elicited answer must be fed back into the model conversation"
+            );
+        })
+        .await;
+}
+
+/// Without the elicitation bridge, `ask_user` is not advertised at all.
+#[tokio::test]
+async fn ask_user_not_advertised_without_bridge() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let h = Harness::new();
+            let sid = create_session(&h).await;
+
+            h.http.push(vec![OpenRouterEvent::TextDelta { text: "hi".to_string() }]);
+            let prompt_subj = format!("acp.session.{sid}.agent.prompt");
+            h.session_req(
+                &prompt_subj,
+                PromptRequest::new(sid.clone(), vec![ContentBlock::from("hello")]),
+                "r.no_ask",
+            );
+            h.expect_n_publishes(2).await;
+
+            let advertised = h.http.recorded_tool_names.lock().unwrap();
+            assert!(
+                !advertised.iter().any(|names| names.iter().any(|n| n == "ask_user")),
+                "ask_user must NOT be advertised without the elicitation bridge; got {advertised:?}"
             );
         })
         .await;
