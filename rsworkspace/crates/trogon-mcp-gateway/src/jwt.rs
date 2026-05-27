@@ -10,10 +10,36 @@ use jsonwebtoken::{
     jwk::{AlgorithmParameters, EllipticCurve, JwkSet},
 };
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::authz::{GatewayIdentity, IdentitySource};
 use crate::rpc_codes;
+
+/// Optional agent-identity claims parsed from a verified JWT payload.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct VerifiedJwtClaims {
+    pub agent_id: Option<String>,
+    pub agent_version: Option<String>,
+    pub wkl: Option<String>,
+    pub wkl_attested_at: Option<i64>,
+    pub purpose: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AgentIdentityMode {
+    #[default]
+    Off,
+    Shadow,
+    Enforce,
+}
+
+#[derive(Clone, Debug)]
+pub struct JwtResolution {
+    pub identity: GatewayIdentity,
+    pub claims: VerifiedJwtClaims,
+}
 
 const JWKS_CACHE_TTL: Duration = Duration::from_secs(300);
 
@@ -27,6 +53,7 @@ pub enum JwtMode {
 #[derive(Clone, Debug)]
 pub struct JwtIngressConfig {
     pub mode: JwtMode,
+    pub agent_identity_mode: AgentIdentityMode,
     pub issuers: HashSet<String>,
     pub audience: String,
     pub leeway_secs: u64,
@@ -50,6 +77,7 @@ impl JwtIngressConfig {
         const ENV_HS256: &str = "MCP_GATEWAY_JWT_HS256_SECRET";
         const ENV_RSA_PEM: &str = "MCP_GATEWAY_JWT_RSA_PUBLIC_KEY_PEM";
         const ENV_JWKS_URI: &str = "MCP_GATEWAY_JWT_JWKS_URI";
+        const ENV_AGENT_IDENTITY: &str = "MCP_GATEWAY_AGENT_IDENTITY";
 
         let raw_mode = env
             .var(ENV_MODE)
@@ -59,6 +87,20 @@ impl JwtIngressConfig {
             "validate" => JwtMode::Validate,
             "require" => JwtMode::Require,
             other => return Err(format!("{ENV_MODE} must be off|validate|require, got {other}")),
+        };
+
+        let raw_agent_identity = env
+            .var(ENV_AGENT_IDENTITY)
+            .unwrap_or_else(|_| "off".to_string());
+        let agent_identity_mode = match raw_agent_identity.trim().to_ascii_lowercase().as_str() {
+            "" | "off" => AgentIdentityMode::Off,
+            "shadow" => AgentIdentityMode::Shadow,
+            "enforce" => AgentIdentityMode::Enforce,
+            other => {
+                return Err(format!(
+                    "{ENV_AGENT_IDENTITY} must be off|shadow|enforce, got {other}"
+                ));
+            }
         };
 
         let issuers: HashSet<String> = if mode == JwtMode::Off {
@@ -113,6 +155,7 @@ impl JwtIngressConfig {
 
         let cfg = Self {
             mode,
+            agent_identity_mode,
             issuers,
             audience,
             leeway_secs,
@@ -192,6 +235,7 @@ impl JwtValidator {
     pub fn disabled() -> Result<Arc<Self>, String> {
         Self::try_new(JwtIngressConfig {
             mode: JwtMode::Off,
+            agent_identity_mode: AgentIdentityMode::Off,
             issuers: HashSet::new(),
             audience: String::new(),
             leeway_secs: 60,
@@ -206,6 +250,11 @@ impl JwtValidator {
     #[must_use]
     pub fn mode(&self) -> JwtMode {
         self.cfg.mode
+    }
+
+    #[must_use]
+    pub fn agent_identity_mode(&self) -> AgentIdentityMode {
+        self.cfg.agent_identity_mode
     }
 
     /// When true, forgeable tenant headers must not reach backends.
@@ -226,18 +275,51 @@ impl JwtValidator {
         legacy_tenant_header: Option<&str>,
         jwt_strict: bool,
     ) -> Result<GatewayIdentity, IdentityDeny> {
-        match self.cfg.mode {
-            JwtMode::Off => Ok(legacy_identity(legacy_tenant_header)),
-            JwtMode::Validate | JwtMode::Require => self.resolve_validate_or_require(bearer_token, legacy_tenant_header, jwt_strict).await,
-        }
+        Ok(self
+            .resolve_with_claims(bearer_token, legacy_tenant_header, jwt_strict, None)
+            .await?
+            .identity)
     }
 
-    async fn resolve_validate_or_require(
+    pub async fn resolve_with_claims(
         &self,
         bearer_token: Option<&str>,
         legacy_tenant_header: Option<&str>,
         jwt_strict: bool,
-    ) -> Result<GatewayIdentity, IdentityDeny> {
+        jsonrpc_method: Option<&str>,
+    ) -> Result<JwtResolution, IdentityDeny> {
+        let resolution = match self.cfg.mode {
+            JwtMode::Off => JwtResolution {
+                identity: legacy_identity(legacy_tenant_header),
+                claims: VerifiedJwtClaims::default(),
+            },
+            JwtMode::Validate | JwtMode::Require => {
+                self.resolve_validate_or_require_with_claims(
+                    bearer_token,
+                    legacy_tenant_header,
+                    jwt_strict,
+                )
+                .await?
+            }
+        };
+
+        if let Some(method) = jsonrpc_method {
+            check_agent_identity_violations(
+                self.cfg.agent_identity_mode,
+                method,
+                &resolution.claims,
+            );
+        }
+
+        Ok(resolution)
+    }
+
+    async fn resolve_validate_or_require_with_claims(
+        &self,
+        bearer_token: Option<&str>,
+        legacy_tenant_header: Option<&str>,
+        jwt_strict: bool,
+    ) -> Result<JwtResolution, IdentityDeny> {
         let Some(token) = bearer_token.filter(|s| !s.is_empty()) else {
             if jwt_strict {
                 return Err(IdentityDeny {
@@ -245,11 +327,14 @@ impl JwtValidator {
                     message: "authentication required".into(),
                 });
             }
-            return Ok(legacy_identity(legacy_tenant_header));
+            return Ok(JwtResolution {
+                identity: legacy_identity(legacy_tenant_header),
+                claims: VerifiedJwtClaims::default(),
+            });
         };
 
         match self.validate_and_extract(token).await {
-            Ok(ident) => Ok(ident),
+            Ok(resolution) => Ok(resolution),
             Err(e) if e.expired_token => Err(IdentityDeny {
                 code: rpc_codes::AUTH_EXPIRED,
                 message: e.message,
@@ -260,13 +345,16 @@ impl JwtValidator {
             }),
             Err(e) => {
                 warn!(error = %e.message, "JWT validation failed; falling back to legacy tenant header");
-                Ok(legacy_identity(legacy_tenant_header))
+                Ok(JwtResolution {
+                    identity: legacy_identity(legacy_tenant_header),
+                    claims: VerifiedJwtClaims::default(),
+                })
             }
         }
     }
 
     #[allow(clippy::too_many_lines)] // JWKS/RSA branching is intentionally linear.
-    async fn validate_and_extract(&self, token: &str) -> Result<GatewayIdentity, ValidateErr> {
+    async fn validate_and_extract(&self, token: &str) -> Result<JwtResolution, ValidateErr> {
         let header =
             decode_header(token).map_err(|e| ValidateErr::new(false, format!("invalid jwt header ({e})")))?;
 
@@ -300,12 +388,16 @@ impl JwtValidator {
             .map(std::string::ToString::to_string);
 
         let tenant_claim = tenant_from_claim_json(&claims, &self.cfg.tenant_claim_key);
-        Ok(GatewayIdentity {
-            tenant: tenant_claim.filter(|t| !t.is_empty()),
-            caller_sub: Some(sub.to_string()),
-            issuer: iss,
-            jti,
-            source: IdentitySource::Jwt,
+        let agent_claims = parse_verified_claims(&claims);
+        Ok(JwtResolution {
+            identity: GatewayIdentity {
+                tenant: tenant_claim.filter(|t| !t.is_empty()),
+                caller_sub: Some(sub.to_string()),
+                issuer: iss,
+                jti,
+                source: IdentitySource::Jwt,
+            },
+            claims: agent_claims,
         })
     }
 
@@ -367,6 +459,51 @@ fn classify_decode_error(e: jsonwebtoken::errors::Error) -> ValidateErr {
     use jsonwebtoken::errors::ErrorKind;
     let expired_token = matches!(e.kind(), ErrorKind::ExpiredSignature);
     ValidateErr::new(expired_token, e.to_string())
+}
+
+pub fn parse_verified_claims(claims: &serde_json::Value) -> VerifiedJwtClaims {
+    serde_json::from_value(claims.clone()).unwrap_or_default()
+}
+
+pub fn check_agent_identity_violations(
+    mode: AgentIdentityMode,
+    jsonrpc_method: &str,
+    claims: &VerifiedJwtClaims,
+) {
+    if mode == AgentIdentityMode::Off || jsonrpc_method != "tools/call" {
+        return;
+    }
+
+    let missing_agent_id = claims
+        .agent_id
+        .as_ref()
+        .is_none_or(|value| value.is_empty());
+    let missing_wkl = claims.wkl.as_ref().is_none_or(|value| value.is_empty());
+    if !missing_agent_id && !missing_wkl {
+        return;
+    }
+
+    match mode {
+        AgentIdentityMode::Shadow => {
+            warn!(
+                event = "agent_identity_violation",
+                jsonrpc_method,
+                missing_agent_id,
+                missing_wkl,
+                "agent identity claims missing on tools/call"
+            );
+        }
+        AgentIdentityMode::Enforce => {
+            error!(
+                event = "agent_identity_violation",
+                jsonrpc_method,
+                missing_agent_id,
+                missing_wkl,
+                "agent identity enforce would reject (not yet implemented)"
+            );
+        }
+        AgentIdentityMode::Off => {}
+    }
 }
 
 fn legacy_identity(legacy_tenant_header: Option<&str>) -> GatewayIdentity {
@@ -522,6 +659,7 @@ mod tests {
         iss.insert(HS_ISSUER.into());
         JwtIngressConfig {
             mode: JwtMode::Validate,
+            agent_identity_mode: AgentIdentityMode::Off,
             issuers: iss,
             audience: HS_AUD.into(),
             leeway_secs: 60,
