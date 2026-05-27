@@ -4,7 +4,7 @@ use async_nats::HeaderMap;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::StreamExt;
-use jsonwebtoken::{Algorithm, Validation, decode, decode_header};
+use jsonwebtoken::{Validation, decode, decode_header};
 use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue, global};
 use serde::Deserialize;
@@ -37,33 +37,25 @@ pub(crate) async fn handle_inbound<J: Jwks + ?Sized>(
 ) -> Result<Bytes, SdkError> {
     let tracer = global::tracer("trogon-a2a-sdk");
     let own_audience = Audience::for_agent(own);
+    let token = extract_caller_jwt(headers)?;
+    let caller = verify_token(jwks, &token, &own_audience).await?;
     let span = tracer
         .span_builder("a2a.serve.dispatch")
         .with_attributes([
             KeyValue::new("agent.id", own.to_string()),
+            KeyValue::new("agent.chain.depth", caller.chain_depth() as i64),
+            KeyValue::new(
+                "agent.purpose",
+                caller.purpose.as_ref().map(Purpose::to_string).unwrap_or_default(),
+            ),
             KeyValue::new("agent.call.direction", "inbound"),
         ])
         .start(&tracer);
     let cx = Context::current().with_span(span);
-    let parent_cx = cx.clone();
 
-    async {
-        let token = extract_caller_jwt(headers)?;
-        let caller = verify_token(jwks, &token, &own_audience).await?;
-        let _attrs = tracer
-            .span_builder("a2a.serve.caller")
-            .with_attributes([
-                KeyValue::new("agent.chain.depth", caller.chain_depth() as i64),
-                KeyValue::new(
-                    "agent.purpose",
-                    caller.purpose.as_ref().map(Purpose::to_string).unwrap_or_default(),
-                ),
-            ])
-            .start_with_context(&tracer, &parent_cx);
-        handler.handle(caller, payload).await
-    }
-    .with_context(cx)
-    .await
+    async { handler.handle(caller, payload).await }
+        .with_context(cx)
+        .await
 }
 
 fn extract_caller_jwt(headers: &HeaderMap) -> Result<String, SdkError> {
@@ -81,7 +73,7 @@ pub(crate) async fn verify_token<J: Jwks + ?Sized>(
     let header = decode_header(token).map_err(|e| SdkError::InvalidToken(format!("decode header: {e}")))?;
     let kid = header.kid.as_deref();
     let key = jwks.decoding_key(kid).await?;
-    let mut validation = Validation::new(Algorithm::HS256);
+    let mut validation = Validation::new(header.alg);
     validation.validate_aud = false;
     validation.validate_exp = false;
     validation.required_spec_claims.clear();
@@ -234,6 +226,7 @@ mod tests {
 
     #[tokio::test]
     async fn serve_rejects_aud_mismatch() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
         let own = AgentId::parse("acme/echo").unwrap();
         let expected_aud = Audience::for_agent(&own);
         let token = mint_token("urn:trogon:a2a:agent:acme:other", vec![entry("u", "a", "w", 1)]);
@@ -252,6 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn serve_rejects_chain_depth_nine() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
         let own = AgentId::parse("acme/echo").unwrap();
         let aud = Audience::for_agent(&own);
         let chain: Vec<_> = (0..9)
@@ -272,6 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn serve_rejects_agent_id_wkl_loop() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
         let own = AgentId::parse("acme/echo").unwrap();
         let aud = Audience::for_agent(&own);
         let chain = vec![
@@ -300,6 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_path_round_trip_via_mocks() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
         let own = AgentId::parse("acme/echo").unwrap();
         let aud = Audience::for_agent(&own);
         let chain = vec![
@@ -322,5 +318,48 @@ mod tests {
         assert_eq!(caller.originator.sub, "user-alice");
         assert_eq!(caller.chain.len(), 3);
         assert_eq!(caller.direct.sub, "agent-b");
+    }
+
+    #[tokio::test]
+    async fn serve_dispatch_span_records_identity_attributes() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
+        use opentelemetry::global;
+        use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider, SimpleSpanProcessor};
+
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+            .build();
+        global::set_tracer_provider(provider.clone());
+
+        let own = AgentId::parse("acme/echo").unwrap();
+        let aud = Audience::for_agent(&own);
+        let chain = vec![entry("user-alice", "acme/agent1", "wkl-a", 100)];
+        let token = mint_token(aud.as_str(), chain);
+        let mut headers = HeaderMap::new();
+        headers.insert(CALLER_JWT_HEADER, token.as_str());
+        let jwks = Hs256Jwks::new(SECRET);
+        let handler = RecordingHandler {
+            last_caller: Mutex::new(None),
+        };
+        handle_inbound(&own, &jwks, &headers, Bytes::from_static(b"{}"), &handler)
+            .await
+            .unwrap();
+
+        provider.force_flush().expect("flush spans");
+        let spans = exporter.get_finished_spans().expect("finished spans");
+        let dispatch = spans
+            .iter()
+            .find(|span| span.name.as_ref() == "a2a.serve.dispatch")
+            .expect("dispatch span");
+        assert!(dispatch.attributes.iter().any(|kv| {
+            kv.key.as_str() == "agent.id" && kv.value.as_str() == "acme/echo"
+        }));
+        assert!(dispatch.attributes.iter().any(|kv| {
+            kv.key.as_str() == "agent.chain.depth" && kv.value.as_str() == "1"
+        }));
+        assert!(dispatch.attributes.iter().any(|kv| {
+            kv.key.as_str() == "agent.purpose" && kv.value.as_str() == "test-purpose"
+        }));
     }
 }
