@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT** — for human review. Blocks STS implementation (PENDING_TODO Block 2.1) and gateway egress minting (Block 2.4).
+**Accepted (2026-05-27).** Authorizes STS signing-key custody (Block 2.1) — Cloud KMS / Vault Transit in prod, file-PEM in dev — and JWKS distribution via NATS KV + HTTPS well-known + `mcp.jwks.mesh.get`.
 
 ## Context
 
