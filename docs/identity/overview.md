@@ -94,6 +94,8 @@ Full schema: [jwt-claim-schema.md](jwt-claim-schema.md).
 | STS unavailable | **Fail-closed** — no bypass | Gateway/backend error; agents retry with backoff |
 | Registry stale / agent revoked | Reject at STS or verifier | STS `invalid_target`; audit deny |
 | Expired mesh token | Reject | `-32106` `auth_expired` |
+| High-risk tool / HITL required | Park; return approval handle | `-32107` `approval_required` ([adaptive-access.md](adaptive-access.md)) |
+| Context throttle exceeded | Reject with retry hint | `-32105` `rate_limited` |
 
 Shadow mode logs the same violations with `would_deny: true` but allows the bootstrap path ([Block 6](../../PENDING_TODO.md)).
 
@@ -121,3 +123,4 @@ Cutover: zero shadow violations for 7 days, STS P99 < 40 ms, then flip to `enfor
 | [0004 STS form factor](../adr/0004-sts-form-factor.md) | [Agent registry](registry.md) |
 | [0005 TTL and audience](../adr/0005-token-ttl-and-audience.md) | [A2A SDK contract](sdk.md) |
 | [0006 Signing keys](../adr/0006-mesh-token-signing-keys.md) | [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) |
+| | [Adaptive access](adaptive-access.md) |
