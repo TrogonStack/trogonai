@@ -5,8 +5,14 @@ use tokio::sync::watch;
 
 use crate::jwks::Jwks;
 
-pub mod cloud;
+pub mod common;
 pub mod file;
+
+#[cfg(feature = "kms-aws")]
+pub mod kms;
+
+#[cfg(feature = "vault")]
+pub mod vault;
 
 #[derive(Debug)]
 pub enum KeyError {
@@ -14,6 +20,9 @@ pub enum KeyError {
     Parse(String),
     Unsupported(String),
     EmptyKeySet,
+    Sign(String),
+    Kms(String),
+    Vault(String),
 }
 
 impl fmt::Display for KeyError {
@@ -23,6 +32,9 @@ impl fmt::Display for KeyError {
             Self::Parse(msg) => write!(f, "key source parse error: {msg}"),
             Self::Unsupported(msg) => write!(f, "key source unsupported: {msg}"),
             Self::EmptyKeySet => f.write_str("key source produced empty JWKS"),
+            Self::Sign(msg) => write!(f, "signing error: {msg}"),
+            Self::Kms(msg) => write!(f, "kms error: {msg}"),
+            Self::Vault(msg) => write!(f, "vault error: {msg}"),
         }
     }
 }
