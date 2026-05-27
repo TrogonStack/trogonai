@@ -804,6 +804,8 @@ Every decision emits one envelope to `mcp.audit.{outcome}.{direction}.{method_ro
 
 Stream: `MCP_AUDIT` on JetStream, retention `limits`. Per-tenant quotas via per-account stream limits when tenancy = account, or by deploying separate `MCP_PREFIX` overrides per tenant. SIEM connectors subscribe via durable consumers filtered on `mcp.audit.>`.
 
+Detailed schema, projector design, and SIEM export format for the agent-centric traffic view live in `docs/identity/agent-traffic.md`. The crate scaffold is `trogon-traffic-view`. See `PENDING_TODO.md` Block 4 for the implementation roadmap.
+
 ## Bundles
 
 - **Format** — OCI artifact or tarball: `bundle.yaml` (Tier 1) + `*.cel` (Tier 2) + `*.wasm` components (Tier 3) + `manifest.json` (declared host capabilities, version, signer).
