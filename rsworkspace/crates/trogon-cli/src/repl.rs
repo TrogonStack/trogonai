@@ -674,6 +674,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         let mut response_buf = String::new();
                         // true while a ┆ tool line is live on stderr (no trailing newline)
                         let mut tool_line_active = false;
+                        // true after the first text token — reset_display called only once per response
+                        let mut text_started = false;
 
                         loop {
                             tokio::select! {
@@ -693,9 +695,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 eprint!("\r\x1b[2K\n");
                                                 let _ = std::io::stderr().flush();
                                                 tool_line_active = false;
-                                                reset_display();
+                                                text_started = false;
                                             }
-                                            reset_display();
+                                            if !text_started {
+                                                reset_display();
+                                                text_started = true;
+                                            }
                                             if stream {
                                                 print!("{text}");
                                                 let _ = stdout.flush();
