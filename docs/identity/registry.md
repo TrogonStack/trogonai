@@ -347,4 +347,90 @@ STS rate limiting during registry outage: circuit-break after N consecutive look
 
 ## Related documents
 
-`PENDING_TODO.md` Blocks 0, 1.2, 2.1, 2.3 · `docs/adr/0005-token-ttl-and-audience.md` (pending) · `MCP_GATEWAY_PLAN.md:537` · `docs/a2a/explanation/auth-callout-design.md`
+`PENDING_TODO.md` Blocks 0, 1.2, 2.1, 2.3 · `docs/adr/0005-token-ttl-and-audience.md` (pending) · `MCP_GATEWAY_PLAN.md:537` · `docs/a2a/explanation/auth-callout-design.md` · `docs/identity/registry-operations.md` (operator runbook)
+
+---
+
+## Signed manifest schema
+
+TOML chosen for diff readability and comment support; YAML rejected because we already pay the TOML tax in `Cargo.toml`/`mise.toml` and don't want a second parser footprint.
+
+Git manifests are the **authoritative source**. Each file is a signed envelope containing a `[record]` block (same fields as § Entity schema, minus runtime-only timestamps) and a detached Ed25519 `[signature]`.
+
+```toml
+manifest_version = 1
+
+[record]
+agent_id = "acme/oncall-agent"
+agent_version = "3.2.1"
+agent_definition_digest = "sha256:abc123def456"
+owner_team = "platform-sre"
+allowed_workloads = ["spiffe://acme.local/ns/prod/sa/oncall-agent"]
+allowed_tools = ["pagerduty.page"]
+allowed_audiences = ["mcp.server.pagerduty"]
+allowed_purposes = ["incident.response"]
+mesh_token_ttl_s = 300
+lifecycle_state = "active"
+
+[record.metadata]
+description = "Pages on-call"
+
+[signature]
+algorithm = "ed25519"
+key_id = "registry-signer-current"
+value = "<base64 signature>"
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `manifest_version` | yes | Must be `1` |
+| `record.*` | yes | Same semantics as § Entity schema |
+| `signature.algorithm` | yes | Must be `ed25519` |
+| `signature.key_id` | yes | Signer key identifier for rotation audit |
+| `signature.value` | yes | Base64 Ed25519 over canonical JSON of `record` |
+
+Validation rules enforced by `agctl registry sync` and the controller:
+
+- `agent_id` — exactly one `/`, lowercase segments, no `.`
+- `owner_team` — non-empty
+- `agent_definition_digest` — `{algo}:{hex}` (e.g. `sha256:…`)
+- `agent_version` — monotonic per `agent_id` within the repo and relative to KV `@latest`
+
+Examples: `rsworkspace/crates/trogon-agent-registry/examples/*.toml`.
+
+---
+
+## Authoritative source: Git → controller → KV
+
+```
+┌─────────────────────┐
+│  Git manifest repo  │  agents/{tenant}/{agent}.toml (signed TOML)
+│  (source of truth)  │
+└──────────┬──────────┘
+           │ merge to main
+           ▼
+┌─────────────────────┐     Ed25519 verify      ┌──────────────────────┐
+│ registry-controller │ ───────────────────────►│  agctl registry sync │
+│  (signer account)   │     (CI pre-commit)   │  (local validation)  │
+└──────────┬──────────┘                       └──────────────────────┘
+           │ PUT {agent_id}/{version}
+           │ PUT {agent_id}/@latest
+           ▼
+┌─────────────────────┐
+│  NATS KV bucket     │  mcp-agent-registry (controller-only writes)
+│  mcp-agent-registry │
+└──────────┬──────────┘
+           │ watch / lookup
+           ▼
+┌─────────────────────┐     mcp.registry.agent.lookup
+│ trogon-agent-registry│ ◄────────────────────────── STS / gateway / SDK
+│  (read-only)         │
+└─────────────────────┘
+           │
+           ▼
+   mcp.audit.registry.{registered,bumped,deprecated,revoked}
+   (controller mutations — distinct from lookup.* audit on read path)
+```
+
+**Write ACL:** only the controller's NATS account may `PUT`/`DELETE` in `mcp-agent-registry`. Lookup nodes, STS, and gateways are read-only consumers.
+
