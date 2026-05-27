@@ -35,6 +35,10 @@ impl TraceStore {
     }
 
     pub fn get(&self, request_id: &str) -> Option<DecisionTrace> {
-        self.inner.lock().expect("trace mutex poisoned").get(request_id).cloned()
+        self.inner
+            .lock()
+            .expect("trace mutex poisoned")
+            .get(request_id)
+            .cloned()
     }
 }
