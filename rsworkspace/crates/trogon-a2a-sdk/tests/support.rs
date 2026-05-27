@@ -11,6 +11,7 @@ use rsa::traits::PublicKeyParts;
 use serde_json::{Value, json};
 use trogon_agent_registry::{AgentRecord, LifecycleState};
 use trogon_sts::DEFAULT_MESH_ISSUER;
+use trogon_sts::attestor::{AttestationPolicy, build_attestor};
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
 use trogon_sts::chain_resolution::ChainResolutionMode;
@@ -170,6 +171,7 @@ pub fn build_exchange_service(
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher, NoOpSpiceDb> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let attestor = build_attestor(trust.clone(), AttestationPolicy::Shadow);
     let registry = RegistryCache::new(InMemoryRegistry::new([
         agent1_registry_record(),
         agent2_registry_record(),
@@ -180,6 +182,8 @@ pub fn build_exchange_service(
         keys.bootstrap_iss.clone(),
         jwks,
         trust,
+        attestor,
+        AttestationPolicy::Shadow,
         registry,
         keys.mesh_signer.clone(),
         audit,
