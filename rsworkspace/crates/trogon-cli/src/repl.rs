@@ -306,6 +306,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 session_context_size = 0;
                                 session_mode = std::env::var("TROGON_MODE")
                                     .unwrap_or_else(|_| "default".into());
+                                // (falls through to persist + print below)
                                 if let Some(ref sup) = client_supervisor {
                                     sup.set_session(session.session_id());
                                 }
@@ -318,7 +319,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
-                            Err(e) => eprintln!("error: {e}"),
+                            Err(e) => eprintln!("error: runner unavailable, could not create new session: {e}\n  The old session is still active. Restart trogon to recover."),
                         }
                     } else if cmd == "/resume" {
                         if arg.is_empty() {
@@ -655,7 +656,24 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 let _ = rl.add_history_entry(&raw_line);
 
                 let expanded = expand_mentions(&line, &cwd, &fs);
-                match session.prompt(&expanded).await {
+                // Auto-recover if the runner restarted and lost the session, then retry once.
+                let prompt_result = match session.prompt(&expanded).await {
+                    Err(e) if e.to_string().contains("not found") => {
+                        eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
+                            Ok(s) => {
+                                session = s;
+                                session.prompt(&expanded).await
+                            }
+                            Err(e2) => {
+                                eprintln!("error: runner unavailable: {e2}\n  Restart trogon to recover.");
+                                continue;
+                            }
+                        }
+                    }
+                    other => other,
+                };
+                match prompt_result {
                     Err(e) => eprintln!("error: {e}"),
                     Ok(mut rx) => {
                         let mut stdout = std::io::stdout();
