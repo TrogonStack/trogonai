@@ -6,7 +6,7 @@ use jsonwebtoken::jwk::JwkSet;
 use moka::future::Cache;
 
 use crate::error::StsError;
-use crate::registry::{AgentRegistryRecord, RegistryLookup, RegistryLookupRequest};
+use crate::registry::{AgentRegistryRecord, RegistryLookup, RegistryLookupRequest, RegistryLookupResponse};
 
 const REGISTRY_CACHE_TTL: Duration = Duration::from_secs(60);
 
@@ -102,6 +102,10 @@ impl<R: RegistryLookup + Clone> RegistryCache<R> {
         Self { inner, cache }
     }
 
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
     pub async fn lookup(&self, agent_id: &str) -> Result<AgentRegistryRecord, StsError> {
         if let Some(record) = self.cache.get(agent_id).await {
             return Ok(record);
@@ -115,6 +119,10 @@ impl<R: RegistryLookup + Clone> RegistryCache<R> {
             .await?;
         self.cache.insert(agent_id.to_string(), response.clone()).await;
         Ok(response)
+    }
+
+    pub async fn lookup_raw(&self, request: &RegistryLookupRequest) -> Result<RegistryLookupResponse, StsError> {
+        self.inner.lookup_raw(request).await
     }
 }
 

@@ -21,6 +21,10 @@ pub struct StsAuditEvent {
     pub wkl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offending_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offending_agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -141,6 +145,8 @@ pub struct StsAuditEmit<'a> {
     pub agent_id: Option<String>,
     pub minted: Option<MintedClaimsSummary>,
     pub source_ip: Option<String>,
+    pub offending_index: Option<usize>,
+    pub offending_agent_id: Option<String>,
 }
 
 pub async fn emit_audit<P: AuditPublisher>(publisher: &P, ctx: StsAuditEmit<'_>) {
@@ -153,6 +159,8 @@ pub async fn emit_audit<P: AuditPublisher>(publisher: &P, ctx: StsAuditEmit<'_>)
         minted: ctx.minted,
         wkl: ctx.wkl,
         agent_id: ctx.agent_id,
+        offending_index: ctx.offending_index,
+        offending_agent_id: ctx.offending_agent_id,
     };
     if let Err(e) = publisher.publish(event).await {
         warn!(error = %e, "failed to publish sts audit event");

@@ -8,14 +8,23 @@ use tracing::{error, info, warn};
 
 use trogon_sts::audit::NatsAuditPublisher;
 use trogon_sts::cache::{HttpJwksSource, JwksCache, JwksSource, RegistryCache, TrustBundleCache};
+use trogon_sts::chain_resolution::ChainResolutionMode;
+use trogon_sts::circuit_breaker::CircuitBreaker;
 use trogon_sts::exchange::{ExchangeService, default_bootstrap_issuer};
-use trogon_sts::registry::NatsRegistryClient;
+use trogon_sts::registry::{NatsRegistryClient, ResilientRegistry};
 use trogon_sts::signer::{DynSigner, FileSigner};
+use trogon_sts::spicedb::{NoOpSpiceDb, ResilientSpiceDb};
 use trogon_sts::types::{StsExchangeRequest, StsTokenErrorResponse};
 use trogon_sts::{
     DEFAULT_MESH_ISSUER, DEFAULT_QUEUE_GROUP, DEFAULT_REGISTRY_SUBJECT, EXCHANGE_SUBJECT, JWKS_KV_BUCKET,
     JWKS_KV_MESH_KEY,
 };
+
+type StsExchangeService = ExchangeService<
+    ResilientRegistry<NatsRegistryClient<async_nats::Client>>,
+    NatsAuditPublisher<async_nats::Client>,
+    ResilientSpiceDb<NoOpSpiceDb>,
+>;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,6 +39,10 @@ struct Args {
     /// PEM file for mesh JWT signing (RS256).
     #[arg(long, env = "MCP_STS_SIGNING_KEY_PATH")]
     signing_key_pem: String,
+
+    /// Mesh token `kid` header value (must match JWKS publisher).
+    #[arg(long, default_value = "mesh-current", env = "MCP_STS_SIGNING_KID")]
+    signing_kid: String,
 
     /// Mesh token issuer (`iss` claim on minted tokens).
     #[arg(long, default_value = DEFAULT_MESH_ISSUER, env = "MCP_STS_MESH_ISSUER")]
@@ -79,10 +92,15 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let trust_bundle = TrustBundleCache::from_pem(trust_pem);
 
     let signing_pem = tokio::fs::read_to_string(&args.signing_key_pem).await?;
-    let signer: DynSigner = Arc::new(FileSigner::from_rsa_pem(&signing_pem, "mesh-current")?);
+    let signer: DynSigner = Arc::new(FileSigner::from_rsa_pem(&signing_pem, &args.signing_kid)?);
 
-    let registry_client = NatsRegistryClient::new(nats.clone(), args.registry_subject.clone());
+    let registry_client = ResilientRegistry::new(
+        NatsRegistryClient::new(nats.clone(), args.registry_subject.clone()),
+        CircuitBreaker::default(),
+    );
     let registry = RegistryCache::new(registry_client);
+    let spicedb = ResilientSpiceDb::new(NoOpSpiceDb, CircuitBreaker::default());
+    let chain_mode = ChainResolutionMode::from_env();
 
     let audit = Arc::new(NatsAuditPublisher::new(nats.clone()));
     let service = Arc::new(ExchangeService::new(
@@ -93,6 +111,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         registry,
         signer,
         audit,
+        spicedb,
+        chain_mode,
     ));
 
     let mut subscriber = nats
@@ -101,6 +121,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     info!(
         subject = EXCHANGE_SUBJECT,
         queue_group = %args.queue_group,
+        chain_resolution = ?chain_mode,
         "trogon-sts listening"
     );
 
@@ -119,12 +140,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_message(
-    service: Arc<ExchangeService<NatsRegistryClient<async_nats::Client>, NatsAuditPublisher<async_nats::Client>>>,
-    nats: async_nats::Client,
-    payload: bytes::Bytes,
-    reply: async_nats::Subject,
-) {
+async fn handle_message(service: Arc<StsExchangeService>, nats: async_nats::Client, payload: bytes::Bytes, reply: async_nats::Subject) {
     let request: StsExchangeRequest = match serde_json::from_slice(&payload) {
         Ok(r) => r,
         Err(e) => {
