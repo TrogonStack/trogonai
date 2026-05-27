@@ -34,7 +34,9 @@ trogon-telemetry = { path = "crates/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp-nats" }
 mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
+trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-nats = { path = "crates/trogon-nats" }
+trogon-sts = { path = "crates/trogon-sts" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 

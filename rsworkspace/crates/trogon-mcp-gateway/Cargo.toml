@@ -23,6 +23,7 @@ spicedb-rs-client = "=1.49.2"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+trogon-identity-types = { path = "../trogon-identity-types" }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 trogon-telemetry = { workspace = true }
