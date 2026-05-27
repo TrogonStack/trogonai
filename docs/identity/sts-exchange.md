@@ -193,13 +193,20 @@ Example gateway JSON-RPC error (enforce mode):
 STS executes these steps in order; any failure short-circuits with an error response and audit deny.
 
 1. **Signature** — Verify `subject_token` JWS against trusted issuer set (auth-callout JWKS for bootstrap; mesh JWKS for upstream mesh tokens).
-2. **SVID** — Validate `actor_token` against SPIFFE trust bundle; extract `wkl`; for allow-listed sentinels, verify `(auth_method, wkl)` pair.
+2. **SVID / workload attestation** — `WorkloadAttestor` validates `actor_token` (X.509 SVID PEM or future mTLS peer cert) against the SPIFFE trust bundle for the SVID’s trust domain. Minted `wkl` is the attested SPIFFE ID (`spiffe://<trust-domain>/<path>`), not a bootstrap JWT claim. Trust bundles are loaded from `MCP_STS_TRUST_BUNDLE_PATH` and watched on NATS KV bucket `mcp-trust-bundles` (key = trust domain). Publish bundles with `trogon-sts-publish-trust-bundle`.
 3. **Registry lookup** — Resolve `agent_id` from subject token; load agent record from `mcp.registry.agent.lookup` (or hot-path cache).
 4. **`aud ∈ allowed_audiences`** — Reject if requested `audience` is not listed on the agent record.
-5. **`wkl ∈ allowed_workloads`** — Reject if attested workload cannot act as this `agent_id`.
+5. **`wkl ∈ allowed_workloads`** — Reject if attested SPIFFE ID (derived `wkl`) is not listed on the agent record (same `access_denied` path as registry workload mismatch).
 6. **`purpose ∈ allowed_purposes`** — When registry enumerates purposes, reject unknown or escalated `purpose`.
 7. **`act_chain` append + depth + loop detect** — Copy inbound chain; reject if `len ≥ max_depth` (default 8) or duplicate `(agent_id, wkl)`; append exchanger entry `{ sub, agent_id, wkl, iat }` matching inbound token claims.
 8. **Mint** — Sign mesh JWT with STS key (`kid` in header); set `exp = iat + ttl` (registry override or default 120 s); emit success audit.
+
+### STS attestation modes (`MCP_STS_REQUIRE_ATTESTATION`)
+
+| Env | `actor_token` | Minted `wkl` | Audit |
+|---|---|---|---|
+| unset (shadow) | `spiffe://…` URI or `sha256:` fingerprint accepted without chain verify | Claim/sentinel-derived | Exchange may succeed; **`mcp.audit.sts.deny`** with `reason: wkl_unattested` on every request |
+| `1` / `true` | X.509 SVID PEM required; chain verified against trust bundle | SPIFFE ID from SVID SAN | Success/deny only; unattested path rejected at attestor |
 
 ---
 

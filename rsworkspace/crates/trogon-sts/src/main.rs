@@ -6,8 +6,12 @@ use futures::StreamExt;
 use jsonwebtoken::jwk::JwkSet;
 use tracing::{error, info, warn};
 
+use trogon_sts::attestor::{AttestationPolicy, build_attestor};
 use trogon_sts::audit::NatsAuditPublisher;
-use trogon_sts::cache::{HttpJwksSource, JwksCache, JwksSource, RegistryCache, TrustBundleCache};
+use trogon_sts::cache::{
+    HttpJwksSource, JwksCache, JwksSource, RegistryCache, TrustBundleCache, load_trust_bundle_from_kv,
+    spawn_trust_bundle_watch,
+};
 use trogon_sts::chain_resolution::ChainResolutionMode;
 use trogon_sts::circuit_breaker::CircuitBreaker;
 use trogon_sts::exchange::{ExchangeService, default_bootstrap_issuer};
@@ -17,7 +21,7 @@ use trogon_sts::spicedb::{NoOpSpiceDb, ResilientSpiceDb};
 use trogon_sts::types::{StsExchangeRequest, StsTokenErrorResponse};
 use trogon_sts::{
     DEFAULT_MESH_ISSUER, DEFAULT_QUEUE_GROUP, DEFAULT_REGISTRY_SUBJECT, EXCHANGE_SUBJECT, JWKS_KV_BUCKET,
-    JWKS_KV_MESH_KEY,
+    JWKS_KV_MESH_KEY, TRUST_BUNDLES_KV_BUCKET,
 };
 
 type StsExchangeService = ExchangeService<
@@ -56,6 +60,10 @@ struct Args {
     #[arg(long, env = "MCP_STS_TRUST_BUNDLE_PATH")]
     trust_bundle_path: String,
 
+    /// SPIFFE trust domain for the file trust bundle (default `local`).
+    #[arg(long, default_value = "local", env = "MCP_STS_TRUST_DOMAIN")]
+    trust_domain: String,
+
     /// Registry lookup subject.
     #[arg(long, default_value = DEFAULT_REGISTRY_SUBJECT, env = "MCP_STS_REGISTRY_SUBJECT")]
     registry_subject: String,
@@ -89,7 +97,16 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     spawn_jwks_watch(nats.clone(), jwks_cache.clone());
 
     let trust_pem = tokio::fs::read_to_string(&args.trust_bundle_path).await?;
-    let trust_bundle = TrustBundleCache::from_pem(trust_pem);
+    let trust_bundle = TrustBundleCache::from_pem_for_domain(&args.trust_domain, trust_pem);
+    spawn_trust_bundle_watch(nats.clone(), trust_bundle.clone(), TRUST_BUNDLES_KV_BUCKET);
+    if let Ok((domain, pem)) =
+        load_trust_bundle_from_kv(&nats, TRUST_BUNDLES_KV_BUCKET, &args.trust_domain).await
+    {
+        trust_bundle.upsert_domain(domain, pem).await;
+    }
+
+    let attestation_policy = AttestationPolicy::from_env();
+    let attestor = build_attestor(trust_bundle.clone(), attestation_policy);
 
     let signing_pem = tokio::fs::read_to_string(&args.signing_key_pem).await?;
     let signer: DynSigner = Arc::new(FileSigner::from_rsa_pem(&signing_pem, &args.signing_kid)?);
@@ -109,6 +126,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         default_bootstrap_issuer(),
         jwks_cache,
         trust_bundle,
+        attestor,
+        attestation_policy,
         registry,
         signer,
         audit,
