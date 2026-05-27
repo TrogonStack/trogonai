@@ -5651,3 +5651,240 @@ async fn ask_user_unavailable_without_elicitation_channel() {
         Some("ask_user is not available in this session."),
     );
 }
+
+// ── LIVE end-to-end (real grok via xAI Responses API) ─────────────────────────
+//
+// Gated: `#[ignore]` + requires `XAI_API_KEY` in the environment. Uses the
+// cheapest model (`grok-3-mini`, override with `XAI_LIVE_MODEL`). Drives the
+// REAL model against a REAL local HTTP MCP server and a REAL elicitation channel
+// round-trip, so it exercises the full runner→grok→MCP / runner→grok→ask_user
+// paths end-to-end. Run with:
+//   XAI_API_KEY=... cargo test -p trogon-xai-runner --features test-helpers \
+//     --test xai_integration live_e2e_mcp_and_ask_user -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "live: requires XAI_API_KEY and spends real money"]
+async fn live_e2e_mcp_and_ask_user() {
+    let key = match std::env::var("XAI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            eprintln!("SKIP live_e2e_mcp_and_ask_user: XAI_API_KEY not set");
+            return;
+        }
+    };
+    let model = std::env::var("XAI_LIVE_MODEL").unwrap_or_else(|_| "grok-3-mini".to_string());
+
+    // ---- Part 1: MCP — real grok must call the advertised {server}__{tool} ----
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[{
+                "name":"search",
+                "description":"Search the web for a query and return a short result.",
+                "inputSchema":{"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"}
+                },"required":["query"]}
+            }]}
+        }));
+    });
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust is a systems programming language"}],"isError":false}
+        }));
+    });
+
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model.clone(),
+        key.clone(),
+        trogon_xai_runner::XaiClient::new(),
+    );
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p1 = "You have a tool named `web__search`. Call it with query \"rust\" to look it up. \
+        You MUST call the web__search tool — do not answer from your own knowledge. \
+        After you receive the tool result, reply with one short sentence.";
+    let r1 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(
+            sid,
+            vec![ContentBlock::Text(TextContent::new(p1))],
+        )),
+    )
+    .await
+    .expect("MCP prompt timed out")
+    .expect("MCP prompt failed");
+    let hits = call_mock.hits();
+    eprintln!("LIVE/MCP: stop_reason={:?}, tools/call hits={hits}", r1.stop_reason);
+    assert!(hits >= 1, "real grok did not call the MCP tool web__search (hits=0)");
+
+    // ---- Part 2: elicitation — real grok must call ask_user, answer round-trips ----
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let captured_q = Arc::new(Mutex::new(None::<String>));
+    let cq = Arc::clone(&captured_q);
+    let responder = tokio::spawn(async move {
+        if let Some(req) = elic_rx.recv().await {
+            *cq.lock().unwrap() = Some(req.request.message.clone());
+            let mut content = std::collections::BTreeMap::new();
+            content.insert(
+                "answer".to_string(),
+                agent_client_protocol::ElicitationContentValue::String("teal".to_string()),
+            );
+            let resp = agent_client_protocol::ElicitationResponse::new(
+                agent_client_protocol::ElicitationAction::Accept(
+                    agent_client_protocol::ElicitationAcceptAction::new().content(content),
+                ),
+            );
+            let _ = req.response_tx.send(Ok(resp));
+        }
+    });
+
+    let agent2 = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model,
+        key,
+        trogon_xai_runner::XaiClient::new(),
+    )
+    .with_elicitation(elic_tx);
+    let sid2 = agent2
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p2 = "Use the `ask_user` tool to ask me exactly: What is your favorite color? \
+        You MUST call the ask_user tool to ask — do not guess. After I answer, \
+        reply telling me which color I chose.";
+    let r2 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent2.prompt(PromptRequest::new(
+            sid2,
+            vec![ContentBlock::Text(TextContent::new(p2))],
+        )),
+    )
+    .await
+    .expect("ask_user prompt timed out")
+    .expect("ask_user prompt failed");
+    let _ = responder.await;
+    let q = captured_q.lock().unwrap().clone();
+    eprintln!("LIVE/ask_user: stop_reason={:?}, forwarded question={q:?}", r2.stop_reason);
+    assert!(
+        q.is_some(),
+        "real grok did not call ask_user (no question forwarded through the channel)"
+    );
+}
+
+/// LIVE permission round-trip: in `default` mode an MCP tool requires approval,
+/// so when real grok calls it the runner fires a `PermissionReq`; an auto-approver
+/// signals `started` + allows it, and the tool then executes.
+#[tokio::test]
+#[ignore = "live: requires XAI_API_KEY and spends real money"]
+async fn live_e2e_permission_round_trip() {
+    let key = match std::env::var("XAI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            eprintln!("SKIP live_e2e_permission_round_trip: XAI_API_KEY not set");
+            return;
+        }
+    };
+    let model = std::env::var("XAI_LIVE_MODEL").unwrap_or_else(|_| "grok-3-mini".to_string());
+
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[{
+                "name":"search",
+                "description":"Search the web for a query and return a short result.",
+                "inputSchema":{"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"}
+                },"required":["query"]}
+            }]}
+        }));
+    });
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust"}],"isError":false}
+        }));
+    });
+
+    // Permission channel + auto-approver: capture the requested tool name, signal
+    // `started`, then allow. Loops so every request in the turn is approved.
+    let (perm_tx, mut perm_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+    let requested = Arc::new(Mutex::new(Vec::<String>::new()));
+    let rq = Arc::clone(&requested);
+    let approver = tokio::spawn(async move {
+        while let Some(req) = perm_rx.recv().await {
+            rq.lock().unwrap().push(req.tool_name.clone());
+            let _ = req.started_tx.send(());
+            let _ = req.response_tx.send(true);
+        }
+    });
+
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model,
+        key,
+        trogon_xai_runner::XaiClient::new(),
+    )
+    .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
+    // new_session defaults to mode "default" → MCP tools require approval.
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p = "You have a tool named `web__search`. Call it with query \"rust\". \
+        You MUST call the web__search tool. After the result, reply with one short sentence.";
+    let r = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(
+            sid,
+            vec![ContentBlock::Text(TextContent::new(p))],
+        )),
+    )
+    .await
+    .expect("permission prompt timed out")
+    .expect("permission prompt failed");
+    approver.abort();
+
+    let reqs = requested.lock().unwrap().clone();
+    let hits = call_mock.hits();
+    eprintln!(
+        "LIVE/permission: stop_reason={:?}, approvals requested for={reqs:?}, tools/call hits={hits}",
+        r.stop_reason
+    );
+    assert!(
+        reqs.iter().any(|t| t == "web__search"),
+        "permission approval must be requested for the MCP tool web__search; got {reqs:?}"
+    );
+    assert!(hits >= 1, "MCP tool must execute after approval");
+}
