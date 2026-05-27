@@ -3870,14 +3870,14 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
     );
 
     // raw_output must contain the bash output string
-    if let Some(n) = completed {
-        if let SessionUpdate::ToolCallUpdate(u) = &n.update {
-            let raw = u.fields.raw_output.as_ref().unwrap();
-            assert!(
-                raw.as_str().unwrap_or("").contains("hello"),
-                "raw_output must contain bash stdout; got: {raw:?}"
-            );
-        }
+    if let Some(n) = completed
+        && let SessionUpdate::ToolCallUpdate(u) = &n.update
+    {
+        let raw = u.fields.raw_output.as_ref().unwrap();
+        assert!(
+            raw.as_str().unwrap_or("").contains("hello"),
+            "raw_output must contain bash stdout; got: {raw:?}"
+        );
     }
 }
 
