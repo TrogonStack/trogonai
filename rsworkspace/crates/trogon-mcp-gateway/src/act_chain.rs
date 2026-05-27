@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_nats::HeaderMap;
 use tracing::warn;
 
-pub use crate::agent_identity::{ActChainEntry, AgentIdentityMode, MAX_ACT_CHAIN_DEPTH};
+pub use trogon_identity_types::{ActChainEntry, MAX_ACT_CHAIN_DEPTH, parse_act_chain};
+
+pub use crate::agent_identity::AgentIdentityMode;
 
 pub const MCP_ACT_CHAIN_HEADER: &str = "mcp-act-chain";
 
@@ -38,10 +40,6 @@ pub fn ingress_act_chain_raw(headers: Option<&HeaderMap>) -> Option<String> {
     hm.get_last(MCP_ACT_CHAIN_HEADER)
         .or_else(|| hm.get(MCP_ACT_CHAIN_HEADER))
         .map(|v| v.as_str().to_string())
-}
-
-pub fn parse_act_chain(raw: &str) -> Result<Vec<ActChainEntry>, serde_json::Error> {
-    serde_json::from_str(raw)
 }
 
 pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>, mode: AgentIdentityMode) {
