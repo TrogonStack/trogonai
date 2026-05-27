@@ -1,14 +1,18 @@
 pub mod audit;
 pub mod cache;
+pub mod chain_resolution;
+pub mod circuit_breaker;
 pub mod error;
 pub mod exchange;
 pub mod limits;
 pub mod registry;
 pub mod signer;
+pub mod spicedb;
 pub mod token_verify;
 pub mod trust;
 pub mod types;
 
+pub use chain_resolution::ChainResolutionMode;
 pub use exchange::{ExchangeRequest, ExchangeService, ExchangeSuccess};
 pub use types::{StsExchangeRequest, StsExchangeResponse, StsTokenErrorResponse};
 
