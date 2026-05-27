@@ -387,6 +387,52 @@ sdk.serve(MyHandler).await?.wait().await?;
 
 ---
 
+## Default purpose handling
+
+When `Client::call` receives `purpose: None`, the SDK **does not** forward an absent or caller-supplied body field. It resolves purpose from the **calling agent's** registry record (`allowed_purposes` for `Client::agent_id`):
+
+| Registry `allowed_purposes` | SDK behavior |
+|----------------------------|--------------|
+| **Empty** | Synthesize `purpose:default` and send that value on the STS exchange. |
+| **Exactly one** | Use that sole purpose automatically. |
+| **Two or more** | Return `SdkError::PurposeRequired`; the caller must pass an explicit `Purpose`. |
+
+Explicit `Some(purpose)` always wins and is validated downstream by STS against the caller's `allowed_purposes`. Handlers still read the resolved purpose from `Caller::purpose` on the serve side.
+
+---
+
+## Quickstart
+
+See [`rsworkspace/crates/trogon-a2a-sdk/README.md`](../../rsworkspace/crates/trogon-a2a-sdk/README.md) for runnable commands (`echo_agent` example), registry + STS wiring, and live test invocation.
+
+Rust client/server sketches remain in [Quickstart sketch (target ≤ 50 lines)](#quickstart-sketch-target--50-lines) above.
+
+---
+
+## Telemetry attributes
+
+OpenTelemetry spans are emitted via the global `trogon-a2a-sdk` tracer.
+
+### Outbound `Client::call`
+
+| Span name | Attributes |
+|-----------|------------|
+| `a2a.call` | `agent.id`, `agent.target.id`, `agent.purpose`, `agent.call.direction=outbound` |
+| `a2a.call.lookup` | (child; inherits trace context) |
+| `a2a.call.exchange` | (child) |
+| `a2a.call.chain` | `agent.chain.depth` (from minted mesh token) |
+| `a2a.call.send` | (child) |
+
+### Inbound `serve` dispatch
+
+| Span name | Attributes |
+|-----------|------------|
+| `a2a.serve.dispatch` | `agent.id`, `agent.chain.depth`, `agent.purpose`, `agent.call.direction=inbound` |
+
+Depth and purpose on the serve span come from the verified mesh token / parsed `Caller`, not from client headers.
+
+---
+
 ## Acceptance criteria (from Block 3)
 
 - [ ] Contract reviewed; open questions triaged into ADRs or implementation issues.

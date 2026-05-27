@@ -26,15 +26,30 @@ struct LookupRequest<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-struct LookupOk {
-    status: String,
-    record: AgentRecord,
+#[serde(tag = "status", rename_all = "snake_case")]
+enum LookupWireResponse {
+    Found { record: RegistryRecordWire },
+    NotFound,
+    Revoked { reason: String },
 }
 
 #[derive(Debug, Deserialize)]
-struct LookupNack {
-    status: String,
-    reason: Option<String>,
+struct RegistryRecordWire {
+    allowed_audiences: Vec<String>,
+    #[serde(default)]
+    allowed_purposes: Option<Vec<String>>,
+    #[serde(default)]
+    mesh_token_ttl_s: Option<u32>,
+}
+
+impl From<RegistryRecordWire> for AgentRecord {
+    fn from(value: RegistryRecordWire) -> Self {
+        Self {
+            allowed_audiences: value.allowed_audiences,
+            allowed_purposes: value.allowed_purposes.unwrap_or_default(),
+            mesh_token_ttl_s: value.mesh_token_ttl_s.map(u64::from),
+        }
+    }
 }
 
 #[async_trait]
@@ -50,15 +65,15 @@ impl Registry for NatsRegistry {
             .await
             .map_err(SdkError::nats)?;
         let body = response.payload;
-        if let Ok(nack) = serde_json::from_slice::<LookupNack>(&body)
-            && nack.status != "ok"
-        {
-            return Err(SdkError::LookupFailed(nack.reason.unwrap_or(nack.status)));
+        let wire: LookupWireResponse =
+            serde_json::from_slice(&body).map_err(|e| SdkError::LookupFailed(e.to_string()))?;
+        match wire {
+            LookupWireResponse::Found { record } => Ok(record.into()),
+            LookupWireResponse::NotFound => Err(SdkError::LookupFailed(format!(
+                "agent {} not found",
+                agent_id.as_str()
+            ))),
+            LookupWireResponse::Revoked { reason } => Err(SdkError::LookupFailed(reason)),
         }
-        let ok: LookupOk = serde_json::from_slice(&body).map_err(|e| SdkError::LookupFailed(e.to_string()))?;
-        if ok.status != "ok" {
-            return Err(SdkError::LookupFailed(ok.status));
-        }
-        Ok(ok.record)
     }
 }

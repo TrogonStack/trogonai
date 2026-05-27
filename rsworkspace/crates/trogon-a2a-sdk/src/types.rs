@@ -4,14 +4,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Canonical definition: `trogon-mcp-gateway::act_chain::ActChainEntry`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ActChainEntry {
-    pub sub: String,
-    pub agent_id: Option<String>,
-    pub wkl: Option<String>,
-    pub iat: i64,
-}
+pub use trogon_identity_types::ActChainEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AgentIdError {
@@ -125,6 +118,8 @@ impl Caller {
 pub struct AgentRecord {
     pub allowed_audiences: Vec<String>,
     #[serde(default)]
+    pub allowed_purposes: Vec<String>,
+    #[serde(default)]
     pub mesh_token_ttl_s: Option<u64>,
 }
 
@@ -170,6 +165,8 @@ pub enum SdkError {
     Serialization(String),
     #[error("configuration error: {0}")]
     Config(String),
+    #[error("purpose is required when the caller has multiple allowed purposes")]
+    PurposeRequired,
 }
 
 impl SdkError {
