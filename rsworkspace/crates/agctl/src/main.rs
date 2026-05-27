@@ -1,3 +1,5 @@
+mod traffic;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -14,6 +16,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     Registry(RegistryCommand),
+    Traffic(traffic::TrafficCommand),
 }
 
 #[derive(Args, Debug)]
@@ -43,12 +46,14 @@ struct SyncArgs {
     signer_key: Option<PathBuf>,
 }
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Registry(registry) => match registry.command {
             RegistrySubcommand::Sync(args) => run_registry_sync(args),
         },
+        Command::Traffic(traffic) => traffic::run(traffic).await,
     }
 }
 
