@@ -31,6 +31,9 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::{
+    build_session_mcp, convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
+};
 use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
@@ -142,6 +145,10 @@ struct XaiSession {
     /// Per-session tool policies (allow/deny/require-approval by tool+path pattern).
     #[serde(default)]
     tool_policies: Vec<ToolPolicy>,
+    /// MCP servers captured from the `new_session` request. Connected per-prompt
+    /// (via `build_session_mcp`) so their tools are advertised to the model.
+    #[serde(default)]
+    mcp_servers: Vec<StoredMcpServer>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -230,6 +237,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     permission_tx: Option<PermissionTx>,
     /// In-memory store for `allow_always` tool persistence.
     permission_store: AllowedToolsSessionStore,
+    /// Elicitation channel — forwards `ask_user` requests to the ACP client via NATS.
+    elicitation_tx: Option<ElicitationTx>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -359,6 +368,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
+            elicitation_tx: None,
         }
     }
 
@@ -402,6 +412,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
+            elicitation_tx: self.elicitation_tx,
         }
     }
 
@@ -413,6 +424,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     ) -> Self {
         self.permission_tx = Some(perm_tx);
         self.permission_store = store;
+        self
+    }
+
+    /// Wire the elicitation channel for the `ask_user` tool (call from `main.rs`
+    /// inside a `LocalSet`). When set, an `ask_user` tool is advertised to the
+    /// model and its calls round-trip through `elic_tx` to the ACP client.
+    pub fn with_elicitation(mut self, elic_tx: ElicitationTx) -> Self {
+        self.elicitation_tx = Some(elic_tx);
         self
     }
 
@@ -507,6 +526,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: snap.branched_at_index,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: snap.mcp_servers.clone(),
             },
         );
         info!(session_id, "xai: session restored from KV snapshot");
@@ -573,6 +593,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             agent_id: self.agent_id.clone(),
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
+            mcp_servers: session.mcp_servers.clone(),
         }
     }
 
@@ -777,6 +798,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             .map(|s| s.to_string());
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
+        // Capture the client's MCP servers; they are connected per-prompt.
+        let mcp_servers = convert_mcp_servers(&req.mcp_servers);
+
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         let evicted_id = Self::maybe_evict_oldest(&mut sessions);
@@ -805,6 +829,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers,
             },
         );
 
@@ -889,7 +914,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode) = {
+        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode, inherited_mcp_servers) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -901,6 +926,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
                 s.mode.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -942,6 +968,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 branched_at_index: branch_at,
                 mode: inherited_mode.clone(),
                 tool_policies: Vec::new(),
+                mcp_servers: inherited_mcp_servers,
             },
         );
 
@@ -1145,7 +1172,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !self.sessions.lock().await.contains_key(&session_id) {
             self.try_restore_from_kv(&session_id, String::new()).await;
         }
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies) = {
+        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1163,6 +1190,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.cwd.clone(),
                 s.mode.clone(),
                 s.tool_policies.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -1305,6 +1333,43 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     parameters: def.input_schema,
                 });
             }
+        }
+
+        // Connect to this session's MCP servers and advertise their tools.
+        // `mcp_dispatch` maps a prefixed tool name back to (original_name, client)
+        // and stays in scope for the tool-dispatch loop below.
+        let (mcp_defs, mcp_dispatch) = build_session_mcp(
+            &self.tool_http_client,
+            &session_mcp_servers,
+            &trogon_runner_tools::egress::EgressPolicy::default_safe(),
+        )
+        .await;
+        for d in mcp_defs {
+            call_tools.push(ToolSpec::Function {
+                name: d.name,
+                description: d.description,
+                parameters: d.input_schema,
+            });
+        }
+
+        // Advertise the `ask_user` elicitation tool when the channel is wired.
+        if self.elicitation_tx.is_some() {
+            call_tools.push(ToolSpec::Function {
+                name: "ask_user".to_string(),
+                description: "Ask the user a free-text question and wait for their answer. \
+                    Use when you need clarification or a decision."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
+                }),
+            });
         }
 
         let client = Arc::clone(&self.client);
@@ -1612,7 +1677,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             .unwrap_or_else(default_session_mode)
                     };
 
-                    let allowed = {
+                    // `ask_user` is a benign interactive tool — it bypasses the
+                    // permission gate entirely (asking the user IS the consent).
+                    let allowed = if name == "ask_user" {
+                        true
+                    } else {
                         let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
                             PermissionRules::parse(&tmd)
                         } else {
@@ -1638,6 +1707,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         format!("Permission denied: user refused to run tool `{name}`")
                     } else {
                     match name.as_str() {
+                        "ask_user" => {
+                            let question = tool_input
+                                .get("question")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if let Some(tx) = &self.elicitation_tx {
+                                match elicit_via_channel(tx, &session_id, question).await {
+                                    Some(answer) => answer,
+                                    None => "The user declined to answer.".to_string(),
+                                }
+                            } else {
+                                "ask_user is not available in this session.".to_string()
+                            }
+                        }
                         "change_directory" => {
                             let path = tool_input
                                 .get("path")
@@ -1678,7 +1761,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             }
                         }
                         _ => {
-                            if name == "fetch_url" {
+                            // MCP tools are advertised under a `{server}__{tool}`
+                            // prefix. Dispatch them through their server client
+                            // before falling through to the built-in tools.
+                            if let Some((_, original_name, mcp_client)) =
+                                mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                            {
+                                match mcp_client.call_tool(original_name, &tool_input).await {
+                                    Ok(text) => text,
+                                    Err(e) => format!("MCP tool error: {e}"),
+                                }
+                            } else if name == "fetch_url" {
                                 let url = tool_input.get("url").and_then(|v| v.as_str()).unwrap_or("");
                                 if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                                     format!("fetch_url: URL blocked by egress policy: {url}")
@@ -1989,12 +2082,9 @@ async fn compact_or_trim_xai_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
-        match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
-            Ok(Some(compacted)) => {
-                *history = xai_history_from_wire(compacted);
-                return;
-            }
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            *history = xai_history_from_wire(compacted);
+            return;
         }
     }
     trim_history(history, max);
@@ -2153,6 +2243,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2175,6 +2266,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2242,6 +2334,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2264,6 +2357,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2286,6 +2380,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2524,6 +2619,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         let resp = agent
@@ -2570,6 +2666,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         assert_eq!(agent.test_session_count().await, 0, "session must not be in memory before load");
@@ -2627,6 +2724,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         agent
@@ -2690,6 +2788,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         agent
@@ -2731,6 +2830,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         let resp = agent
