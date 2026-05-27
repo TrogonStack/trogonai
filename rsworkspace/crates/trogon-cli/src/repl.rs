@@ -258,11 +258,6 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 eprint!("\x1b[1A\r\x1b[2K\x1b[1;35m┃\x1b[0m {line}\n");
 
                 if line == "cd" || line.starts_with("cd ") {
-                    if sync_repl_cwd_from_session(&session, &mut cwd).await
-                        && let Some(helper) = rl.helper_mut()
-                    {
-                        helper.cwd = cwd.clone();
-                    }
                     let arg = line.strip_prefix("cd").unwrap_or("").trim();
                     if apply_repl_cd(
                         &session,
@@ -286,11 +281,6 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     let cmd = parts.next().unwrap_or("");
                     let arg = parts.next().unwrap_or("");
                     if cmd == "/cd" {
-                        if sync_repl_cwd_from_session(&session, &mut cwd).await
-                            && let Some(helper) = rl.helper_mut()
-                        {
-                            helper.cwd = cwd.clone();
-                        }
                         if apply_repl_cd(
                             &session,
                             &fs,
