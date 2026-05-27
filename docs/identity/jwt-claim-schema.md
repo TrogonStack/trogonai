@@ -211,6 +211,17 @@ Suggested enforce requirements (pending ADR finalization):
 
 During shadow rollout, existing connect-time JWTs remain authoritative for NATS subject ACL; new claims inform CEL and audit only (`PENDING_TODO.md` Block 6).
 
+### Gateway JSON-RPC errors (`MCP_GATEWAY_AGENT_IDENTITY=enforce`)
+
+| Code | Symbol | Condition |
+|---|---|---|
+| `-32109` | `audience_mismatch` | Bearer `aud` does not include `MCP_GATEWAY_AUDIENCE` / `MCP_GATEWAY_JWT_AUDIENCE` |
+| `-32113` | `act_chain_depth_exceeded` | `act_chain` length &gt; 8 (JWT claim or `mcp-act-chain` header) |
+| `-32114` | `act_chain_loop_detected` | Duplicate `(agent_id, wkl)` among entries with both set |
+| `-32117` | `agent_identity_required` | `auth_method` is `svid`/`spire` without `wkl`; or SPIFFE `wkl` without `agent_id` |
+
+Forgeable identity claims from issuers outside `MCP_GATEWAY_TRUSTED_MINT_ISSUERS` are stripped (not rejected) so policy sees no client-supplied `agent_id` / `wkl` / `auth_method` / `act_chain`.
+
 ---
 
 ## Example tokens
