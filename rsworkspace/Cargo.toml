@@ -37,6 +37,7 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
+trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
 
 # A2A
 a2a-types = { version = "=0.2.0" }
@@ -116,6 +117,10 @@ nkeys = { version = "=0.4.5", features = ["xkeys"] }
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
 tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen"] }
 moka = { version = "=0.12.10", features = ["future"] }
+notify = "=7.0.0"
+rustls = { version = "=0.23.35", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
+pem = "=3.0.6"
 
 [profile.release]
 lto = "thin"
