@@ -1669,7 +1669,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 }
                             } else if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                                execute_bash_via_nats(nats, wasm, &session_id, &arguments).await
+                                execute_bash_via_nats(nats, wasm, &session_id, &arguments, &cwd).await
                             } else {
                                 "bash not available: no execution backend configured".to_string()
                             }
@@ -2049,6 +2049,7 @@ async fn execute_bash_via_nats(
     wasm_prefix: &str,
     session_id: &str,
     arguments: &str,
+    cwd: &str,
 ) -> String {
     use agent_client_protocol::{
         CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
@@ -2070,7 +2071,8 @@ async fn execute_bash_via_nats(
     let result = tokio::time::timeout(Duration::from_secs(30), async move {
         // 1. create terminal
         let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
-            .args(vec!["-c".to_string(), command]);
+            .args(vec!["-c".to_string(), command])
+            .cwd(std::path::PathBuf::from(cwd));
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),

@@ -955,10 +955,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut needs_save = false;
         let new_cwd = req.cwd.to_string_lossy().into_owned();
         if !new_cwd.is_empty() && state.cwd != new_cwd {
-            state.cwd = new_cwd.clone();
-            // Update terminal_cwd so the next bash command runs from the new cwd
-            // without recreating the terminal (preserving shell env/history).
-            state.terminal_cwd = Some(new_cwd);
+            state.cwd = new_cwd;
+            // Clear the terminal so the next bash call spawns a fresh one at the
+            // new cwd. Keeping the old terminal and lying about terminal_cwd would
+            // cause the mismatch guard to skip the reset — leaving bash stranded at
+            // the old directory.
+            state.terminal_id = None;
+            state.terminal_cwd = None;
             state.updated_at = now_iso8601();
             needs_save = true;
         }
