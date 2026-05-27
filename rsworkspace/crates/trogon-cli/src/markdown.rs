@@ -10,14 +10,14 @@ pub fn render(text: &str) -> String {
     let last = lines.len().saturating_sub(1);
 
     for (i, line) in lines.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-
         if line.starts_with("```") {
             in_code_block = !in_code_block;
-            // skip the fence line itself
+            // skip the fence line itself (no newline either — avoids blank lines at fence positions)
             continue;
+        }
+
+        if i > 0 {
+            out.push('\n');
         }
 
         if in_code_block {
