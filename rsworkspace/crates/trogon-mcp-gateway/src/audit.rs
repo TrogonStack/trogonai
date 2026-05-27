@@ -195,7 +195,10 @@ mod tests {
         assert!(!obj.contains_key("purpose"));
         assert!(!obj.contains_key("session_id"));
         assert!(!obj.contains_key("act_chain"));
-        assert_eq!(obj.get("subject_in").and_then(|v| v.as_str()), Some("mcp.gateway.request.fs.tools.call"));
+        assert_eq!(
+            obj.get("subject_in").and_then(|v| v.as_str()),
+            Some("mcp.gateway.request.fs.tools.call")
+        );
         assert_eq!(obj.get("outcome").and_then(|v| v.as_str()), Some("allow"));
         assert_eq!(obj.get("identity_source").and_then(|v| v.as_str()), Some("jwt"));
     }
@@ -232,10 +235,16 @@ mod tests {
         let obj = json.as_object().expect("object");
         assert_eq!(obj.get("agent_id").and_then(|v| v.as_str()), Some("oncall-agent"));
         assert_eq!(obj.get("agent_version").and_then(|v| v.as_str()), Some("1.2.3"));
-        assert_eq!(obj.get("wkl").and_then(|v| v.as_str()), Some("spiffe://acme.local/ns/prod/sa/oncall"));
+        assert_eq!(
+            obj.get("wkl").and_then(|v| v.as_str()),
+            Some("spiffe://acme.local/ns/prod/sa/oncall")
+        );
         assert_eq!(obj.get("purpose").and_then(|v| v.as_str()), Some("incident-response"));
         assert_eq!(obj.get("session_id").and_then(|v| v.as_str()), Some("sess_abc"));
-        let chain = obj.get("act_chain").and_then(|v| v.as_array()).expect("act_chain array");
+        let chain = obj
+            .get("act_chain")
+            .and_then(|v| v.as_array())
+            .expect("act_chain array");
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].get("sub").and_then(|v| v.as_str()), Some("user:alice"));
         assert_eq!(chain[0].get("iat").and_then(|v| v.as_i64()), Some(1_715_000_000));

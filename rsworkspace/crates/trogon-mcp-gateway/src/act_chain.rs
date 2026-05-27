@@ -3,49 +3,20 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::HeaderMap;
-use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::warn;
+
+pub use crate::agent_identity::{ActChainEntry, AgentIdentityMode, MAX_ACT_CHAIN_DEPTH};
 
 pub const MCP_ACT_CHAIN_HEADER: &str = "mcp-act-chain";
-pub const MAX_ACT_CHAIN_DEPTH: usize = 8;
 
-const ENV_AGENT_IDENTITY: &str = "MCP_GATEWAY_AGENT_IDENTITY";
 const ENV_GATEWAY_IDENTITY_SUB: &str = "MCP_GATEWAY_IDENTITY_SUB";
 const DEFAULT_GATEWAY_IDENTITY_SUB: &str = "trogon-mcp-gateway";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentIdentityMode {
-    Off,
-    Shadow,
-    Enforce,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct ActChainEntry {
-    pub sub: String,
-    pub agent_id: Option<String>,
-    pub wkl: Option<String>,
-    pub iat: i64,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActChainProjectOutcome {
     NoOp,
     Projected { depth: usize },
     TooDeepForwarded { depth: usize },
-}
-
-pub fn agent_identity_mode_from_env() -> AgentIdentityMode {
-    match std::env::var(ENV_AGENT_IDENTITY)
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "shadow" => AgentIdentityMode::Shadow,
-        "enforce" => AgentIdentityMode::Enforce,
-        _ => AgentIdentityMode::Off,
-    }
 }
 
 fn gateway_identity_sub_from_env() -> String {
@@ -73,8 +44,7 @@ pub fn parse_act_chain(raw: &str) -> Result<Vec<ActChainEntry>, serde_json::Erro
     serde_json::from_str(raw)
 }
 
-pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>) {
-    let mode = agent_identity_mode_from_env();
+pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>, mode: AgentIdentityMode) {
     let gateway_sub = gateway_identity_sub_from_env();
     let now_iat = current_unix_time();
     let _ = project_act_chain_header_inner(headers, ingress_raw, mode, gateway_sub.as_str(), now_iat);
@@ -109,19 +79,10 @@ pub(crate) fn project_act_chain_header_inner(
             max_depth = MAX_ACT_CHAIN_DEPTH,
             "act chain exceeds max depth"
         );
-        if mode == AgentIdentityMode::Enforce {
-            error!(
-                event = "act_chain_too_deep",
-                depth = chain.len(),
-                "enforce mode would reject act chain exceeding max depth (rejection not yet enabled)"
-            );
-        }
         if !chain.is_empty() {
             set_act_chain_header(headers, &chain);
         }
-        return ActChainProjectOutcome::TooDeepForwarded {
-            depth: chain.len(),
-        };
+        return ActChainProjectOutcome::TooDeepForwarded { depth: chain.len() };
     }
 
     chain.push(ActChainEntry {
@@ -167,7 +128,8 @@ mod tests {
     #[test]
     fn mode_off_leaves_header_absent() {
         let mut headers = HeaderMap::new();
-        let outcome = project_act_chain_header_inner(&mut headers, None, AgentIdentityMode::Off, "trogon-mcp-gateway", 1);
+        let outcome =
+            project_act_chain_header_inner(&mut headers, None, AgentIdentityMode::Off, "trogon-mcp-gateway", 1);
         assert_eq!(outcome, ActChainProjectOutcome::NoOp);
         assert!(headers.get(MCP_ACT_CHAIN_HEADER).is_none());
     }
@@ -193,10 +155,7 @@ mod tests {
 
     #[test]
     fn existing_two_entry_chain_shadow_becomes_three() {
-        let existing = vec![
-            sample_entry("user-a", 100),
-            sample_entry("agent-b", 200),
-        ];
+        let existing = vec![sample_entry("user-a", 100), sample_entry("agent-b", 200)];
         let raw = chain_json(&existing);
         let mut headers = HeaderMap::new();
         let outcome = project_act_chain_header_inner(
@@ -254,27 +213,5 @@ mod tests {
         let chain = header_chain(&headers).unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].sub, "trogon-mcp-gateway");
-    }
-
-    #[test]
-    fn agent_identity_mode_parses_env_values() {
-        assert_eq!(
-            agent_identity_mode_from_env_with("shadow"),
-            AgentIdentityMode::Shadow
-        );
-        assert_eq!(
-            agent_identity_mode_from_env_with("ENFORCE"),
-            AgentIdentityMode::Enforce
-        );
-        assert_eq!(agent_identity_mode_from_env_with("off"), AgentIdentityMode::Off);
-        assert_eq!(agent_identity_mode_from_env_with(""), AgentIdentityMode::Off);
-    }
-
-    fn agent_identity_mode_from_env_with(value: &str) -> AgentIdentityMode {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "shadow" => AgentIdentityMode::Shadow,
-            "enforce" => AgentIdentityMode::Enforce,
-            _ => AgentIdentityMode::Off,
-        }
     }
 }

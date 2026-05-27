@@ -6,11 +6,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use trogon_std::{
-    env::SystemEnv,
-    fs::SystemFs,
-    signal::shutdown_signal,
-};
+use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 use config::GatewayCliConfig;
@@ -24,9 +20,7 @@ fn config_err_box(msg: String) -> BoxError {
 async fn build_permission_checker<E: trogon_std::env::ReadEnv>(
     env: &E,
 ) -> Result<Arc<dyn trogon_mcp_gateway::authz::PermissionChecker>, BoxError> {
-    let Some(sb) =
-        config::spicedb_connect_config(env).map_err(config_err_box)?
-    else {
+    let Some(sb) = config::spicedb_connect_config(env).map_err(config_err_box)? else {
         info!("MCP gateway authorization: allow-all (SpiceDB not configured)");
         return Ok(Arc::new(trogon_mcp_gateway::authz::AllowAllPermissionChecker));
     };
@@ -43,7 +37,9 @@ async fn build_permission_checker<E: trogon_std::env::ReadEnv>(
     }
 
     let client = builder.insecure(sb.insecure).connect().await.map_err(|e| {
-        config_err_box(format!("failed to connect to SpiceDB ({e}); check MCP_GATEWAY_SPICEDB_*"))
+        config_err_box(format!(
+            "failed to connect to SpiceDB ({e}); check MCP_GATEWAY_SPICEDB_*"
+        ))
     })?;
 
     Ok(Arc::new(trogon_mcp_gateway::spicedb::SpicedbPermissionChecker::new(
@@ -85,9 +81,7 @@ async fn main() -> Result<(), BoxError> {
         "MCP gateway verified identity"
     );
 
-    let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> =
-        build_permission_checker(&SystemEnv).await?;
-
+    let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = build_permission_checker(&SystemEnv).await?;
 
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
@@ -107,8 +101,7 @@ async fn main() -> Result<(), BoxError> {
         "MCP NATS gateway starting"
     );
 
-    let result =
-        trogon_mcp_gateway::run(nats_client, checker, traces, settings, shutdown_signal()).await;
+    let result = trogon_mcp_gateway::run(nats_client, checker, traces, settings, shutdown_signal()).await;
 
     match &result {
         Ok(()) => info!("MCP NATS gateway stopped"),

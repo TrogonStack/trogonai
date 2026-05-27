@@ -95,7 +95,7 @@ mod tests {
     fn phase1_gate_ignores_jwt_variables() {
         let program = Program::compile(SPICEDB_GATE_EXPR).unwrap();
         let mut ctx = Context::default();
-        let mcp = cel_interpreter::to_value(&serde_json::json!({ "method": "tools/call" })).unwrap();
+        let mcp = cel_interpreter::to_value(serde_json::json!({ "method": "tools/call" })).unwrap();
         ctx.add_variable_from_value("mcp", mcp);
         add_jwt_to_cel_context(
             &mut ctx,
