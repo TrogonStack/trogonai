@@ -16,6 +16,8 @@ pub enum StsError {
     ActChainLoopDetected,
     #[error("act_chain_entry_revoked: index {index} agent {agent_id}")]
     ActChainEntryRevoked { index: usize, agent_id: String },
+    #[error("purpose_missing")]
+    PurposeMissing,
     #[error("rate_limited: {0}")]
     RateLimited(String),
     #[error("registry_unavailable: {0}")]
@@ -37,7 +39,7 @@ impl StsError {
             Self::InvalidRequest(_) => "invalid_request",
             Self::InvalidGrant(_) => "invalid_grant",
             Self::InvalidTarget(_) => "invalid_target",
-            Self::AccessDenied(_) => "access_denied",
+            Self::AccessDenied(_) | Self::PurposeMissing => "access_denied",
             Self::ActChainDepthExceeded => "act_chain_depth_exceeded",
             Self::ActChainLoopDetected => "act_chain_loop_detected",
             Self::ActChainEntryRevoked { .. } => "act_chain_entry_revoked",
@@ -60,6 +62,7 @@ impl StsError {
             Self::DependencyUnavailable(_) => "dependency_unavailable".into(),
             Self::SignerUnavailable(_) => "signer_unavailable".into(),
             Self::ActChainEntryRevoked { .. } => "act_chain_entry_revoked".into(),
+            Self::PurposeMissing => "purpose_missing".into(),
             other => other.error_description(),
         }
     }

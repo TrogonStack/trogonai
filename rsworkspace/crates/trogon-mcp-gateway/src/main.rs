@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
+use trogon_std::{ReadEnv, env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
 use trogon_telemetry::{ResourceAttribute, ServiceName};
 
 use config::GatewayCliConfig;
@@ -81,6 +81,27 @@ async fn main() -> Result<(), BoxError> {
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
 
+    let mesh_gateway_cfg =
+        trogon_mcp_gateway::ingress::MeshGatewayConfig::from_env(&SystemEnv);
+    let registry_subject = SystemEnv
+        .var("MCP_GATEWAY_REGISTRY_SUBJECT")
+        .unwrap_or_else(|_| trogon_sts::DEFAULT_REGISTRY_SUBJECT.to_string());
+    let registry_client = trogon_sts::registry::ResilientRegistry::new(
+        trogon_sts::registry::NatsRegistryClient::new((*nats_client).clone(), registry_subject),
+        trogon_sts::circuit_breaker::CircuitBreaker::default(),
+    );
+    let registry_cache = trogon_sts::cache::RegistryCache::new(registry_client);
+    let chain_resolver = if mesh_gateway_cfg.chain_resolution_mode
+        == trogon_sts::chain_resolution::ChainResolutionMode::Off
+    {
+        None
+    } else {
+        Some(trogon_mcp_gateway::ingress::chain_resolver_boxed(
+            registry_cache,
+            mesh_gateway_cfg.chain_resolution_mode,
+        ))
+    };
+
     let egress = if jwt.agent_identity_mode() == trogon_mcp_gateway::agent_identity::AgentIdentityMode::Off {
         None
     } else {
@@ -88,7 +109,11 @@ async fn main() -> Result<(), BoxError> {
             trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv).map_err(config_err_box)?;
         let sts_cfg = trogon_sts_client::StsClientConfig::from_env(&SystemEnv);
         let sts = trogon_sts_client::StsClient::from_arc(nats_client.clone(), sts_cfg);
-        Some(trogon_mcp_gateway::egress::EgressMinter::from_parts(sts, egress_cfg))
+        Some(trogon_mcp_gateway::egress::EgressMinter::from_parts(
+            sts,
+            egress_cfg,
+            Some(nats_client.clone()),
+        ))
     };
 
     info!(
@@ -107,6 +132,7 @@ async fn main() -> Result<(), BoxError> {
         mcp,
         jwt,
         egress,
+        chain_resolver,
     };
 
     info!(

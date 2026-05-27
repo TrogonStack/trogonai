@@ -5,7 +5,10 @@ use tracing::{info, warn};
 use trogon_sts_client::{MintedMeshToken, StsClient, StsClientError, build_exchange_request};
 
 use crate::agent_identity::AgentIdentityMode;
-use crate::egress::audience::{backend_target_aud, client_target_aud};
+use crate::egress::audience::{
+    backend_target_aud, client_target_aud, peek_token_audience, publish_shadow_aud_mismatch_metric,
+    record_shadow_aud_mismatch,
+};
 use crate::egress::cache::{CacheKeyParts, MCP_SESSION_HEADER, MeshEgressCache, scope_fingerprint, tool_scope};
 use crate::egress::config::EgressMintConfig;
 use crate::jwt::VerifiedJwtClaims;
@@ -39,16 +42,26 @@ pub struct EgressMinter {
     sts: StsClient,
     cache: MeshEgressCache,
     config: EgressMintConfig,
+    metrics: Option<Arc<async_nats::Client>>,
 }
 
 impl EgressMinter {
-    pub fn new(sts: StsClient, config: EgressMintConfig) -> Self {
+    pub fn new(sts: StsClient, config: EgressMintConfig, metrics: Option<Arc<async_nats::Client>>) -> Self {
         let cache = MeshEgressCache::new(config.clone());
-        Self { sts, cache, config }
+        Self {
+            sts,
+            cache,
+            config,
+            metrics,
+        }
     }
 
-    pub fn from_parts(sts: StsClient, config: EgressMintConfig) -> Arc<Self> {
-        Arc::new(Self::new(sts, config))
+    pub fn from_parts(
+        sts: StsClient,
+        config: EgressMintConfig,
+        metrics: Option<Arc<async_nats::Client>>,
+    ) -> Arc<Self> {
+        Arc::new(Self::new(sts, config, metrics))
     }
 
     pub fn config(&self) -> &EgressMintConfig {
@@ -93,6 +106,20 @@ impl EgressMinter {
         };
 
         let target_aud = self.target_audience(tenant, &target);
+        if mode == AgentIdentityMode::Shadow
+            && let Some(presented_aud) = peek_token_audience(subject_token)
+            && record_shadow_aud_mismatch(target_aud.as_str(), presented_aud.as_str(), tenant, caller_sub)
+            && let Some(client) = self.metrics.as_ref()
+        {
+            publish_shadow_aud_mismatch_metric(
+                client.as_ref(),
+                target_aud.as_str(),
+                presented_aud.as_str(),
+                tenant,
+                caller_sub,
+            )
+            .await;
+        }
         let key = CacheKeyParts {
             tenant: tenant.to_string(),
             caller_sub: caller_sub.to_string(),
