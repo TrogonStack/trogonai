@@ -1,0 +1,63 @@
+{
+  "agents": [
+    {
+      "agent_id": "acme/oncall-agent",
+      "agent_version": "3.2.1",
+      "agent_definition_digest": "sha256:abc123def456",
+      "owner_team": "platform-sre",
+      "allowed_workloads": [
+        "spiffe://acme.local/ns/prod/sa/oncall-agent"
+      ],
+      "allowed_tools": [
+        "pagerduty.page",
+        "github.issues.read",
+        "slack.post_message"
+      ],
+      "allowed_audiences": [
+        "mcp.server.pagerduty",
+        "mcp.server.github",
+        "agent:acme/incident-coordinator"
+      ],
+      "allowed_purposes": [
+        "incident.response",
+        "incident.triage"
+      ],
+      "mesh_token_ttl_s": 300,
+      "metadata": {
+        "description": "Pages on-call and opens incident threads",
+        "repo": "https://github.com/acme/oncall-agent",
+        "contact": "platform-sre@acme.example"
+      },
+      "lifecycle_state": "active",
+      "created_at": "2026-05-27T00:00:00Z",
+      "updated_at": "2026-05-27T00:00:00Z"
+    },
+    {
+      "agent_id": "acme/human-fronted-assistant",
+      "agent_version": "1.0.0",
+      "agent_definition_digest": "sha256:7890abcd",
+      "owner_team": "product-ops",
+      "allowed_workloads": [
+        "sentinel:human"
+      ],
+      "allowed_tools": [
+        "linear.issues.read",
+        "slack.post_message"
+      ],
+      "allowed_audiences": [
+        "mcp.server.linear",
+        "agent:acme/human-fronted-assistant"
+      ],
+      "allowed_purposes": [
+        "ops.triage"
+      ],
+      "metadata": {
+        "description": "Human-operated assistant for ops triage",
+        "contact": "product-ops@acme.example"
+      },
+      "lifecycle_state": "active",
+      "created_at": "2026-05-27T00:00:00Z",
+      "updated_at": "2026-05-27T00:00:00Z"
+    }
+  ]
+}
