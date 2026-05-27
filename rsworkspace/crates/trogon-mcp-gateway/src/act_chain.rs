@@ -3,8 +3,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::HeaderMap;
-use tracing::{error, warn};
+use tracing::warn;
+
 pub use trogon_identity_types::{ActChainEntry, MAX_ACT_CHAIN_DEPTH, parse_act_chain};
+
+pub use crate::agent_identity::AgentIdentityMode;
 
 pub const MCP_ACT_CHAIN_HEADER: &str = "mcp-act-chain";
 
@@ -46,8 +49,7 @@ pub fn ingress_act_chain_raw(headers: Option<&HeaderMap>) -> Option<String> {
         .map(|v| v.as_str().to_string())
 }
 
-pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>) {
-    let mode = agent_identity_mode_from_env();
+pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>, mode: AgentIdentityMode) {
     let gateway_sub = gateway_identity_sub_from_env();
     let now_iat = current_unix_time();
     let _ = project_act_chain_header_inner(headers, ingress_raw, mode, gateway_sub.as_str(), now_iat);
