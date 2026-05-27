@@ -6,6 +6,7 @@ pub mod audit;
 pub mod authz;
 pub mod egress;
 pub mod gateway;
+pub mod ingress;
 pub mod jwt;
 pub mod policy;
 pub mod rpc_codes;

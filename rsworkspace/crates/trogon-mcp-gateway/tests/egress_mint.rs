@@ -200,6 +200,7 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
             actor_token: gateway_wkl.into(),
             clock_skew_secs: 30,
         },
+        None,
     );
 
     let settings = GatewaySettings {
@@ -209,6 +210,7 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
         mcp: mcp_conf,
         jwt: jwt_validator(),
         egress: Some(egress),
+        chain_resolver: None,
     };
 
     let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
@@ -295,6 +297,7 @@ async fn sts_timeout_returns_structured_error() {
             actor_token: "spiffe://acme.local/ns/prod/sa/mcp-gateway".into(),
             clock_skew_secs: 30,
         },
+        None,
     );
 
     let settings = GatewaySettings {
@@ -304,6 +307,7 @@ async fn sts_timeout_returns_structured_error() {
         mcp: mcp_conf,
         jwt: jwt_validator(),
         egress: Some(egress),
+        chain_resolver: None,
     };
 
     let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = Arc::new(AllowAllPermissionChecker);
