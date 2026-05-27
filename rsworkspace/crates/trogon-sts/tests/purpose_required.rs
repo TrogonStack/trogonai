@@ -3,13 +3,14 @@ mod support;
 use std::sync::Arc;
 
 use support::*;
+use trogon_sts::DEFAULT_MESH_ISSUER;
+use trogon_sts::attestor::{AttestationPolicy, build_attestor};
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
 use trogon_sts::chain_resolution::ChainResolutionMode;
 use trogon_sts::exchange::ExchangeService;
 use trogon_sts::registry::InMemoryRegistry;
 use trogon_sts::spicedb::NoOpSpiceDb;
-use trogon_sts::DEFAULT_MESH_ISSUER;
 
 #[tokio::test]
 async fn empty_request_purpose_rejected_when_required() {
@@ -67,12 +68,15 @@ async fn purpose_missing_emits_deny_audit_reason() {
     let audit = Arc::new(RecordingAuditPublisher::new());
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let attestor = build_attestor(trust.clone(), AttestationPolicy::Shadow);
     let registry = RegistryCache::new(InMemoryRegistry::new([sample_registry_record()]));
     let service = ExchangeService::new(
         DEFAULT_MESH_ISSUER.to_string(),
         keys.bootstrap_iss.clone(),
         jwks,
         trust,
+        attestor,
+        AttestationPolicy::Shadow,
         registry,
         keys.mesh_signer.clone(),
         Arc::clone(&audit),

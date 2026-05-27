@@ -14,6 +14,7 @@ use rsa::pkcs8::EncodePrivateKey;
 use rsa::traits::PublicKeyParts;
 use serde_json::{Value, json};
 use trogon_sts::DEFAULT_MESH_ISSUER;
+use trogon_sts::attestor::{AttestationPolicy, build_attestor};
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
 use trogon_sts::chain_resolution::ChainResolutionMode;
@@ -116,7 +117,37 @@ pub fn build_service(
     keys: &'static TestKeys,
     record: AgentRegistryRecord,
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
-    build_service_with_mode(keys, record, ChainResolutionMode::Off)
+    build_service_with_audit(keys, record, ChainResolutionMode::Off).0
+}
+
+pub fn build_service_with_audit(
+    keys: &'static TestKeys,
+    record: AgentRegistryRecord,
+    chain_mode: ChainResolutionMode,
+) -> (
+    ExchangeService<InMemoryRegistry, RecordingAuditPublisher>,
+    Arc<RecordingAuditPublisher>,
+) {
+    let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
+    let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let attestor = build_attestor(trust.clone(), AttestationPolicy::Shadow);
+    let registry = RegistryCache::new(InMemoryRegistry::new([record]));
+    let audit = Arc::new(RecordingAuditPublisher::new());
+    let service = ExchangeService::new(
+        DEFAULT_MESH_ISSUER.to_string(),
+        keys.bootstrap_iss.clone(),
+        jwks,
+        trust,
+        attestor,
+        AttestationPolicy::Shadow,
+        registry,
+        keys.mesh_signer.clone(),
+        Arc::clone(&audit),
+        NoOpSpiceDb,
+        chain_mode,
+        true,
+    );
+    (service, audit)
 }
 
 pub fn build_service_with_mode(
@@ -135,6 +166,7 @@ pub fn build_service_with_mode_and_purpose(
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let attestor = build_attestor(trust.clone(), AttestationPolicy::Shadow);
     let registry = RegistryCache::new(InMemoryRegistry::new([record]));
     let audit = Arc::new(RecordingAuditPublisher::new());
     ExchangeService::new(
@@ -142,6 +174,8 @@ pub fn build_service_with_mode_and_purpose(
         keys.bootstrap_iss.clone(),
         jwks,
         trust,
+        attestor,
+        AttestationPolicy::Shadow,
         registry,
         keys.mesh_signer.clone(),
         audit,
@@ -174,6 +208,66 @@ pub fn bootstrap_claims(keys: &'static TestKeys) -> Value {
         "agent_version": "1.0.0",
         "purpose": "oncall-incident-triage",
     })
+}
+
+pub fn test_spiffe_svid_pem(trust_domain: &str, path: &str) -> (String, String) {
+    use rcgen::{
+        BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType,
+    };
+    use rcgen::Ia5String;
+    let spiffe_uri: Ia5String = format!("spiffe://{trust_domain}/{path}")
+        .try_into()
+        .expect("spiffe uri");
+    let ca_key = KeyPair::generate().expect("ca key");
+    let mut ca_params = CertificateParams::default();
+    ca_params.distinguished_name.push(DnType::CommonName, "test-ca");
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca = ca_params.self_signed(&ca_key).expect("ca");
+    let ee_key = KeyPair::generate().expect("ee key");
+    let mut ee_params = CertificateParams::default();
+    ee_params.distinguished_name.push(DnType::CommonName, "workload");
+    ee_params.subject_alt_names = vec![SanType::URI(spiffe_uri)];
+    ee_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    let ee = ee_params.signed_by(&ee_key, &ca, &ca_key).expect("ee");
+    (ee.pem(), ca.pem())
+}
+
+pub async fn spawn_nats_js() -> Option<(tokio::process::Child, async_nats::Client)> {
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    let port = 16000 + (std::process::id() as u16 % 20000);
+    let url = format!("nats://127.0.0.1:{port}");
+    let store_dir = tempfile::tempdir().ok()?;
+    let config_dir = tempfile::tempdir().ok()?;
+    let config_path = config_dir.path().join("nats.conf");
+    let store_path = store_dir.path().to_string_lossy();
+    let config = format!(
+        r#"
+port: {port}
+jetstream {{
+  store_dir: "{store_path}"
+}}
+"#
+    );
+    std::fs::write(&config_path, config).ok()?;
+    let child = tokio::process::Command::new("nats-server")
+        .arg("-c")
+        .arg(&config_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    std::mem::forget(store_dir);
+    std::mem::forget(config_dir);
+    for _ in 0..50 {
+        if let Ok(client) = async_nats::connect(&url).await {
+            return Some((child, client));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    None
 }
 
 pub fn decode_payload(token: &str) -> Value {
@@ -227,6 +321,7 @@ pub fn build_counting_service(
 ) {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
+    let attestor = build_attestor(trust.clone(), AttestationPolicy::Shadow);
     let registry = RegistryCache::new(registry);
     let audit = Arc::new(RecordingAuditPublisher::new());
     let service = ExchangeService::new(
@@ -234,6 +329,8 @@ pub fn build_counting_service(
         keys.bootstrap_iss.clone(),
         jwks,
         trust,
+        attestor,
+        AttestationPolicy::Shadow,
         registry,
         keys.mesh_signer.clone(),
         Arc::clone(&audit),

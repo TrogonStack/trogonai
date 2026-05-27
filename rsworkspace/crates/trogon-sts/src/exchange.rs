@@ -5,6 +5,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use trogon_identity_types::{ActChainEntry, MAX_ACT_CHAIN_DEPTH};
 
+use crate::attestor::{AttestationPolicy, DynAttestor, PresentedCreds};
 use crate::audit::{AuditPublisher, StsAuditEmit, emit_audit};
 use crate::cache::{JwksCache, RegistryCache, TrustBundleCache};
 use crate::chain_resolution::{ChainResolutionMode, ChainResolver};
@@ -14,7 +15,6 @@ use crate::registry::RegistryLookup;
 use crate::signer::DynSigner;
 use crate::spicedb::{NoOpSpiceDb, SpiceDbCheck};
 use crate::token_verify::verify_subject_token;
-use crate::trust::verify_actor_token;
 use crate::types::{MintedClaimsSummary, StsExchangeRequest, StsExchangeResponse, StsTokenErrorResponse};
 use crate::{DEFAULT_MESH_TOKEN_TTL_SECS, MAX_MESH_TOKEN_TTL_SECS, MIN_MESH_TOKEN_TTL_SECS};
 
@@ -30,6 +30,8 @@ where
     bootstrap_issuer: String,
     jwks: JwksCache,
     trust_bundle: TrustBundleCache,
+    attestor: DynAttestor,
+    attestation_policy: AttestationPolicy,
     registry: RegistryCache<R>,
     chain_resolver: ChainResolver<R>,
     require_purpose: bool,
@@ -51,6 +53,8 @@ where
         bootstrap_issuer: String,
         jwks: JwksCache,
         trust_bundle: TrustBundleCache,
+        attestor: DynAttestor,
+        attestation_policy: AttestationPolicy,
         registry: RegistryCache<R>,
         signer: DynSigner,
         audit: Arc<A>,
@@ -64,6 +68,8 @@ where
             bootstrap_issuer,
             jwks,
             trust_bundle,
+            attestor,
+            attestation_policy,
             registry,
             chain_resolver,
             require_purpose,
@@ -81,7 +87,7 @@ where
     ) -> Result<StsExchangeResponse, StsTokenErrorResponse> {
         let started = Instant::now();
         match self.exchange_inner(&request).await {
-            Ok((response, summary, wkl, agent_id)) => {
+            Ok((response, summary, wkl, agent_id, shadow_unattested)) => {
                 emit_audit(
                     self.audit.as_ref(),
                     StsAuditEmit {
@@ -89,15 +95,33 @@ where
                         reason: "exchange_ok".into(),
                         latency: started.elapsed(),
                         request: &request,
-                        wkl: Some(wkl),
-                        agent_id,
+                        wkl: Some(wkl.clone()),
+                        agent_id: agent_id.clone(),
                         minted: Some(summary),
-                        source_ip,
+                        source_ip: source_ip.clone(),
                         offending_index: None,
                         offending_agent_id: None,
                     },
                 )
                 .await;
+                if shadow_unattested {
+                    emit_audit(
+                        self.audit.as_ref(),
+                        StsAuditEmit {
+                            outcome: "deny",
+                            reason: "wkl_unattested".into(),
+                            latency: started.elapsed(),
+                            request: &request,
+                            wkl: Some(wkl),
+                            agent_id,
+                            minted: None,
+                            source_ip,
+                            offending_index: None,
+                            offending_agent_id: None,
+                        },
+                    )
+                    .await;
+                }
                 Ok(response)
             }
             Err(err) => {
@@ -132,7 +156,7 @@ where
     async fn exchange_inner(
         &self,
         request: &StsExchangeRequest,
-    ) -> Result<(StsExchangeResponse, MintedClaimsSummary, String, Option<String>), StsError> {
+    ) -> Result<(StsExchangeResponse, MintedClaimsSummary, String, Option<String>, bool), StsError> {
         validate_wire_request(request)?;
 
         let iss_hint = peek_token_iss(&request.subject_token)?;
@@ -152,8 +176,14 @@ where
             .verify_inbound_chain(&subject.act_chain)
             .await?;
 
-        let trust_pem = self.trust_bundle.pem().await;
-        let actor_wkl = verify_actor_token(&request.actor_token, &trust_pem)?;
+        let presented = PresentedCreds {
+            actor_token: request.actor_token.clone(),
+            peer_cert_pem: None,
+        };
+        let svid = self.attestor.attest(&presented).await?;
+        self.trust_bundle.verify(&svid).await?;
+        let actor_wkl = svid.wkl();
+        let shadow_unattested = self.attestation_policy.is_shadow();
 
         self.limits.check(&actor_wkl, subject.agent_id.as_deref())?;
 
@@ -239,6 +269,7 @@ where
             summary,
             actor_wkl,
             subject.agent_id,
+            shadow_unattested,
         ))
     }
 }

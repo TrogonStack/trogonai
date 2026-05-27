@@ -11,6 +11,10 @@ path = "src/main.rs"
 name = "trogon-sts-probe"
 path = "src/bin/probe.rs"
 
+[[bin]]
+name = "trogon-sts-publish-trust-bundle"
+path = "src/bin/publish_trust_bundle.rs"
+
 [lints]
 workspace = true
 
@@ -34,6 +38,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
+x509-parser = { workspace = true, features = ["verify"] }
 
 aws-config = { version = "=1.8.12", optional = true }
 aws-sdk-kms = { version = "=1.96.0", optional = true }
@@ -41,8 +46,10 @@ aws-sdk-kms = { version = "=1.96.0", optional = true }
 [dev-dependencies]
 base64 = { workspace = true }
 rand = { workspace = true }
+rcgen = { workspace = true }
 rsa = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
 wiremock = { workspace = true }
 
 [features]
