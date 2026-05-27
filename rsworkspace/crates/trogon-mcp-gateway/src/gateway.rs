@@ -12,6 +12,7 @@ use tracing::{Instrument, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
+use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::audit::{self, AuditEnvelope};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker};
 use crate::jwt::JwtValidator;
@@ -295,8 +296,10 @@ async fn handle_ingress_inner(
     }
 
     let base_headers = msg.headers.clone().unwrap_or_default();
+    let act_chain_raw = act_chain::ingress_act_chain_raw(msg.headers.as_ref());
     let mut outbound_headers = egress_header_map(base_headers, settings.jwt.jwt_controls_transport());
     append_verified_gateway_identity_headers(&mut outbound_headers, &gateway_identity);
+    act_chain::project_act_chain_header(&mut outbound_headers, act_chain_raw.as_deref());
     inject_trace_context(&mut outbound_headers);
 
     if msg.reply.is_none() {
@@ -602,13 +605,13 @@ fn append_verified_gateway_identity_headers(headers: &mut async_nats::HeaderMap,
 }
 
 fn egress_header_map(src: async_nats::HeaderMap, strip_legacy_tenant: bool) -> async_nats::HeaderMap {
-    if !strip_legacy_tenant {
-        return src;
-    }
     let mut out = async_nats::HeaderMap::new();
     for (name, vals) in src.iter() {
         let header_name_ref: &str = AsRef::<str>::as_ref(name);
-        if header_name_ref.eq_ignore_ascii_case(TENANT_HEADER) {
+        if header_name_ref.eq_ignore_ascii_case(MCP_ACT_CHAIN_HEADER) {
+            continue;
+        }
+        if strip_legacy_tenant && header_name_ref.eq_ignore_ascii_case(TENANT_HEADER) {
             continue;
         }
         for v in vals {
@@ -725,6 +728,16 @@ mod tests {
         let stripped = egress_header_map(h, true);
         assert!(stripped.get(TENANT_HEADER).is_none());
         assert!(stripped.get("X-Other").is_some());
+    }
+
+    #[test]
+    fn always_strips_act_chain_header_from_ingress() {
+        let mut h = async_nats::HeaderMap::new();
+        h.insert(MCP_ACT_CHAIN_HEADER, r#"[{"sub":"evil","iat":1}]"#);
+        h.insert("X-Other", "v");
+        let out = egress_header_map(h, false);
+        assert!(out.get(MCP_ACT_CHAIN_HEADER).is_none());
+        assert!(out.get("X-Other").is_some());
     }
 
     #[test]
