@@ -9,8 +9,8 @@ use trogon_sts::DEFAULT_MESH_ISSUER;
 async fn bootstrap_to_mesh_exchange_produces_one_entry_act_chain() {
     let keys = shared_test_keys();
     let record = sample_registry_record();
-    let service = build_service(&keys, record);
-    let subject = mint_bootstrap_token(&keys, bootstrap_claims(&keys));
+    let service = build_service(keys, record);
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let request = sample_exchange_request(&subject);
 
     let response = service.handle(request, None).await.expect("exchange");
@@ -41,7 +41,7 @@ async fn depth_nine_inbound_chain_rejected() {
     let keys = shared_test_keys();
     let mut record = sample_registry_record();
     record.mesh_token_ttl_s = Some(120);
-    let service = build_service(&keys, record);
+    let service = build_service(keys, record);
 
     let chain: Vec<ActChainEntry> = (0..9)
         .map(|i| ActChainEntry {
@@ -51,9 +51,9 @@ async fn depth_nine_inbound_chain_rejected() {
             iat: i as i64,
         })
         .collect();
-    let mut claims = bootstrap_claims(&keys);
+    let mut claims = bootstrap_claims(keys);
     claims["act_chain"] = serde_json::to_value(chain).unwrap();
-    let subject = mint_bootstrap_token(&keys, claims);
+    let subject = mint_bootstrap_token(keys, claims);
     let err = service
         .handle(sample_exchange_request(&subject), None)
         .await
@@ -64,7 +64,7 @@ async fn depth_nine_inbound_chain_rejected() {
 #[tokio::test]
 async fn agent_wkl_loop_rejected() {
     let keys = shared_test_keys();
-    let service = build_service(&keys, sample_registry_record());
+    let service = build_service(keys, sample_registry_record());
     let wkl = "spiffe://acme.local/ns/prod/sa/oncall-agent";
     let chain = vec![ActChainEntry {
         sub: "user:alice".into(),
@@ -72,9 +72,9 @@ async fn agent_wkl_loop_rejected() {
         wkl: Some(wkl.into()),
         iat: 1,
     }];
-    let mut claims = bootstrap_claims(&keys);
+    let mut claims = bootstrap_claims(keys);
     claims["act_chain"] = serde_json::to_value(chain).unwrap();
-    let subject = mint_bootstrap_token(&keys, claims);
+    let subject = mint_bootstrap_token(keys, claims);
     let err = service
         .handle(sample_exchange_request(&subject), None)
         .await
@@ -85,8 +85,8 @@ async fn agent_wkl_loop_rejected() {
 #[tokio::test]
 async fn audience_not_allowed_returns_invalid_target() {
     let keys = shared_test_keys();
-    let service = build_service(&keys, sample_registry_record());
-    let subject = mint_bootstrap_token(&keys, bootstrap_claims(&keys));
+    let service = build_service(keys, sample_registry_record());
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let mut request = sample_exchange_request(&subject);
     request.audience = "urn:trogon:mcp:backend:acme:unknown".into();
     let err = service.handle(request, None).await.expect_err("invalid aud");
@@ -98,8 +98,8 @@ async fn ttl_clamps_to_registry_mesh_token_ttl_s() {
     let keys = shared_test_keys();
     let mut record = sample_registry_record();
     record.mesh_token_ttl_s = Some(60);
-    let service = build_service(&keys, record);
-    let subject = mint_bootstrap_token(&keys, bootstrap_claims(&keys));
+    let service = build_service(keys, record);
+    let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let response = service
         .handle(sample_exchange_request(&subject), None)
         .await

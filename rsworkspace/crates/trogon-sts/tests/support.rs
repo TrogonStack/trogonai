@@ -81,7 +81,7 @@ pub fn now_secs() -> i64 {
         .as_secs() as i64
 }
 
-pub fn mint_bootstrap_token(keys: &TestKeys, claims: Value) -> String {
+pub fn mint_bootstrap_token(keys: &'static TestKeys, claims: Value) -> String {
     let mut hdr = Header::new(Algorithm::RS256);
     hdr.kid = Some("bootstrap-kid".into());
     encode(&hdr, &claims, &keys.bootstrap_enc).expect("bootstrap token")
@@ -104,7 +104,7 @@ pub fn sample_registry_record() -> AgentRegistryRecord {
 }
 
 pub fn build_service(
-    keys: &TestKeys,
+    keys: &'static TestKeys,
     record: AgentRegistryRecord,
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
@@ -134,7 +134,7 @@ pub fn sample_exchange_request(subject_token: &str) -> StsExchangeRequest {
     }
 }
 
-pub fn bootstrap_claims(keys: &TestKeys) -> Value {
+pub fn bootstrap_claims(keys: &'static TestKeys) -> Value {
     json!({
         "sub": "user:alice",
         "iss": keys.bootstrap_iss,
