@@ -27,6 +27,31 @@ impl NatsSts {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+struct StsWireRequest {
+    subject_token: String,
+    subject_token_type: &'static str,
+    actor_token: String,
+    audience: String,
+    scope: String,
+    purpose: String,
+    requested_token_type: &'static str,
+}
+
+impl From<ExchangeRequest> for StsWireRequest {
+    fn from(req: ExchangeRequest) -> Self {
+        Self {
+            subject_token: req.subject_token,
+            subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+            actor_token: req.actor_token,
+            audience: req.audience,
+            scope: req.scope.unwrap_or_default(),
+            purpose: req.purpose.unwrap_or_default(),
+            requested_token_type: "urn:ietf:params:oauth:token-type:jwt",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct StsErrorEnvelope {
     error: Option<String>,
@@ -36,7 +61,8 @@ struct StsErrorEnvelope {
 #[async_trait]
 impl Sts for NatsSts {
     async fn exchange(&self, req: ExchangeRequest) -> Result<ExchangeResponse, SdkError> {
-        let payload = serde_json::to_vec(&req).map_err(|e| SdkError::Serialization(e.to_string()))?;
+        let wire = StsWireRequest::from(req);
+        let payload = serde_json::to_vec(&wire).map_err(|e| SdkError::Serialization(e.to_string()))?;
         let response = self
             .client
             .request(self.subject.clone(), payload.into())
