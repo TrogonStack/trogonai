@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT** — for human review. Does not authorize implementation until accepted.
+**Accepted (2026-05-27).** Authorizes implementation of STS exchange (Block 2.1) and gateway egress minting (Block 2.4).
 
 ## Context
 
