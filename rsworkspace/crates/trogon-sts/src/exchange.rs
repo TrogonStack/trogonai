@@ -32,6 +32,7 @@ where
     trust_bundle: TrustBundleCache,
     registry: RegistryCache<R>,
     chain_resolver: ChainResolver<R>,
+    require_purpose: bool,
     spicedb: S,
     signer: DynSigner,
     limits: RateLimiter,
@@ -55,6 +56,7 @@ where
         audit: Arc<A>,
         spicedb: S,
         chain_resolution_mode: ChainResolutionMode,
+        require_purpose: bool,
     ) -> Self {
         let chain_resolver = ChainResolver::new(registry.clone(), chain_resolution_mode);
         Self {
@@ -64,6 +66,7 @@ where
             trust_bundle,
             registry,
             chain_resolver,
+            require_purpose,
             spicedb,
             signer,
             limits: RateLimiter::new(),
@@ -140,6 +143,8 @@ where
         };
 
         let subject = verify_subject_token(&request.subject_token, &iss, &jwks)?;
+        let is_bootstrap = iss != self.mesh_issuer;
+        assert_purpose_required(self.require_purpose, request, Some((&subject, is_bootstrap)))?;
 
         self.spicedb.authorize_exchange().await?;
 
@@ -236,6 +241,42 @@ where
             subject.agent_id,
         ))
     }
+}
+
+fn assert_purpose_required(
+    require: bool,
+    request: &StsExchangeRequest,
+    bootstrap_subject: Option<(&crate::types::VerifiedSubjectClaims, bool)>,
+) -> Result<(), StsError> {
+    if !require {
+        return Ok(());
+    }
+    if request.purpose.trim().is_empty() {
+        return Err(StsError::PurposeMissing);
+    }
+    if let Some((subject, true)) = bootstrap_subject {
+        let claim_ok = subject
+            .purpose
+            .as_deref()
+            .is_some_and(|p| !p.trim().is_empty());
+        if !claim_ok {
+            return Err(StsError::PurposeMissing);
+        }
+    }
+    Ok(())
+}
+
+pub fn parse_require_purpose_flag(raw: &str) -> bool {
+    !matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+pub fn require_purpose_from_env() -> bool {
+    std::env::var("MCP_STS_REQUIRE_PURPOSE")
+        .map(|v| parse_require_purpose_flag(&v))
+        .unwrap_or(true)
 }
 
 fn validate_wire_request(request: &StsExchangeRequest) -> Result<(), StsError> {

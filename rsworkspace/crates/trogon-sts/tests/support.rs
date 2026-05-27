@@ -124,6 +124,15 @@ pub fn build_service_with_mode(
     record: AgentRegistryRecord,
     chain_mode: ChainResolutionMode,
 ) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
+    build_service_with_mode_and_purpose(keys, record, chain_mode, true)
+}
+
+pub fn build_service_with_mode_and_purpose(
+    keys: &'static TestKeys,
+    record: AgentRegistryRecord,
+    chain_mode: ChainResolutionMode,
+    require_purpose: bool,
+) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
     let registry = RegistryCache::new(InMemoryRegistry::new([record]));
@@ -138,6 +147,7 @@ pub fn build_service_with_mode(
         audit,
         NoOpSpiceDb,
         chain_mode,
+        require_purpose,
     )
 }
 
@@ -162,6 +172,7 @@ pub fn bootstrap_claims(keys: &'static TestKeys) -> Value {
         "iat": now_secs(),
         "agent_id": "acme/oncall-agent",
         "agent_version": "1.0.0",
+        "purpose": "oncall-incident-triage",
     })
 }
 
@@ -228,6 +239,7 @@ pub fn build_counting_service(
         Arc::clone(&audit),
         NoOpSpiceDb,
         chain_mode,
+        true,
     );
     (service, audit)
 }
