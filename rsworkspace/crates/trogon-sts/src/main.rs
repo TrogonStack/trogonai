@@ -101,6 +101,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let registry = RegistryCache::new(registry_client);
     let spicedb = ResilientSpiceDb::new(NoOpSpiceDb, CircuitBreaker::default());
     let chain_mode = ChainResolutionMode::from_env();
+    let require_purpose = trogon_sts::exchange::require_purpose_from_env();
 
     let audit = Arc::new(NatsAuditPublisher::new(nats.clone()));
     let service = Arc::new(ExchangeService::new(
@@ -113,6 +114,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         audit,
         spicedb,
         chain_mode,
+        require_purpose,
     ));
 
     let mut subscriber = nats
