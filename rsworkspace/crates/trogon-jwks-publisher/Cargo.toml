@@ -1,0 +1,40 @@
+[package]
+name = "trogon-jwks-publisher"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "trogon-jwks-publisher"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+async-trait = { workspace = true }
+axum = { workspace = true }
+axum-server = { version = "=0.7.3", features = ["tls-rustls"] }
+base64 = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+ed25519-dalek = { workspace = true, features = ["pkcs8", "rand_core"] }
+futures = { workspace = true }
+futures-util = { workspace = true }
+hex = { workspace = true }
+jsonwebtoken = { workspace = true }
+notify = { workspace = true }
+rsa = { workspace = true, features = ["sha2"] }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "fs", "net", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+rand = { workspace = true }
+rsa = { workspace = true, features = ["sha2"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tower = { version = "=0.5.3", features = ["util"] }
