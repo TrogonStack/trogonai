@@ -73,10 +73,16 @@ impl AcpStream {
     }
 
     pub fn config(&self, prefix: &AcpPrefix) -> Config {
-        // Global and GlobalExt subjects are used for core NATS request-reply.
-        // no_ack prevents JetStream from sending PubAcks to the request reply-to
-        // inbox, which would race with the runner's actual response.
-        let no_ack = matches!(self, Self::Global | Self::GlobalExt);
+        // Global, GlobalExt, and ClientOps carry core NATS request-reply traffic:
+        // session.new / agent.ext.* for the first two, and client.terminal.* /
+        // client.ext.* / client.session.request_permission for ClientOps. no_ack
+        // prevents JetStream from sending a PubAck to the request's reply-to inbox,
+        // which would otherwise race with — and be mis-parsed in place of — the
+        // responder's actual reply (e.g. the wasm bash tool parsing the PubAck as a
+        // CreateTerminalResponse → "missing field terminalId"). no_ack disables only
+        // the PubAck, not storage, so ClientOps still durably retains the one-way
+        // client.session.update notifications for MED-35 replay.
+        let no_ack = matches!(self, Self::Global | Self::GlobalExt | Self::ClientOps);
         Config {
             name: self.stream_name(prefix),
             subjects: self.subject_patterns(prefix),
@@ -203,6 +209,22 @@ mod tests {
         let patterns = AcpStream::ClientOps.subject_patterns(&p);
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0], "acp.session.*.client.>");
+    }
+
+    #[test]
+    fn request_reply_streams_disable_pubacks() {
+        // Streams carrying core request-reply traffic must set no_ack so JetStream
+        // doesn't send a PubAck to the request reply-to inbox (which the requester
+        // would mis-parse instead of the responder's real reply). ClientOps carries
+        // client.terminal.* / client.ext.* / request_permission request-reply, so it
+        // must be in this set alongside Global and GlobalExt.
+        let pfx = prefix("acp");
+        for s in [AcpStream::Global, AcpStream::GlobalExt, AcpStream::ClientOps] {
+            assert!(s.config(&pfx).no_ack, "{s} must set no_ack");
+        }
+        for s in [AcpStream::Commands, AcpStream::Responses, AcpStream::Notifications] {
+            assert!(!s.config(&pfx).no_ack, "{s} must not set no_ack");
+        }
     }
 
     #[test]
