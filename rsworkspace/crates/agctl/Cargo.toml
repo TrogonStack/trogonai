@@ -1,0 +1,16 @@
+[package]
+name = "agctl"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "agctl"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+ed25519-dalek = { workspace = true, features = ["pkcs8", "rand_core", "std"] }
+trogon-agent-registry-controller = { path = "../trogon-agent-registry-controller" }

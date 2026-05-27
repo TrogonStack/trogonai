@@ -1,0 +1,27 @@
+manifest_version = 1
+
+[record]
+agent_id = "acme/human-fronted-assistant"
+agent_version = "1.0.0"
+agent_definition_digest = "sha256:7890abcd"
+owner_team = "product-ops"
+allowed_workloads = ["sentinel:human"]
+allowed_tools = [
+    "linear.issues.read",
+    "slack.post_message",
+]
+allowed_audiences = [
+    "mcp.server.linear",
+    "agent:acme/human-fronted-assistant",
+]
+allowed_purposes = ["ops.triage"]
+lifecycle_state = "active"
+
+[record.metadata]
+contact = "product-ops@acme.example"
+description = "Human-operated assistant for ops triage"
+
+[signature]
+algorithm = "ed25519"
+key_id = "registry-signer-current"
+value = "F+ZcC2J+Bk68AZWMx1HKT0NXcsJmNNAklPEBbavciwhzNUuNVrQjcIFqXj1mHF+9KgexMuBfkjb8C1zpdz6SDQ=="
