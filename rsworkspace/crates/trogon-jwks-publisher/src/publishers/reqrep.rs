@@ -11,6 +11,18 @@ pub struct ReqRepState {
     jwks: Arc<RwLock<Jwks>>,
 }
 
+impl ReqRepState {
+    pub fn new(jwks: Jwks) -> Self {
+        Self {
+            jwks: Arc::new(RwLock::new(jwks)),
+        }
+    }
+}
+
+pub async fn set_jwks(state: &ReqRepState, jwks: Jwks) {
+    *state.jwks.write().await = jwks;
+}
+
 pub fn current_jwks_json(state: &ReqRepState) -> Result<Vec<u8>, serde_json::Error> {
     let jwks = state
         .jwks
@@ -25,9 +37,7 @@ pub async fn run_reqrep_publisher(
     mut watch_rx: watch::Receiver<Jwks>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = async_nats::connect(nats_url).await?;
-    let state = ReqRepState {
-        jwks: Arc::new(RwLock::new(watch_rx.borrow().clone())),
-    };
+        let state = ReqRepState::new(watch_rx.borrow().clone());
     let cache = Arc::clone(&state.jwks);
     tokio::spawn(async move {
         while watch_rx.changed().await.is_ok() {
@@ -86,9 +96,7 @@ mod tests {
                 }),
             }],
         };
-        let state = ReqRepState {
-            jwks: Arc::new(RwLock::new(jwks.clone())),
-        };
+        let state = ReqRepState::new(jwks.clone());
         let payload = current_jwks_json(&state).expect("serialize");
         let parsed: Jwks = serde_json::from_slice(&payload).expect("parse");
         assert_eq!(parsed, jwks);

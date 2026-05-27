@@ -167,6 +167,12 @@ Distinct `iss` values separate bootstrap (auth-callout) from mesh (STS) keys so 
 - [ ] **Per-tenant signing keys** (ADR 0001) — one KMS key per tenant vs. single mesh key with tenant in claims?
 - [ ] **Auth-callout `vault` source** — implement once and share Vault client/config with STS, or separate paths?
 
+## Implementation Pin
+
+- First-choice KMS: AWS KMS.
+- Key spec: `RSA_2048` (PSS_SHA_256) primary; `EC_NIST_P256` acceptable as alternative.
+- Why not GCP / Azure: deferred — same trait surface, can add later without breaking JWKS publication.
+
 ## References
 
 - `PENDING_TODO.md` — Block 0 (Key material custody), Block 2.1 (STS)
