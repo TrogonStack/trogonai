@@ -37,6 +37,7 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-sts = { path = "crates/trogon-sts" }
+trogon-sts-client = { path = "crates/trogon-sts-client" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
