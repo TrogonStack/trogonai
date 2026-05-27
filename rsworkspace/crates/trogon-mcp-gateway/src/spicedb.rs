@@ -3,12 +3,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use spicedb_rs_client::v1::{
-    CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency,
-    ObjectReference, SubjectReference, ZedToken, check_bulk_permissions_pair,
-    check_permission_response, consistency,
-};
 use spicedb_rs_client::Client;
+use spicedb_rs_client::v1::{
+    CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, SubjectReference,
+    ZedToken, check_bulk_permissions_pair, check_permission_response, consistency,
+};
 use tokio::sync::Mutex;
 
 use crate::authz::{AuthzContext, AuthzError, PermissionChecker};
@@ -49,9 +48,7 @@ fn consistency_from_cached_zed_token(maybe_cached: Option<String>) -> Consistenc
         return minimize_latency_consistency();
     };
     Consistency {
-        requirement: Some(consistency::Requirement::AtLeastAsFresh(ZedToken {
-            token: tok,
-        })),
+        requirement: Some(consistency::Requirement::AtLeastAsFresh(ZedToken { token: tok })),
     }
 }
 
@@ -127,11 +124,7 @@ impl SpicedbPermissionChecker {
 
         if let Some(zt) = response.checked_at.and_then(|t| {
             let trimmed = t.token.trim().to_owned();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
+            if trimmed.is_empty() { None } else { Some(trimmed) }
         }) {
             let mut lock = self.inner.check_zed_token_cache.lock().await;
             *lock = Some(zt);
@@ -144,10 +137,9 @@ impl SpicedbPermissionChecker {
             .ok_or_else(|| AuthzError("SpiceDB CheckBulkPermissions returned no pairs".to_string()))?;
 
         match pair.response {
-            Some(check_bulk_permissions_pair::Response::Item(item)) => Ok(
-                item.permissionship
-                    == check_permission_response::Permissionship::HasPermission as i32,
-            ),
+            Some(check_bulk_permissions_pair::Response::Item(item)) => {
+                Ok(item.permissionship == check_permission_response::Permissionship::HasPermission as i32)
+            }
             Some(check_bulk_permissions_pair::Response::Error(st)) => Err(AuthzError(format!(
                 "SpiceDB bulk permission check error: {}",
                 st.message

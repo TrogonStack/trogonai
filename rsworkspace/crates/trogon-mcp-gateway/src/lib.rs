@@ -1,6 +1,7 @@
 //! MCP gateway queue-group worker: ingress `{prefix}.gateway.request.*`, egress `{prefix}.server.*`.
 
 pub mod act_chain;
+pub mod agent_identity;
 pub mod audit;
 pub mod authz;
 pub mod gateway;
