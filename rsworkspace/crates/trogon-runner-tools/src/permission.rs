@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, oneshot};
 use trogon_tools::PermissionChecker;
 
 use crate::permission_rules::{
-    extract_path_from_input, normalize_tool_name, PermissionRules, RuleDecision,
+    extract_path_from_input, is_always_allowed, normalize_tool_name, PermissionRules, RuleDecision,
 };
 use crate::session_store::{AuditEntry, AuditOutcome, PolicyAction, ToolPolicy};
 
@@ -86,12 +86,10 @@ impl PermissionChecker for ChannelPermissionChecker {
         tool_name: &'a str,
         tool_input: &'a Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-        // Auto-allow tools the user has previously allowed for this session.
-        // Comparison uses normalize_tool_name so "Bash" and "bash" match.
-        let norm_tool = normalize_tool_name(tool_name);
-        if self.allowed_tools.lock().unwrap().iter()
-            .any(|t| normalize_tool_name(t) == norm_tool)
-        {
+        // Auto-allow tools the user has previously approved for this session.
+        // Bash commands are checked by binary prefix ("Bash:mkdir") so only that
+        // binary is auto-approved, not the entire bash tool.
+        if is_always_allowed(&self.allowed_tools.lock().unwrap(), tool_name, tool_input) {
             push_audit(&self.audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
             return Box::pin(async move { true });
         }

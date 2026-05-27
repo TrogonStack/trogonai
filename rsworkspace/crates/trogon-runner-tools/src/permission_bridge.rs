@@ -10,6 +10,7 @@ use agent_client_protocol::{
 use trogon_nats::{FlushClient, PublishClient, RequestClient};
 use tracing::warn;
 
+use crate::permission_rules::always_allow_key;
 use crate::{PermissionReq, SessionStore};
 
 /// Forward a single `PermissionReq` to the ACP client and send the allow/deny
@@ -38,12 +39,18 @@ pub async fn handle_permission_request_nats<S, N>(
 
     let proxy = NatsClientProxy::new(nats, session_id, prefix, Duration::from_secs(60));
 
+    // For bash commands show "Always Allow `mkdir`" so the user knows the scope is
+    // per-binary, not the entire bash tool.
+    let always_key = always_allow_key(&req.tool_name, &req.tool_input);
+    let always_label: std::borrow::Cow<str> =
+        if let Some(bin) = always_key.strip_prefix("Bash:") {
+            format!("Always Allow `{bin}`").into()
+        } else {
+            "Always Allow".into()
+        };
+
     let options = vec![
-        PermissionOption::new(
-            "allow_always",
-            "Always Allow",
-            PermissionOptionKind::AllowAlways,
-        ),
+        PermissionOption::new("allow_always", always_label.as_ref(), PermissionOptionKind::AllowAlways),
         PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
         PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
     ];
@@ -65,7 +72,16 @@ pub async fn handle_permission_request_nats<S, N>(
         Ok(resp) => match resp.outcome {
             RequestPermissionOutcome::Selected(sel) => {
                 let id = sel.option_id.0.as_ref();
-                let is_allowed = id == "allow" || id == "allow_always";
+                // Regular tool prompts return "allow"/"allow_always"/"reject".
+                // ExitPlanMode prompts (tui_client::exit_plan_mode_options) instead
+                // return "acceptEdits"/"default"/"bypassPermissions" — all meaning
+                // "yes, leave plan mode" — or "plan" meaning "keep planning". Treat
+                // every proceed id as allowed so an ExitPlanMode approval over the
+                // NATS bridge isn't misread as a deny.
+                let is_allowed = matches!(
+                    id,
+                    "allow" | "allow_always" | "acceptEdits" | "default" | "bypassPermissions"
+                );
                 let is_always = id == "allow_always";
                 (is_allowed, is_always)
             }
@@ -85,12 +101,12 @@ pub async fn handle_permission_request_nats<S, N>(
     if save_always {
         // Update in-memory list immediately so subsequent tool calls this turn
         // are auto-approved without another permission round-trip.
-        req.always_allowed.lock().unwrap().push(req.tool_name.clone());
+        req.always_allowed.lock().unwrap().push(always_key.clone());
         // Persist to KV store so future turns and sessions also see the decision.
         if let Ok(mut state) = store.load(&req.session_id).await
-            && !state.allowed_tools.contains(&req.tool_name)
+            && !state.allowed_tools.contains(&always_key)
         {
-            state.allowed_tools.push(req.tool_name.clone());
+            state.allowed_tools.push(always_key.clone());
             if let Err(e) = store.save(&req.session_id, &state).await {
                 warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
             }
@@ -190,6 +206,34 @@ mod tests {
     #[tokio::test]
     async fn cancelled_returns_false() {
         let (allowed, _) = run("Bash", cancelled()).await;
+        assert!(!allowed);
+    }
+
+    // ExitPlanMode prompts return mode ids, not "allow". The proceed variants must
+    // register as allowed; only "plan" (keep planning) is a deny.
+    #[tokio::test]
+    async fn exit_plan_mode_accept_edits_returns_true() {
+        let (allowed, store) = run("ExitPlanMode", selected("acceptEdits")).await;
+        assert!(allowed);
+        // A mode-change proceed is not an always-allow of the tool.
+        assert!(store.load(SESSION).await.unwrap().allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn exit_plan_mode_default_returns_true() {
+        let (allowed, _) = run("ExitPlanMode", selected("default")).await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn exit_plan_mode_bypass_returns_true() {
+        let (allowed, _) = run("ExitPlanMode", selected("bypassPermissions")).await;
+        assert!(allowed);
+    }
+
+    #[tokio::test]
+    async fn exit_plan_mode_keep_planning_returns_false() {
+        let (allowed, _) = run("ExitPlanMode", selected("plan")).await;
         assert!(!allowed);
     }
 
