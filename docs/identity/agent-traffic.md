@@ -74,6 +74,11 @@ Postgres v1 (documentation DDL; implementer may add migrations in a follow-up cr
 ```sql
 -- Retention: default 30 days; operator sets TRAFFIC_INDEX_RETENTION_DAYS (min 7, max 365).
 -- Enforced via pg_partman or scheduled DELETE on ts; not automatic in skeleton.
+--
+-- v1 implementation (`trogon-traffic-view/migrations/001_agent_traffic_events.sql`) uses
+-- `event_id TEXT PRIMARY KEY` (stable hash or wire `event_id`) for replay-safe upserts via
+-- `ON CONFLICT DO NOTHING`. Extended dashboard columns below remain the long-term shape;
+-- the v1 migration stores the query columns called out in the task brief.
 
 CREATE TYPE traffic_source AS ENUM ('gateway', 'sts', 'registry');
 CREATE TYPE traffic_decision AS ENUM ('allow', 'deny', 'rewrite', 'rate_limited', 'unknown');
@@ -247,6 +252,18 @@ agctl traffic chain --trace-id 0af7651916cd43dd8448eb211c80319c
 agctl traffic top --metric active-agents|denied-agents|deepest-chains --window 24h --limit 20
 agctl traffic export --format ocsf --since 1h --out ./siem-batch.ndjson
 ```
+
+**Shipped in v1 (`agctl traffic`):**
+
+```bash
+# Postgres URL via --database-url or TROGON_PG_URL
+agctl traffic query --since 1h --tenant acme --agent-id acme/agent1 [--limit 100] [--json]
+agctl traffic tail --tenant acme [--since 5m] [--limit 50] [--json]
+```
+
+`query` filters on `tenant`, optional `agent_id` (matches `caller_sub`), and a relative `--since`
+duration (`1h`, `30m`, `24h`). `tail` streams recent rows for a tenant in ascending time order.
+Both commands default to a fixed-width table; pass `--json` for raw indexed rows.
 
 ---
 
