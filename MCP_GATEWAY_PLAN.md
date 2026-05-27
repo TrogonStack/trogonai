@@ -831,6 +831,7 @@ Every gateway-handled message carries a fixed header set. Headers are authoritat
 | `mcp-deadline-unix-ms` | client → gateway → backend | integer string | client (gateway clamps) | Absolute deadline, milliseconds since epoch. Gateway propagates after clamping to configured max. |
 | `mcp-correlation-id` | both | string | client (optional) | Opaque client correlator surfaced in audit envelope. |
 | `mcp-instance-id` | gateway → backend | string | gateway | Which gateway instance handled the request. Used for reply-inbox routing and audit. |
+| `mcp-act-chain` | client → gateway, gateway → backend | compact JSON string | gateway (egress); client may send but is stripped on ingress | Delegation lineage: JSON array of `{sub, agent_id?, wkl?, iat}` objects (plain UTF-8 JSON — not base64url). `sub` and `iat` (Unix seconds) required per entry; `agent_id` and `wkl` omitted when absent. Gateway **drops** any client-supplied value on ingress, parses the prior chain (if any), appends its own hop (`sub` from `MCP_GATEWAY_IDENTITY_SUB`, default `trogon-mcp-gateway`), and sets the header before forwarding. Max depth **8** — at capacity the gateway forwards without append and logs `act_chain_too_deep` (enforce-mode rejection reserved). Not authoritative over the validated egress JWT when both are present. See `docs/identity/act-chain.md`, ADR 0002. |
 
 **Ingress hardening rule.** On every message entering the gateway from the edge zone, the gateway **drops** any client-supplied value of `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, and `mcp-schema` and replaces them with values derived from the JWT and its own state. Clients cannot forge identity by header injection.
 
@@ -897,6 +898,8 @@ Trogon application errors occupy `-32100` to `-32199` (within the JSON-RPC appli
 | `-32106` | `auth_expired` | JWT expired mid-session, or session revoked. | `{ trace_id }` |
 | `-32107` | `authz_unreachable` | SpiceDB (or chosen PDP) did not respond. failClosed result. | `{ trace_id, elapsed_ms }` |
 | `-32108` | `no_policy` | Bundle not loaded, default-deny configured. | `{ trace_id }` |
+| `-32109` | `audience_mismatch` | JWT `aud` does not match the expected gateway or backend URI (enforce mode). | `{ trace_id, expected_aud, actual_aud }` |
+| `TODO(enforce-mode-hardening)` | `agent_identity_required` *(code TBD; `-32108` is the likely candidate)* | Reserved for enforce-mode identity checks (missing `wkl`, SPIFFE/`agent_id` mismatch, act-chain depth reject, etc.) not yet pinned. | TBD |
 
 `trace_id` is always present and matches the `traceparent` header for cross-system correlation. Error message text is human-readable but **not** part of the contract — only the code and `data` shape are stable.
 
@@ -925,9 +928,19 @@ Every audit envelope is JSON with a fixed top-level schema field. Forward-compat
   "rewrites": [{ "path": "$.params.token", "op": "hash" }],
   "spicedb": { "zedtoken": "…", "checks": 1, "cache_hit": true },
   "error": null,
-  "latency_us": 1820
+  "latency_us": 1820,
+  "agent_id": "acme/oncall-responder",
+  "agent_version": "3.2.1",
+  "wkl": "spiffe://acme.local/ns/prod/sa/oncall-responder",
+  "purpose": "incident-response",
+  "act_chain": [
+    { "sub": "user:alice@acme.com", "wkl": "human", "iat": 1748341200 },
+    { "sub": "agent:acme/oncall-responder", "agent_id": "acme/oncall-responder", "wkl": "spiffe://acme.local/ns/prod/sa/oncall-responder", "iat": 1748341203 }
+  ]
 }
 ```
+
+**Optional identity fields (ADR 0002).** Top-level `agent_id`, `agent_version`, `wkl`, `purpose`, `session_id`, and `act_chain` are omitted from the wire when unset (`skip_serializing_if = Option::is_none` in the gateway publisher). When present, `act_chain` is a JSON array of `{sub, agent_id, wkl, iat}` objects matching the `mcp-act-chain` header / JWT claim shape. Envelopes without identity context remain byte-identical to the pre-identity schema.
 
 Stream-level metadata also tags `schema` so an offline reader can dispatch without unpacking a message. Bumps to `v2` are reserved for additive changes that consumers must opt into; renames or removals are `v2` and break old consumers.
 
@@ -938,7 +951,8 @@ Roots are pinned; fields under a root may be added without a version bump, but n
 | Root | Phase | Variables | Notes |
 |---|---|---|---|
 | `mcp.*` | both | `mcp.method` (string), `mcp.method_root` (string), `mcp.tool.name` (string), `mcp.tool.target` (string), `mcp.resource.uri` (string), `mcp.prompt.name` (string), `mcp.params` (JSON map), `mcp.result` (JSON map; response phase only) | Protocol surface. |
-| `jwt.*` | both | `jwt.sub` (string), `jwt.tenant` (string), `jwt.roles` (list<string>), `jwt.iss` (string), `jwt.aud` (string), `jwt.<custom>` | Claims from validated JWT. Custom claims are dynamic. |
+| `jwt.*` | both | `jwt.sub` (string), `jwt.tenant` (string), `jwt.roles` (list<string>), `jwt.iss` (string), `jwt.aud` (string), `jwt.agent_id` (string, optional — registered agent identity, ADR 0002), `jwt.agent_version` (string, optional), `jwt.wkl` (string — attested workload: SPIFFE URI or `sentinel:*`), `jwt.purpose` (string, optional intent claim), `jwt.session_id` (string, optional), `jwt.act_chain` (list<map> — see `docs/identity/act-chain.md`), `jwt.<custom>` | Claims from validated JWT. Custom claims are dynamic. |
+| `chain.*` | both | *(functions, bound to `jwt.act_chain`)* — `chain.contains(agent_id) -> bool`, `chain.originator() -> map`, `chain.depth() -> int` | Delegation lineage helpers (ADR 0002). |
 | `nats.*` | both | `nats.subject` (string), `nats.headers` (map<string,string>), `nats.account` (string) | Transport context. |
 | `request.*` | both | `request.id` (string), `request.deadline` (timestamp), `request.session_id` (string) | Request-level context. |
 | `response.*` | response only | `response.is_error` (bool), `response.list_filter_index` (int) | The list-filter index is set when re-evaluating the same rule per-item during `*/list` shaping. |
