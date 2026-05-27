@@ -1,3 +1,4 @@
+pub mod attestor;
 pub mod audit;
 pub mod cache;
 pub mod chain_resolution;
@@ -7,10 +8,13 @@ pub mod exchange;
 pub mod limits;
 pub mod registry;
 pub mod signer;
+pub mod spiffe_id;
 pub mod spicedb;
+pub mod svid_verify;
 pub mod token_verify;
 pub mod trust;
 pub mod types;
+pub mod workload_svid;
 
 pub use chain_resolution::ChainResolutionMode;
 pub use exchange::{ExchangeRequest, ExchangeService, ExchangeSuccess};
@@ -23,6 +27,7 @@ pub const DEFAULT_QUEUE_GROUP: &str = "trogon-sts";
 pub const EXCHANGE_SUBJECT: &str = "mcp.sts.exchange";
 pub const JWKS_KV_BUCKET: &str = "mcp-jwks";
 pub const JWKS_KV_MESH_KEY: &str = "mesh/current";
+pub const TRUST_BUNDLES_KV_BUCKET: &str = "mcp-trust-bundles";
 pub const MIN_MESH_TOKEN_TTL_SECS: u64 = 60;
 pub const MAX_MESH_TOKEN_TTL_SECS: u64 = 300;
 pub const CLOCK_SKEW_SECS: i64 = 30;
