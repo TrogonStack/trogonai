@@ -1,10 +1,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
 use tracing::{error, info};
-use trogon_jwks_publisher::JwksState;
 use trogon_jwks_publisher::keys::KeySource;
 use trogon_jwks_publisher::keys::file::FileKeySource;
 use trogon_jwks_publisher::publishers::https;

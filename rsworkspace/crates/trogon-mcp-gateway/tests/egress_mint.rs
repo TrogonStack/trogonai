@@ -161,7 +161,7 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
         let nats_backend = nats.clone();
         let mut sub = nats_backend.subscribe(subject_out.clone()).await.expect("backend sub");
         tokio::spawn(async move {
-            while let Some(msg) = sub.next().await {
+            if let Some(msg) = sub.next().await {
                 let auth = msg
                     .headers
                     .as_ref()
@@ -181,7 +181,6 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
                         .ok();
                     nats_backend.flush().await.ok();
                 }
-                break;
             }
         });
     }

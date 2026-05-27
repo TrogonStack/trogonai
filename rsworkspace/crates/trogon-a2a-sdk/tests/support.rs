@@ -13,9 +13,11 @@ use trogon_agent_registry::{AgentRecord, LifecycleState};
 use trogon_sts::DEFAULT_MESH_ISSUER;
 use trogon_sts::audit::RecordingAuditPublisher;
 use trogon_sts::cache::{JwksCache, RegistryCache, TrustBundleCache};
+use trogon_sts::chain_resolution::ChainResolutionMode;
 use trogon_sts::exchange::ExchangeService;
 use trogon_sts::registry::{AgentRegistryRecord, InMemoryRegistry};
 use trogon_sts::signer::{DynSigner, FileSigner};
+use trogon_sts::spicedb::NoOpSpiceDb;
 
 pub struct TestKeys {
     pub bootstrap_jwks: JwkSet,
@@ -165,7 +167,7 @@ pub fn kv_agent_record(agent_id: &str, wkl: &str, audiences: Vec<String>) -> Age
 
 pub fn build_exchange_service(
     keys: &'static TestKeys,
-) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher> {
+) -> ExchangeService<InMemoryRegistry, RecordingAuditPublisher, NoOpSpiceDb> {
     let jwks = JwksCache::new(keys.bootstrap_jwks.clone(), keys.mesh_jwks.clone());
     let trust = TrustBundleCache::from_pem("-----BEGIN TRUST BUNDLE-----".into());
     let registry = RegistryCache::new(InMemoryRegistry::new([
@@ -181,6 +183,8 @@ pub fn build_exchange_service(
         registry,
         keys.mesh_signer.clone(),
         audit,
+        NoOpSpiceDb,
+        ChainResolutionMode::Cache,
     )
 }
 
