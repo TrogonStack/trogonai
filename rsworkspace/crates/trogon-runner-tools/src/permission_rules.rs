@@ -73,12 +73,12 @@ pub fn bash_command_bin(command: &str) -> &str {
 /// For bash, uses `"Bash:{bin}"` so only that binary is auto-approved, not
 /// the entire bash tool. For all other tools the key is just the tool name.
 pub fn always_allow_key(tool_name: &str, tool_input: &Value) -> String {
-    if normalize_tool_name(tool_name) == "bash" {
-        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
-            let bin = bash_command_bin(cmd);
-            if !bin.is_empty() {
-                return format!("Bash:{bin}");
-            }
+    if normalize_tool_name(tool_name) == "bash"
+        && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+    {
+        let bin = bash_command_bin(cmd);
+        if !bin.is_empty() {
+            return format!("Bash:{bin}");
         }
     }
     tool_name.to_string()
@@ -95,14 +95,14 @@ pub fn is_always_allowed(allowed: &[String], tool_name: &str, tool_input: &Value
     if allowed.iter().any(|t| normalize_tool_name(t) == norm) {
         return true;
     }
-    if norm == "bash" {
-        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
-            let bin = bash_command_bin(cmd);
-            if !bin.is_empty() {
-                return allowed
-                    .iter()
-                    .any(|t| t.strip_prefix("Bash:").is_some_and(|prefix| prefix == bin));
-            }
+    if norm == "bash"
+        && let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str())
+    {
+        let bin = bash_command_bin(cmd);
+        if !bin.is_empty() {
+            return allowed
+                .iter()
+                .any(|t| t.strip_prefix("Bash:").is_some_and(|prefix| prefix == bin));
         }
     }
     false

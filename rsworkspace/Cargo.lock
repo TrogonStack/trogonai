@@ -5840,6 +5840,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "globset",
+ "httpmock",
  "reqwest",
  "serde",
  "serde_json",
