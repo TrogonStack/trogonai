@@ -9287,6 +9287,673 @@ async def test_openrouter_set_session_model_wire():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers for stateful bash live tests (T172–T179)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _register_fake_wasm(nc, wasm_prefix, agent_type, timeout=10):
+    """Write a fake execution backend entry into AGENT_REGISTRY KV.
+    Purges any stale wasm-t* entries from previous tests first so the runner
+    always discovers exactly one 'execution' entry.
+    Retries until the bucket exists (the runner provisions it on startup)."""
+    js = nc.jetstream()
+    cap = {
+        "agent_type": agent_type,
+        "capabilities": ["execution"],
+        "nats_subject": f"{wasm_prefix}.agent.>",
+        "current_load": 0,
+        "metadata": {"acp_prefix": wasm_prefix},
+    }
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        try:
+            kv = await js.key_value("AGENT_REGISTRY")
+            # Remove stale fake-wasm entries from previous tests
+            try:
+                keys = await kv.keys()
+                for k in (keys or []):
+                    if k.startswith("wasm-t") and k != agent_type:
+                        try:
+                            await kv.delete(k)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            await kv.put(agent_type, json.dumps(cap).encode())
+            return
+        except Exception:
+            if asyncio.get_event_loop().time() >= deadline:
+                raise
+            await asyncio.sleep(0.3)
+
+
+async def _setup_terminal_responder(nc, wasm_prefix):
+    """
+    Subscribe to {wasm_prefix}.session.> and respond with the stateful
+    terminal protocol.  Returns (create_count, release_count) as single-element
+    lists (mutated in place by the callback so the caller can inspect them).
+    """
+    create_count = [0]
+    release_count = [0]
+    session_outputs = {}  # session_id -> accumulated str
+
+    # wasm_prefix depth: "wasm.t172" → 2 tokens, so session id is at index 3
+    prefix_depth = len(wasm_prefix.split("."))
+
+    async def on_msg(msg):
+        subj = msg.subject
+        parts = subj.split(".")
+        sid = parts[prefix_depth + 1] if len(parts) > prefix_depth + 1 else ""
+
+        if subj.endswith(".create"):
+            create_count[0] += 1
+            n = create_count[0]
+            resp = json.dumps({"terminalId": f"tid-{n}"}).encode()
+            if msg.reply:
+                await nc.publish(msg.reply, resp)
+
+        elif "write_stdin" in subj:
+            session_outputs[sid] = session_outputs.get(sid, "") + "done\n__EXIT_0__\n"
+            if msg.reply:
+                await nc.publish(msg.reply, b"{}")
+
+        elif subj.endswith(".output"):
+            out = session_outputs.get(sid, "")
+            resp = json.dumps({"output": out, "truncated": False}).encode()
+            if msg.reply:
+                await nc.publish(msg.reply, resp)
+
+        elif subj.endswith(".release"):
+            release_count[0] += 1
+            if msg.reply:
+                await nc.publish(msg.reply, b"{}")
+
+    await nc.subscribe(f"{wasm_prefix}.session.>", cb=on_msg)
+    return create_count, release_count
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 172 — xai-runner: bash terminal reused across two calls in same session
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_bash_stateful_terminal_reuse():
+    """Spec (stateful-bash/xai-runner): two bash calls in the same session must
+    create the terminal only once — the second call reuses the existing terminal."""
+    print("\n\033[1mTest 172: xai-runner stateful bash — terminal reused on 2nd call\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return xai_function_call_sse("b172a", "bash",
+                    json.dumps({"command": "echo first"}))
+            if n == 2:
+                return xai_function_call_sse("b172b", "bash",
+                    json.dumps({"command": "echo second"}))
+            return xai_text_sse("bash reuse done t172")
+
+        mock = MockHttpServer(30200, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t172",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30200",
+               "XAI_MODELS": "grok-t172:grok-t172"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t172", "wasm-t172")
+            create_count, _ = await _setup_terminal_responder(nc, "wasm.t172")
+
+            _, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t172", tmpdir, "run two bash commands", timeout=30)
+            print(f"    done={done} api_calls={len(mock.received)} creates={create_count[0]}",
+                  flush=True)
+
+            if create_count[0] == 1:
+                ok("xai bash stateful reuse: 2 bash calls → only 1 terminal.create sent")
+            elif create_count[0] == 0:
+                fail("xai bash stateful reuse: no terminal.create — bash tool not invoked",
+                     f"api_calls={len(mock.received)}")
+            else:
+                fail("xai bash stateful reuse: terminal created more than once",
+                     f"create_count={create_count[0]}")
+        except Exception as e:
+            fail("xai bash stateful reuse", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 173 — xai-runner: terminal released on close_session
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_bash_stateful_terminal_release():
+    """Spec (stateful-bash/xai-runner): close_session must send terminal.release
+    when a bash terminal was created during the session."""
+    print("\n\033[1mTest 173: xai-runner stateful bash — terminal released on close_session\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return xai_function_call_sse("b173", "bash",
+                    json.dumps({"command": "echo release_me"}))
+            return xai_text_sse("bash release done t173")
+
+        mock = MockHttpServer(30201, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t173",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30201",
+               "XAI_MODELS": "grok-t173:grok-t173"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t173", "wasm-t173")
+            _, release_count = await _setup_terminal_responder(nc, "wasm.t173")
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t173", tmpdir, "run bash then close", timeout=25)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            # Send close_session
+            nc2 = await natspy.connect(NATS_JS)
+            try:
+                req_id = "close-t173"
+                resp_subj = f"acp.t173.session.{sid}.agent.response.{req_id}"
+                sub = await nc2.subscribe(resp_subj)
+                js = nc2.jetstream()
+                await js.publish(
+                    f"acp.t173.session.{sid}.agent.close",
+                    json.dumps({"sessionId": sid}).encode(),
+                    headers={"X-Req-Id": req_id})
+                try:
+                    await asyncio.wait_for(sub.next_msg(), timeout=10)
+                except asyncio.TimeoutError:
+                    pass
+                await sub.unsubscribe()
+            finally:
+                await nc2.close()
+
+            await asyncio.sleep(0.3)
+            print(f"    release_count={release_count[0]}", flush=True)
+
+            if release_count[0] >= 1:
+                ok("xai bash stateful release: close_session sent terminal.release")
+            else:
+                fail("xai bash stateful release: close_session did NOT send terminal.release",
+                     f"release_count={release_count[0]}")
+        except Exception as e:
+            fail("xai bash stateful release", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 174 — xai-runner: no terminal.release when no bash was called
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_bash_no_release_when_no_bash():
+    """Spec (stateful-bash/xai-runner): if bash was never called in a session,
+    close_session must NOT send terminal.release."""
+    print("\n\033[1mTest 174: xai-runner stateful bash — no release when no bash called\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30202, lambda n: xai_text_sse("text only t174")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t174",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30202",
+               "XAI_MODELS": "grok-t174:grok-t174"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t174", "wasm-t174")
+            _, release_count = await _setup_terminal_responder(nc, "wasm.t174")
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t174", tmpdir, "just chat no bash", timeout=20)
+            print(f"    done={done}", flush=True)
+
+            # close_session
+            nc2 = await natspy.connect(NATS_JS)
+            try:
+                req_id = "close-t174"
+                resp_subj = f"acp.t174.session.{sid}.agent.response.{req_id}"
+                sub = await nc2.subscribe(resp_subj)
+                js = nc2.jetstream()
+                await js.publish(
+                    f"acp.t174.session.{sid}.agent.close",
+                    json.dumps({"sessionId": sid}).encode(),
+                    headers={"X-Req-Id": req_id})
+                try:
+                    await asyncio.wait_for(sub.next_msg(), timeout=8)
+                except asyncio.TimeoutError:
+                    pass
+                await sub.unsubscribe()
+            finally:
+                await nc2.close()
+
+            await asyncio.sleep(0.3)
+            print(f"    release_count={release_count[0]}", flush=True)
+
+            if release_count[0] == 0:
+                ok("xai bash no release: close_session without bash sent no terminal.release")
+            else:
+                fail("xai bash no release: terminal.release sent even though bash was not called",
+                     f"release_count={release_count[0]}")
+        except Exception as e:
+            fail("xai bash no release", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 175 — xai-runner: forked session gets independent terminal
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_bash_stateful_fork_independent_terminal():
+    """Spec (stateful-bash/xai-runner): when a session is forked and both parent
+    and child call bash, each must create its own terminal (create_count == 2)."""
+    print("\n\033[1mTest 175: xai-runner stateful bash — fork creates independent terminal\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_counts = [0]
+
+        def sse(n):
+            call_counts[0] = n
+            if n % 2 == 1:  # odd calls: bash tool call
+                return xai_function_call_sse(f"b175-{n}", "bash",
+                    json.dumps({"command": f"echo session-{n}"}))
+            return xai_text_sse(f"bash fork done t175 call{n}")
+
+        mock = MockHttpServer(30203, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t175",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30203",
+               "XAI_MODELS": "grok-t175:grok-t175"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            await _register_fake_wasm(nc, "wasm.t175", "wasm-t175")
+            create_count, _ = await _setup_terminal_responder(nc, "wasm.t175")
+
+            # 1. Create parent session and run bash
+            r = await nc.request("acp.t175.agent.session.new",
+                                  json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            parent_sid = json.loads(r.data)["sessionId"]
+
+            req_id1 = "p-t175"
+            resp_subj1 = f"acp.t175.session.{parent_sid}.agent.prompt.response.{req_id1}"
+            sub1 = await nc.subscribe(resp_subj1)
+            await nc.publish(
+                f"acp.t175.session.{parent_sid}.agent.prompt",
+                json.dumps({"sessionId": parent_sid,
+                            "prompt": [{"type": "text", "text": "parent bash t175"}]}).encode(),
+                headers={"X-Req-Id": req_id1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=25)
+            await sub1.unsubscribe()
+
+            # 2. Fork the parent session
+            req_id_fork = "fork-t175"
+            fork_resp_subj = f"acp.t175.session.{parent_sid}.agent.response.{req_id_fork}"
+            sub_fork = await nc.subscribe(fork_resp_subj)
+            await js.publish(
+                f"acp.t175.session.{parent_sid}.agent.fork",
+                json.dumps({"sessionId": parent_sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_fork})
+            fork_msg = await asyncio.wait_for(sub_fork.next_msg(), timeout=10)
+            await sub_fork.unsubscribe()
+            fork_sid = json.loads(fork_msg.data).get("sessionId", "")
+            print(f"    parent_sid={parent_sid} fork_sid={fork_sid}", flush=True)
+
+            if not fork_sid or fork_sid == parent_sid:
+                fail("xai bash fork: fork did not return a new sessionId",
+                     f"fork_data={json.loads(fork_msg.data)!r}")
+                return
+
+            # 3. Run bash in forked session
+            req_id2 = "f-t175"
+            resp_subj2 = f"acp.t175.session.{fork_sid}.agent.prompt.response.{req_id2}"
+            sub2 = await nc.subscribe(resp_subj2)
+            await nc.publish(
+                f"acp.t175.session.{fork_sid}.agent.prompt",
+                json.dumps({"sessionId": fork_sid,
+                            "prompt": [{"type": "text", "text": "fork bash t175"}]}).encode(),
+                headers={"X-Req-Id": req_id2})
+            await asyncio.wait_for(sub2.next_msg(), timeout=25)
+            await sub2.unsubscribe()
+
+            print(f"    create_count={create_count[0]}", flush=True)
+
+            if create_count[0] == 2:
+                ok("xai bash fork: parent bash + fork bash → 2 independent terminal.create calls")
+            elif create_count[0] == 1:
+                fail("xai bash fork: only 1 terminal.create — fork did not create its own terminal",
+                     f"fork_sid={fork_sid!r}")
+            elif create_count[0] == 0:
+                fail("xai bash fork: no terminal.create at all — bash not invoked")
+            else:
+                fail("xai bash fork: unexpected create count",
+                     f"create_count={create_count[0]}")
+        except Exception as e:
+            fail("xai bash fork", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 176 — openrouter-runner: bash terminal reused across two calls in same session
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_bash_stateful_terminal_reuse():
+    """Spec (stateful-bash/openrouter-runner): two bash calls in the same session
+    must create the terminal only once."""
+    print("\n\033[1mTest 176: openrouter-runner stateful bash — terminal reused on 2nd call\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return or_tool_calls_sse("b176a", "bash",
+                    json.dumps({"command": "echo first"}))
+            if n == 2:
+                return or_tool_calls_sse("b176b", "bash",
+                    json.dumps({"command": "echo second"}))
+            return or_text_sse("bash reuse done t176")
+
+        mock = MockHttpServer(30204, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t176",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30204",
+               "OPENROUTER_MODELS": "gpt-t176:gpt-t176"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t176", "wasm-t176")
+            create_count, _ = await _setup_terminal_responder(nc, "wasm.t176")
+
+            _, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t176", tmpdir, "run two bash commands", timeout=30)
+            print(f"    done={done} api_calls={len(mock.received)} creates={create_count[0]}",
+                  flush=True)
+
+            if create_count[0] == 1:
+                ok("openrouter bash stateful reuse: 2 bash calls → only 1 terminal.create sent")
+            elif create_count[0] == 0:
+                fail("openrouter bash stateful reuse: no terminal.create — bash tool not invoked",
+                     f"api_calls={len(mock.received)}")
+            else:
+                fail("openrouter bash stateful reuse: terminal created more than once",
+                     f"create_count={create_count[0]}")
+        except Exception as e:
+            fail("openrouter bash stateful reuse", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 177 — openrouter-runner: terminal released on close_session
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_bash_stateful_terminal_release():
+    """Spec (stateful-bash/openrouter-runner): close_session must send
+    terminal.release when a bash terminal was created during the session."""
+    print("\n\033[1mTest 177: openrouter-runner stateful bash — terminal released on close_session\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        def sse(n):
+            if n == 1:
+                return or_tool_calls_sse("b177", "bash",
+                    json.dumps({"command": "echo release_me"}))
+            return or_text_sse("bash release done t177")
+
+        mock = MockHttpServer(30205, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t177",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30205",
+               "OPENROUTER_MODELS": "gpt-t177:gpt-t177"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t177", "wasm-t177")
+            _, release_count = await _setup_terminal_responder(nc, "wasm.t177")
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t177", tmpdir, "run bash then close", timeout=25)
+            print(f"    done={done} api_calls={len(mock.received)}", flush=True)
+
+            nc2 = await natspy.connect(NATS_JS)
+            try:
+                req_id = "close-t177"
+                resp_subj = f"acp.t177.session.{sid}.agent.response.{req_id}"
+                sub = await nc2.subscribe(resp_subj)
+                js = nc2.jetstream()
+                await js.publish(
+                    f"acp.t177.session.{sid}.agent.close",
+                    json.dumps({"sessionId": sid}).encode(),
+                    headers={"X-Req-Id": req_id})
+                try:
+                    await asyncio.wait_for(sub.next_msg(), timeout=10)
+                except asyncio.TimeoutError:
+                    pass
+                await sub.unsubscribe()
+            finally:
+                await nc2.close()
+
+            await asyncio.sleep(0.3)
+            print(f"    release_count={release_count[0]}", flush=True)
+
+            if release_count[0] >= 1:
+                ok("openrouter bash stateful release: close_session sent terminal.release")
+            else:
+                fail("openrouter bash stateful release: close_session did NOT send terminal.release",
+                     f"release_count={release_count[0]}")
+        except Exception as e:
+            fail("openrouter bash stateful release", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 178 — openrouter-runner: no terminal.release when no bash was called
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_bash_no_release_when_no_bash():
+    """Spec (stateful-bash/openrouter-runner): if bash was never called in a
+    session, close_session must NOT send terminal.release."""
+    print("\n\033[1mTest 178: openrouter-runner stateful bash — no release when no bash called\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock = MockHttpServer(30206, lambda n: or_text_sse("text only t178")).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t178",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30206",
+               "OPENROUTER_MODELS": "gpt-t178:gpt-t178"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _register_fake_wasm(nc, "wasm.t178", "wasm-t178")
+            _, release_count = await _setup_terminal_responder(nc, "wasm.t178")
+
+            sid, done, _ = await runner_session_prompt(
+                NATS_JS, "acp.t178", tmpdir, "just chat no bash", timeout=20)
+            print(f"    done={done}", flush=True)
+
+            nc2 = await natspy.connect(NATS_JS)
+            try:
+                req_id = "close-t178"
+                resp_subj = f"acp.t178.session.{sid}.agent.response.{req_id}"
+                sub = await nc2.subscribe(resp_subj)
+                js = nc2.jetstream()
+                await js.publish(
+                    f"acp.t178.session.{sid}.agent.close",
+                    json.dumps({"sessionId": sid}).encode(),
+                    headers={"X-Req-Id": req_id})
+                try:
+                    await asyncio.wait_for(sub.next_msg(), timeout=8)
+                except asyncio.TimeoutError:
+                    pass
+                await sub.unsubscribe()
+            finally:
+                await nc2.close()
+
+            await asyncio.sleep(0.3)
+            print(f"    release_count={release_count[0]}", flush=True)
+
+            if release_count[0] == 0:
+                ok("openrouter bash no release: close_session without bash sent no terminal.release")
+            else:
+                fail("openrouter bash no release: terminal.release sent even though bash was not called",
+                     f"release_count={release_count[0]}")
+        except Exception as e:
+            fail("openrouter bash no release", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 179 — openrouter-runner: forked session gets independent terminal
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_bash_stateful_fork_independent_terminal():
+    """Spec (stateful-bash/openrouter-runner): parent bash + fork bash must each
+    create their own terminal (create_count == 2)."""
+    print("\n\033[1mTest 179: openrouter-runner stateful bash — fork creates independent terminal\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_counts = [0]
+
+        def sse(n):
+            call_counts[0] = n
+            if n % 2 == 1:
+                return or_tool_calls_sse(f"b179-{n}", "bash",
+                    json.dumps({"command": f"echo session-{n}"}))
+            return or_text_sse(f"bash fork done t179 call{n}")
+
+        mock = MockHttpServer(30207, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t179",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30207",
+               "OPENROUTER_MODELS": "gpt-t179:gpt-t179"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        js = nc.jetstream()
+        try:
+            await _register_fake_wasm(nc, "wasm.t179", "wasm-t179")
+            create_count, _ = await _setup_terminal_responder(nc, "wasm.t179")
+
+            # 1. Create parent session and run bash
+            r = await nc.request("acp.t179.agent.session.new",
+                                  json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            parent_sid = json.loads(r.data)["sessionId"]
+
+            req_id1 = "p-t179"
+            resp_subj1 = f"acp.t179.session.{parent_sid}.agent.prompt.response.{req_id1}"
+            sub1 = await nc.subscribe(resp_subj1)
+            await nc.publish(
+                f"acp.t179.session.{parent_sid}.agent.prompt",
+                json.dumps({"sessionId": parent_sid,
+                            "prompt": [{"type": "text", "text": "parent bash t179"}]}).encode(),
+                headers={"X-Req-Id": req_id1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=25)
+            await sub1.unsubscribe()
+
+            # 2. Fork the parent session
+            req_id_fork = "fork-t179"
+            fork_resp_subj = f"acp.t179.session.{parent_sid}.agent.response.{req_id_fork}"
+            sub_fork = await nc.subscribe(fork_resp_subj)
+            await js.publish(
+                f"acp.t179.session.{parent_sid}.agent.fork",
+                json.dumps({"sessionId": parent_sid, "cwd": tmpdir, "mcpServers": []}).encode(),
+                headers={"X-Req-Id": req_id_fork})
+            fork_msg = await asyncio.wait_for(sub_fork.next_msg(), timeout=10)
+            await sub_fork.unsubscribe()
+            fork_sid = json.loads(fork_msg.data).get("sessionId", "")
+            print(f"    parent_sid={parent_sid} fork_sid={fork_sid}", flush=True)
+
+            if not fork_sid or fork_sid == parent_sid:
+                fail("openrouter bash fork: fork did not return a new sessionId",
+                     f"fork_data={json.loads(fork_msg.data)!r}")
+                return
+
+            # 3. Run bash in forked session
+            req_id2 = "f-t179"
+            resp_subj2 = f"acp.t179.session.{fork_sid}.agent.prompt.response.{req_id2}"
+            sub2 = await nc.subscribe(resp_subj2)
+            await nc.publish(
+                f"acp.t179.session.{fork_sid}.agent.prompt",
+                json.dumps({"sessionId": fork_sid,
+                            "prompt": [{"type": "text", "text": "fork bash t179"}]}).encode(),
+                headers={"X-Req-Id": req_id2})
+            await asyncio.wait_for(sub2.next_msg(), timeout=25)
+            await sub2.unsubscribe()
+
+            print(f"    create_count={create_count[0]}", flush=True)
+
+            if create_count[0] == 2:
+                ok("openrouter bash fork: parent bash + fork bash → 2 independent terminal.create calls")
+            elif create_count[0] == 1:
+                fail("openrouter bash fork: only 1 terminal.create — fork did not create its own terminal",
+                     f"fork_sid={fork_sid!r}")
+            elif create_count[0] == 0:
+                fail("openrouter bash fork: no terminal.create at all — bash not invoked")
+            else:
+                fail("openrouter bash fork: unexpected create count",
+                     f"create_count={create_count[0]}")
+        except Exception as e:
+            fail("openrouter bash fork", str(e))
+        finally:
+            await nc.close()
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -9452,6 +10119,14 @@ async def main():
     await test_acp_no_trogon_md()
     await test_acp_close_session()
     await test_openrouter_set_session_model_wire()
+    await test_xai_bash_stateful_terminal_reuse()
+    await test_xai_bash_stateful_terminal_release()
+    await test_xai_bash_no_release_when_no_bash()
+    await test_xai_bash_stateful_fork_independent_terminal()
+    await test_openrouter_bash_stateful_terminal_reuse()
+    await test_openrouter_bash_stateful_terminal_release()
+    await test_openrouter_bash_no_release_when_no_bash()
+    await test_openrouter_bash_stateful_fork_independent_terminal()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 

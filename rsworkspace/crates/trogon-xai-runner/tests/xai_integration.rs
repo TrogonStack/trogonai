@@ -3495,10 +3495,7 @@ async fn incomplete_max_turns_continuation_resends_user_input() {
 ///    correct `previous_response_id`.
 #[tokio::test]
 async fn bash_tool_call_round_trips_through_wasm_runtime() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -3529,8 +3526,10 @@ async fn bash_tool_call_round_trips_through_wasm_runtime() {
     };
     registry.register(&cap).await.unwrap();
 
-    // ── Spawn terminal responder ──────────────────────────────────────────
-    // Handles the four sequential NATS requests the agent issues per bash call.
+    // ── Spawn stateful terminal responder ─────────────────────────────────
+    // Baseline .output → empty; after .write_stdin fires → "hello\n__EXIT_0__\n"
+    let output_ready = Arc::new(Mutex::new(false));
+    let out_ready = output_ready.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -3543,13 +3542,16 @@ async fn bash_tool_call_round_trips_through_wasm_runtime() {
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 let resp = CreateTerminalResponse::new(TerminalId::new("tid-1"));
                 serde_json::to_vec(&resp).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                let resp = WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                );
-                serde_json::to_vec(&resp).unwrap()
+            } else if subject.contains("write_stdin") {
+                *out_ready.lock().unwrap() = true;
+                vec![]
             } else if subject.ends_with(".output") {
-                let resp = TerminalOutputResponse::new("hello\n".to_string(), false);
+                let output = if *out_ready.lock().unwrap() {
+                    "hello\n__EXIT_0__\n".to_string()
+                } else {
+                    String::new()
+                };
+                let resp = TerminalOutputResponse::new(output, false);
                 serde_json::to_vec(&resp).unwrap()
             } else {
                 vec![]
@@ -3763,8 +3765,8 @@ async fn pending_tool_calls_cleared_when_incomplete_response_contains_function_c
 #[tokio::test]
 async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output() {
     use agent_client_protocol::{
-        CreateTerminalResponse, SessionUpdate, TerminalExitStatus, TerminalId,
-        TerminalOutputResponse, ToolCallStatus, ToolKind, WaitForTerminalExitResponse,
+        CreateTerminalResponse, SessionUpdate, TerminalId, TerminalOutputResponse, ToolCallStatus,
+        ToolKind,
     };
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
@@ -3792,6 +3794,8 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
     };
     registry.register(&cap).await.unwrap();
 
+    let output_ready = Arc::new(Mutex::new(false));
+    let out_rdy = output_ready.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -3800,12 +3804,16 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                *out_rdy.lock().unwrap() = true;
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("hello\n".to_string(), false)).unwrap()
+                let output = if *out_rdy.lock().unwrap() {
+                    "hello\n__EXIT_0__\n".to_string()
+                } else {
+                    String::new()
+                };
+                serde_json::to_vec(&TerminalOutputResponse::new(output, false)).unwrap()
             } else {
                 vec![]
             };
@@ -3899,10 +3907,7 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
 /// the agent to return `StopReason::Cancelled` without executing the tool.
 #[tokio::test]
 async fn max_tool_rounds_cap_returns_cancelled() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -3929,6 +3934,8 @@ async fn max_tool_rounds_cap_returns_cancelled() {
     };
     registry.register(&cap).await.unwrap();
 
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -3937,12 +3944,12 @@ async fn max_tool_rounds_cap_returns_cancelled() {
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("ok\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else {
                 vec![]
             };
@@ -3982,8 +3989,8 @@ async fn max_tool_rounds_cap_returns_cancelled() {
 
     assert_eq!(
         resp.stop_reason,
-        StopReason::Cancelled,
-        "hitting MAX_TOOL_ROUNDS must return Cancelled"
+        StopReason::MaxTurnRequests,
+        "hitting MAX_TOOL_ROUNDS must return MaxTurnRequests"
     );
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 11, "expected exactly 11 HTTP calls (10 bash + 1 cap hit)");
@@ -4087,10 +4094,7 @@ async fn bash_nats_error_forwarded_as_tool_result_to_model() {
 /// being sent as `previous_response_id` on the next prompt.
 #[tokio::test]
 async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_id() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -4117,6 +4121,8 @@ async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_
     };
     registry.register(&cap).await.unwrap();
 
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -4125,12 +4131,12 @@ async fn last_response_id_cleared_when_bash_ran_but_final_round_has_no_response_
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("ok\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else {
                 vec![]
             };
@@ -4330,10 +4336,7 @@ async fn bash_skipped_when_stream_has_no_response_id() {
 /// each must produce its own `function_call_output` in the follow-up request.
 #[tokio::test]
 async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -4360,28 +4363,23 @@ async fn multiple_bash_calls_in_one_round_all_forwarded_as_function_call_outputs
         metadata: serde_json::json!({ "acp_prefix": "wasm" }),
     }).await.unwrap();
 
-    // Terminal responder: reply "out-<create-count>" so each call returns distinct output.
+    // Terminal responder: stateful growing buffer; both calls in one round use the same terminal.
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
-        let mut n: u32 = 0;
         while let Some(msg) = sub.next().await {
             let reply = match msg.reply.clone() { Some(r) => r, None => continue };
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
-                n += 1;
-                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new(
-                    format!("tid-{n}"),
-                ))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("done\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new(
-                    format!("out-{n}"),
-                    false,
-                )).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else {
                 vec![]
             };
@@ -4509,10 +4507,7 @@ async fn execution_backend_registered_adds_bash_to_tools_array() {
 /// Assert: `prompt` returns an error and only 2 HTTP calls were made (no retry).
 #[tokio::test]
 async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -4538,6 +4533,8 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
         metadata: serde_json::json!({ "acp_prefix": "wasm" }),
     }).await.unwrap();
 
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -4546,12 +4543,12 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("ok\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else { vec![] };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
@@ -4601,10 +4598,7 @@ async fn continuation_in_progress_prevents_stale_id_retry_after_bash() {
 /// stateful multi-turn via `previous_response_id`.
 #[tokio::test]
 async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -4630,6 +4624,8 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
         metadata: serde_json::json!({ "acp_prefix": "wasm" }),
     }).await.unwrap();
 
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
@@ -4638,12 +4634,12 @@ async fn last_response_id_updated_when_bash_ran_and_final_round_has_response_id(
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("ok\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("ok\n".to_string(), false)).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else { vec![] };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
@@ -4739,10 +4735,7 @@ async fn execution_backend_set_but_no_wasm_runtime_registered_means_no_bash_in_t
 /// prefix and successfully route terminal requests there.
 #[tokio::test]
 async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
-    use agent_client_protocol::{
-        CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-    };
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
     use async_nats::jetstream;
     use futures_util::StreamExt as _;
     use testcontainers_modules::nats::Nats;
@@ -4771,6 +4764,8 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
     }).await.unwrap();
 
     // Terminal responder on the fallback prefix "acp.wasm".
+    let output_buf = Arc::new(Mutex::new(String::new()));
+    let ob = output_buf.clone();
     let nats_srv = nats.clone();
     tokio::spawn(async move {
         let mut sub = nats_srv.subscribe("acp.wasm.session.>").await.unwrap();
@@ -4779,12 +4774,12 @@ async fn wasm_prefix_falls_back_to_acp_wasm_when_metadata_missing() {
             let subject: &str = msg.subject.as_ref();
             let payload: Vec<u8> = if subject.ends_with(".create") {
                 serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
-            } else if subject.ends_with(".wait_for_exit") {
-                serde_json::to_vec(&WaitForTerminalExitResponse::new(
-                    TerminalExitStatus::new().exit_code(Some(0)),
-                )).unwrap()
+            } else if subject.contains("write_stdin") {
+                ob.lock().unwrap().push_str("fallback\n__EXIT_0__\n");
+                vec![]
             } else if subject.ends_with(".output") {
-                serde_json::to_vec(&TerminalOutputResponse::new("fallback\n".to_string(), false)).unwrap()
+                let out = ob.lock().unwrap().clone();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
             } else { vec![] };
             let _ = nats_srv.publish(reply, payload.into()).await;
         }
@@ -6184,3 +6179,425 @@ async fn xai_request_has_required_responses_api_fields() {
         }
     }
 }
+
+// ── Stateful bash: terminal lifecycle integration tests ───────────────────────
+
+fn spawn_stateful_terminal_responder_xai(
+    nats: async_nats::Client,
+) -> (Arc<Mutex<u32>>, Arc<Mutex<std::collections::HashMap<String, String>>>) {
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
+    use futures_util::StreamExt as _;
+
+    let create_count = Arc::new(Mutex::new(0u32));
+    let session_outputs: Arc<Mutex<std::collections::HashMap<String, String>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    let cc = create_count.clone();
+    let so = session_outputs.clone();
+    tokio::spawn(async move {
+        let mut sub = nats.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let sid = subject.split('.').nth(2).unwrap_or("").to_string();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                let mut guard = cc.lock().unwrap();
+                *guard += 1;
+                let n = *guard;
+                drop(guard);
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new(
+                    format!("tid-{n}"),
+                )))
+                .unwrap()
+            } else if subject.contains("write_stdin") {
+                so.lock()
+                    .unwrap()
+                    .entry(sid)
+                    .or_default()
+                    .push_str("done\n__EXIT_0__\n");
+                vec![]
+            } else if subject.ends_with(".output") {
+                let out = so.lock().unwrap().get(&sid).cloned().unwrap_or_default();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats.publish(reply, payload.into()).await;
+        }
+    });
+
+    (create_count, session_outputs)
+}
+
+async fn setup_xai_execution_registry(
+    nats: &async_nats::Client,
+) -> trogon_registry::Registry<async_nats::jetstream::kv::Store> {
+    let js = async_nats::jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: "wasm.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "wasm" }),
+        })
+        .await
+        .unwrap();
+    registry
+}
+
+/// The bash terminal is created once and reused on all subsequent bash calls
+/// within the same session — the `.create` NATS request must fire exactly once.
+#[tokio::test]
+async fn bash_stateful_terminal_reused_on_second_call_same_session() {
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+    let registry = setup_xai_execution_registry(&nats).await;
+    let (create_count, _outputs) = spawn_stateful_terminal_responder_xai(nats.clone());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+
+    // Prompt 1: model calls bash, then gives final answer
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r1".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "c1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo a"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r2".to_string() },
+        XaiEvent::TextDelta { text: "done 1".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Prompt 2 (same session): model calls bash again
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r3".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "c2".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo b"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r4".to_string() },
+        XaiEvent::TextDelta { text: "done 2".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    let r1 = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("first bash call"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r1.stop_reason, StopReason::EndTurn);
+
+    let r2 = agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("second bash call"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r2.stop_reason, StopReason::EndTurn);
+
+    assert_eq!(
+        *create_count.lock().unwrap(),
+        1,
+        "terminal must be created once and reused for subsequent bash calls in the same session"
+    );
+}
+
+/// close_session must send a `.release` NATS request to free the bash terminal
+/// that was allocated during the session.
+#[tokio::test]
+async fn bash_stateful_terminal_released_on_close_session() {
+    use agent_client_protocol::{CreateTerminalResponse, TerminalId, TerminalOutputResponse};
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+    let registry = setup_xai_execution_registry(&nats).await;
+
+    let released = Arc::new(Mutex::new(false));
+    let output_ready = Arc::new(Mutex::new(false));
+
+    let nats_srv = nats.clone();
+    let rel = released.clone();
+    let out = output_ready.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new(TerminalId::new("tid-1"))).unwrap()
+            } else if subject.contains("write_stdin") {
+                *out.lock().unwrap() = true;
+                vec![]
+            } else if subject.ends_with(".output") {
+                let output = if *out.lock().unwrap() {
+                    "done\n__EXIT_0__\n".to_string()
+                } else {
+                    String::new()
+                };
+                serde_json::to_vec(&TerminalOutputResponse::new(output, false)).unwrap()
+            } else if subject.ends_with(".release") {
+                *rel.lock().unwrap() = true;
+                vec![]
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r1".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "c1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hi"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r2".to_string() },
+        XaiEvent::TextDelta { text: "done".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("run bash"))],
+        ))
+        .await
+        .unwrap();
+
+    assert!(!*released.lock().unwrap(), "release must not be sent before close_session");
+
+    agent
+        .close_session(CloseSessionRequest::new(sid))
+        .await
+        .unwrap();
+
+    assert!(
+        *released.lock().unwrap(),
+        "close_session must send a .release NATS request to free the terminal"
+    );
+}
+
+/// close_session must NOT send a `.release` request when the session never
+/// invoked bash — no terminal was allocated so there is nothing to release.
+#[tokio::test]
+async fn bash_stateful_no_release_when_no_bash_called() {
+    use futures_util::StreamExt as _;
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+    let registry = setup_xai_execution_registry(&nats).await;
+
+    let released = Arc::new(Mutex::new(false));
+    let nats_srv = nats.clone();
+    let rel = released.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe("wasm.session.>").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let subject: &str = msg.subject.as_ref();
+            if subject.ends_with(".release") {
+                *rel.lock().unwrap() = true;
+            }
+            if let Some(reply) = msg.reply {
+                let _ = nats_srv.publish(reply, vec![].into()).await;
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+
+    // Model answers with plain text — no bash call
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "r1".to_string() },
+        XaiEvent::TextDelta { text: "hello".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("just answer"))],
+        ))
+        .await
+        .unwrap();
+
+    agent
+        .close_session(CloseSessionRequest::new(sid))
+        .await
+        .unwrap();
+
+    assert!(
+        !*released.lock().unwrap(),
+        "close_session must not send .release when no bash terminal was created"
+    );
+}
+
+/// Forking a session always starts with `terminal_id: None`. The forked session
+/// must create its own independent bash terminal rather than sharing the parent's.
+#[tokio::test]
+async fn bash_stateful_fork_creates_independent_terminal() {
+    use testcontainers_modules::nats::Nats;
+    use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
+
+    let _container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("failed to start NATS — is Docker running?");
+    let port = _container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
+
+    let registry = setup_xai_execution_registry(&nats).await;
+    let (create_count, _outputs) = spawn_stateful_terminal_responder_xai(nats.clone());
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(mock.clone()).await.with_execution_backend(nats.clone(), registry);
+
+    // Parent session: bash call
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "rA1".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cA1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo parent"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "rA2".to_string() },
+        XaiEvent::TextDelta { text: "parent done".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    // Forked session: bash call (must create a new independent terminal)
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "rB1".to_string() },
+        XaiEvent::FunctionCall {
+            call_id: "cB1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo fork"}"#.to_string(),
+        },
+        XaiEvent::Finished { reason: FinishReason::ToolCalls, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+    mock.push_response(vec![
+        XaiEvent::ResponseId { id: "rB2".to_string() },
+        XaiEvent::TextDelta { text: "fork done".to_string() },
+        XaiEvent::Finished { reason: FinishReason::Completed, incomplete_reason: None },
+        XaiEvent::Done,
+    ]);
+
+    let sess_a = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+    let sid_a = sess_a.session_id.to_string();
+
+    let r_a = agent
+        .prompt(PromptRequest::new(
+            sid_a.clone(),
+            vec![ContentBlock::Text(TextContent::new("parent bash"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r_a.stop_reason, StopReason::EndTurn);
+    assert_eq!(*create_count.lock().unwrap(), 1, "parent session must create exactly one terminal");
+
+    // Fork — the fork starts with terminal_id: None (correct by design)
+    let fork = agent
+        .fork_session(ForkSessionRequest::new(sid_a.clone(), "/tmp"))
+        .await
+        .unwrap();
+    let sid_b = fork.session_id.to_string();
+
+    let r_b = agent
+        .prompt(PromptRequest::new(
+            sid_b.clone(),
+            vec![ContentBlock::Text(TextContent::new("forked bash"))],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r_b.stop_reason, StopReason::EndTurn);
+
+    assert_eq!(
+        *create_count.lock().unwrap(),
+        2,
+        "forked session must create its own independent terminal, not inherit the parent's"
+    );
+}
+

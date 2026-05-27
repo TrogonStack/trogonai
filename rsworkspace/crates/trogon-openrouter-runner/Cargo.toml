@@ -6,6 +6,10 @@ edition = "2024"
 [features]
 test-helpers = []
 
+[[test]]
+name = "perm_integration"
+required-features = ["test-helpers"]
+
 [lints]
 workspace = true
 
