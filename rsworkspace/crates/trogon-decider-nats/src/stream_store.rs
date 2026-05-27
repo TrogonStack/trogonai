@@ -622,7 +622,7 @@ mod tests {
     fn build_publish_message_sets_trogon_event_type_header() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
@@ -633,7 +633,7 @@ mod tests {
 
         assert_eq!(
             headers.get(TROGON_EVENT_TYPE).map(|value| value.as_str()),
-            Some("trogonai.scheduler.schedules.v1.ScheduleAdded")
+            Some("trogonai.scheduler.schedules.v1.ScheduleCreated")
         );
         assert_eq!(
             headers.get(NATS_MESSAGE_ID).map(|value| value.as_str()),
@@ -645,7 +645,7 @@ mod tests {
     fn build_publish_message_maps_headers_to_trogon_headers() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
             content: Vec::new(),
             headers: Headers::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
         };
@@ -689,7 +689,7 @@ mod tests {
     fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
@@ -723,7 +723,7 @@ mod tests {
     fn build_publish_message_omits_occ_header_without_expected_sequence() {
         let event = Event {
             id: EventId::from(Uuid::from_u128(1)),
-            r#type: "trogonai.scheduler.schedules.v1.ScheduleAdded".to_string(),
+            r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
             content: Vec::new(),
             headers: Headers::empty(),
         };
