@@ -32,6 +32,44 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::permission::AuditBuf;
+use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
+use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, append_audit_entries};
+
+fn apply_permission(
+    tool_name: &str,
+    input: &serde_json::Value,
+    bypass: bool,
+    rules: &PermissionRules,
+    audit: &AuditBuf,
+) -> bool {
+    let outcome = if bypass {
+        AuditOutcome::Allowed
+    } else {
+        match rules.check(tool_name, input) {
+            RuleDecision::Deny => AuditOutcome::Denied,
+            RuleDecision::Allow | RuleDecision::Ask => AuditOutcome::Allowed,
+        }
+    };
+    let summary = if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+        path.to_string()
+    } else if tool_name == "bash" {
+        input.get("command").and_then(|v| v.as_str())
+            .map(|s| s.chars().take(60).collect())
+            .unwrap_or_else(|| tool_name.to_string())
+    } else {
+        tool_name.to_string()
+    };
+    if let Ok(mut guard) = audit.lock() {
+        guard.push(AuditEntry {
+            timestamp: crate::session_store::now_iso(),
+            tool: tool_name.to_string(),
+            input_summary: summary,
+            outcome: outcome.clone(),
+        });
+    }
+    !matches!(outcome, AuditOutcome::Denied)
+}
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -130,6 +168,16 @@ struct OpenRouterSession {
     /// NATS wasm prefix used when the terminal was created, needed for release on close.
     #[serde(skip)]
     terminal_wasm_prefix: Option<String>,
+    /// "default" or "bypassPermissions".
+    session_mode: String,
+    /// Static rules parsed from TROGON.md at session creation.
+    #[serde(skip)]
+    permission_rules: trogon_runner_tools::permission_rules::PermissionRules,
+    /// Audit log of all permission decisions across all prompts.
+    audit_log: Vec<trogon_runner_tools::session_store::AuditEntry>,
+    /// Session-level permission rules text set via `set_session_config_option("permissions")`.
+    /// Merged with TROGON.md rules at prompt time.
+    permission_rules_text: Option<String>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -433,7 +481,10 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     fn session_mode_state(&self) -> SessionModeState {
         SessionModeState::new(
             "default".to_string(),
-            vec![SessionMode::new("default", "Default")],
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
+            ],
         )
     }
 
@@ -599,6 +650,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .map(|s| s.to_string());
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
+        let bypass_perms = req.meta
+            .as_ref()
+            .and_then(|m| m.get("bypassPermissions"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let session_mode = if bypass_perms {
+            "bypassPermissions".to_string()
+        } else {
+            "default".to_string()
+        };
+        let permission_rules = self.md_loader.load(&cwd).await
+            .map(|md| PermissionRules::parse(&md))
+            .unwrap_or_default();
+
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         Self::maybe_evict_oldest(&mut sessions);
@@ -621,6 +686,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 total_cache_creation_tokens: 0,
                 terminal_id: None,
                 terminal_wasm_prefix: None,
+                session_mode,
+                permission_rules,
+                audit_log: Vec::new(),
+                permission_rules_text: None,
             },
         );
 
@@ -709,6 +778,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         total_cache_creation_tokens,
                         terminal_id: None,
                         terminal_wasm_prefix: None,
+                        session_mode: "default".to_string(),
+                        permission_rules: PermissionRules::default(),
+                        audit_log: Vec::new(),
+                permission_rules_text: None,
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
@@ -790,6 +863,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 total_cache_creation_tokens: 0,
                 terminal_id: None,
                 terminal_wasm_prefix: None,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
             },
         );
 
@@ -887,12 +964,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
         let mode_id = req.mode_id.to_string();
         let session_id = req.session_id.to_string();
-        if mode_id != "default" {
+        if mode_id != "default" && mode_id != "bypassPermissions" {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
-        if !self.sessions.lock().await.contains_key(&session_id) {
-            return Err(not_found(format!("session {session_id} not found")));
-        }
+        let mut sessions = self.sessions.lock().await;
+        let s = sessions.get_mut(&session_id)
+            .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+        s.session_mode = mode_id;
         Ok(SetSessionModeResponse::new())
     }
 
@@ -933,7 +1011,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .get_mut(&session_id)
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
 
-        if let SessionConfigOptionValue::ValueId { value } = &req.value {
+        if config_id == "permissions" {
+            if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                let text = value.to_string();
+                s.permission_rules_text = if text.is_empty() { None } else { Some(text) };
+                info!(session_id, "openrouter: session permission rules updated");
+            }
+        } else if let SessionConfigOptionValue::ValueId { value } = &req.value {
             let val = value.to_string();
             match val.as_str() {
                 "enabled" => {
@@ -984,7 +1068,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd, mut terminal_id) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd, mut terminal_id, session_mode, permission_rules, permission_rules_text) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&session_id)
@@ -997,7 +1081,19 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.enabled_tools.clone(),
                 s.cwd.clone(),
                 s.terminal_id.clone(),
+                s.session_mode.clone(),
+                s.permission_rules.clone(),
+                s.permission_rules_text.clone(),
             )
+        };
+        let audit_buf: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let bypass = session_mode == "bypassPermissions";
+        let permission_rules = {
+            let mut r = permission_rules;
+            if let Some(ref extra) = permission_rules_text {
+                r.merge(PermissionRules::parse(extra));
+            }
+            r
         };
 
         let trogon_md = self.md_loader.load(&cwd).await;
@@ -1228,6 +1324,30 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             };
 
             for call in &assembled_calls {
+                let call_input = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                    .unwrap_or_else(|_| {
+                        if call.name == "bash" { serde_json::json!({"command": call.arguments}) }
+                        else { serde_json::Value::Null }
+                    });
+                if !apply_permission(&call.name, &call_input, bypass, &permission_rules, &audit_buf) {
+                    let denied_result = format!("permission denied: {} blocked by security policy", call.name);
+                    notifier.notify(agent_client_protocol::SessionNotification::new(
+                        notification_session_id.clone(),
+                        SessionUpdate::ToolCallUpdate(
+                            ToolCallUpdate::new(
+                                call.id.clone(),
+                                ToolCallUpdateFields::new()
+                                    .status(ToolCallStatus::Completed)
+                                    .raw_output(serde_json::Value::String(denied_result.clone())),
+                            ),
+                        ),
+                    )).await;
+                    let result_msg = Message::tool_result(call.id.clone(), denied_result);
+                    messages.push(result_msg.clone());
+                    wire_messages.push(result_msg);
+                    continue;
+                }
+
                 let kind = if call.name == "bash" { ToolKind::Execute } else { ToolKind::Other };
                 notifier.notify(agent_client_protocol::SessionNotification::new(
                     notification_session_id.clone(),
@@ -1292,6 +1412,16 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         };
 
         self.cancel_senders.lock().await.remove(&session_id);
+
+        {
+            let new_entries = audit_buf.lock().map(|g| g.clone()).unwrap_or_default();
+            if !new_entries.is_empty() {
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    append_audit_entries(&mut s.audit_log, new_entries);
+                }
+            }
+        }
 
         {
             let mut sessions = self.sessions.lock().await;
@@ -1542,79 +1672,72 @@ async fn execute_bash_stateful(
 
     let nats = nats.clone();
     let session_id = session_id.to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
 
-    let result = tokio::time::timeout(Duration::from_secs(30), async move {
-        // 2. Snapshot baseline output length
-        let baseline_len = {
-            let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
-            let payload = match serde_json::to_vec(&req) {
-                Ok(p) => p,
-                Err(e) => return format!("error: {e}"),
-            };
-            match nats.request(format!("{term_base}.output"), payload.into()).await {
-                Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
-                    Ok(r) => r.output.len(),
-                    Err(_) => 0,
-                },
-                Err(_) => 0,
-            }
-        };
-
-        // 3. Write command with demarcation marker
-        let cmd_with_marker = format!(
-            "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
-        );
-        let write_req = serde_json::json!({
-            "terminal_id": tid,
-            "data": cmd_with_marker.as_bytes()
-        });
-        let payload = match serde_json::to_vec(&write_req) {
+    // 2. Snapshot baseline output length
+    let baseline_len = {
+        let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
-            return format!("error writing to terminal: {e}");
+        match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                Ok(r) => r.output.len(),
+                Err(_) => 0,
+            },
+            Err(_) => 0,
         }
+    };
 
-        // 4. Poll for output until marker found or timeout
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            tokio::time::sleep(BASH_POLL_INTERVAL).await;
+    // 3. Write command with demarcation marker
+    let cmd_with_marker = format!(
+        "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
+    );
+    let write_req = serde_json::json!({
+        "terminal_id": tid,
+        "data": cmd_with_marker.as_bytes()
+    });
+    let payload = match serde_json::to_vec(&write_req) {
+        Ok(p) => p,
+        Err(e) => return format!("error: {e}"),
+    };
+    if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
+        return format!("error writing to terminal: {e}");
+    }
 
-            let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
-            let payload = match serde_json::to_vec(&req) {
-                Ok(p) => p,
-                Err(e) => return format!("error: {e}"),
-            };
-            let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
-                Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
-                    Ok(r) => r.output,
-                    Err(e) => return format!("error reading output: {e}"),
-                },
+    // 4. Poll for output until marker found or timeout
+    loop {
+        tokio::time::sleep(BASH_POLL_INTERVAL).await;
+
+        let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                Ok(r) => r.output,
                 Err(e) => return format!("error reading output: {e}"),
-            };
+            },
+            Err(e) => return format!("error reading output: {e}"),
+        };
 
-            if full_output.len() > baseline_len {
-                let new_output = &full_output[baseline_len..];
-                if let Some(output) = bash_extract_before_marker(new_output) {
-                    return output;
-                }
-            }
-
-            if tokio::time::Instant::now() >= deadline {
-                let partial = if full_output.len() > baseline_len {
-                    full_output[baseline_len..].to_string()
-                } else {
-                    String::new()
-                };
-                return format!("error: bash timed out. Partial output:\n{partial}");
+        if full_output.len() > baseline_len {
+            let new_output = &full_output[baseline_len..];
+            if let Some(output) = bash_extract_before_marker(new_output) {
+                return output;
             }
         }
-    }).await;
 
-    match result {
-        Ok(output) => output,
-        Err(_) => "error: bash execution timed out".to_string(),
+        if tokio::time::Instant::now() >= deadline {
+            let partial = if full_output.len() > baseline_len {
+                full_output[baseline_len..].to_string()
+            } else {
+                String::new()
+            };
+            return format!("error: bash timed out. Partial output:\n{partial}");
+        }
     }
 }
 
@@ -1660,17 +1783,37 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             total_cache_creation_tokens: 0,
             terminal_id: None,
             terminal_wasm_prefix: None,
+            session_mode: "default".to_string(),
+            permission_rules: PermissionRules::default(),
+            audit_log: Vec::new(),
+            permission_rules_text: None,
         });
     }
 
     pub async fn test_insert_session(&self, id: &str) {
         self.test_insert_session_with_history(id, vec![]).await;
     }
+
 }
 
 impl<H, N, M> OpenRouterAgent<H, N, M> {
     pub async fn test_cancel_channels_len(&self) -> usize {
         self.cancel_senders.lock().await.len()
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+impl<H, N, M> OpenRouterAgent<H, N, M> {
+    pub fn test_notifier(&self) -> &N {
+        &*self.notifier
+    }
+
+    pub async fn test_session_mode(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).map(|s| s.session_mode.clone())
+    }
+
+    pub async fn test_session_audit_log(&self, id: &str) -> Vec<trogon_runner_tools::session_store::AuditEntry> {
+        self.sessions.lock().await.get(id).map(|s| s.audit_log.clone()).unwrap_or_default()
     }
 }
 
@@ -1876,18 +2019,23 @@ mod tests {
             total_cache_creation_tokens: 0,
             terminal_id: None,
             terminal_wasm_prefix: None,
+            session_mode: "default".to_string(),
+            permission_rules: PermissionRules::default(),
+            audit_log: Vec::new(),
+            permission_rules_text: None,
         }
     }
 
     // ── session_mode_state / session_model_state ──────────────────────────────
 
     #[test]
-    fn session_mode_state_has_single_default_mode() {
+    fn session_mode_state_has_default_and_bypass_permissions_modes() {
         let agent = make_agent();
         let state = agent.session_mode_state();
         assert_eq!(state.current_mode_id.0.as_ref(), "default");
-        assert_eq!(state.available_modes.len(), 1);
+        assert_eq!(state.available_modes.len(), 2);
         assert_eq!(state.available_modes[0].id.0.as_ref(), "default");
+        assert_eq!(state.available_modes[1].id.0.as_ref(), "bypassPermissions");
     }
 
     #[test]
@@ -5425,6 +5573,556 @@ mod tests {
             assert_eq!(
                 s.total_output_tokens, 6,
                 "cancelled prompt must accumulate output tokens in session state"
+            );
+        }).await;
+    }
+
+    // ── bash_extract_before_marker ────────────────────────────────────────────
+
+    #[test]
+    fn bash_extract_no_marker_returns_none() {
+        assert_eq!(bash_extract_before_marker("hello world\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_empty_input_returns_none() {
+        assert_eq!(bash_extract_before_marker(""), None);
+    }
+
+    #[test]
+    fn bash_extract_exit_zero_returns_preceding_output() {
+        assert_eq!(
+            bash_extract_before_marker("hello\n__EXIT_0__\n"),
+            Some("hello".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_exit_nonzero_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("oops\n__EXIT_1__\n"),
+            Some("oops".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_large_exit_code_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("missing\n__EXIT_127__\n"),
+            Some("missing".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_strips_single_trailing_newline() {
+        // The \n immediately before the marker is produced by the command's own output;
+        // strip it so the model sees clean text.
+        assert_eq!(
+            bash_extract_before_marker("line\n__EXIT_0__\n"),
+            Some("line".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_no_trailing_newline_before_marker_returned_verbatim() {
+        assert_eq!(
+            bash_extract_before_marker("no-newline__EXIT_0__\n"),
+            Some("no-newline".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_multiline_output_preserved() {
+        let output = "line1\nline2\nline3\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("line1\nline2\nline3".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_command_with_no_output_returns_empty_string() {
+        assert_eq!(
+            bash_extract_before_marker("__EXIT_0__\n"),
+            Some(String::new()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_code_is_ignored() {
+        assert_eq!(bash_extract_before_marker("x\n__EXIT_abc__\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_skipped_valid_marker_still_found() {
+        // Bad marker must not prevent a subsequent valid marker from being recognized.
+        let output = "__EXIT_abc__\nreal output\n__EXIT_0__\n";
+        let result = bash_extract_before_marker(output).expect("valid marker must be found");
+        assert!(result.contains("real output"), "got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_multiple_valid_markers_last_one_wins() {
+        // If two commands somehow write to the same terminal in one call,
+        // the function must return everything before the last marker.
+        let output = "first\n__EXIT_0__\nsecond\n__EXIT_1__\n";
+        let result = bash_extract_before_marker(output).expect("last marker must be found");
+        assert!(result.contains("second"), "content after first marker must be included; got: {result}");
+        assert!(result.contains("first"), "content before first marker must be included; got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_partial_marker_no_closing_suffix_not_matched() {
+        // __EXIT_0 without the closing __ is not a complete marker.
+        assert_eq!(bash_extract_before_marker("output\n__EXIT_0\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_marker_without_any_suffix_not_matched() {
+        assert_eq!(bash_extract_before_marker("__EXIT_42"), None);
+    }
+
+    #[test]
+    fn bash_extract_only_trailing_newline_stripped_not_internal() {
+        // Only the single \n immediately before the marker is stripped;
+        // internal newlines in the output must survive.
+        let output = "a\nb\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("a\nb".to_string()),
+        );
+    }
+
+    // ── set_session_mode stores mode ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_mode_bypass_permissions_stored() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "bypassPermissions")).await.unwrap();
+            assert_eq!(agent.test_session_mode("s1").await, Some("bypassPermissions".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_default_stored() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "default")).await.unwrap();
+            assert_eq!(agent.test_session_mode("s1").await, Some("default".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_unknown_rejected() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            assert!(agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "turbo")).await.is_err());
+        }).await;
+    }
+
+    // ── apply_permission ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_permission_bypass_always_allows() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: src/**\n");
+        let input = serde_json::json!({"path": "src/main.rs"});
+        assert!(apply_permission("read_file", &input, true, &rules, &audit));
+        let log = audit.lock().unwrap();
+        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Allowed);
+    }
+
+    #[test]
+    fn apply_permission_deny_rule_blocks() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: .env\n");
+        let input = serde_json::json!({"path": ".env"});
+        assert!(!apply_permission("read_file", &input, false, &rules, &audit));
+        let log = audit.lock().unwrap();
+        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
+    }
+
+    #[test]
+    fn apply_permission_no_rule_allows() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let rules = PermissionRules::default();
+        let input = serde_json::json!({"path": "src/main.rs"});
+        assert!(apply_permission("read_file", &input, false, &rules, &audit));
+    }
+
+    // ── granular permissions: integration via prompt ──────────────────────────
+
+    #[tokio::test]
+    async fn prompt_deny_path_blocks_tool_and_records_audit() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: .env\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-deny".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            // Second call's messages must include a tool result with "permission denied"
+            let calls = agent.client.calls.lock().unwrap();
+            let denied_in_messages = calls[1].messages.iter().any(|m| {
+                m.tool_call_id.is_some() && m.content.contains("permission denied")
+            });
+            assert!(denied_in_messages, "second call must contain permission denied tool result message");
+            drop(calls);
+
+            // Audit log via direct session access (test helpers not available for with_md_loader type)
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0].tool, "read_file");
+            assert_eq!(audit[0].input_summary, ".env");
+            assert_eq!(audit[0].outcome, AuditOutcome::Denied);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_bypass_permissions_meta_skips_deny_rule() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: .env\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-bypass".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let mut meta = serde_json::Map::new();
+            meta.insert("bypassPermissions".to_string(), serde_json::json!(true));
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")).meta(meta))
+                .await.unwrap().session_id.to_string();
+
+            let sessions = agent.sessions.lock().await;
+            assert_eq!(sessions.get(&sid).map(|s| s.session_mode.as_str()), Some("bypassPermissions"));
+            drop(sessions);
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let has_permission_denied = calls[1].messages.iter().any(|m| {
+                m.tool_call_id.is_some() && m.content.contains("permission denied")
+            });
+            assert!(!has_permission_denied, "bypass mode must not produce 'permission denied' output");
+            drop(calls);
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0].outcome, AuditOutcome::Allowed, "bypass mode must record Allowed");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_deny_command_blocks_bash() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_commands: rm -rf\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-bash-deny".to_string(),
+                    name: "bash".to_string(),
+                    arguments: r#"{"command":"rm -rf /"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("run")]))
+                .await.unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let denied_in_messages = calls[1].messages.iter().any(|m| {
+                m.tool_call_id.is_some() && m.content.contains("permission denied")
+            });
+            assert!(denied_in_messages, "bash with rm -rf must be blocked by deny_commands rule");
+            drop(calls);
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0].tool, "bash");
+            assert_eq!(audit[0].outcome, AuditOutcome::Denied);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_audit_log_records_allowed_and_denied_in_same_prompt() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: secrets/**\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-ok".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"README.md"}"#.to_string(),
+                },
+                crate::client::AssembledToolCall {
+                    id: "cid-bad".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"secrets/key.pem"}"#.to_string(),
+                },
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read both")]))
+                .await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+
+            assert_eq!(audit.len(), 2, "audit must have one entry per tool call");
+            let has_allowed = audit.iter().any(|e| e.outcome == AuditOutcome::Allowed);
+            let has_denied  = audit.iter().any(|e| e.outcome == AuditOutcome::Denied);
+            assert!(has_allowed, "audit must contain an Allowed entry for README.md");
+            assert!(has_denied,  "audit must contain a Denied entry for secrets/key.pem");
+
+            let denied = audit.iter().find(|e| e.outcome == AuditOutcome::Denied).unwrap();
+            assert_eq!(denied.input_summary, "secrets/key.pem");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_set_session_mode_bypass_makes_deny_ineffective() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: .env\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-mode".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            // Switch to bypass after session creation (default mode has the deny rule active)
+            agent.set_session_mode(SetSessionModeRequest::new(
+                sid.clone(), "bypassPermissions"
+            )).await.unwrap();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0].outcome, AuditOutcome::Allowed,
+                "bypass mode set via set_session_mode must override deny rule");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_permission_rules_text_via_config_option_denies_tool() {
+        // No TROGON.md rules; inject deny via set_session_config_option.
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(None));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-perm-txt".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.set_session_config_option(SetSessionConfigOptionRequest::new(
+                sid.clone(),
+                "permissions",
+                "## Permissions\ndeny_paths: .env\n",
+            )).await.unwrap();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let audit = sessions.get(&sid).map(|s| s.audit_log.clone()).unwrap_or_default();
+            drop(sessions);
+            assert_eq!(audit.len(), 1);
+            assert_eq!(audit[0].outcome, AuditOutcome::Denied,
+                "deny rule from permission_rules_text must block the tool");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn prompt_no_inprogress_notification_when_permission_denied() {
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: .env\n".to_string())));
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-no-ip".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            let notifs = agent.notifier.notifications.lock().unwrap();
+
+            // ToolCall(InProgress) must NOT be sent for a denied tool
+            let has_inprogress = notifs.iter().any(|n| {
+                matches!(&n.update, SessionUpdate::ToolCall(tc)
+                    if tc.status == ToolCallStatus::InProgress
+                        && tc.tool_call_id.0.as_ref() == "cid-no-ip")
+            });
+            assert!(!has_inprogress, "ToolCall(InProgress) must NOT be sent for a denied tool");
+
+            // ToolCallUpdate(Completed) with "permission denied" must be sent
+            let has_denied_update = notifs.iter().any(|n| {
+                if let SessionUpdate::ToolCallUpdate(tcu) = &n.update {
+                    tcu.tool_call_id.0.as_ref() == "cid-no-ip"
+                        && tcu.fields.raw_output.as_ref()
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.contains("permission denied"))
+                            .unwrap_or(false)
+                } else {
+                    false
+                }
+            });
+            assert!(has_denied_update, "ToolCallUpdate(Completed) with permission denied must be sent for denied tool");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn audit_log_is_ephemeral_after_close_and_load() {
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+        use std::pin::Pin;
+        use std::future::Future;
+
+        // Minimal session store that captures the last save and returns it on load.
+        struct RoundtripSessionStore(std::sync::Mutex<Option<SessionSnapshot>>);
+
+        impl RoundtripSessionStore {
+            fn new() -> Arc<Self> {
+                Arc::new(Self(std::sync::Mutex::new(None)))
+            }
+        }
+
+        impl SessionStoring for RoundtripSessionStore {
+            fn save<'a>(&'a self, snap: &'a SessionSnapshot) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+                *self.0.lock().unwrap() = Some(snap.clone());
+                Box::pin(std::future::ready(()))
+            }
+            fn remove<'a>(&'a self, _: &'a str, _: &'a str) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+                Box::pin(std::future::ready(()))
+            }
+            fn load<'a>(&'a self, _: &'a str, session_id: &'a str) -> Pin<Box<dyn Future<Output = Option<SessionSnapshot>> + Send + 'a>> {
+                let snap = self.0.lock().unwrap().clone().filter(|s| s.id == session_id);
+                Box::pin(std::future::ready(snap))
+            }
+        }
+
+        let store = RoundtripSessionStore::new();
+        let agent = make_agent_with_key("k")
+            .with_md_loader(MockTrogonMdLoader(Some("## Permissions\ndeny_paths: .env\n".to_string())))
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        // Simulate model requesting read_file on .env — will be denied by the permission rule.
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-audit-eph".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":".env"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await.unwrap().session_id.to_string();
+
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+                .await.unwrap();
+
+            // Audit log must be non-empty before close.
+            let audit_before = agent.test_session_audit_log(&sid).await;
+            assert!(!audit_before.is_empty(), "expected audit entries after denied tool call; audit is empty");
+
+            // close_session saves a SessionSnapshot to the store — SessionSnapshot has no audit_log field.
+            agent.close_session(CloseSessionRequest::new(sid.clone())).await.unwrap();
+
+            // load_session restores from the captured snapshot (KV roundtrip simulated by RoundtripSessionStore).
+            agent.load_session(LoadSessionRequest::new(sid.clone(), "/tmp")).await.unwrap();
+
+            // Audit log must be empty — SessionSnapshot has no audit_log field.
+            // This is intentional: audit entries are ephemeral and do not survive close+load.
+            let audit_after = agent.test_session_audit_log(&sid).await;
+            assert!(
+                audit_after.is_empty(),
+                "audit_log must be empty after close+load — it is ephemeral by design, \
+                 not persisted to KV; got: {audit_after:?}"
             );
         }).await;
     }
