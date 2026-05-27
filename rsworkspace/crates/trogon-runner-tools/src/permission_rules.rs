@@ -42,6 +42,7 @@ pub fn normalize_tool_name(tool_name: &str) -> &str {
         "bash" | "Bash" => "bash",
         "read_file" | "Read" => "read_file",
         "write_file" | "Write" => "write_file",
+        "delete_file" => "delete_file",
         "str_replace" | "Edit" => "str_replace",
         "glob" | "Glob" => "glob",
         "grep" | "Grep" | "search" | "search_files" => "grep",
@@ -56,6 +57,55 @@ pub fn normalize_tool_name(tool_name: &str) -> &str {
         "change_directory" => "change_directory",
         other => other,
     }
+}
+
+/// Extract the bare binary name from the first token of a bash command.
+/// `/usr/bin/mkdir -p foo` → `mkdir`, `mkdir /tmp/x` → `mkdir`.
+pub fn bash_command_bin(command: &str) -> &str {
+    let first = command.split_whitespace().next().unwrap_or("");
+    std::path::Path::new(first)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(first)
+}
+
+/// Key stored in `allowed_tools` for an "always allow" decision.
+/// For bash, uses `"Bash:{bin}"` so only that binary is auto-approved, not
+/// the entire bash tool. For all other tools the key is just the tool name.
+pub fn always_allow_key(tool_name: &str, tool_input: &Value) -> String {
+    if normalize_tool_name(tool_name) == "bash" {
+        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
+            let bin = bash_command_bin(cmd);
+            if !bin.is_empty() {
+                return format!("Bash:{bin}");
+            }
+        }
+    }
+    tool_name.to_string()
+}
+
+/// Return true if the tool call is covered by an existing always-allow entry.
+///
+/// Handles:
+/// - Exact normalized name match for all tools (e.g. `"write_file"`)
+/// - Legacy `"Bash"` entries from before per-binary granularity (allows all bash)
+/// - New `"Bash:{bin}"` entries — only allow bash commands whose first binary matches
+pub fn is_always_allowed(allowed: &[String], tool_name: &str, tool_input: &Value) -> bool {
+    let norm = normalize_tool_name(tool_name);
+    if allowed.iter().any(|t| normalize_tool_name(t) == norm) {
+        return true;
+    }
+    if norm == "bash" {
+        if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
+            let bin = bash_command_bin(cmd);
+            if !bin.is_empty() {
+                return allowed
+                    .iter()
+                    .any(|t| t.strip_prefix("Bash:").is_some_and(|prefix| prefix == bin));
+            }
+        }
+    }
+    false
 }
 
 /// Extract a filesystem path from tool input (`path`, `file_path`, or `notebook_path`).
@@ -117,11 +167,23 @@ fn parse_rule_line(line: &str, rules: &mut PermissionRules) {
 impl PermissionRules {
     /// Parse rules from the concatenated TROGON.md text.
     ///
-    /// Reads `key: value1, value2` lines anywhere in the document (including
-    /// inside markdown code fences and bare lines before any heading).
+    /// Reads `key: value1, value2` bare lines, but **skips anything inside a
+    /// fenced code block** (```` ``` ```` or `~~~`). Markdown fences hold prose
+    /// examples ("for permissive local work you can `allow_paths: **`"), and
+    /// treating those as live rules silently disabled all permission gating —
+    /// a real security footgun. Only real, unfenced rule lines take effect.
     pub fn parse(text: &str) -> Self {
         let mut rules = Self::default();
+        let mut in_fence = false;
         for line in text.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fence = !in_fence;
+                continue;
+            }
+            if in_fence {
+                continue;
+            }
             parse_rule_line(line, &mut rules);
         }
         rules
@@ -268,11 +330,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_rules_inside_yaml_fence() {
+    fn rules_inside_yaml_fence_are_ignored() {
+        // Fenced code blocks are documentation examples, not live rules — treating
+        // them as real rules silently disabled permission gating (security footgun).
         let md = "```yaml\nallow_paths: src/**\nallow_commands: cargo test\n```\n";
         let r = PermissionRules::parse(md);
-        assert_eq!(r.allow_paths, vec!["src/**"]);
-        assert_eq!(r.allow_commands, vec!["cargo test"]);
+        assert!(r.allow_paths.is_empty());
+        assert!(r.allow_commands.is_empty());
     }
 
     #[test]
@@ -489,5 +553,50 @@ deny_commands: rm -rf, sudo
             ),
             RuleDecision::Allow
         );
+    }
+
+    // Allow-everything rules that live inside a fenced markdown code block (a doc
+    // example) must NOT become live rules — otherwise an innocent example silently
+    // disables all permission gating (writes/bash auto-allowed with no prompt).
+    #[test]
+    fn fenced_example_rules_are_ignored() {
+        let md = "\
+# TROGON.md
+
+For permissive local work you can allow everything:
+
+```yaml
+allow_paths: **
+allow_commands: *
+```
+";
+        let rules = PermissionRules::parse(md);
+        // The fenced example is inert:
+        assert!(rules.allow_paths.is_empty(), "fenced allow_paths leaked: {:?}", rules.allow_paths);
+        assert!(rules.allow_commands.is_empty(), "fenced allow_commands leaked");
+        // ...so writes/bash fall through to an interactive prompt (Ask):
+        assert_eq!(
+            rules.check("write_file", &serde_json::json!({"path": "/etc/anything"})),
+            RuleDecision::Ask
+        );
+        assert_eq!(
+            rules.check("bash", &serde_json::json!({"command": "rm -rf /tmp/x"})),
+            RuleDecision::Ask
+        );
+    }
+
+    // Real, unfenced rule lines under a `## Permissions` heading still take effect.
+    #[test]
+    fn unfenced_rules_still_apply() {
+        let md = "\
+## Permissions
+
+deny_paths: .env, **/.env
+allow_paths: src/**
+";
+        let rules = PermissionRules::parse(md);
+        assert_eq!(rules.check("write_file", &serde_json::json!({"path": "src/main.rs"})), RuleDecision::Allow);
+        assert_eq!(rules.check("write_file", &serde_json::json!({"path": ".env"})), RuleDecision::Deny);
+        assert_eq!(rules.check("write_file", &serde_json::json!({"path": "/tmp/other"})), RuleDecision::Ask);
     }
 }
