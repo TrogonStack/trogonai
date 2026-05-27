@@ -1,0 +1,34 @@
+manifest_version = 1
+
+[record]
+agent_id = "acme/oncall-agent"
+agent_version = "3.2.1"
+agent_definition_digest = "sha256:abc123def456"
+owner_team = "platform-sre"
+allowed_workloads = ["spiffe://acme.local/ns/prod/sa/oncall-agent"]
+allowed_tools = [
+    "pagerduty.page",
+    "github.issues.read",
+    "slack.post_message",
+]
+allowed_audiences = [
+    "mcp.server.pagerduty",
+    "mcp.server.github",
+    "agent:acme/incident-coordinator",
+]
+allowed_purposes = [
+    "incident.response",
+    "incident.triage",
+]
+mesh_token_ttl_s = 300
+lifecycle_state = "active"
+
+[record.metadata]
+contact = "platform-sre@acme.example"
+description = "Pages on-call and opens incident threads"
+repo = "https://github.com/acme/oncall-agent"
+
+[signature]
+algorithm = "ed25519"
+key_id = "registry-signer-current"
+value = "1m1QYW1qcgIo+JKhtXrKJLGCd9QAKovkYf5+tZzno3nCcR/tx7XrJ45cNzyYgpbwIJUwa0A/hf5mb54ctnUhDg=="
