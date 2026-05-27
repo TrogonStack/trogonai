@@ -185,6 +185,7 @@ pub fn build_exchange_service(
         audit,
         NoOpSpiceDb,
         ChainResolutionMode::Cache,
+        true,
     )
 }
 
