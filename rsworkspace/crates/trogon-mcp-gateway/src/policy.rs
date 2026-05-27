@@ -3,12 +3,130 @@
 use cel_interpreter::extractors::This;
 use cel_interpreter::objects::Key;
 use cel_interpreter::{Context, Program, Value, functions};
+use serde_json::Value as JsonValue;
 
 use crate::act_chain::ActChainEntry;
+use crate::approvals::{build_approval_required, build_approval_required_step_up};
 use crate::authz::GatewayIdentity;
 use crate::jwt::VerifiedJwtClaims;
+use crate::rpc_codes;
+use crate::throttle::{ContextThrottler, ThrottleConfig, ThrottleKey};
 
 const SPICEDB_GATE_EXPR: &str = r#"mcp.method == "tools/call" || mcp.method == "resources/read""#;
+
+const DEFAULT_APPROVAL_TTL_SECS: u64 = 300;
+const DEFAULT_APPROVAL_BASE_URL: &str = "https://console.trogon.local";
+
+#[derive(Clone, Debug)]
+pub struct ThrottleMeshConfig {
+    pub enabled: bool,
+    pub window_secs: u64,
+    pub max_requests: u32,
+}
+
+impl Default for ThrottleMeshConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window_secs: 300,
+            max_requests: 100,
+        }
+    }
+}
+
+impl From<&ThrottleMeshConfig> for ThrottleConfig {
+    fn from(value: &ThrottleMeshConfig) -> Self {
+        Self {
+            enabled: value.enabled,
+            window_secs: value.window_secs,
+            max_requests: value.max_requests,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RiskThresholds {
+    pub approval_score: u32,
+    pub deny_score: u32,
+    pub step_up_purposes: Vec<String>,
+    pub approval_denials_60s: u32,
+}
+
+impl Default for RiskThresholds {
+    fn default() -> Self {
+        Self {
+            approval_score: 80,
+            deny_score: 120,
+            step_up_purposes: vec!["privileged".into(), "admin".into()],
+            approval_denials_60s: 3,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MeshGatewayConfig {
+    pub throttle: ThrottleMeshConfig,
+    pub risk: RiskThresholds,
+    pub approval_ttl_secs: u64,
+    pub approval_base_url: String,
+}
+
+impl Default for MeshGatewayConfig {
+    fn default() -> Self {
+        Self {
+            throttle: ThrottleMeshConfig::default(),
+            risk: RiskThresholds::default(),
+            approval_ttl_secs: DEFAULT_APPROVAL_TTL_SECS,
+            approval_base_url: DEFAULT_APPROVAL_BASE_URL.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CallContext {
+    pub tenant: String,
+    pub agent_id: String,
+    pub purpose: String,
+    pub target_aud: String,
+    pub scope_fingerprint: String,
+    pub jsonrpc_method: String,
+    pub tool_name: Option<String>,
+    pub recent_denials_60s: u32,
+    pub args: JsonValue,
+    pub request_id: String,
+}
+
+impl CallContext {
+    pub fn throttle_key(&self) -> ThrottleKey {
+        ThrottleKey {
+            tenant: self.tenant.clone(),
+            agent_id: self.agent_id.clone(),
+            purpose: self.purpose.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RiskDecision {
+    Allow,
+    Deny { reason: String },
+    StepUp { scope: String },
+    RequireApproval { reason: String, ttl_s: u64 },
+    Throttle { retry_after_s: u64 },
+}
+
+#[derive(Clone, Debug)]
+pub struct PolicyOutcome {
+    pub requires_spicedb: bool,
+    pub risk: RiskDecision,
+}
+
+#[derive(Clone, Debug)]
+pub struct RiskGateResponse {
+    pub requires_spicedb: bool,
+    pub risk: RiskDecision,
+    pub approval_data: Option<JsonValue>,
+}
 
 #[derive(Debug)]
 pub struct PolicyError(pub String);
@@ -173,6 +291,131 @@ pub fn add_jwt_to_cel_context(ctx: &mut Context, jwt: serde_json::Value) -> Resu
     Ok(())
 }
 
+fn risk_score(ctx: &CallContext, thresholds: &RiskThresholds) -> u32 {
+    let mut score = 0u32;
+    score = score.saturating_add(ctx.recent_denials_60s.saturating_mul(20));
+    if ctx.recent_denials_60s >= thresholds.approval_denials_60s {
+        score = score.saturating_add(40);
+    }
+    if thresholds
+        .step_up_purposes
+        .iter()
+        .any(|purpose| purpose.eq_ignore_ascii_case(ctx.purpose.as_str()))
+    {
+        score = score.saturating_add(50);
+    }
+    if ctx.jsonrpc_method == "tools/call" {
+        score = score.saturating_add(10);
+    }
+    if ctx.scope_fingerprint.is_empty() {
+        score = score.saturating_add(15);
+    }
+    if ctx.target_aud.contains(":backend:") {
+        score = score.saturating_add(5);
+    }
+    score
+}
+
+#[must_use]
+pub fn evaluate_risk(ctx: &CallContext, config: &MeshGatewayConfig) -> RiskDecision {
+    let score = risk_score(ctx, &config.risk);
+    if score >= config.risk.deny_score {
+        return RiskDecision::Deny {
+            reason: format!("risk_score={score}"),
+        };
+    }
+    if thresholds_require_step_up(ctx, &config.risk) {
+        return RiskDecision::StepUp {
+            scope: format!("purpose:{}", ctx.purpose),
+        };
+    }
+    if score >= config.risk.approval_score {
+        return RiskDecision::RequireApproval {
+            reason: format!("risk_score={score}"),
+            ttl_s: config.approval_ttl_secs,
+        };
+    }
+    RiskDecision::Allow
+}
+
+fn thresholds_require_step_up(ctx: &CallContext, thresholds: &RiskThresholds) -> bool {
+    thresholds
+        .step_up_purposes
+        .iter()
+        .any(|purpose| purpose.eq_ignore_ascii_case(ctx.purpose.as_str()))
+        && ctx.jsonrpc_method == "tools/call"
+}
+
+pub fn run_with_risk(
+    policy: &SpicedbGatePolicy,
+    mesh_config: &MeshGatewayConfig,
+    ctx: &CallContext,
+    throttler: &ContextThrottler,
+) -> Result<PolicyOutcome, PolicyError> {
+    let requires_spicedb = policy.requires_spicedb_for_method(&ctx.jsonrpc_method)?;
+    if let Some(retry_after_s) = throttler.check_and_record(&ctx.throttle_key()) {
+        return Ok(PolicyOutcome {
+            requires_spicedb,
+            risk: RiskDecision::Throttle { retry_after_s },
+        });
+    }
+    Ok(PolicyOutcome {
+        requires_spicedb,
+        risk: evaluate_risk(ctx, mesh_config),
+    })
+}
+
+#[must_use]
+pub fn risk_gate_response(
+    mesh_config: &MeshGatewayConfig,
+    ctx: &CallContext,
+    outcome: &PolicyOutcome,
+) -> RiskGateResponse {
+    use crate::approvals::RequestId;
+
+    let approval_data = match &outcome.risk {
+        RiskDecision::StepUp { scope } => RequestId::new(&ctx.request_id).ok().map(|request_id| {
+            build_approval_required_step_up(
+                &request_id,
+                scope,
+                mesh_config.approval_ttl_secs,
+                mesh_config.approval_base_url.as_str(),
+            )
+        }),
+        RiskDecision::RequireApproval { reason, ttl_s } => {
+            RequestId::new(&ctx.request_id).ok().map(|request_id| {
+                build_approval_required(
+                    &request_id,
+                    reason,
+                    *ttl_s,
+                    mesh_config.approval_base_url.as_str(),
+                )
+            })
+        }
+        _ => None,
+    };
+    RiskGateResponse {
+        requires_spicedb: outcome.requires_spicedb,
+        risk: outcome.risk.clone(),
+        approval_data,
+    }
+}
+
+#[must_use]
+pub fn risk_decision_blocks_request(risk: &RiskDecision) -> bool {
+    !matches!(risk, RiskDecision::Allow)
+}
+
+#[must_use]
+pub fn risk_decision_jsonrpc_code(risk: &RiskDecision) -> i32 {
+    match risk {
+        RiskDecision::Allow => 0,
+        RiskDecision::Deny { .. } => rpc_codes::POLICY_DENY,
+        RiskDecision::StepUp { .. } | RiskDecision::RequireApproval { .. } => rpc_codes::APPROVAL_REQUIRED,
+        RiskDecision::Throttle { .. } => rpc_codes::RATE_LIMITED,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +544,86 @@ mod tests {
         let program = Program::compile(r#"jwt.sub == "alice" && jwt.agent_id == null"#).unwrap();
         let ctx = new_policy_cel_context(&sample_identity(), &VerifiedJwtClaims::default(), &[]).unwrap();
         assert!(matches!(program.execute(&ctx), Ok(Value::Bool(true))));
+    }
+
+    fn sample_call_context(recent_denials: u32, purpose: &str) -> CallContext {
+        CallContext {
+            tenant: "acme".into(),
+            agent_id: "agent/oncall".into(),
+            purpose: purpose.into(),
+            target_aud: "urn:trogon:mcp:backend:acme:github".into(),
+            scope_fingerprint: "tool:deploy".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+            recent_denials_60s: recent_denials,
+            args: serde_json::json!({"name": "deploy"}),
+            request_id: "req-policy-test".into(),
+        }
+    }
+
+    #[test]
+    fn low_risk_allows() {
+        let ctx = sample_call_context(0, "routine");
+        assert_eq!(evaluate_risk(&ctx, &MeshGatewayConfig::default()), RiskDecision::Allow);
+    }
+
+    #[test]
+    fn privileged_purpose_requires_step_up() {
+        let ctx = sample_call_context(0, "admin");
+        assert_eq!(
+            evaluate_risk(&ctx, &MeshGatewayConfig::default()),
+            RiskDecision::StepUp {
+                scope: "purpose:admin".into()
+            }
+        );
+    }
+
+    #[test]
+    fn repeated_denials_require_approval() {
+        let ctx = sample_call_context(3, "routine");
+        match evaluate_risk(&ctx, &MeshGatewayConfig::default()) {
+            RiskDecision::RequireApproval { reason, .. } => assert!(reason.contains("risk_score")),
+            other => panic!("expected RequireApproval, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extreme_denials_deny() {
+        let mut config = MeshGatewayConfig::default();
+        config.risk.deny_score = 60;
+        let ctx = sample_call_context(10, "routine");
+        assert!(matches!(evaluate_risk(&ctx, &config), RiskDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn run_with_risk_applies_throttle() {
+        let policy = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        let mesh = MeshGatewayConfig {
+            throttle: ThrottleMeshConfig {
+                enabled: true,
+                window_secs: 60,
+                max_requests: 1,
+            },
+            ..MeshGatewayConfig::default()
+        };
+        let throttler = ContextThrottler::new((&mesh.throttle).into());
+        let ctx = sample_call_context(0, "routine");
+        let first = run_with_risk(&policy, &mesh, &ctx, &throttler).unwrap();
+        assert_eq!(first.risk, RiskDecision::Allow);
+        let second = run_with_risk(&policy, &mesh, &ctx, &throttler).unwrap();
+        assert!(matches!(second.risk, RiskDecision::Throttle { .. }));
+    }
+
+    #[test]
+    fn risk_gate_response_builds_approval_envelope() {
+        let ctx = sample_call_context(0, "admin");
+        let mesh = MeshGatewayConfig::default();
+        let outcome = PolicyOutcome {
+            requires_spicedb: true,
+            risk: evaluate_risk(&ctx, &mesh),
+        };
+        let response = risk_gate_response(&mesh, &ctx, &outcome);
+        let data = response.approval_data.expect("approval data");
+        assert_eq!(data["approval_subject"], "mcp.approvals.step-up.req-policy-test");
     }
 }
