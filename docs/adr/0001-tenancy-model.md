@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | DRAFT |
+| **Status** | Accepted (2026-05-27) |
 | **Date** | 2026-05-27 |
 | **Deciders** | *(author / platform security — TBD)* |
 | **Blocks** | Block 0 (`PENDING_TODO.md`), Block A item 3 (`MCP_GATEWAY_PLAN.md`) |
@@ -100,7 +100,7 @@ Single NATS Account (or few shared accounts) for many tenants. Tenant id is a va
 
 **Irreversible consequences:** The **abstraction boundary** (always thread `TenantContext { account, claim }` through gateway, STS, audit) must be designed once; retrofitting later is expensive. Choosing hybrid commits to dual-mode tests in CI, not to "soft only."
 
-## Recommendation (draft — not a final decision)
+## Decision
 
 **Adopt (c) hybrid**, with a clear environment split:
 

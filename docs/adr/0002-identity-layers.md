@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT** — for human review. Gates Block 1 (registry, attestation, claim schema) and downstream ADRs 0003–0006.
+**Accepted (2026-05-27).** Drives Block 1 (registry, attestation, claim schema) and the downstream ADRs 0003–0006.
 
 ## Context
 
