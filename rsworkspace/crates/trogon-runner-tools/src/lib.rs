@@ -2,6 +2,8 @@
 
 pub mod compaction;
 pub mod egress;
+pub mod elicitation;
+pub mod mcp;
 pub mod nats_todo_tool;
 pub mod permission;
 pub mod permission_bridge;
@@ -17,6 +19,11 @@ pub use compaction::{
     COMPACT_SUBJECT, DEFAULT_COMPACT_THRESHOLD_PCT, DEFAULT_TOKEN_BUDGET,
 };
 pub use egress::EgressPolicy;
+pub use elicitation::{
+    answer_from_response, elicit_via_channel, handle_elicitation_request_nats, ElicitationReq,
+    ElicitationTx,
+};
+pub use mcp::{build_session_mcp, convert_mcp_servers};
 pub use permission::{
     build_mode_permission_checker, check_tool_permission, ChannelPermissionChecker,
     ModePermissionChecker, PermissionReq, PermissionTx, RulesPermissionChecker,
