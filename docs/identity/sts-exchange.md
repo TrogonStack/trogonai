@@ -274,13 +274,31 @@ Envelope shape (illustrative):
 
 ## Failure modes
 
-| Condition | Behavior |
+The table below extends the v1 operational contract. Protocol sections above are unchanged.
+
+| Failure | Trigger | STS behavior | Audit subject + `reason` | Gateway JSON-RPC code | Recovery |
+|---|---|---|---|---|---|
+| **Registry unavailable** | `mcp.registry.agent.lookup` NACK/timeout, or registry circuit breaker open after consecutive dependency failures | Fail-closed: exchange error `server_error` / `dependency_unavailable` | `mcp.audit.sts.deny` or `mcp.audit.sts.error` with `reason: "registry_unavailable"` | `-32107` `authz_unreachable` | Restore registry consumer; breaker auto half-opens after 5 s cool-down (default). No stale-cache grace in v1. |
+| **SpiceDB / PDP unavailable** | Synchronous SpiceDB check required and unreachable, or SpiceDB circuit breaker open | Fail-closed: `dependency_unavailable` | `mcp.audit.sts.error` with `reason: "spicedb_unavailable"` | `-32107` `authz_unreachable` | Restore SpiceDB; prefer registry ACLs on the hot path where possible. Breaker cool-down default 5 s. |
+| **JWKS stale** (verification only) | Mesh JWKS KV watch lagging; inbound mesh `subject_token` signed with unknown `kid` | Reject at signature step: `invalid_grant` | `mcp.audit.sts.deny` with grant/signature reason | `-32110` invalid token class at gateway ingress | Refresh `mcp-jwks/mesh/current`; maintain overlap window ≥ max mesh TTL + skew ([ADR 0006](../adr/0006-mesh-token-signing-keys.md)). |
+| **Signer unreachable** | KMS `Sign` or Vault Transit `sign` failure; file PEM unreadable at startup | Fail-closed: `server_error` / signer unavailable | `mcp.audit.sts.error` with `reason: "signer_unavailable"` | `-32103` `backend_unreachable` | Fix KMS/Vault credentials or key policy; fall back to overlapping `kid` only after JWKS publisher confirms new key. |
+| **Act-chain entry revoked / unknown** | Inbound `act_chain` entry `agent_id` resolves to `not_found` or `revoked` in registry during chain walk | Fail-closed: `act_chain_entry_revoked` | `mcp.audit.sts.deny` with `reason: "act_chain_entry_revoked"`, `offending_index`, `offending_agent_id` | `-32115` `act_chain_principal_unknown` | Remove or re-register agent; audit includes offending hop index. |
+
+### Chain resolution latency
+
+STS walks every inbound `act_chain` entry with an `agent_id` before minting. Resolution uses a TTL-bounded chain cache (default 60 s) separate from the per-agent registry cache. Env `STS_CHAIN_RESOLUTION_MODE`:
+
+| Mode | Behavior |
 |---|---|
-| **STS unavailable** | **Fail-closed.** Gateway/agent receives no `access_token`; mesh traffic stops. Gateway returns structured error; clients retry with backoff. No bootstrap bypass in enforce mode ([ADR 0004](../adr/0004-sts-form-factor.md)). |
-| **Registry stale / outage** | **Reject.** No stale-cache grace in v1; circuit breaker opens after configured unhealthy threshold. |
-| **Signing-key rotation** | JWKS is source of truth: KV `mcp-jwks/mesh/current`, HTTPS `/.well-known/jwks.json`, `mcp.jwks.mesh.get`. Overlap window ≥ max mesh TTL + skew; verifiers accept all active `kid` values ([ADR 0006](../adr/0006-mesh-token-signing-keys.md)). |
-| **Trust bundle stale** | Reject SVID validation until bundle refreshes. |
-| **SpiceDB / PDP outage** | Circuit breaker; fail-closed if synchronous check required (registry ACLs preferred on hot path). |
+| `off` | Skip chain walk (emergency only) |
+| `cache` | **Default v1.** Walk with chain-resolution cache |
+| `strict` | Walk on every exchange (no chain cache) |
+
+If chain walk adds > 5 ms to an exchange, STS logs a warning span. Target exchange P99 remains < 40 ms with `cache` mode; use `strict` only when audit requires cold registry reads every hop.
+
+### Latency probe and alerting
+
+Run `trogon-sts-probe` as a sidecar (not inside the STS process). It fires a synthetic exchange every `probe_interval_secs` (default 10 s), tracks rolling P50/P95/P99, and publishes to `mcp.metrics.sts.latency`. When P99 exceeds `p99_threshold_ms` (default 40 ms), it also emits `mcp.audit.sts.latency_violation`. Wire `mcp.audit.*` subjects to PagerDuty via the standard MCP audit ETL.
 
 ---
 
