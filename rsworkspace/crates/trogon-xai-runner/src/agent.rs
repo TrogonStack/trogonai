@@ -451,6 +451,68 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self
     }
 
+    /// Restore a session from the KV snapshot store into the in-memory map.
+    /// Returns `true` if the session was found and restored.
+    /// `cwd` is used as the restored session's working directory; pass an empty
+    /// string when no cwd is available (e.g. when called from `prompt`).
+    async fn try_restore_from_kv(&self, session_id: &str, cwd: String) -> bool {
+        let Some(store) = &self.session_store else {
+            return false;
+        };
+        let Some(snap) = store.load(&self.tenant_id, session_id).await else {
+            return false;
+        };
+        let enabled_tools = if snap.tools.is_empty() {
+            trogon_tools::all_tool_defs()
+                .into_iter()
+                .map(|d| d.name.to_string())
+                .collect()
+        } else {
+            snap.tools.clone()
+        };
+        let history: Vec<Message> = snap
+            .messages
+            .iter()
+            .map(|m| Message {
+                role: m.role.clone(),
+                content: Some(
+                    m.content.iter().map(|b| b.text.clone()).collect::<Vec<_>>().join(""),
+                ),
+                prompt_tokens: m.usage.as_ref().map(|u| u.input_tokens as u64),
+                completion_tokens: m.usage.as_ref().map(|u| u.output_tokens as u64),
+            })
+            .collect();
+        let evicted_id = {
+            let mut sessions = self.sessions.lock().await;
+            Self::maybe_evict_oldest(&mut sessions)
+        };
+        if let Some(evicted) = evicted_id {
+            store.remove(&self.tenant_id, &evicted).await;
+        }
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(
+            session_id.to_string(),
+            XaiSession {
+                cwd,
+                model: snap.model.clone(),
+                api_key: self.global_api_key.clone(),
+                history,
+                last_response_id: None,
+                enabled_tools,
+                system_prompt: self.system_prompt.clone(),
+                created_at: Instant::now(),
+                last_used_at: Instant::now(),
+                created_at_iso: snap.created_at.clone(),
+                parent_session_id: snap.parent_session_id.clone(),
+                branched_at_index: snap.branched_at_index,
+                mode: default_session_mode(),
+                tool_policies: Vec::new(),
+            },
+        );
+        info!(session_id, "xai: session restored from KV snapshot");
+        true
+    }
+
     /// Build a `SessionSnapshot` from the given session for writing to the KV store.
     fn build_snapshot(&self, session_id: &str, session: &XaiSession) -> SessionSnapshot {
         let name = session
@@ -785,77 +847,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Not in memory — try KV snapshot.
-        if let Some(store) = &self.session_store {
-            if let Some(snap) = store.load(&self.tenant_id, &session_id).await {
-                let enabled_tools = if snap.tools.is_empty() {
-                    // Pre-fix snapshot: trogon tools were always enabled and cannot
-                    // be disabled by users — restore them. xAI tools default to off.
-                    trogon_tools::all_tool_defs()
-                        .into_iter()
-                        .map(|d| d.name.to_string())
-                        .collect()
-                } else {
-                    snap.tools.clone()
-                };
-                let history: Vec<Message> = snap
-                    .messages
-                    .iter()
-                    .map(|m| Message {
-                        role: m.role.clone(),
-                        content: Some(
-                            m.content.iter().map(|b| b.text.clone()).collect::<Vec<_>>().join(""),
-                        ),
-                        prompt_tokens: m.usage.as_ref().map(|u| u.input_tokens as u64),
-                        completion_tokens: m.usage.as_ref().map(|u| u.output_tokens as u64),
-                    })
-                    .collect();
-                let model = snap.model.clone();
-                let created_at_iso = snap.created_at.clone();
-                let parent_session_id = snap.parent_session_id.clone();
-                let branched_at_index = snap.branched_at_index;
-                let api_key = self.global_api_key.clone();
-                let system_prompt = self.system_prompt.clone();
-
-                let evicted_id = {
-                    let mut sessions = self.sessions.lock().await;
-                    Self::maybe_evict_oldest(&mut sessions)
-                };
-                if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
-                    store.remove(&self.tenant_id, &evicted).await;
-                }
-                let mut sessions = self.sessions.lock().await;
-                sessions.insert(
-                    session_id.clone(),
-                    XaiSession {
-                        cwd,
-                        model,
-                        api_key,
-                        history,
-                        last_response_id: None,
-                        enabled_tools: enabled_tools.clone(),
-                        system_prompt,
-                        created_at: Instant::now(),
-                        last_used_at: Instant::now(),
-                        created_at_iso,
-                        parent_session_id,
-                        branched_at_index,
-                        mode: default_session_mode(),
-                        tool_policies: Vec::new(),
-                    },
-                );
-                info!(session_id, "xai: load_session restored from KV snapshot");
-                return Ok(LoadSessionResponse::new()
-                    .modes(self.session_mode_state(
-                        &sessions
-                            .get(&session_id)
-                            .map(|s| s.mode.as_str())
-                            .unwrap_or("default"),
-                    ))
-                    .models(self.session_model_state(
-                        sessions.get(&session_id).and_then(|s| s.model.as_deref()),
-                    ))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
-            }
+        if self.try_restore_from_kv(&session_id, cwd).await {
+            let sessions = self.sessions.lock().await;
+            let s = sessions.get(&session_id).expect("just restored");
+            return Ok(LoadSessionResponse::new()
+                .modes(self.session_mode_state(&s.mode))
+                .models(self.session_model_state(s.model.as_deref()))
+                .config_options(Self::all_tool_config_options(&s.enabled_tools)));
         }
 
         Err(not_found(format!("session {session_id} not found")))
@@ -1142,6 +1140,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
 
         // Snapshot session state — release lock before streaming.
+        // If the session was evicted from memory (e.g. runner restart), restore
+        // from the KV snapshot so the conversation can continue seamlessly.
+        if !self.sessions.lock().await.contains_key(&session_id) {
+            self.try_restore_from_kv(&session_id, String::new()).await;
+        }
         let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
