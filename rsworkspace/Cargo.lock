@@ -1186,6 +1186,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cipher"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+dependencies = [
+ "crypto-common 0.1.7",
+ "inout",
+ "zeroize",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3764,6 +3775,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-display"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "914a1c2265c98e2446911282c6ac86d8524f495792c38c5bd884f80499c7538a"
+dependencies = [
+ "parse-display-derive",
+ "regex",
+ "regex-syntax",
+]
+
+[[package]]
+name = "parse-display-derive"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ae7800a4c974efd12df917266338e79a7a74415173caf7e70aa0a0707345281"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-syntax",
+ "structmeta",
+ "syn",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4377,6 +4413,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags 2.11.0",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6035,32 +6082,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "trogon-jwks-publisher"
+name = "trogon-identity-types"
 version = "0.1.0"
 dependencies = [
- "async-nats",
- "async-trait",
- "axum",
- "axum-server",
- "base64 0.22.1",
- "clap",
- "ed25519-dalek",
- "futures",
- "futures-util",
- "hex",
- "jsonwebtoken 9.3.0",
- "notify",
- "rand 0.8.5",
- "rsa",
- "rustls",
  "serde",
  "serde_json",
- "sha2 0.10.8",
- "tempfile",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -6083,6 +6109,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-opentelemetry",
+ "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
  "trogon-telemetry",
@@ -6136,6 +6163,35 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+]
+
+[[package]]
+name = "trogon-sts"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "clap",
+ "futures",
+ "hex",
+ "jsonwebtoken 10.4.0",
+ "moka",
+ "rand 0.8.5",
+ "reqwest",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-identity-types",
+ "trogon-nats",
+ "wiremock",
 ]
 
 [[package]]
