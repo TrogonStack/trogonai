@@ -8,7 +8,7 @@ use opentelemetry::{Context, KeyValue, global};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::constants::CALLER_JWT_HEADER;
+use crate::constants::{CALLER_JWT_HEADER, DEFAULT_PURPOSE};
 use crate::subject::agent_request_subject;
 use crate::traits::{MessageTransport, Registry, Sts, SubjectTokenSource, SvidSource};
 use crate::types::{AgentId, Audience, ExchangeRequest, Purpose, SdkError};
@@ -123,12 +123,13 @@ impl Client {
         R: DeserializeOwned,
     {
         let tracer = global::tracer("trogon-a2a-sdk");
-        let purpose_str = purpose.map(Purpose::as_str).unwrap_or("");
+        let resolved_purpose = self.resolve_purpose(purpose).await?;
+        let purpose_str = resolved_purpose.as_str();
         let root = tracer
             .span_builder("a2a.call")
             .with_attributes([
                 KeyValue::new("agent.id", self.agent_id.to_string()),
-                KeyValue::new("agent.target", target.to_string()),
+                KeyValue::new("agent.target.id", target.to_string()),
                 KeyValue::new("agent.purpose", purpose_str.to_owned()),
                 KeyValue::new("agent.call.direction", "outbound"),
             ])
@@ -165,7 +166,7 @@ impl Client {
                     actor_token,
                     audience: audience.clone(),
                     scope,
-                    purpose: purpose.map(Purpose::as_str).map(str::to_owned),
+                    purpose: Some(resolved_purpose.as_str().to_owned()),
                     agent_id: Some(self.agent_id.to_string()),
                 })
                 .await?;
@@ -190,6 +191,18 @@ impl Client {
         .with_context(cx)
         .await
     }
+
+    async fn resolve_purpose(&self, purpose: Option<&Purpose>) -> Result<Purpose, SdkError> {
+        if let Some(purpose) = purpose {
+            return Ok(purpose.clone());
+        }
+        let record = self.registry.lookup(&self.agent_id).await?;
+        match record.allowed_purposes.len() {
+            0 => Ok(Purpose::new(DEFAULT_PURPOSE)),
+            1 => Ok(Purpose::new(record.allowed_purposes[0].clone())),
+            _ => Err(SdkError::PurposeRequired),
+        }
+    }
 }
 
 fn chain_depth_from_token(token: &str) -> Option<usize> {
@@ -213,7 +226,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::constants::CALLER_JWT_HEADER;
+    use crate::constants::{CALLER_JWT_HEADER, DEFAULT_PURPOSE};
     use crate::subject::agent_request_subject;
     use crate::types::{AgentRecord, ExchangeRequest, ExchangeResponse};
 
@@ -234,7 +247,7 @@ mod tests {
     }
 
     struct MockSts {
-        last_req: Mutex<Option<ExchangeRequest>>,
+        last_req: Arc<Mutex<Option<ExchangeRequest>>>,
         token: String,
     }
 
@@ -251,13 +264,18 @@ mod tests {
     }
 
     struct MockRegistry {
-        record: AgentRecord,
+        self_record: AgentRecord,
+        target_record: AgentRecord,
     }
 
     #[async_trait]
     impl Registry for MockRegistry {
-        async fn lookup(&self, _agent_id: &AgentId) -> Result<AgentRecord, SdkError> {
-            Ok(self.record.clone())
+        async fn lookup(&self, agent_id: &AgentId) -> Result<AgentRecord, SdkError> {
+            if agent_id.as_str() == "acme/oncall" {
+                Ok(self.self_record.clone())
+            } else {
+                Ok(self.target_record.clone())
+            }
         }
     }
 
@@ -297,12 +315,10 @@ mod tests {
 
     #[tokio::test]
     async fn call_publishes_to_expected_subject_with_caller_jwt_header() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
         let target = AgentId::parse("acme/planner").unwrap();
         let mesh_token = "header.payload.sig";
-        let sts = MockSts {
-            last_req: Mutex::new(None),
-            token: mesh_token.to_owned(),
-        };
+        let (sts, last_req) = mock_sts(mesh_token);
         let captured = Arc::new(Mutex::new(None));
         let transport = MockTransport {
             captured: captured.clone(),
@@ -314,8 +330,14 @@ mod tests {
             .subject_token_source(FixedSubjectToken("bootstrap-jwt".into()))
             .sts(sts)
             .registry(MockRegistry {
-                record: AgentRecord {
+                self_record: AgentRecord {
+                    allowed_audiences: vec![],
+                    allowed_purposes: vec![],
+                    mesh_token_ttl_s: None,
+                },
+                target_record: AgentRecord {
                     allowed_audiences: vec!["urn:trogon:a2a:agent:acme:planner".into()],
+                    allowed_purposes: vec![],
                     mesh_token_ttl_s: Some(120),
                 },
             })
@@ -334,5 +356,118 @@ mod tests {
         assert_eq!(captured.headers.get(CALLER_JWT_HEADER).unwrap().as_str(), mesh_token);
         let req_body: EchoReq = serde_json::from_slice(&captured.payload).unwrap();
         assert_eq!(req_body.msg, "hi");
+        let _ = last_req;
+    }
+
+    fn test_client(sts: MockSts, registry: MockRegistry, transport: MockTransport) -> Client {
+        Client::builder()
+            .agent_id(AgentId::parse("acme/oncall").unwrap())
+            .svid_source(FixedSvid("svid-jwt".into()))
+            .subject_token_source(FixedSubjectToken("bootstrap-jwt".into()))
+            .sts(sts)
+            .registry(registry)
+            .transport(transport)
+            .build()
+            .unwrap()
+    }
+
+    fn mock_sts(token: &str) -> (MockSts, Arc<Mutex<Option<ExchangeRequest>>>) {
+        let last_req = Arc::new(Mutex::new(None));
+        (
+            MockSts {
+                last_req: Arc::clone(&last_req),
+                token: token.to_owned(),
+            },
+            last_req,
+        )
+    }
+
+    #[tokio::test]
+    async fn call_uses_default_purpose_when_registry_has_none() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
+        let (sts, last_req) = mock_sts("mesh");
+        let client = test_client(
+            sts,
+            MockRegistry {
+                self_record: AgentRecord {
+                    allowed_audiences: vec![],
+                    allowed_purposes: vec![],
+                    mesh_token_ttl_s: None,
+                },
+                target_record: AgentRecord {
+                    allowed_audiences: vec!["urn:trogon:a2a:agent:acme:planner".into()],
+                    allowed_purposes: vec![],
+                    mesh_token_ttl_s: None,
+                },
+            },
+            MockTransport {
+                captured: Arc::new(Mutex::new(None)),
+                response: br#"{"echo":"ok"}"#.as_slice().into(),
+            },
+        );
+        let target = AgentId::parse("acme/planner").unwrap();
+        let _: EchoResp = client.call(&target, &EchoReq { msg: "x".into() }, None).await.unwrap();
+        let req = last_req.lock().unwrap().take().unwrap();
+        assert_eq!(req.purpose.as_deref(), Some(DEFAULT_PURPOSE));
+    }
+
+    #[tokio::test]
+    async fn call_uses_sole_allowed_purpose_when_omitted() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
+        let (sts, last_req) = mock_sts("mesh");
+        let client = test_client(
+            sts,
+            MockRegistry {
+                self_record: AgentRecord {
+                    allowed_audiences: vec![],
+                    allowed_purposes: vec!["triage".into()],
+                    mesh_token_ttl_s: None,
+                },
+                target_record: AgentRecord {
+                    allowed_audiences: vec!["urn:trogon:a2a:agent:acme:planner".into()],
+                    allowed_purposes: vec![],
+                    mesh_token_ttl_s: None,
+                },
+            },
+            MockTransport {
+                captured: Arc::new(Mutex::new(None)),
+                response: br#"{"echo":"ok"}"#.as_slice().into(),
+            },
+        );
+        let target = AgentId::parse("acme/planner").unwrap();
+        let _: EchoResp = client.call(&target, &EchoReq { msg: "x".into() }, None).await.unwrap();
+        let req = last_req.lock().unwrap().take().unwrap();
+        assert_eq!(req.purpose.as_deref(), Some("triage"));
+    }
+
+    #[tokio::test]
+    async fn call_errors_when_multiple_allowed_purposes_and_none_passed() {
+        let _guard = crate::test_tracer_lock::tracer_test_guard().await;
+        let (sts, _) = mock_sts("mesh");
+        let client = test_client(
+            sts,
+            MockRegistry {
+                self_record: AgentRecord {
+                    allowed_audiences: vec![],
+                    allowed_purposes: vec!["a".into(), "b".into()],
+                    mesh_token_ttl_s: None,
+                },
+                target_record: AgentRecord {
+                    allowed_audiences: vec!["urn:trogon:a2a:agent:acme:planner".into()],
+                    allowed_purposes: vec![],
+                    mesh_token_ttl_s: None,
+                },
+            },
+            MockTransport {
+                captured: Arc::new(Mutex::new(None)),
+                response: br#"{"echo":"ok"}"#.as_slice().into(),
+            },
+        );
+        let target = AgentId::parse("acme/planner").unwrap();
+        let err = client
+            .call::<EchoReq, EchoResp>(&target, &EchoReq { msg: "x".into() }, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SdkError::PurposeRequired));
     }
 }
