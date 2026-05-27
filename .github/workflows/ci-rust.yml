@@ -35,6 +35,9 @@ jobs:
         run: cargo clippy --all-targets --all-features
         working-directory: rsworkspace
 
+      - name: Check direct NATS gateway publishes
+        run: bash scripts/ci/check-direct-nats-publishes.sh
+
   test:
     runs-on: ubuntu-latest
     env:
@@ -62,6 +65,10 @@ jobs:
 
       - name: Run tests with coverage
         run: cargo cov --cobertura --output-path coverage.xml
+        working-directory: rsworkspace
+
+      - name: Live A2A SDK integration tests
+        run: cargo test -p trogon-a2a-sdk --features live --test integration_live
         working-directory: rsworkspace
 
       - name: Coverage report and gate
