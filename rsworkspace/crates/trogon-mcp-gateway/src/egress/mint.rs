@@ -62,6 +62,7 @@ impl EgressMinter {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn mint(
         &self,
         mode: AgentIdentityMode,
