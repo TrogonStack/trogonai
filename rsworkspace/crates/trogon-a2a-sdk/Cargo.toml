@@ -13,7 +13,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 base64 = { workspace = true }
 futures-util = { workspace = true }
-jsonwebtoken = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", default-features = false, features = ["rust_crypto"] }
 opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,14 +21,25 @@ thiserror = "=2.0.18"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 tracing = { workspace = true }
 async-nats = { workspace = true }
+trogon-identity-types = { workspace = true }
 
 [dev-dependencies]
-jsonwebtoken = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+base64 = { workspace = true }
+futures = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", default-features = false, features = ["rust_crypto"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "testing"] }
+rand = { workspace = true }
+rsa = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "time"] }
+trogon-agent-registry = { path = "../trogon-agent-registry" }
+trogon-sts = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = ["nats"]
 nats = []
+live = ["nats"]
 
 [[example]]
 name = "echo_agent"
