@@ -81,11 +81,10 @@ async fn collect_text_chunks(sub: &mut async_nats::Subscriber) -> String {
         tokio::time::timeout(Duration::from_millis(500), sub.next()).await
     {
         let v: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-        if v["update"]["sessionUpdate"].as_str() == Some("agent_message_chunk") {
-            if let Some(text) = v["update"]["content"]["text"].as_str() {
+        if v["update"]["sessionUpdate"].as_str() == Some("agent_message_chunk")
+            && let Some(text) = v["update"]["content"]["text"].as_str() {
                 chunks.push(text.to_string());
             }
-        }
     }
     chunks.join("")
 }

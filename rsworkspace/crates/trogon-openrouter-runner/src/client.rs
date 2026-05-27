@@ -454,13 +454,12 @@ fn process_sse_line(
     if let Some(choice) = val["choices"].get(0) {
         let delta = &choice["delta"];
 
-        if let Some(text) = delta["content"].as_str() {
-            if !text.is_empty() {
+        if let Some(text) = delta["content"].as_str()
+            && !text.is_empty() {
                 pending.push_back(OpenRouterEvent::TextDelta {
                     text: text.to_string(),
                 });
             }
-        }
 
         if let Some(tool_calls) = delta["tool_calls"].as_array() {
             for entry in tool_calls {
@@ -470,16 +469,14 @@ fn process_sse_line(
                     name: String::new(),
                     arguments: String::new(),
                 });
-                if let Some(id) = entry["id"].as_str() {
-                    if !id.is_empty() {
+                if let Some(id) = entry["id"].as_str()
+                    && !id.is_empty() {
                         partial.id = id.to_string();
                     }
-                }
-                if let Some(name) = entry["function"]["name"].as_str() {
-                    if !name.is_empty() {
+                if let Some(name) = entry["function"]["name"].as_str()
+                    && !name.is_empty() {
                         partial.name = name.to_string();
                     }
-                }
                 if let Some(args) = entry["function"]["arguments"].as_str() {
                     partial.arguments.push_str(args);
                 }
@@ -507,8 +504,8 @@ fn process_sse_line(
     }
 
     // Usage — emitted after Finished; may arrive in a separate chunk with empty choices.
-    if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
-        if !usage.is_empty() {
+    if let Some(usage) = val.get("usage").and_then(|u| u.as_object())
+        && !usage.is_empty() {
             let prompt_tokens = usage
                 .get("prompt_tokens")
                 .and_then(|v| v.as_u64())
@@ -522,7 +519,6 @@ fn process_sse_line(
                 completion_tokens,
             });
         }
-    }
 }
 
 #[cfg(test)]
