@@ -3,18 +3,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::DecodePrivateKey;
-use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, Jwk, KeyOperations, OctetKeyPairParameters, OctetKeyPairType,
-    PublicKeyUse, RSAKeyParameters, RSAKeyType,
-};
+use jsonwebtoken::jwk::Jwk;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePublicKey;
-use rsa::traits::PublicKeyParts;
-use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
@@ -118,7 +112,7 @@ pub fn load_jwks_from_dir(dir: &Path) -> Result<Jwks, KeyError> {
     Ok(Jwks { keys })
 }
 
-fn parse_private_pem(pem_bytes: &[u8], path: &Path) -> Result<Vec<Jwk>, KeyError> {
+pub(crate) fn parse_private_pem(pem_bytes: &[u8], path: &Path) -> Result<Vec<Jwk>, KeyError> {
     let pem_text = std::str::from_utf8(pem_bytes)
         .map_err(|e| KeyError::Parse(format!("{} is not valid UTF-8: {e}", path.display())))?;
 
@@ -136,45 +130,12 @@ fn parse_private_pem(pem_bytes: &[u8], path: &Path) -> Result<Vec<Jwk>, KeyError
     )))
 }
 
-fn kid_from_public_der(der: &[u8]) -> String {
-    let digest = Sha256::digest(der);
-    hex::encode(&digest[..8])
-}
-
-fn b64url_uint_be(bytes: &[u8]) -> String {
-    let start = bytes
-        .iter()
-        .position(|&b| b != 0)
-        .unwrap_or(bytes.len().saturating_sub(1));
-    let trimmed = if start >= bytes.len() {
-        &bytes[bytes.len().saturating_sub(1)..]
-    } else {
-        &bytes[start..]
-    };
-    URL_SAFE_NO_PAD.encode(trimmed)
-}
-
 fn rsa_private_to_jwk(key: &RsaPrivateKey) -> Result<Jwk, KeyError> {
     let public = key.to_public_key();
     let der = public
         .to_public_key_der()
         .map_err(|e| KeyError::Parse(format!("rsa public key der: {e}")))?;
-    let kid = kid_from_public_der(der.as_bytes());
-    let n = b64url_uint_be(&public.n().to_bytes_be());
-    let e = b64url_uint_be(&public.e().to_bytes_be());
-    Ok(Jwk {
-        common: CommonParameters {
-            public_key_use: Some(PublicKeyUse::Signature),
-            key_operations: Some(vec![KeyOperations::Verify]),
-            key_id: Some(kid),
-            ..Default::default()
-        },
-        algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
-            key_type: RSAKeyType::RSA,
-            n,
-            e,
-        }),
-    })
+    super::common::rsa_public_der_to_jwk(der.as_bytes(), None)
 }
 
 fn ed25519_private_to_jwk(signing_key: &SigningKey) -> Result<Jwk, KeyError> {
@@ -182,21 +143,7 @@ fn ed25519_private_to_jwk(signing_key: &SigningKey) -> Result<Jwk, KeyError> {
     let der = verifying_key
         .to_public_key_der()
         .map_err(|e| KeyError::Parse(format!("ed25519 public key der: {e}")))?;
-    let kid = kid_from_public_der(der.as_bytes());
-    let x = URL_SAFE_NO_PAD.encode(verifying_key.as_bytes());
-    Ok(Jwk {
-        common: CommonParameters {
-            public_key_use: Some(PublicKeyUse::Signature),
-            key_operations: Some(vec![KeyOperations::Verify]),
-            key_id: Some(kid),
-            ..Default::default()
-        },
-        algorithm: AlgorithmParameters::OctetKeyPair(OctetKeyPairParameters {
-            key_type: OctetKeyPairType::OctetKeyPair,
-            curve: EllipticCurve::Ed25519,
-            x,
-        }),
-    })
+    super::common::ed25519_public_der_to_jwk(der.as_bytes(), None)
 }
 
 #[cfg(test)]

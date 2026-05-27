@@ -7,6 +7,12 @@ edition = "2024"
 name = "trogon-jwks-publisher"
 path = "src/main.rs"
 
+[features]
+default = ["file-pem"]
+file-pem = []
+kms-aws = ["aws-sdk-kms", "aws-config"]
+vault = ["reqwest"]
+
 [lints]
 workspace = true
 
@@ -31,6 +37,10 @@ sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "fs", "net", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+aws-config = { version = "=1.8.12", optional = true, default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-kms = { version = "=1.96.0", optional = true, default-features = false }
+reqwest = { workspace = true, optional = true, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 rand = { workspace = true }
