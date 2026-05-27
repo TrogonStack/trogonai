@@ -2,7 +2,7 @@
 name = "trogon-traffic-view"
 version = "0.1.0"
 edition = "2024"
-description = "Agent-traffic view: audit projector traits and index surface (spec + skeleton)"
+description = "Agent-traffic view: audit projector, Postgres indexer, and OCSF export"
 
 [lints]
 workspace = true
@@ -10,11 +10,20 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }
+chrono = { version = "=0.4.41", features = ["serde"] }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "json", "chrono"] }
 thiserror = "=2.0.18"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tracing = { workspace = true }
+trogon-nats = { path = "../trogon-nats" }
 
 [dev-dependencies]
+testcontainers = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
