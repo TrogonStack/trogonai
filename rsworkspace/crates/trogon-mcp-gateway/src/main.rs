@@ -75,16 +75,29 @@ async fn main() -> Result<(), BoxError> {
 
     let jwt_ingress = trogon_mcp_gateway::jwt::JwtIngressConfig::from_env(&SystemEnv).map_err(config_err_box)?;
     let jwt = trogon_mcp_gateway::jwt::JwtValidator::try_new(jwt_ingress).map_err(config_err_box)?;
-    info!(
-        jwt_mode = ?jwt.mode(),
-        jwt_strip_legacy_tenant_header_to_backend = jwt.jwt_controls_transport(),
-        "MCP gateway verified identity"
-    );
 
     let checker: Arc<dyn trogon_mcp_gateway::authz::PermissionChecker> = build_permission_checker(&SystemEnv).await?;
 
     let nats_connect_timeout = mcp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = Arc::new(mcp_nats::nats::connect(mcp.nats(), nats_connect_timeout).await?);
+
+    let egress = if jwt.agent_identity_mode() == trogon_mcp_gateway::agent_identity::AgentIdentityMode::Off {
+        None
+    } else {
+        let egress_cfg =
+            trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv).map_err(config_err_box)?;
+        let sts_cfg = trogon_sts_client::StsClientConfig::from_env(&SystemEnv);
+        let sts = trogon_sts_client::StsClient::from_arc(nats_client.clone(), sts_cfg);
+        Some(trogon_mcp_gateway::egress::EgressMinter::from_parts(sts, egress_cfg))
+    };
+
+    info!(
+        jwt_mode = ?jwt.mode(),
+        jwt_strip_legacy_tenant_header_to_backend = jwt.jwt_controls_transport(),
+        mesh_egress = egress.is_some(),
+        "MCP gateway verified identity"
+    );
+
     let traces = trogon_mcp_gateway::trace::TraceStore::default();
 
     let settings = trogon_mcp_gateway::gateway::GatewaySettings {
@@ -93,6 +106,7 @@ async fn main() -> Result<(), BoxError> {
         init_audit_stream,
         mcp,
         jwt,
+        egress,
     };
 
     info!(
