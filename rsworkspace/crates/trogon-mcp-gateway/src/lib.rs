@@ -4,6 +4,7 @@ pub mod act_chain;
 pub mod agent_identity;
 pub mod audit;
 pub mod authz;
+pub mod egress;
 pub mod gateway;
 pub mod jwt;
 pub mod policy;

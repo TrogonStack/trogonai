@@ -9,25 +9,37 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 cel-interpreter = "=0.10.0"
 clap = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 mcp-nats = { workspace = true }
+moka = { workspace = true }
 pem = "=3.0.6"
 reqwest = { version = "=0.12.22", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 spicedb-rs-client = "=1.49.2"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-identity-types = { path = "../trogon-identity-types" }
 trogon-nats = { workspace = true }
+trogon-sts-client = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 trogon-telemetry = { workspace = true }
 
 [dev-dependencies]
+base64 = { workspace = true }
 bytes = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+rand = { workspace = true }
+rsa = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+trogon-sts-client = { workspace = true }
 uuid = { workspace = true }

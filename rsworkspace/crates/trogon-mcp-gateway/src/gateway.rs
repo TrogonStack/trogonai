@@ -13,8 +13,10 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
+use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker};
+use crate::egress::{EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers, strip_inbound_credentials};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::rpc_codes;
@@ -46,6 +48,7 @@ pub struct GatewaySettings {
     pub audit_stream_name: String,
     pub init_audit_stream: bool,
     pub jwt: Arc<JwtValidator>,
+    pub egress: Option<Arc<EgressMinter>>,
 }
 
 pub async fn run<S>(
@@ -211,6 +214,7 @@ async fn handle_ingress_inner(
         }
     };
     let gateway_identity = gateway_resolution.identity;
+    let jwt_claims = gateway_resolution.claims;
 
     let span = tracing::Span::current();
     span.record("gateway.identity.source", gateway_identity.source.as_otel_snake_case());
@@ -303,10 +307,83 @@ async fn handle_ingress_inner(
         tracing::Span::current().record("gateway.spicedb.allowed", tracing::field::display(allowed));
     }
 
+    let tenant = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant_hdr.as_deref())
+        .unwrap_or("unknown");
+    let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
+    let session_id = session_id_from_headers(msg.headers.as_ref(), &jwt_claims);
+    let scope = scope_for_tools_call(server_id, tool_call.as_deref());
+
+    let mesh_token = if let Some(egress) = settings.egress.as_ref() {
+        match egress
+            .mint(
+                agent_identity_mode,
+                bearer.as_deref(),
+                tenant,
+                caller_sub,
+                session_id.as_str(),
+                scope.as_deref(),
+                jwt_claims.purpose.as_deref(),
+                EgressTarget::Backend {
+                    server_id: server_id.to_string(),
+                },
+            )
+            .await
+        {
+            Ok(token) => token,
+            Err(err) => {
+                finish_ingress_blocked(FinishIngressBlockedParams {
+                    client,
+                    jetstream,
+                    mcp: &settings.mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    gateway_identity: gateway_identity.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed,
+                    traces,
+                    audit_outcome: "error",
+                    jsonrpc_code: err.code,
+                    jsonrpc_message: err.message,
+                })
+                .await;
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+
     let base_headers = msg.headers.clone().unwrap_or_default();
     let mut outbound_headers = egress_header_map(base_headers, settings.jwt.jwt_controls_transport());
-    append_verified_gateway_identity_headers(&mut outbound_headers, &gateway_identity);
-    act_chain::project_act_chain_header(&mut outbound_headers, act_chain_raw.as_deref(), agent_identity_mode);
+
+    let mesh_enforce = mesh_token.is_some() && agent_identity_mode == AgentIdentityMode::Enforce;
+    let mesh_shadow = mesh_token.is_some() && agent_identity_mode == AgentIdentityMode::Shadow;
+
+    if mesh_enforce {
+        strip_inbound_credentials(&mut outbound_headers, bearer_h.as_str());
+    } else if settings.jwt.jwt_controls_transport() {
+        append_verified_gateway_identity_headers(&mut outbound_headers, &gateway_identity);
+    }
+
+    if !mesh_enforce {
+        act_chain::project_act_chain_header(&mut outbound_headers, act_chain_raw.as_deref(), agent_identity_mode);
+    }
+
+    if let Some(ref token) = mesh_token {
+        apply_mesh_egress_headers(
+            &mut outbound_headers,
+            token,
+            agent_identity_mode,
+            bearer_h.as_str(),
+            mesh_shadow,
+        );
+    }
+
     inject_trace_context(&mut outbound_headers);
 
     if msg.reply.is_none() {
