@@ -40,3 +40,9 @@ pub use session_store::{
     SessionStore, StoredMcpServer, TodoItem, append_audit_entries,
 };
 pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogon_md_hierarchy, load_trogon_md, project_trogon_md_path};
+
+/// Guidance appended to every interactive runner's system prompt so the agent
+/// retrieves URLs with the `fetch_url` tool instead of treating a link as a local
+/// file path. Without it, a model asked to "see <url>" or "check example.com"
+/// reaches for file/search tools and comes back empty.
+pub const URL_FETCH_GUIDANCE: &str = "When the user gives or refers to a URL or web link (for example \"see https://example.com\", \"check example.com\", or \"open this page\"), call the fetch_url tool to retrieve its contents. Never treat a URL as a local file path or search the filesystem for it.";

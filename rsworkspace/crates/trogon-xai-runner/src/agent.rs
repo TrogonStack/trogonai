@@ -1210,8 +1210,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
+            let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
             let header = format!(
-                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}"
+                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -4478,8 +4479,8 @@ mod tests {
             "system prompt must start with Trogon identity"
         );
         assert!(
-            !sys_content.contains("\n\n"),
-            "empty XAI_SYSTEM_PROMPT must not append extra content after header"
+            sys_content.ends_with(trogon_runner_tools::URL_FETCH_GUIDANCE),
+            "empty XAI_SYSTEM_PROMPT must not append session content after the header's URL guidance"
         );
     }
 
