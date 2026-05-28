@@ -50,3 +50,6 @@ coverage-*.xml
 
 # Misc
 tmp
+
+# Python
+__pycache__

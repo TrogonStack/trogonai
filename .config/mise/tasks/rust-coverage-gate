@@ -1,0 +1,182 @@
+#!/usr/bin/env -S uv run --script
+#MISE description="Local only: gate PR-changed rsworkspace .rs files vs main baseline (requires coverage.xml)"
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pycobertura==3.0.0"]
+# ///
+"""Fail PR CI when changed rsworkspace .rs files have newly uncovered lines vs main."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+from pycobertura import Cobertura
+
+
+def normalize_rust_path(path: str) -> str:
+    return path.strip().removeprefix("rsworkspace/")
+
+
+def changed_rust_files(base_ref: str) -> set[str]:
+    for ref in (f"origin/{base_ref}...HEAD", f"{base_ref}...HEAD"):
+        result = subprocess.run(
+            ["git", "diff", "--name-only", ref, "--", "rsworkspace/"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            continue
+        paths = {
+            normalize_rust_path(line)
+            for line in result.stdout.splitlines()
+            if line.strip().endswith(".rs")
+        }
+        if paths or result.stdout.strip():
+            return paths
+    return set()
+
+
+def fetch_base_ref(base_ref: str) -> None:
+    subprocess.run(
+        ["git", "fetch", "origin", base_ref, "--depth=1"],
+        check=False,
+        capture_output=True,
+    )
+
+
+def missed_lines_for(cov: Cobertura, filename: str) -> set[int]:
+    if filename not in set(cov.files()):
+        return set()
+    return set(cov.missed_lines(filename))
+
+
+def read_source_lines(repo_path: Path, line_nos: list[int]) -> dict[int, str]:
+    if not repo_path.is_file():
+        return {}
+    text = repo_path.read_text(errors="replace").splitlines()
+    return {n: text[n - 1] for n in line_nos if 1 <= n <= len(text)}
+
+
+def format_ranges(line_nos: list[int]) -> str:
+    if not line_nos:
+        return ""
+    sorted_nos = sorted(line_nos)
+    ranges: list[str] = []
+    start = prev = sorted_nos[0]
+    for n in sorted_nos[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f"{start}" if start == prev else f"{start}-{prev}")
+        start = prev = n
+    ranges.append(f"{start}" if start == prev else f"{start}-{prev}")
+    return ", ".join(ranges)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-ref", default="main")
+    parser.add_argument(
+        "--baseline-xml",
+        default="tmp/_xml_coverage_reports/data/main/coverage.xml",
+    )
+    parser.add_argument(
+        "--current-xml",
+        default="rsworkspace/coverage.xml",
+    )
+    parser.add_argument(
+        "--source-root",
+        default="rsworkspace",
+        help="Repo path prefix used to resolve source for uncovered lines",
+    )
+    parser.add_argument(
+        "--max-lines-per-file",
+        type=int,
+        default=20,
+        help="Cap snippet output per file in human format (detection uses all lines)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("ai", "human"),
+        default="ai",
+        help="ai (default): emit only 'path:line: source' for newly uncovered lines",
+    )
+    args = parser.parse_args()
+
+    fetch_base_ref(args.base_ref)
+
+    baseline_path = Path(args.baseline_xml)
+    current_path = Path(args.current_xml)
+    source_root = Path(args.source_root)
+
+    ai = args.format == "ai"
+
+    def note(msg: str, *, stream=sys.stdout) -> None:
+        if not ai:
+            print(msg, file=stream)
+
+    changed = changed_rust_files(args.base_ref)
+    if not changed:
+        note("No changed rsworkspace/**/*.rs files; skipping coverage gate.")
+        return 0
+
+    note("Changed Rust files in scope for coverage gate:")
+    for path in sorted(changed):
+        note(f"  - {path}")
+
+    if not baseline_path.is_file():
+        note(f"Baseline coverage not found at {baseline_path}; skipping gate.")
+        return 0
+    if not current_path.is_file():
+        print(f"Current coverage report not found at {current_path}", file=sys.stderr)
+        return 1
+
+    baseline = Cobertura(str(baseline_path))
+    current = Cobertura(str(current_path))
+
+    regressions: list[tuple[str, list[int]]] = []
+    for filename in sorted(changed):
+        before = missed_lines_for(baseline, filename)
+        after = missed_lines_for(current, filename)
+        newly_missed = sorted(after - before)
+        if newly_missed:
+            regressions.append((filename, newly_missed))
+
+    if ai:
+        for filename, lines in regressions:
+            source = read_source_lines(source_root / filename, lines)
+            for n in lines:
+                text = source.get(n, "").rstrip()
+                print(f"{filename}:{n}: {text}")
+        return 1 if regressions else 0
+
+    print()
+    print("=== Path-scoped coverage gate (changed files only) ===")
+
+    if not regressions:
+        print("PASS: no newly uncovered lines in changed Rust files.")
+        return 0
+
+    print("FAIL: newly uncovered lines in changed Rust files:")
+    for filename, lines in regressions:
+        print()
+        print(
+            f"  {filename}  ({len(lines)} new uncovered line(s): {format_ranges(lines)})"
+        )
+        snippet_lines = lines[: args.max_lines_per_file]
+        source = read_source_lines(source_root / filename, snippet_lines)
+        for n in snippet_lines:
+            text = source.get(n, "").rstrip()
+            print(f"    {n:>5}: {text}")
+        if len(lines) > len(snippet_lines):
+            print(f"    ... ({len(lines) - len(snippet_lines)} more)")
+
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

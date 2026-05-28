@@ -6,6 +6,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
+    paths:
+      - 'rsworkspace/**'
+      - '.mise.toml'
+      - '.config/mise/tasks/**'
+      - '.github/workflows/ci-rust.yml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -45,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: true
 
       - uses: jdx/mise-action@v4.0.1

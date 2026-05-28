@@ -1834,6 +1834,14 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_to_get_listeners_returns_missing_when_no_listeners() {
+        let frame = SseFrame::json(r#"{"jsonrpc":"2.0","id":2,"result":null}"#.to_string());
+        let outcome = dispatch_to_get_listeners(&frame, &mut Vec::new());
+
+        assert!(matches!(outcome, ListenerDispatch::Missing));
+    }
+
+    #[test]
     fn dispatch_to_get_listeners_drops_full_listener() {
         let mut get_listeners = Vec::new();
         let (listener_tx, mut listener_rx) = mpsc::channel(1);
