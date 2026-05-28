@@ -51,6 +51,25 @@ fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
         let prefix: String = cmd.chars().take(60).collect();
         return prefix;
     }
+    if tool_name == "gh" {
+        let cmd = tool_input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                tool_input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+            })
+            .unwrap_or_default();
+        return format!("gh {}", cmd.chars().take(60).collect::<String>());
+    }
     tool_name.to_string()
 }
 
@@ -131,9 +150,11 @@ impl PermissionChecker for ChannelPermissionChecker {
                 push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::DeniedByUser);
                 return false;
             }
-            // Now the user is actually being prompted — apply the response timeout.
-            match tokio::time::timeout(std::time::Duration::from_secs(60), resp_rx).await {
-                Ok(Ok(true)) => {
+            // Now the user is actually being prompted. The prompt blocks on the human,
+            // so there is no response timeout — wait until the user answers (the bridge
+            // resolves `resp_rx`) or the bridge drops the channel (treated as deny).
+            match resp_rx.await {
+                Ok(true) => {
                     push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::ApprovedByUser);
                     true
                 }
@@ -266,6 +287,7 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "todo_write",
     "git_commit",
     "fetch_url",
+    "gh",
 ];
 
 fn is_read_only_tool(tool_name: &str) -> bool {
@@ -725,6 +747,21 @@ mod tests {
             !checker
                 .check("tc-pl", "write_file", &serde_json::json!({"path": "/tmp/x"}))
                 .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_denies_gh() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-gh", "gh", &serde_json::json!({"command": "pr create"}))
+                .await,
+            "gh must be denied in plan mode"
         );
     }
 
