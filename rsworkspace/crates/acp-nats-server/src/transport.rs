@@ -1287,6 +1287,7 @@ pub async fn run_http_connection<N, J>(
                     sessions.insert(session_id);
                 }
 
+                // TODO(coverage): no integration test drives the Missing/Dropped warn arms below; add one against the HTTP client outbound loop with zero/full GET listeners.
                 if let Some(dispatch_outcome) =
                     undelivered_response_outcome(parsed.as_ref(), dispatch_to_get_listeners(&frame, &mut get_listeners))
                 {
@@ -1834,6 +1835,14 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_to_get_listeners_returns_missing_when_no_listeners() {
+        let frame = SseFrame::json(r#"{"jsonrpc":"2.0","id":2,"result":null}"#.to_string());
+        let outcome = dispatch_to_get_listeners(&frame, &mut Vec::new());
+
+        assert!(matches!(outcome, ListenerDispatch::Missing));
+    }
+
+    #[test]
     fn dispatch_to_get_listeners_drops_full_listener() {
         let mut get_listeners = Vec::new();
         let (listener_tx, mut listener_rx) = mpsc::channel(1);
@@ -2215,6 +2224,7 @@ mod tests {
                     assert!(message.is_notification());
                     let _ = response.send(Ok(HttpPostOutcome::Accepted));
                 }
+                // TODO(coverage): defensive test guard; sweep when refreshing baseline.
                 _ => panic!("unexpected manager request"),
             }
         });
@@ -2258,6 +2268,7 @@ mod tests {
                     assert!(message.is_response());
                     let _ = response.send(Ok(HttpPostOutcome::Accepted));
                 }
+                // TODO(coverage): defensive test guard; sweep when refreshing baseline.
                 _ => panic!("unexpected manager request"),
             }
         });
@@ -2310,6 +2321,7 @@ mod tests {
                         body: body.to_string(),
                     }));
                 }
+                // TODO(coverage): defensive test guard; sweep when refreshing baseline.
                 _ => panic!("unexpected manager request"),
             }
         });
@@ -2365,6 +2377,7 @@ mod tests {
                         stream: stream_rx,
                     }));
                 }
+                // TODO(coverage): defensive test guard; sweep when refreshing baseline.
                 _ => panic!("unexpected manager request"),
             }
             match manager_rx.recv().await.unwrap() {
@@ -2377,6 +2390,7 @@ mod tests {
                     assert_eq!(protocol_version, None);
                     let _ = response.send(Ok(Some(ProtocolVersion::V0)));
                 }
+                // TODO(coverage): defensive test guard; sweep when refreshing baseline.
                 _ => panic!("unexpected manager request"),
             }
         });
