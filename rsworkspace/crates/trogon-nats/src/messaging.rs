@@ -100,6 +100,49 @@ where
     request_with_timeout(client, subject, request, DEFAULT_TIMEOUT).await
 }
 
+/// Request-reply with no timeout — resolves only when a reply arrives (or the
+/// connection drops). For requests that block on human input (permission prompts).
+pub async fn request_no_timeout<N: RequestClient, Req, Res>(
+    client: &N,
+    subject: &str,
+    request: &Req,
+) -> Result<Res, NatsError>
+where
+    Req: Serialize,
+    Res: DeserializeOwned,
+{
+    let span = Span::current();
+    set_client_operation_span_attributes(&span, MessagingOperation::Request, subject);
+
+    let payload = serde_json::to_vec(request).map_err(|error| {
+        set_span_error(&span, MessagingError::Serialize);
+        NatsError::Serialize(error)
+    })?;
+    let headers = build_request_headers();
+
+    let response = client
+        .request_with_headers_no_timeout(subject.to_string(), headers, payload.into())
+        .await
+        .map_err(|error| {
+            set_span_error(&span, MessagingError::Request);
+            NatsError::Request {
+                subject: subject.to_string(),
+                error: error.to_string(),
+            }
+        })?;
+
+    serde_json::from_slice(&response.payload).map_err(|error| {
+        set_span_error(&span, MessagingError::Deserialize);
+        tracing::error!(
+            error = %error,
+            subject = %subject,
+            payload = %String::from_utf8_lossy(&response.payload),
+            "Failed to deserialize NATS response"
+        );
+        NatsError::Deserialize(error)
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     /// Set to 0 to disable retries.

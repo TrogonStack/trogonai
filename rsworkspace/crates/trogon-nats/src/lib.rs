@@ -64,7 +64,8 @@ pub use lease::{
 };
 pub use messaging::{
     FlushPolicy, NatsError, PublishOperationError, PublishOptions, PublishOptionsBuilder, RetryPolicy,
-    build_request_headers, headers_with_trace_context, inject_trace_context, publish, request, request_with_timeout,
+    build_request_headers, headers_with_trace_context, inject_trace_context, publish, request, request_no_timeout,
+    request_with_timeout,
 };
 pub use nats_token::{DottedNatsToken, NatsToken};
 pub use subject_token_violation::SubjectTokenViolation;

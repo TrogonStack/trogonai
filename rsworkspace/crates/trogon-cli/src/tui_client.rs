@@ -125,7 +125,6 @@ enum PermissionKey {
     Cancel,
 }
 
-const PERMISSION_TIMEOUT: Duration = Duration::from_secs(55);
 const ESCAPE_FOLLOW_MS: i32 = 50;
 const POLL_SLICE_MS: i32 = 200;
 const INVALID_KEY_DEBOUNCE: Duration = Duration::from_millis(750);
@@ -332,7 +331,6 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
     let mut guard = RawModeGuard { fd, original, drain_stdin_on_drop: true };
 
     tty_debug("waiting for permission key…");
-    let deadline = Instant::now() + PERMISSION_TIMEOUT;
     let mut last_invalid_msg: Option<Instant> = None;
 
     loop {
@@ -340,15 +338,11 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
             tty_debug("permission read cancelled by coordinator");
             break Ok(PermissionKey::Cancel);
         }
-        if Instant::now() >= deadline {
-            tty_debug("permission read timed out");
-            break Ok(PermissionKey::Cancel);
-        }
 
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let timeout_ms = remaining.as_millis().min(POLL_SLICE_MS as u128) as i32;
-
-        match read_byte_with_timeout(fd, timeout_ms)? {
+        // No wall-clock deadline: a permission prompt blocks on the human and must
+        // never auto-deny. Poll in fixed slices so coordinator cancellation (a newer
+        // prompt superseding this one, or session teardown) is still observed promptly.
+        match read_byte_with_timeout(fd, POLL_SLICE_MS)? {
             None => continue,
             Some(b'\r') | Some(b'\n') => {
                 tty_debug("permission read cancelled by Enter");
