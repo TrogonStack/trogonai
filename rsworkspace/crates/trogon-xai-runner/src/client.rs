@@ -143,13 +143,14 @@ impl Serialize for ToolSpec {
                 map.end()
             }
             Self::Function { name, description, parameters } => {
+                // xAI Responses API uses a flat structure (no nested "function" object):
+                // https://docs.x.ai/api — tools[].type="function" with name/description/parameters
+                // at the top level, unlike OpenAI Chat Completions which nests them.
                 serde_json::json!({
                     "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": description,
-                        "parameters": parameters,
-                    }
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
                 })
                 .serialize(s)
             }
@@ -709,6 +710,25 @@ fn process_sse_line(
                     name,
                     arguments,
                 });
+            }
+        }
+        // ── output_item.done — authoritative function-call completion ────────
+        // `response.output_item.done` carries the final, authoritative values
+        // for `call_id`, `name`, and `arguments` for function-call items.
+        // This is the ONLY reliable emission point for the new grok-4 format:
+        // `response.function_call_arguments.done` uses `item_id` (not `call_id`)
+        // and has no `name` field, so its guard (`!call_id.is_empty() || !name.is_empty()`)
+        // evaluates to false and no event is emitted from that handler. Using
+        // `output_item.done` avoids both the key mismatch and the double-emission risk.
+        "response.output_item.done" => {
+            if val["item"]["type"].as_str() == Some("function_call") {
+                let call_id = val["item"]["call_id"].as_str().unwrap_or("").to_string();
+                let name = val["item"]["name"].as_str().unwrap_or("").to_string();
+                let arguments = val["item"]["arguments"].as_str().unwrap_or("").to_string();
+                pending_fc.remove(&call_id);
+                if !call_id.is_empty() || !name.is_empty() {
+                    pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
+                }
             }
         }
         // ── Server-side tool call lifecycle events ───────────────────────────
@@ -2260,6 +2280,8 @@ mod tests {
 
     #[test]
     fn tool_spec_function_serializes_correctly() {
+        // xAI Responses API expects a flat structure — name/description/parameters
+        // at the top level, NOT nested under a "function" key (that's OpenAI format).
         let spec = ToolSpec::Function {
             name: "bash".to_string(),
             description: "Run a shell command".to_string(),
@@ -2267,9 +2289,9 @@ mod tests {
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["type"], "function");
-        assert_eq!(json["function"]["name"], "bash");
-        assert_eq!(json["function"]["description"], "Run a shell command");
-        assert!(json.get("name").is_none(), "top-level 'name' key must not appear in Function spec");
+        assert_eq!(json["name"], "bash", "name must be at top level (xAI Responses API flat format)");
+        assert_eq!(json["description"], "Run a shell command");
+        assert!(json.get("function").is_none(), "must not have nested 'function' key (that's OpenAI format)");
     }
 
     // ── InputItem serialization ───────────────────────────────────────────────
@@ -2632,5 +2654,57 @@ mod tests {
             Some(true),
             "'stream' must always be true in request body; body: {body}"
         );
+    }
+
+    // ── grok-4 new streaming format regression test ───────────────────────────
+
+    /// Verifies that the parser correctly emits a FunctionCall event when grok-4
+    /// sends the new Responses API event sequence (output_item.added →
+    /// function_call_arguments.delta → function_call_arguments.done →
+    /// output_item.done), as captured from the real xAI API 2026-05.
+    ///
+    /// The bug: `response.function_call_arguments.done` uses `item_id` (not
+    /// `call_id`) and has no `name` field — so the parser's guard
+    /// `!call_id.is_empty() || !name.is_empty()` evaluated to false and the
+    /// FunctionCall event was never emitted. `response.output_item.done`
+    /// (which carries all three fields) had no handler and fell through to `_ => {}`.
+    #[test]
+    fn grok4_function_call_new_event_format_emits_function_call_event() {
+        // Actual SSE data lines captured from the real grok-4 API (2026-05).
+        // The function_call_arguments.done event uses `item_id` (not `call_id`)
+        // and has no `name` field — both absent from the old xAI format the
+        // parser was written for.
+        let lines = [
+            // output_item.added — announces the function call, provides call_id + name
+            r#"data: {"sequence_number":22,"type":"response.output_item.added","item":{"arguments":"","call_id":"call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0","name":"write_file","type":"function_call","id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","status":"in_progress"},"output_index":1}"#,
+            // function_call_arguments.delta — uses item_id (not call_id), full args in one chunk
+            r#"data: {"sequence_number":23,"type":"response.function_call_arguments.delta","delta":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","item_id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","output_index":1}"#,
+            // function_call_arguments.done — uses item_id (not call_id), no name field
+            r#"data: {"sequence_number":24,"type":"response.function_call_arguments.done","arguments":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","item_id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","output_index":1}"#,
+            // output_item.done — has call_id, name, AND complete arguments
+            r#"data: {"sequence_number":25,"type":"response.output_item.done","item":{"arguments":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","call_id":"call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0","name":"write_file","type":"function_call","id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","status":"completed"},"output_index":1}"#,
+        ];
+
+        let events = parse_lines(&lines);
+
+        let fc_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, XaiEvent::FunctionCall { .. }))
+            .collect();
+
+        assert_eq!(
+            fc_events.len(),
+            1,
+            "exactly one FunctionCall event must be emitted from the grok-4 new format; got: {events:?}"
+        );
+
+        if let XaiEvent::FunctionCall { call_id, name, arguments } = &fc_events[0] {
+            assert_eq!(call_id, "call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0",
+                "call_id must match the value from response.output_item.done");
+            assert_eq!(name, "write_file",
+                "name must match the value from response.output_item.done");
+            assert!(arguments.contains("hello.txt"),
+                "arguments must contain the path; got: {arguments}");
+        }
     }
 }
