@@ -1374,6 +1374,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         let client = Arc::clone(&self.client);
         let mut assistant_text = String::new();
+        // Set to true when at least one TextDelta was received this turn so that
+        // TextComplete events (output_item.done fallback) can be skipped.
+        let mut received_text_delta = false;
         let mut current_turn_usage: Option<(u64, u64)> = None;
         let mut canceled = false;
         let mut timed_out = false;
@@ -1445,6 +1448,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
                 match event {
                     XaiEvent::TextDelta { text } => {
+                        received_text_delta = true;
                         assistant_text.push_str(&text);
                         let notif = SessionNotification::new(
                             session_id.clone(),
@@ -1453,6 +1457,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             )),
                         );
                         self.notifier.notify(notif).await;
+                    }
+                    XaiEvent::TextComplete { text } => {
+                        // Non-streaming text from output_item.done. Only use it
+                        // when no streaming deltas arrived — prevents duplicate
+                        // output when the model sends both (streaming-capable models).
+                        if !received_text_delta {
+                            assistant_text.push_str(&text);
+                            let notif = SessionNotification::new(
+                                session_id.clone(),
+                                SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::from(text),
+                                )),
+                            );
+                            self.notifier.notify(notif).await;
+                        }
                     }
                     XaiEvent::ResponseId { id } => {
                         current_response_id = Some(id);
@@ -1573,6 +1592,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             stale_retry_done = true;
                             // Clear any text accumulated before the error.
                             assistant_text.clear();
+                            received_text_delta = false;
                             // Clear usage captured before the error.
                             current_turn_usage = None;
                             // Clear any pending tool calls from the failed attempt.
