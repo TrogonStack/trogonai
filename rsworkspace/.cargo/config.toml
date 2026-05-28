@@ -3,4 +3,6 @@ cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
+    "--ignore-filename-regex",
+    "crates/trogonai-proto/src/gen/.*",
 ]
