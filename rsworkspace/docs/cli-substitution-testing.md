@@ -607,6 +607,90 @@ trogon
 
 ---
 
+## P. Git & GitHub Tools ✅
+
+Trogon exposes native git tools (`git_status`, `git_diff`, `git_log`, `git_commit`,
+`git_create_branch`, `git_push`). GitHub operations use `bash` + `gh` CLI — the same
+path Claude Code takes.
+
+**Prerequisites**
+```bash
+# gh CLI must be installed and authenticated
+gh auth status   # should show "Logged in to github.com"
+```
+
+**P1. git_status**
+```bash
+cd rsworkspace
+trogon
+# ask: "what files have uncommitted changes?"
+# Expect: Claude calls git_status and lists modified files
+```
+
+**P2. git_diff**
+```bash
+# ask: "show me the diff of my current changes"
+# Expect: Claude calls git_diff and shows the diff (truncated at 4KB)
+# For staged changes:
+# ask: "show me what is staged"
+# Expect: Claude passes --staged to git_diff
+```
+
+**P3. git_log**
+```bash
+# ask: "show me the last 10 commits"
+# Expect: Claude calls git_log and shows recent commits (oneline format)
+```
+
+**P4. git_commit**
+```bash
+# Make a throwaway change:
+echo "test" > /tmp/git-tool-test.txt && cd rsworkspace && echo "# test" >> README.md
+# ask: "commit README.md with message 'test: git tool'"
+# Expect: Claude stages README.md and commits — no manual git commands
+git log --oneline -1   # verify commit exists
+git reset HEAD~1 --mixed   # undo
+```
+
+**P5. git_create_branch**
+```bash
+cd rsworkspace
+trogon
+# ask: "create a branch called test/git-tools and switch to it"
+# Expect: Claude calls git_create_branch with checkout=true
+git branch   # shows * test/git-tools
+git checkout programming-gaps   # switch back
+git branch -d test/git-tools
+```
+
+**P6. git_push (dry run)**
+```bash
+# ask: "what branch am I on and push it to origin with upstream tracking"
+# Expect: Claude calls git_push with set_upstream=true
+# Note: this will actually push — only run on a safe test branch
+```
+
+**P7. GitHub via bash — PR creation**
+```bash
+# (requires gh authenticated, on a branch with commits ahead of main)
+# ask: "open a draft PR against main with title 'test PR' and body 'testing gh integration'"
+# Expect: Claude runs `gh pr create --draft --title ... --body ...`
+```
+
+**P8. GitHub via bash — PR status**
+```bash
+# ask: "list open PRs in this repo"
+# Expect: Claude runs `gh pr list` and shows results
+```
+
+**P9. GitHub via bash — issue list**
+```bash
+# ask: "show me the last 5 open issues"
+# Expect: Claude runs `gh issue list --limit 5`
+```
+
+---
+
 ## Known Gaps (❌ Not Implemented)
 
 These are Claude Code features **not built** in trogon. Not test failures — known scope gaps.
@@ -616,7 +700,7 @@ These are Claude Code features **not built** in trogon. Not test failures — kn
 | Hooks system | PreToolUse, PostToolUse, Stop, etc. | ❌ |
 | Checkpointing | `/rewind`, file snapshots | ❌ |
 | Auth | `/login`, `/logout`, OAuth | ❌ |
-| GitHub integration | `/pr-comments`, `/review` | ❌ |
+| GitHub integration | `/pr-comments`, `/review` | via `bash` + `gh` CLI ⚠️ |
 | Vim mode | `/vim`, vi keybindings | ❌ |
 | IDE management | `/ide` | ❌ |
 | Plugin/skill marketplace | `/plugin install`, SKILL.md | ❌ (planned) |
