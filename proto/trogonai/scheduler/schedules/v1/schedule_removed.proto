@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+// ScheduleRemoved is terminal for a schedule stream so removed ids are not recreated.
+message ScheduleRemoved {
+  // Stable NATS token for the schedule stream being removed.
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
