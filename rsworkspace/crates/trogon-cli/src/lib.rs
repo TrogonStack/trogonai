@@ -130,6 +130,7 @@ pub async fn connect_or_start_nats(
     // race does not produce "address already in use" noise on the terminal.
     let child = match Command::new("nats-server")
         .args(["-p", port, "-js"])
+        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
     {

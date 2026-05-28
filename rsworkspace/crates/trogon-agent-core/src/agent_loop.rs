@@ -127,7 +127,8 @@ impl AnthropicHttpClient for reqwest::Client {
                     .get("retry-after")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(60);
+                    .unwrap_or(30)
+                    .min(30);
                 warn!(attempt, retry_after, "Anthropic 429 — waiting before retry");
                 tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
                 attempt += 1;
