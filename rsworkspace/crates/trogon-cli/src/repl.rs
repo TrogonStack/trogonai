@@ -52,10 +52,11 @@ impl Completer for FileAtHelper {
         if partial.contains(' ') {
             return Ok((pos, vec![]));
         }
-        let (dir, prefix) = if let Some(slash) = partial.rfind('/') {
-            (self.cwd.join(&partial[..=slash]), &partial[slash + 1..])
+        let (dir, prefix, dir_prefix) = if let Some(slash) = partial.rfind('/') {
+            let (dir_part, file_part) = partial.split_at(slash + 1);
+            (self.cwd.join(dir_part), file_part, dir_part)
         } else {
-            (self.cwd.clone(), partial)
+            (self.cwd.clone(), partial, "")
         };
         let mut pairs: Vec<Pair> = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -63,8 +64,8 @@ impl Completer for FileAtHelper {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.starts_with(prefix) {
                     let suffix = if entry.path().is_dir() { "/" } else { "" };
-                    let replacement = format!("{name}{suffix}");
-                    pairs.push(Pair { display: replacement.clone(), replacement });
+                    let replacement = format!("{dir_prefix}{name}{suffix}");
+                    pairs.push(Pair { display: format!("{name}{suffix}"), replacement });
                 }
             }
         }
