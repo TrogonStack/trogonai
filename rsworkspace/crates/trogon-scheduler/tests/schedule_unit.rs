@@ -1,0 +1,246 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
+use buffa::MessageField;
+use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
+use trogon_scheduler::{
+    AddScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
+    PauseScheduleCommand, RemoveScheduleCommand, Schedule, ScheduleActor, ScheduleEventDelivery, ScheduleEventSchedule,
+    ScheduleEventStatus, ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
+    commands::domain as command_domain,
+    mocks::{MockLeaderLock, MockSchedulePublisher, MockSchedulerStore},
+};
+
+fn position(value: u64) -> StreamPosition {
+    StreamPosition::try_new(value).expect("test stream position must be non-zero")
+}
+
+fn command_job_id(id: &str) -> command_domain::ScheduleId {
+    command_domain::ScheduleId::parse(id).unwrap()
+}
+
+fn actor() -> ScheduleActor {
+    ScheduleActor::parse("test-actor").unwrap()
+}
+
+fn event_at() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+}
+
+fn expected_job(id: &str) -> Schedule {
+    Schedule {
+        id: id.to_string(),
+        status: ScheduleEventStatus::Enabled,
+        schedule: ScheduleEventSchedule::Every { every_sec: 30 },
+        delivery: ScheduleEventDelivery::NatsEvent {
+            route: "agent.run".to_string(),
+            ttl_sec: None,
+            source: None,
+        },
+        message: MessageEnvelope {
+            content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+            headers: MessageHeaders::default(),
+        },
+    }
+}
+
+fn command_base_job(id: &str) -> command_domain::Job {
+    command_domain::Job {
+        id: command_job_id(id),
+        status: command_domain::JobStatus::Enabled,
+        schedule: command_domain::Schedule::every(30).unwrap(),
+        delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
+        message: command_domain::JobMessage {
+            content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+            headers: command_domain::JobHeaders::default(),
+        },
+    }
+}
+
+#[tokio::test]
+async fn client_register_then_get() {
+    let store = MockSchedulerStore::new();
+
+    let job = command_base_job("backup");
+    CommandExecution::new(&store, &AddScheduleCommand::new(job, actor(), event_at()))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
+
+    let got = store
+        .get_schedule(GetScheduleCommand::new(ScheduleId::parse("backup").unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(got, Some(expected_job("backup")));
+}
+
+#[tokio::test]
+async fn client_pause_job_toggles_job() {
+    let store = MockSchedulerStore::new();
+
+    CommandExecution::new(
+        &store,
+        &AddScheduleCommand::new(command_base_job("toggle"), actor(), event_at()),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
+    CommandExecution::new(
+        &store,
+        &PauseScheduleCommand::new(command_job_id("toggle"), actor(), event_at()),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
+
+    let got = store
+        .get_schedule(GetScheduleCommand::new(ScheduleId::parse("toggle").unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.status, ScheduleEventStatus::Disabled);
+}
+
+#[tokio::test]
+async fn client_remove_and_list_schedules_use_store_paths() {
+    let store = MockSchedulerStore::new();
+
+    CommandExecution::new(
+        &store,
+        &AddScheduleCommand::new(command_base_job("alpha"), actor(), event_at()),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
+    CommandExecution::new(
+        &store,
+        &AddScheduleCommand::new(command_base_job("beta"), actor(), event_at()),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
+
+    let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
+    assert_eq!(listed.len(), 2);
+
+    CommandExecution::new(
+        &store,
+        &RemoveScheduleCommand::new(command_job_id("beta"), actor(), event_at()),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
+
+    assert!(
+        store
+            .get_schedule(GetScheduleCommand::new(ScheduleId::parse("beta").unwrap()))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.list_schedules(ListSchedulesCommand).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn client_rejects_invalid_route() {
+    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
+        "id": "bad",
+        "schedule": { "type": "every", "every_sec": 30 },
+        "delivery": { "type": "nats_event", "route": "agent.>" },
+        "content": "{\"kind\":\"heartbeat\"}"
+    }))
+    .unwrap_err();
+
+    assert!(error.to_string().contains("route"));
+}
+
+#[tokio::test]
+async fn client_rejects_invalid_source_subject() {
+    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
+        "id": "bad-source",
+        "schedule": { "type": "every", "every_sec": 30 },
+        "delivery": {
+            "type": "nats_event",
+            "route": "agent.run",
+            "source": { "type": "latest_from_subject", "subject": "sensors.>" }
+        },
+        "content": "{\"kind\":\"heartbeat\"}"
+    }))
+    .unwrap_err();
+
+    assert!(error.to_string().contains("sampling source"));
+}
+
+#[tokio::test]
+async fn client_rejects_stale_version() {
+    let error = ScheduleWriteCondition::MustBeAtPosition(position(99))
+        .ensure(
+            "stale",
+            trogon_scheduler::config::ScheduleWriteState::new(Some(position(1)), true),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        trogon_scheduler::SchedulerError::OptimisticConcurrencyConflict { .. }
+    ));
+}
+
+#[tokio::test]
+async fn mock_schedule_publisher_records_changes() {
+    let publisher = MockSchedulePublisher::new();
+    let job = trogon_scheduler::v1::ScheduleAdded {
+        schedule_id: "alpha".to_string(),
+        added_at: trogon_scheduler::commands::domain::proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
+        status: trogon_scheduler::v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
+        schedule: MessageField::some(trogon_scheduler::v1::Schedule {
+            kind: Some(trogon_scheduler::v1::EverySchedule { every_sec: 30 }.into()),
+        }),
+        delivery: MessageField::some(trogon_scheduler::v1::Delivery {
+            kind: Some(
+                trogon_scheduler::v1::NatsEventDelivery {
+                    route: "agent.run".to_string(),
+                    ttl_sec: None,
+                    source: MessageField::none(),
+                }
+                .into(),
+            ),
+        }),
+        message: MessageField::some(trogon_scheduler::v1::Message {
+            content: r#"{"kind":"heartbeat"}"#.to_string(),
+            headers: Vec::new(),
+        }),
+        added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
+            value: "test-actor".to_string(),
+        }),
+    };
+    let resolved = trogon_scheduler::ResolvedSchedule::from_event("alpha", &job).unwrap();
+
+    publisher.upsert_schedule(&resolved).await.unwrap();
+    publisher.remove_schedule("alpha").await.unwrap();
+
+    assert_eq!(publisher.upserts(), vec!["scheduler.schedules.alpha"]);
+    assert_eq!(publisher.removals(), vec!["alpha"]);
+}
+
+#[test]
+fn controller_new_with_mocks_compiles() {
+    let _controller = SchedulerController::new(
+        MockSchedulerStore::new(),
+        MockSchedulePublisher::new(),
+        MockLeaderLock::new(),
+    );
+}

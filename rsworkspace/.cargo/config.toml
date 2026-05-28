@@ -4,5 +4,5 @@ cov = [
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/trogonai-proto/src/gen/.*",
+    "crates/trogonai-proto/src/gen/.*|crates/trogon-eventsourcing/src/nats/.*|crates/trogon-scheduler/src/(nats|kv)\\.rs|crates/trogon-scheduler/src/store/.*|crates/trogon-nats/src/(client|jetstream/traits)\\.rs",
 ]
