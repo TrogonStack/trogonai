@@ -3246,6 +3246,7 @@ dependencies = [
  "buffa",
  "buffa-types",
  "serde",
+ "trogon-decider-runtime",
 ]
 
 [[package]]
