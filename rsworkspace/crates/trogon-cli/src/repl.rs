@@ -255,9 +255,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
     };
 
+    // Claude-style interrupt UX: when Ctrl+C cancels an in-flight response, the
+    // prompt the user submitted is stashed here and pre-filled into the next
+    // readline so they can edit and resend it instead of retyping it.
+    let mut pending_input: Option<String> = None;
+
     loop {
         permission_coordinator.cancel_pending();
-        match rl.readline("> ") {
+        let read = match pending_input.take() {
+            Some(text) => rl.readline_with_initial("> ", (&text, "")),
+            None => rl.readline("> "),
+        };
+        match read {
             Ok(raw_line) => {
                 let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
@@ -716,6 +725,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     session.cancel().await;
                                     if tool_line_active { eprint!("\r\x1b[2K\n"); let _ = std::io::stderr().flush(); }
                                     eprintln!("\n[cancelled]");
+                                    // Claude-style: restore the interrupted prompt so the
+                                    // next readline is pre-filled with it, ready to edit/resend.
+                                    pending_input = Some(line.clone());
                                     break;
                                 }
                                 event = rx.recv() => {
