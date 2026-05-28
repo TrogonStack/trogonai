@@ -52,6 +52,18 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
             .map_err(to_acp_error)
     }
 
+    /// Like [`request`] but never times out — for requests that block on human
+    /// input (permission prompts), where any fixed timeout wrongly denies the user.
+    async fn request_no_timeout<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
+        &self,
+        subject: &impl crate::nats::markers::ClientRequestable,
+        args: &Req,
+    ) -> Result<Resp> {
+        crate::nats::request_no_timeout(&self.nats, subject, args)
+            .await
+            .map_err(to_acp_error)
+    }
+
     async fn notify<Req: serde::Serialize>(
         &self,
         subject: &impl crate::nats::markers::ClientPublishable,
@@ -75,7 +87,9 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
 impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<N> {
     async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
         let s = session::client::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
-        self.request(&s, &args).await
+        // Permission prompts wait on the human — never time out. The CLI replies on
+        // the request's inbox once the user answers (or the connection drops).
+        self.request_no_timeout(&s, &args).await
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
