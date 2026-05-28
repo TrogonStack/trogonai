@@ -161,20 +161,22 @@ ls ~/.local/share/trogon/history   # file exists
 
 **E1. Basic file expansion**
 ```bash
+cd rsworkspace   # paths are relative to session cwd
 trogon
-# type: summarize @rsworkspace/Cargo.toml
+# type: summarize @Cargo.toml
 # Expect: Claude receives the file content and summarizes it
 ```
 
 **E2. Tab completion**
 ```bash
-# type: @rsworkspace/crates/trogon-cl   then Tab
-# Expect: completes to trogon-cli/
+# (run trogon from rsworkspace/ so relative paths work cleanly)
+# type: @crates/trogon-cl   then Tab
+# Expect: completes to @crates/trogon-cli/
 ```
 
 **E3. Directory rejected**
 ```bash
-# type: @rsworkspace/crates
+# type: @crates
 # Expect: "is a directory" error, not a crash
 ```
 
