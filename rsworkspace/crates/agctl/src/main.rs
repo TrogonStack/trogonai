@@ -1,3 +1,4 @@
+mod mcp;
 mod traffic;
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ struct Cli {
 enum Command {
     Registry(RegistryCommand),
     Traffic(traffic::TrafficCommand),
+    Mcp(mcp::McpCommand),
 }
 
 #[derive(Args, Debug)]
@@ -54,6 +56,7 @@ async fn main() -> ExitCode {
             RegistrySubcommand::Sync(args) => run_registry_sync(args),
         },
         Command::Traffic(traffic) => traffic::run(traffic).await,
+        Command::Mcp(mcp) => mcp::run(mcp),
     }
 }
 
