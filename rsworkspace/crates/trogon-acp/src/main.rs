@@ -38,6 +38,7 @@ mod multi_runner;
 use std::sync::Arc;
 
 use acp_nats::{AcpPrefix, Bridge, Config};
+use acp_nats::jetstream::provision::provision_streams;
 use agent_client_protocol::{
     AgentSideConnection, Client, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionRequest, SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
@@ -85,6 +86,18 @@ async fn main() -> anyhow::Result<()> {
     info!(url = %nats_url, "connected to NATS");
 
     let js = jetstream::new(nats.clone());
+
+    // ── JetStream streams for the embedded-Claude bridge ─────────────────────
+    // The TrogonAcpAgent bridge uses JetStream (COMMANDS / RESPONSES / NOTIFICATIONS
+    // streams) to communicate with the embedded TrogonAgent for Claude sessions.
+    // Without these streams the bridge's prompt::handle fails with
+    // "get notifications stream: stream not found" — same provision call every
+    // standalone runner (xai, openrouter, acp-runner) already makes at startup.
+    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)?;
+    let js_for_provision = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
+    provision_streams(&js_for_provision, &acp_prefix_typed)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to provision JetStream streams: {e}"))?;
 
     // ── AgentLoop ─────────────────────────────────────────────────────────────
 
@@ -152,9 +165,8 @@ async fn main() -> anyhow::Result<()> {
         None,
         gateway_config.clone(),
     );
-    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)?;
     let (_, runner_io_task) =
-        AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed, |fut| {
+        AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed.clone(), |fut| {
             tokio::task::spawn_local(fut);
         });
 

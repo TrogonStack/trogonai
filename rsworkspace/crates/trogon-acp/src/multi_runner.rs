@@ -390,9 +390,35 @@ where
         // Capture cwd so a runner session can be opened on model selection.
         let cwd = args.cwd.to_string_lossy().to_string();
         let resp = self.inner.new_session(args).await?;
+        let acp_sid = resp.session_id.0.to_string();
         self.session_cwd
             .borrow_mut()
-            .insert(resp.session_id.0.to_string(), cwd);
+            .insert(acp_sid.clone(), cwd.clone());
+
+        // If the deploy-time default model (AGENT_MODEL) is served by an external runner,
+        // establish routing now so the FIRST prompt reaches that runner. Without this the
+        // first prompt falls through to the embedded bridge, whose JetStream streams
+        // trogon-acp never provisions → "get notifications stream: stream not found".
+        // Best-effort: if the runner is unavailable the session still succeeds and the
+        // user can select a model later (set_session_model sets up routing then).
+        let default_model = self.inner.default_model.clone();
+        if let Some(prefix) = self.resolve_external_prefix(&default_model).await
+            && let Some(runner_sid) = self.open_runner_session(&prefix, &cwd, &default_model).await
+        {
+            self.active_sessions
+                .borrow_mut()
+                .insert(acp_sid.clone(), (prefix.clone(), runner_sid.clone()));
+            self.id_remap.borrow_mut().insert(runner_sid, acp_sid.clone());
+            // Persist the chosen model to KV so load_session / fork_session / resume_session
+            // and a process restart re-route correctly via the lazy path in prompt().
+            if let Ok(mut state) = self.store.load(&acp_sid).await
+                && state.model.is_none()
+            {
+                state.model = Some(default_model);
+                let _ = self.store.save(&acp_sid, &state).await;
+            }
+        }
+
         // Replace inner's Claude-only model list with the full multi-runner list.
         let current = resp
             .models
