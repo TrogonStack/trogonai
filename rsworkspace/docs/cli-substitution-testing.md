@@ -585,6 +585,32 @@ pkill trogon-xai-runner
 # Expect: "99" — session restored from KV
 ```
 
+**N3. Blank responses from grok-4 — stale HTTP connection**
+
+grok-4 can return blank responses if the xai-runner has a stale connection to the
+xAI API (stream opens and closes immediately with no events). The runner also handles
+non-streaming delivery via `response.output_item.done` for reasoning-heavy turns.
+
+```bash
+/model grok
+# type: "hello"
+# If response is blank (cursor returns with no text, 0 tokens in /cost):
+# → xai-runner has a stale HTTP connection. Restart the dev stack:
+./scripts/trogon-dev.sh
+trogon
+/model grok
+# type: "hello"
+# Expect: normal response
+```
+
+To verify `response.output_item.done` delivery (non-streaming path):
+```bash
+/model grok
+# type: "explain in detail how quicksort works"
+# Expect: full explanation — grok-4 may deliver this non-incrementally
+#         (text appears all at once rather than word-by-word); both paths work
+```
+
 ---
 
 ## O. `.env.local` Loading ✅
