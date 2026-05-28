@@ -1,14 +1,11 @@
-use chrono::{DateTime, Utc};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::{Job, ScheduleActor, ScheduleId, job_added_from_job};
+use super::domain::{Job, ScheduleId, schedule_created_from_job};
 
 #[derive(Debug, Clone)]
 pub struct AddScheduleCommand {
     pub job: Job,
-    pub actor: ScheduleActor,
-    pub added_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +25,8 @@ impl std::fmt::Display for AddScheduleDecideError {
 impl std::error::Error for AddScheduleDecideError {}
 
 impl AddScheduleCommand {
-    pub fn new(job: Job, actor: ScheduleActor, added_at: DateTime<Utc>) -> Self {
-        Self { job, actor, added_at }
+    pub fn new(job: Job) -> Self {
+        Self { job }
     }
 }
 
@@ -63,7 +60,7 @@ impl Decider for AddScheduleCommand {
         };
         match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => Ok(Decision::event(v1::ScheduleEvent {
-                event: Some(job_added_from_job(&command.job, &command.added_at, &command.actor).into()),
+                event: Some(schedule_created_from_job(&command.job).into()),
             })),
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
                 Err(AddScheduleDecideError::AlreadyExists {
@@ -92,36 +89,23 @@ mod tests {
 
     use super::*;
     use crate::commands::domain::{
-        Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule as DomainSchedule, ScheduleActor,
-        proto_timestamp,
+        Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule as DomainSchedule,
     };
     use crate::{
         GetScheduleCommand, MessageContent as ReadMessageContent, MessageEnvelope, MessageHeaders, Schedule,
         ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, mocks::MockSchedulerStore,
     };
 
-    const EVENT_TIMESTAMP: &str = "2026-05-22T00:00:00+00:00";
-
-    fn event_at() -> DateTime<Utc> {
-        chrono::DateTime::parse_from_rfc3339(EVENT_TIMESTAMP)
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    }
-
     fn job_id(id: &str) -> ScheduleId {
         ScheduleId::parse(id).unwrap()
     }
 
-    fn actor() -> ScheduleActor {
-        ScheduleActor::parse("test-actor").unwrap()
-    }
-
     fn add_job_command(id: &str) -> AddScheduleCommand {
-        AddScheduleCommand::new(job(id), actor(), event_at())
+        AddScheduleCommand::new(job(id))
     }
 
     fn remove_job_command(id: &str) -> crate::RemoveScheduleCommand {
-        crate::RemoveScheduleCommand::new(ScheduleId::parse(id).unwrap(), actor(), event_at())
+        crate::RemoveScheduleCommand::new(ScheduleId::parse(id).unwrap())
     }
 
     fn job(id: &str) -> Job {
@@ -140,10 +124,10 @@ mod tests {
     fn expected_job(id: &str) -> Schedule {
         Schedule {
             id: id.to_string(),
-            status: ScheduleEventStatus::Enabled,
+            status: ScheduleEventStatus::Scheduled,
             schedule: ScheduleEventSchedule::Every { every_sec: 30 },
-            delivery: ScheduleEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
+            delivery: ScheduleEventDelivery::NatsMessage {
+                subject: "agent.run".to_string(),
                 ttl_sec: None,
                 source: None,
             },
@@ -156,7 +140,7 @@ mod tests {
 
     fn added(id: &str) -> v1::ScheduleEvent {
         v1::ScheduleEvent {
-            event: Some(job_added_from_job(&job(id), &event_at(), &actor()).into()),
+            event: Some(schedule_created_from_job(&job(id)).into()),
         }
     }
 
@@ -165,8 +149,6 @@ mod tests {
             event: Some(
                 v1::ScheduleRemoved {
                     schedule_id: "backup".to_string(),
-                    removed_at: proto_timestamp(&event_at()),
-                    removed_by: actor().into(),
                 }
                 .into(),
             ),

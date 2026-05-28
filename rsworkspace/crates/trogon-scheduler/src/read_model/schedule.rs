@@ -14,7 +14,7 @@ pub struct Schedule {
 
 impl Schedule {
     pub fn is_enabled(&self) -> bool {
-        matches!(self.status, ScheduleEventStatus::Enabled)
+        matches!(self.status, ScheduleEventStatus::Scheduled)
     }
 }
 

@@ -16,7 +16,7 @@ use trogon_nats::lease::{LeaderElection, LeaseRenewInterval, LeaseTiming, LeaseT
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    ResolvedSchedule, ScheduleEventCase,
+    ResolvedSchedule, ScheduleEventCase, ScheduleStatusKind,
     error::SchedulerError,
     kv::{EVENTS_SUBJECT_PREFIX, LEADER_BUCKET, LEADER_KEY},
     nats::NatsSchedulePublisher,
@@ -54,7 +54,7 @@ enum DesiredJobState {
 #[derive(Debug, Clone)]
 struct SchedulerJob {
     id: String,
-    details: v1::ScheduleAdded,
+    details: v1::ScheduleCreated,
     enabled: bool,
 }
 
@@ -65,9 +65,13 @@ struct DesiredJobsRollback {
 }
 
 impl SchedulerJob {
-    fn from_event(id: &str, details: &v1::ScheduleAdded) -> Self {
+    fn from_event(id: &str, details: &v1::ScheduleCreated) -> Self {
         let details = details.clone();
-        let enabled = details.status != v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED;
+        let is_paused = matches!(
+            details.status.as_option().and_then(|s| s.kind.as_ref()),
+            Some(ScheduleStatusKind::Paused(_))
+        );
+        let enabled = !is_paused;
         Self {
             id: id.to_string(),
             details,
@@ -77,12 +81,16 @@ impl SchedulerJob {
 
     fn pause(&mut self) {
         self.enabled = false;
-        self.details.status = v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED;
+        self.details.status = buffa::MessageField::some(v1::ScheduleStatus {
+            kind: Some(v1::schedule_status::Paused {}.into()),
+        });
     }
 
     fn resume(&mut self) {
         self.enabled = true;
-        self.details.status = v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED;
+        self.details.status = buffa::MessageField::some(v1::ScheduleStatus {
+            kind: Some(v1::schedule_status::Scheduled {}.into()),
+        });
     }
 
     fn resolve(&self) -> Result<ResolvedSchedule, SchedulerError> {
@@ -429,7 +437,7 @@ fn apply_scheduler_event(
     validate_scheduler_event_job_id(stream_id, event)?;
 
     match &event.event {
-        Some(ScheduleEventCase::ScheduleAdded(inner)) => {
+        Some(ScheduleEventCase::ScheduleCreated(inner)) => {
             if matches!(desired_jobs.get(stream_id), Some(DesiredJobState::Deleted)) {
                 return Err(SchedulerError::event_source(
                     "scheduler received an add event for a deleted job stream",
@@ -509,7 +517,7 @@ fn validate_scheduler_event_job_id(stream_id: &str, event: &v1::ScheduleEvent) -
 
 fn scheduler_event_job_id(event: &v1::ScheduleEvent) -> Option<&str> {
     match &event.event {
-        Some(ScheduleEventCase::ScheduleAdded(inner)) => Some(&inner.schedule_id),
+        Some(ScheduleEventCase::ScheduleCreated(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::SchedulePaused(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::ScheduleResumed(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::ScheduleRemoved(inner)) => Some(&inner.schedule_id),
@@ -771,27 +779,25 @@ mod tests {
 
     use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
     use buffa::MessageField;
+    use buffa_types::google::protobuf::Duration;
 
     use super::{
         DesiredJobState, DesiredJobsRollback, SchedulerChange, SchedulerController, SchedulerJob,
         apply_scheduler_change, apply_scheduler_event, default_leader_timing, next_scheduler_start_sequence,
         reconcile_snapshot, scheduler_consumer_config, scheduler_replay_consumer_config,
     };
-    use crate::commands::domain::proto_timestamp_rfc3339;
     use crate::mocks::{MockLeaderLock, MockSchedulePublisher, MockSchedulerStore};
     use crate::v1;
 
-    fn base_job_details() -> v1::ScheduleAdded {
-        v1::ScheduleAdded {
+    fn base_job_details() -> v1::ScheduleCreated {
+        v1::ScheduleCreated {
             schedule_id: "heartbeat".to_string(),
-            added_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-            status: v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
+            status: MessageField::some(v1::ScheduleStatus {
+                kind: Some(v1::schedule_status::Scheduled {}.into()),
+            }),
             schedule: MessageField::some(every_schedule(30)),
             delivery: MessageField::some(nats_delivery(None)),
             message: MessageField::some(message(r#"{"kind":"heartbeat"}"#, [])),
-            added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                value: "test-actor".to_string(),
-            }),
         }
     }
 
@@ -804,7 +810,9 @@ mod tests {
     fn disabled_job(id: &str) -> SchedulerJob {
         let mut details = base_job_details();
         details.schedule_id = id.to_string();
-        details.status = v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED;
+        details.status = MessageField::some(v1::ScheduleStatus {
+            kind: Some(v1::schedule_status::Paused {}.into()),
+        });
         SchedulerJob::from_event(id, &details)
     }
 
@@ -812,33 +820,30 @@ mod tests {
         let mut details = base_job_details();
         details.schedule_id = id.to_string();
         v1::ScheduleEvent {
-            event: Some(
-                v1::ScheduleAdded {
-                    schedule_id: details.schedule_id.clone(),
-                    added_at: details.added_at.clone(),
-                    status: details.status,
-                    schedule: details.schedule,
-                    delivery: details.delivery,
-                    message: details.message,
-                    added_by: details.added_by,
+            event: Some(details.into()),
+        }
+    }
+
+    fn every_schedule(every_sec: u64) -> v1::Schedule {
+        v1::Schedule {
+            kind: Some(
+                v1::schedule::Every {
+                    every: MessageField::some(Duration {
+                        seconds: every_sec as i64,
+                        ..Default::default()
+                    }),
                 }
                 .into(),
             ),
         }
     }
 
-    fn every_schedule(every_sec: u64) -> v1::Schedule {
-        v1::Schedule {
-            kind: Some(v1::EverySchedule { every_sec }.into()),
-        }
-    }
-
     fn cron_schedule(expr: &str) -> v1::Schedule {
         v1::Schedule {
             kind: Some(
-                v1::CronSchedule {
+                v1::schedule::Cron {
                     expr: expr.to_string(),
-                    timezone: String::new(),
+                    timezone: MessageField::none(),
                 }
                 .into(),
             ),
@@ -848,13 +853,13 @@ mod tests {
     fn nats_delivery(source: Option<&str>) -> v1::Delivery {
         v1::Delivery {
             kind: Some(
-                v1::NatsEventDelivery {
-                    route: "agent.run".to_string(),
-                    ttl_sec: None,
+                v1::delivery::NatsMessage {
+                    subject: "agent.run".to_string(),
+                    ttl: MessageField::none(),
                     source: source
-                        .map(|subject| v1::SamplingSource {
+                        .map(|subject| v1::delivery::nats_message::Source {
                             kind: Some(
-                                v1::LatestFromSubjectSampling {
+                                v1::delivery::nats_message::LatestFromSubject {
                                     subject: subject.to_string(),
                                 }
                                 .into(),
@@ -870,7 +875,10 @@ mod tests {
 
     fn message<const N: usize>(content: &str, headers: [(&str, &str); N]) -> v1::Message {
         v1::Message {
-            content: content.to_string(),
+            content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+                content_type: "application/json".to_string(),
+                data: content.as_bytes().to_vec(),
+            }),
             headers: headers
                 .into_iter()
                 .map(|(name, value)| v1::Header {
@@ -886,10 +894,6 @@ mod tests {
             event: Some(
                 v1::SchedulePaused {
                     schedule_id: id.to_string(),
-                    paused_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-                    paused_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                        value: "test-actor".to_string(),
-                    }),
                 }
                 .into(),
             ),
@@ -901,10 +905,6 @@ mod tests {
             event: Some(
                 v1::ScheduleResumed {
                     schedule_id: id.to_string(),
-                    resumed_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-                    resumed_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                        value: "test-actor".to_string(),
-                    }),
                 }
                 .into(),
             ),
@@ -916,10 +916,6 @@ mod tests {
             event: Some(
                 v1::ScheduleRemoved {
                     schedule_id: id.to_string(),
-                    removed_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-                    removed_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                        value: "test-actor".to_string(),
-                    }),
                 }
                 .into(),
             ),

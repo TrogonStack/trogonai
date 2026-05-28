@@ -9,7 +9,7 @@ use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, Stre
 use trogon_nats::{NatsConfig, connect as nats_connect};
 use trogon_scheduler::{
     AddScheduleCommand, GetScheduleCommand, PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand,
-    ScheduleActor, ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, SchedulerController,
+    ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, SchedulerController,
     commands::domain as command_domain, connect_store, get_schedule, state_v1, v1,
 };
 
@@ -19,14 +19,6 @@ fn test_url() -> String {
 
 fn command_job_id(id: &str) -> command_domain::ScheduleId {
     command_domain::ScheduleId::parse(id).unwrap()
-}
-
-fn actor() -> ScheduleActor {
-    ScheduleActor::parse("test-actor").unwrap()
-}
-
-fn event_at() -> chrono::DateTime<chrono::Utc> {
-    Utc::now()
 }
 
 async fn connect() -> async_nats::Client {
@@ -182,7 +174,7 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -213,7 +205,7 @@ async fn controller_reconciles_sampling_job() {
         source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -246,7 +238,7 @@ async fn controller_reconciles_schedule_with_timezone() {
     let mut job = base_job("cron-timezone");
     job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -271,7 +263,7 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -283,7 +275,7 @@ async fn disabling_job_removes_schedule_subject() {
 
     CommandExecution::new(
         &store.event_store,
-        &PauseScheduleCommand::new(command_job_id("disabled"), actor(), event_at()),
+        &PauseScheduleCommand::new(command_job_id("disabled")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -307,7 +299,7 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -319,7 +311,7 @@ async fn removing_job_removes_schedule_subject() {
 
     CommandExecution::new(
         &store.event_store,
-        &RemoveScheduleCommand::new(command_job_id("removed"), actor(), event_at()),
+        &RemoveScheduleCommand::new(command_job_id("removed")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -345,7 +337,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         timezone: Some("UTC".to_string()),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -353,7 +345,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         .unwrap();
     CommandExecution::new(
         &store.event_store,
-        &PauseScheduleCommand::new(command_job_id("eventful"), actor(), event_at()),
+        &PauseScheduleCommand::new(command_job_id("eventful")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -370,7 +362,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(rebuilt.status, ScheduleEventStatus::Disabled);
+    assert_eq!(rebuilt.status, ScheduleEventStatus::Paused);
     assert_eq!(rebuilt.schedule, expected_schedule);
 }
 
@@ -384,7 +376,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let job = base_job("lifecycle");
     let command_id = command_job_id("lifecycle");
 
-    let added = CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job, actor(), event_at()))
+    let added = CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -396,45 +388,36 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
     );
 
-    let paused = CommandExecution::new(
-        &store.event_store,
-        &PauseScheduleCommand::new(command_id.clone(), actor(), event_at()),
-    )
-    .with_snapshot(&store.event_store)
-    .with_task_runtime(TokioSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    let paused = CommandExecution::new(&store.event_store, &PauseScheduleCommand::new(command_id.clone()))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
     assert_eq!(paused.stream_position.as_u64(), added_position.as_u64() + 1);
     assert_eq!(
         paused.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
     );
 
-    let resumed = CommandExecution::new(
-        &store.event_store,
-        &ResumeScheduleCommand::new(command_id.clone(), actor(), event_at()),
-    )
-    .with_snapshot(&store.event_store)
-    .with_task_runtime(TokioSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    let resumed = CommandExecution::new(&store.event_store, &ResumeScheduleCommand::new(command_id.clone()))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
     assert_eq!(resumed.stream_position.as_u64(), paused.stream_position.as_u64() + 1);
     assert_eq!(
         resumed.state.state.as_ref().and_then(|value| value.as_known()),
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
     );
 
-    let removed = CommandExecution::new(
-        &store.event_store,
-        &RemoveScheduleCommand::new(command_id, actor(), event_at()),
-    )
-    .with_snapshot(&store.event_store)
-    .with_task_runtime(TokioSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    let removed = CommandExecution::new(&store.event_store, &RemoveScheduleCommand::new(command_id))
+        .with_snapshot(&store.event_store)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
     assert_eq!(removed.stream_position.as_u64(), resumed.stream_position.as_u64() + 1);
     assert_eq!(
         removed.state.state.as_ref().and_then(|value| value.as_known()),
@@ -458,7 +441,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         .iter()
         .map(|event| event.decode::<v1::ScheduleEvent>().unwrap().into_decoded().unwrap())
         .collect::<Vec<_>>();
-    assert!(matches!(&events[0].event, Some(ScheduleEventCase::ScheduleAdded(_))));
+    assert!(matches!(&events[0].event, Some(ScheduleEventCase::ScheduleCreated(_))));
     assert!(matches!(&events[1].event, Some(ScheduleEventCase::SchedulePaused(_))));
     assert!(matches!(&events[2].event, Some(ScheduleEventCase::ScheduleResumed(_))));
     assert!(matches!(&events[3].event, Some(ScheduleEventCase::ScheduleRemoved(_))));

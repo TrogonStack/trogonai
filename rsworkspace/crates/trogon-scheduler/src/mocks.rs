@@ -21,8 +21,8 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    DeliveryKind, GetScheduleCommand, ListSchedulesCommand, ResolvedSchedule, SamplingSourceKind, ScheduleEventCase,
-    ScheduleKind,
+    DeliveryKind, GetScheduleCommand, ListSchedulesCommand, ResolvedSchedule, ScheduleEventCase, ScheduleKind,
+    ScheduleStatusKind, SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
     error::SchedulerError,
     projections::{LoadAndWatchSchedulesResult, ScheduleWatchStream},
@@ -186,7 +186,7 @@ impl MockSchedulerStore {
     pub fn seed_job(&self, job: Schedule) {
         let id = job.id.clone();
         let event = v1::ScheduleEvent {
-            event: Some(schedule_to_proto_added(&job).into()),
+            event: Some(schedule_to_proto_created(&job).into()),
         };
 
         let initial_position = StreamPosition::new(NonZeroU64::MIN);
@@ -236,30 +236,53 @@ impl MockSchedulerStore {
     }
 }
 
-fn schedule_to_proto_added(job: &Schedule) -> v1::ScheduleAdded {
-    v1::ScheduleAdded {
+fn schedule_to_proto_created(job: &Schedule) -> v1::ScheduleCreated {
+    v1::ScheduleCreated {
         schedule_id: job.id.clone(),
-        added_at: crate::commands::domain::proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-        status: match job.status {
-            ScheduleEventStatus::Enabled => v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
-            ScheduleEventStatus::Disabled => v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED,
-        },
+        status: MessageField::some(v1::ScheduleStatus {
+            kind: Some(match job.status {
+                ScheduleEventStatus::Scheduled => v1::schedule_status::Scheduled {}.into(),
+                ScheduleEventStatus::Paused => v1::schedule_status::Paused {}.into(),
+            }),
+        }),
         schedule: MessageField::some(proto_schedule(&job.schedule)),
         delivery: MessageField::some(proto_delivery(&job.delivery)),
         message: MessageField::some(proto_message(&job.message)),
-        added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-            value: "test-actor".to_string(),
-        }),
     }
 }
 
 fn proto_schedule(schedule: &ScheduleEventSchedule) -> v1::Schedule {
+    use buffa_types::google::protobuf::{Duration, Timestamp};
     let kind = match schedule {
-        ScheduleEventSchedule::At { at } => v1::AtSchedule { at: at.clone() }.into(),
-        ScheduleEventSchedule::Every { every_sec } => v1::EverySchedule { every_sec: *every_sec }.into(),
-        ScheduleEventSchedule::Cron { expr, timezone } => v1::CronSchedule {
+        ScheduleEventSchedule::At { at } => {
+            let ts = Timestamp {
+                seconds: at.timestamp(),
+                nanos: at.timestamp_subsec_nanos() as i32,
+                ..Default::default()
+            };
+            v1::schedule::At {
+                at: MessageField::some(ts),
+            }
+            .into()
+        }
+        ScheduleEventSchedule::Every { every_sec } => v1::schedule::Every {
+            every: MessageField::some(Duration {
+                seconds: *every_sec as i64,
+                ..Default::default()
+            }),
+        }
+        .into(),
+        ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
             expr: expr.clone(),
-            timezone: timezone.clone().unwrap_or_default(),
+            timezone: timezone
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|tz| trogonai_proto::google::r#type::TimeZone {
+                    id: tz.to_string(),
+                    ..Default::default()
+                })
+                .map(MessageField::some)
+                .unwrap_or_else(MessageField::none),
         }
         .into(),
         ScheduleEventSchedule::RRule {
@@ -268,25 +291,51 @@ fn proto_schedule(schedule: &ScheduleEventSchedule) -> v1::Schedule {
             timezone,
             rdate,
             exdate,
-        } => v1::RRuleSchedule {
-            dtstart: dtstart.clone(),
-            rrule: rrule.clone(),
-            timezone: timezone.clone().unwrap_or_default(),
-            rdate: rdate.clone(),
-            exdate: exdate.clone(),
+        } => {
+            let to_ts = |dt: &chrono::DateTime<chrono::Utc>| Timestamp {
+                seconds: dt.timestamp(),
+                nanos: dt.timestamp_subsec_nanos() as i32,
+                ..Default::default()
+            };
+            v1::schedule::RRule {
+                dtstart: MessageField::some(to_ts(dtstart)),
+                rrule: rrule.clone(),
+                timezone: timezone
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(|tz| trogonai_proto::google::r#type::TimeZone {
+                        id: tz.to_string(),
+                        ..Default::default()
+                    })
+                    .map(MessageField::some)
+                    .unwrap_or_else(MessageField::none),
+                rdate: rdate.iter().map(to_ts).collect(),
+                exdate: exdate.iter().map(to_ts).collect(),
+            }
+            .into()
         }
-        .into(),
     };
     v1::Schedule { kind: Some(kind) }
 }
 
 fn proto_delivery(delivery: &ScheduleEventDelivery) -> v1::Delivery {
+    use buffa_types::google::protobuf::Duration;
     match delivery {
-        ScheduleEventDelivery::NatsEvent { route, ttl_sec, source } => v1::Delivery {
+        ScheduleEventDelivery::NatsMessage {
+            subject,
+            ttl_sec,
+            source,
+        } => v1::Delivery {
             kind: Some(
-                v1::NatsEventDelivery {
-                    route: route.clone(),
-                    ttl_sec: *ttl_sec,
+                v1::delivery::NatsMessage {
+                    subject: subject.clone(),
+                    ttl: ttl_sec
+                        .map(|s| Duration {
+                            seconds: s as i64,
+                            ..Default::default()
+                        })
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
                     source: source
                         .as_ref()
                         .map(proto_sampling_source)
@@ -299,11 +348,11 @@ fn proto_delivery(delivery: &ScheduleEventDelivery) -> v1::Delivery {
     }
 }
 
-fn proto_sampling_source(source: &ScheduleEventSamplingSource) -> v1::SamplingSource {
+fn proto_sampling_source(source: &ScheduleEventSamplingSource) -> v1::delivery::nats_message::Source {
     match source {
-        ScheduleEventSamplingSource::LatestFromSubject { subject } => v1::SamplingSource {
+        ScheduleEventSamplingSource::LatestFromSubject { subject } => v1::delivery::nats_message::Source {
             kind: Some(
-                v1::LatestFromSubjectSampling {
+                v1::delivery::nats_message::LatestFromSubject {
                     subject: subject.clone(),
                 }
                 .into(),
@@ -314,7 +363,10 @@ fn proto_sampling_source(source: &ScheduleEventSamplingSource) -> v1::SamplingSo
 
 fn proto_message(message: &MessageEnvelope) -> v1::Message {
     v1::Message {
-        content: message.content.as_str().to_string(),
+        content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+            content_type: "application/json".to_string(),
+            data: message.content.as_str().as_bytes().to_vec(),
+        }),
         headers: message
             .headers
             .as_slice()
@@ -327,13 +379,19 @@ fn proto_message(message: &MessageEnvelope) -> v1::Message {
     }
 }
 
-fn schedule_read_model_from_proto(stream_id: &str, details: &v1::ScheduleAdded) -> Schedule {
+fn schedule_read_model_from_proto(stream_id: &str, details: &v1::ScheduleCreated) -> Schedule {
     Schedule {
         id: stream_id.to_string(),
-        status: if details.status == v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED {
-            ScheduleEventStatus::Disabled
-        } else {
-            ScheduleEventStatus::Enabled
+        status: {
+            let is_paused = matches!(
+                details.status.as_option().and_then(|s| s.kind.as_ref()),
+                Some(ScheduleStatusKind::Paused(_))
+            );
+            if is_paused {
+                ScheduleEventStatus::Paused
+            } else {
+                ScheduleEventStatus::Scheduled
+            }
         },
         schedule: details
             .schedule
@@ -344,8 +402,8 @@ fn schedule_read_model_from_proto(stream_id: &str, details: &v1::ScheduleAdded) 
             .delivery
             .as_option()
             .map(delivery_from_proto)
-            .unwrap_or_else(|| ScheduleEventDelivery::NatsEvent {
-                route: String::new(),
+            .unwrap_or_else(|| ScheduleEventDelivery::NatsMessage {
+                subject: String::new(),
                 ttl_sec: None,
                 source: None,
             }),
@@ -361,21 +419,39 @@ fn schedule_read_model_from_proto(stream_id: &str, details: &v1::ScheduleAdded) 
 }
 
 fn schedule_from_proto(schedule: &v1::Schedule) -> ScheduleEventSchedule {
+    use buffa_types::google::protobuf::Timestamp;
+    use chrono::TimeZone;
+    let ts_to_dt = |ts: &Timestamp| -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc
+            .timestamp_opt(ts.seconds, ts.nanos as u32)
+            .single()
+            .unwrap_or_default()
+    };
     match schedule.kind.as_ref() {
-        Some(ScheduleKind::At(inner)) => ScheduleEventSchedule::At { at: inner.at.clone() },
+        Some(ScheduleKind::At(inner)) => ScheduleEventSchedule::At {
+            at: inner.at.as_option().map(ts_to_dt).unwrap_or_default(),
+        },
         Some(ScheduleKind::Every(inner)) => ScheduleEventSchedule::Every {
-            every_sec: inner.every_sec,
+            every_sec: inner.every.as_option().map(|d| d.seconds as u64).unwrap_or(0),
         },
         Some(ScheduleKind::Cron(inner)) => ScheduleEventSchedule::Cron {
             expr: inner.expr.clone(),
-            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
+            timezone: inner
+                .timezone
+                .as_option()
+                .map(|tz| tz.id.clone())
+                .filter(|s| !s.is_empty()),
         },
         Some(ScheduleKind::Rrule(inner)) => ScheduleEventSchedule::RRule {
-            dtstart: inner.dtstart.clone(),
+            dtstart: inner.dtstart.as_option().map(ts_to_dt).unwrap_or_default(),
             rrule: inner.rrule.clone(),
-            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
-            rdate: inner.rdate.clone(),
-            exdate: inner.exdate.clone(),
+            timezone: inner
+                .timezone
+                .as_option()
+                .map(|tz| tz.id.clone())
+                .filter(|s| !s.is_empty()),
+            rdate: inner.rdate.iter().map(ts_to_dt).collect(),
+            exdate: inner.exdate.iter().map(ts_to_dt).collect(),
         },
         None => ScheduleEventSchedule::Every { every_sec: 0 },
     }
@@ -383,22 +459,22 @@ fn schedule_from_proto(schedule: &v1::Schedule) -> ScheduleEventSchedule {
 
 fn delivery_from_proto(delivery: &v1::Delivery) -> ScheduleEventDelivery {
     match delivery.kind.as_ref() {
-        Some(DeliveryKind::NatsEvent(inner)) => ScheduleEventDelivery::NatsEvent {
-            route: inner.route.clone(),
-            ttl_sec: inner.ttl_sec,
+        Some(DeliveryKind::NatsMessage(inner)) => ScheduleEventDelivery::NatsMessage {
+            subject: inner.subject.clone(),
+            ttl_sec: inner.ttl.as_option().map(|d| d.seconds as u64),
             source: inner.source.as_option().map(sampling_source_from_proto),
         },
-        None => ScheduleEventDelivery::NatsEvent {
-            route: String::new(),
+        None => ScheduleEventDelivery::NatsMessage {
+            subject: String::new(),
             ttl_sec: None,
             source: None,
         },
     }
 }
 
-fn sampling_source_from_proto(source: &v1::SamplingSource) -> ScheduleEventSamplingSource {
+fn sampling_source_from_proto(source: &v1::delivery::nats_message::Source) -> ScheduleEventSamplingSource {
     match source.kind.as_ref() {
-        Some(SamplingSourceKind::LatestFromSubject(inner)) => ScheduleEventSamplingSource::LatestFromSubject {
+        Some(SourceKind::LatestFromSubject(inner)) => ScheduleEventSamplingSource::LatestFromSubject {
             subject: inner.subject.clone(),
         },
         None => ScheduleEventSamplingSource::LatestFromSubject { subject: String::new() },
@@ -406,8 +482,13 @@ fn sampling_source_from_proto(source: &v1::SamplingSource) -> ScheduleEventSampl
 }
 
 fn message_from_proto(message: &v1::Message) -> MessageEnvelope {
+    let content_str = message
+        .content
+        .as_option()
+        .map(|c| String::from_utf8_lossy(&c.data).into_owned())
+        .unwrap_or_default();
     MessageEnvelope {
-        content: MessageContent::new(message.content.clone()),
+        content: MessageContent::new(content_str),
         headers: MessageHeaders::from_pairs(
             message
                 .headers
@@ -503,7 +584,7 @@ impl StreamAppend<str> for MockSchedulerStore {
                 continue;
             };
             match &event.event {
-                Some(ScheduleEventCase::ScheduleAdded(inner)) => {
+                Some(ScheduleEventCase::ScheduleCreated(inner)) => {
                     projected_job = Some(schedule_read_model_from_proto(stream_id.as_str(), inner));
                 }
                 Some(ScheduleEventCase::SchedulePaused(_)) => {
@@ -513,7 +594,7 @@ impl StreamAppend<str> for MockSchedulerStore {
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    job.status = crate::ScheduleEventStatus::Disabled;
+                    job.status = crate::ScheduleEventStatus::Paused;
                     projected_job = Some(job);
                 }
                 Some(ScheduleEventCase::ScheduleResumed(_)) => {
@@ -523,7 +604,7 @@ impl StreamAppend<str> for MockSchedulerStore {
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
-                    job.status = crate::ScheduleEventStatus::Enabled;
+                    job.status = crate::ScheduleEventStatus::Scheduled;
                     projected_job = Some(job);
                 }
                 Some(ScheduleEventCase::ScheduleRemoved(_)) => {
@@ -603,8 +684,8 @@ mod tests {
     use crate::commands::domain as command_domain;
     use crate::{
         AddScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
-        PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand, Schedule, ScheduleActor,
-        ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
+        PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand, Schedule, ScheduleEventDelivery,
+        ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -616,23 +697,13 @@ mod tests {
         command_domain::ScheduleId::parse(id).unwrap()
     }
 
-    fn actor() -> ScheduleActor {
-        ScheduleActor::parse("test-actor").unwrap()
-    }
-
-    fn event_at() -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    }
-
     fn base_job(id: &str) -> Schedule {
         Schedule {
             id: id.to_string(),
-            status: ScheduleEventStatus::Enabled,
+            status: ScheduleEventStatus::Scheduled,
             schedule: ScheduleEventSchedule::Every { every_sec: 30 },
-            delivery: ScheduleEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
+            delivery: ScheduleEventDelivery::NatsMessage {
+                subject: "agent.run".to_string(),
                 ttl_sec: None,
                 source: None,
             },
@@ -664,7 +735,7 @@ mod tests {
     async fn mock_schedule_publisher_tracks_active_jobs() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_job("orphan");
-        let details = schedule_to_proto_added(&expected_job("alpha"));
+        let details = schedule_to_proto_created(&expected_job("alpha"));
         let resolved = ResolvedSchedule::from_event("alpha", &details).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
@@ -712,15 +783,12 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        CommandExecution::new(
-            &store,
-            &AddScheduleCommand::new(command_base_job("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+        CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap();
         let alpha = store
             .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
             .await
@@ -728,15 +796,12 @@ mod tests {
             .unwrap();
         assert_eq!(alpha, expected_job("alpha"));
 
-        CommandExecution::new(
-            &store,
-            &PauseScheduleCommand::new(command_job_id("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+        CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap();
         assert_eq!(
             store
                 .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
@@ -744,7 +809,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .status,
-            ScheduleEventStatus::Disabled
+            ScheduleEventStatus::Paused
         );
 
         let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
@@ -758,15 +823,12 @@ mod tests {
                 .is_err()
         );
 
-        CommandExecution::new(
-            &store,
-            &RemoveScheduleCommand::new(command_job_id("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+        CommandExecution::new(&store, &RemoveScheduleCommand::new(command_job_id("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap();
         assert!(
             store
                 .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
@@ -775,15 +837,12 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(
-            &store,
-            &AddScheduleCommand::new(command_base_job("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap_err();
+        let deleted_error = CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap_err();
         assert!(matches!(
             deleted_error,
             CommandError::Decide(crate::AddScheduleDecideError::JobDeleted { .. })
@@ -806,38 +865,29 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        CommandExecution::new(
-            &store,
-            &AddScheduleCommand::new(command_base_job("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
-        let same_state_error = CommandExecution::new(
-            &store,
-            &ResumeScheduleCommand::new(command_job_id("alpha"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap_err();
+        CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap();
+        let same_state_error = CommandExecution::new(&store, &ResumeScheduleCommand::new(command_job_id("alpha")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap_err();
         assert!(matches!(
             same_state_error,
             CommandError::Decide(crate::ResumeScheduleDecideError::AlreadyActive { .. })
         ));
 
-        let missing_error = CommandExecution::new(
-            &store,
-            &PauseScheduleCommand::new(command_job_id("missing"), actor(), event_at()),
-        )
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap_err();
+        let missing_error = CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("missing")))
+            .with_snapshot(&store)
+            .with_task_runtime(ImmediateSnapshotTaskScheduler)
+            .execute()
+            .await
+            .unwrap_err();
         assert!(matches!(
             missing_error,
             CommandError::Decide(crate::PauseScheduleDecideError::JobNotFound { .. })

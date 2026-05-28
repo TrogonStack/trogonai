@@ -7,7 +7,7 @@ use rrule::RRuleSet;
 use trogon_nats::{DottedNatsToken, NatsToken};
 
 use crate::{
-    DeliveryKind, SamplingSourceKind, ScheduleKind,
+    DeliveryKind, ScheduleKind, ScheduleStatusKind, SourceKind,
     error::{ScheduleSpecError, SchedulerError},
     kv::{FIRE_SUBJECT_PREFIX, SCHEDULE_SUBJECT_PREFIX},
     v1,
@@ -54,11 +54,11 @@ struct ResolvedScheduleParts {
 }
 
 impl ResolvedSchedule {
-    pub fn from_event(job_id: &str, job: &v1::ScheduleAdded) -> Result<Self, SchedulerError> {
+    pub fn from_event(job_id: &str, job: &v1::ScheduleCreated) -> Result<Self, SchedulerError> {
         Self::from_event_at(job_id, job, Utc::now())
     }
 
-    pub fn from_event_at(job_id: &str, job: &v1::ScheduleAdded, now: DateTime<Utc>) -> Result<Self, SchedulerError> {
+    pub fn from_event_at(job_id: &str, job: &v1::ScheduleCreated, now: DateTime<Utc>) -> Result<Self, SchedulerError> {
         let ResolvedScheduleParts {
             job_id,
             enabled,
@@ -141,7 +141,7 @@ impl ResolvedSchedule {
 
 fn resolved_job_parts(
     job_id: &str,
-    job: &v1::ScheduleAdded,
+    job: &v1::ScheduleCreated,
     now: DateTime<Utc>,
 ) -> Result<ResolvedScheduleParts, SchedulerError> {
     let job_id = parse_job_id(job_id)?;
@@ -174,12 +174,17 @@ fn resolved_job_parts(
     let body = if source_subject.is_some() {
         Bytes::from_static(br#"{}"#)
     } else {
-        Bytes::from(message.content.clone())
+        let content_bytes = message.content.as_option().map(|c| c.data.clone()).unwrap_or_default();
+        Bytes::from(content_bytes)
     };
+    let is_paused = matches!(
+        job.status.as_option().and_then(|s| s.kind.as_ref()),
+        Some(ScheduleStatusKind::Paused(_))
+    );
 
     Ok(ResolvedScheduleParts {
         job_id,
-        enabled: job.status != v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED,
+        enabled: !is_paused,
         route,
         schedule_expression,
         timezone,
@@ -199,11 +204,23 @@ fn parse_job_id(id: &str) -> Result<NatsToken, SchedulerError> {
     })
 }
 
+fn timestamp_to_rfc3339(ts: &buffa_types::google::protobuf::Timestamp) -> String {
+    use chrono::TimeZone;
+    chrono::Utc
+        .timestamp_opt(ts.seconds, ts.nanos as u32)
+        .single()
+        .unwrap_or_default()
+        .to_rfc3339()
+}
+
 fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String, Option<String>), SchedulerError> {
     match schedule.kind.as_ref() {
-        Some(ScheduleKind::At(inner)) => Ok((format!("@at {}", inner.at), None)),
+        Some(ScheduleKind::At(inner)) => {
+            let at_str = inner.at.as_option().map(timestamp_to_rfc3339).unwrap_or_default();
+            Ok((format!("@at {at_str}"), None))
+        }
         Some(ScheduleKind::Every(inner)) => {
-            let every_sec = inner.every_sec;
+            let every_sec = inner.every.as_option().map(|d| d.seconds as u64).unwrap_or(0);
             if every_sec == 0 {
                 return Err(SchedulerError::invalid_job_spec(
                     ScheduleSpecError::EverySecondsMustBePositive,
@@ -219,7 +236,11 @@ fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String
                     source: Box::new(source),
                 })
             })?;
-            let timezone = (!inner.timezone.is_empty()).then(|| inner.timezone.clone());
+            let timezone = inner
+                .timezone
+                .as_option()
+                .map(|tz| tz.id.clone())
+                .filter(|s| !s.is_empty());
             Ok((expr, validate_timezone(timezone)?))
         }
         Some(ScheduleKind::Rrule(inner)) => {
@@ -233,8 +254,12 @@ fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String
     }
 }
 
-fn next_rrule_occurrence(schedule: &v1::RRuleSchedule, now: DateTime<Utc>) -> Result<DateTime<Utc>, SchedulerError> {
-    let timezone = (!schedule.timezone.is_empty()).then(|| schedule.timezone.clone());
+fn next_rrule_occurrence(schedule: &v1::schedule::RRule, now: DateTime<Utc>) -> Result<DateTime<Utc>, SchedulerError> {
+    let timezone = schedule
+        .timezone
+        .as_option()
+        .map(|tz| tz.id.clone())
+        .filter(|s| !s.is_empty());
     let timezone = validate_timezone(timezone)?;
     let timezone_value = parse_rrule_timezone(timezone.as_deref())?;
     let set_text = rrule_set_text(schedule, timezone.as_deref(), timezone_value)?;
@@ -255,13 +280,13 @@ fn next_rrule_occurrence(schedule: &v1::RRuleSchedule, now: DateTime<Utc>) -> Re
 }
 
 fn rrule_set_text(
-    schedule: &v1::RRuleSchedule,
+    schedule: &v1::schedule::RRule,
     timezone_name: Option<&str>,
     timezone: rrule::Tz,
 ) -> Result<String, SchedulerError> {
     let rrule = normalize_rrule_value(&schedule.rrule)?;
     let mut lines = Vec::with_capacity(4);
-    lines.push(dtstart_line(&schedule.dtstart, timezone_name, timezone)?);
+    lines.push(dtstart_line(schedule.dtstart.as_option(), timezone_name, timezone)?);
     lines.push(format!("RRULE:{rrule}"));
     if let Some(line) = date_list_line("RDATE", &schedule.rdate)? {
         lines.push(line);
@@ -311,58 +336,58 @@ fn parse_rrule_timezone(timezone: Option<&str>) -> Result<rrule::Tz, SchedulerEr
     }
 }
 
-fn dtstart_line(value: &str, timezone_name: Option<&str>, timezone: rrule::Tz) -> Result<String, SchedulerError> {
-    let parsed = parse_rrule_datetime("dtstart", value)?;
+fn dtstart_line(
+    ts: Option<&buffa_types::google::protobuf::Timestamp>,
+    timezone_name: Option<&str>,
+    timezone: rrule::Tz,
+) -> Result<String, SchedulerError> {
+    use chrono::TimeZone;
+    let dt = ts
+        .and_then(|t| Utc.timestamp_opt(t.seconds, t.nanos as u32).single())
+        .unwrap_or_default();
     match timezone_name {
         Some(timezone_name) => Ok(format!(
             "DTSTART;TZID={timezone_name}:{}",
-            parsed.with_timezone(&timezone).format("%Y%m%dT%H%M%S")
+            dt.with_timezone(&timezone).format("%Y%m%dT%H%M%S")
         )),
-        None => Ok(format!(
-            "DTSTART:{}",
-            parsed.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ")
-        )),
+        None => Ok(format!("DTSTART:{}", dt.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ"))),
     }
 }
 
-fn date_list_line(name: &'static str, values: &[String]) -> Result<Option<String>, SchedulerError> {
+fn date_list_line(
+    name: &'static str,
+    values: &[buffa_types::google::protobuf::Timestamp],
+) -> Result<Option<String>, SchedulerError> {
     if values.is_empty() {
         return Ok(None);
     }
-
-    let values = values
+    use chrono::TimeZone;
+    let formatted = values
         .iter()
-        .map(|value| {
-            parse_rrule_datetime(name, value)
-                .map(|parsed| parsed.with_timezone(&Utc).format("%Y%m%dT%H%M%SZ").to_string())
+        .map(|ts| {
+            Utc.timestamp_opt(ts.seconds, ts.nanos as u32)
+                .single()
+                .unwrap_or_default()
+                .format("%Y%m%dT%H%M%SZ")
+                .to_string()
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
 
-    Ok(Some(format!("{name};VALUE=DATE-TIME:{}", values.join(","))))
-}
-
-fn parse_rrule_datetime(field: &'static str, value: &str) -> Result<DateTime<chrono::FixedOffset>, SchedulerError> {
-    DateTime::parse_from_rfc3339(value).map_err(|source| {
-        SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidRRuleDateTime {
-            field,
-            value: value.to_string(),
-            source: Box::new(source),
-        })
-    })
+    Ok(Some(format!("{name};VALUE=DATE-TIME:{}", formatted.join(","))))
 }
 
 fn delivery_parts(delivery: &v1::Delivery) -> Result<(DottedNatsToken, Option<u64>, Option<String>), SchedulerError> {
     match delivery.kind.as_ref() {
-        Some(DeliveryKind::NatsEvent(inner)) => {
-            let route = inner.route.clone();
+        Some(DeliveryKind::NatsMessage(inner)) => {
+            let subject = inner.subject.clone();
             Ok((
-                DottedNatsToken::new(&route).map_err(|source| {
+                DottedNatsToken::new(&subject).map_err(|source| {
                     SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidRoute {
-                        route: route.clone(),
+                        route: subject.clone(),
                         source,
                     })
                 })?,
-                inner.ttl_sec,
+                inner.ttl.as_option().map(|d| d.seconds as u64),
                 inner.source.as_option().map(source_subject).transpose()?,
             ))
         }
@@ -373,9 +398,9 @@ fn delivery_parts(delivery: &v1::Delivery) -> Result<(DottedNatsToken, Option<u6
     }
 }
 
-fn source_subject(source: &v1::SamplingSource) -> Result<String, SchedulerError> {
+fn source_subject(source: &v1::delivery::nats_message::Source) -> Result<String, SchedulerError> {
     match source.kind.as_ref() {
-        Some(SamplingSourceKind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
+        Some(SourceKind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
         None => Err(SchedulerError::event_source(
             "scheduler received job details without a sampling source kind",
             std::io::Error::other("missing sampling source kind"),
@@ -415,42 +440,69 @@ fn validate_scheduler_headers(headers: &[(String, String)]) -> Result<(), Schedu
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
+    use buffa_types::google::protobuf::{Duration, Timestamp};
 
     use super::*;
-    use crate::commands::domain::proto_timestamp_rfc3339;
 
-    fn base_job() -> v1::ScheduleAdded {
-        v1::ScheduleAdded {
+    fn timestamp_from_str(rfc3339: &str) -> Timestamp {
+        let dt = chrono::DateTime::parse_from_rfc3339(rfc3339).unwrap();
+        Timestamp {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+            ..Default::default()
+        }
+    }
+
+    fn base_job() -> v1::ScheduleCreated {
+        v1::ScheduleCreated {
             schedule_id: "heartbeat".to_string(),
-            added_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-            status: v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
+            status: MessageField::some(v1::ScheduleStatus {
+                kind: Some(v1::schedule_status::Scheduled {}.into()),
+            }),
             schedule: MessageField::some(every_schedule(30)),
             delivery: MessageField::some(nats_delivery(None)),
             message: MessageField::some(message(r#"{"kind":"heartbeat"}"#, [("x-kind", "heartbeat")])),
-            added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                value: "test-actor".to_string(),
-            }),
         }
     }
 
     fn every_schedule(every_sec: u64) -> v1::Schedule {
         v1::Schedule {
-            kind: Some(v1::EverySchedule { every_sec }.into()),
+            kind: Some(
+                v1::schedule::Every {
+                    every: MessageField::some(Duration {
+                        seconds: every_sec as i64,
+                        ..Default::default()
+                    }),
+                }
+                .into(),
+            ),
         }
     }
 
     fn at_schedule(at: &str) -> v1::Schedule {
         v1::Schedule {
-            kind: Some(v1::AtSchedule { at: at.to_string() }.into()),
+            kind: Some(
+                v1::schedule::At {
+                    at: MessageField::some(timestamp_from_str(at)),
+                }
+                .into(),
+            ),
         }
     }
 
     fn cron_schedule(expr: &str, timezone: Option<&str>) -> v1::Schedule {
         v1::Schedule {
             kind: Some(
-                v1::CronSchedule {
+                v1::schedule::Cron {
                     expr: expr.to_string(),
-                    timezone: timezone.unwrap_or_default().to_string(),
+                    timezone: timezone
+                        .filter(|s| !s.is_empty())
+                        .map(|tz| trogonai_proto::google::r#type::TimeZone {
+                            id: tz.to_string(),
+                            ..Default::default()
+                        })
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
                 }
                 .into(),
             ),
@@ -466,12 +518,19 @@ mod tests {
     ) -> v1::Schedule {
         v1::Schedule {
             kind: Some(
-                v1::RRuleSchedule {
-                    dtstart: dtstart.to_string(),
+                v1::schedule::RRule {
+                    dtstart: MessageField::some(timestamp_from_str(dtstart)),
                     rrule: rrule.to_string(),
-                    timezone: timezone.unwrap_or_default().to_string(),
-                    rdate: rdate.iter().map(|value| value.to_string()).collect(),
-                    exdate: exdate.iter().map(|value| value.to_string()).collect(),
+                    timezone: timezone
+                        .filter(|s| !s.is_empty())
+                        .map(|tz| trogonai_proto::google::r#type::TimeZone {
+                            id: tz.to_string(),
+                            ..Default::default()
+                        })
+                        .map(MessageField::some)
+                        .unwrap_or_else(MessageField::none),
+                    rdate: rdate.iter().map(|s| timestamp_from_str(s)).collect(),
+                    exdate: exdate.iter().map(|s| timestamp_from_str(s)).collect(),
                 }
                 .into(),
             ),
@@ -481,13 +540,16 @@ mod tests {
     fn nats_delivery(source: Option<&str>) -> v1::Delivery {
         v1::Delivery {
             kind: Some(
-                v1::NatsEventDelivery {
-                    route: "agent.run".to_string(),
-                    ttl_sec: Some(15),
+                v1::delivery::NatsMessage {
+                    subject: "agent.run".to_string(),
+                    ttl: MessageField::some(Duration {
+                        seconds: 15,
+                        ..Default::default()
+                    }),
                     source: source
-                        .map(|subject| v1::SamplingSource {
+                        .map(|subject| v1::delivery::nats_message::Source {
                             kind: Some(
-                                v1::LatestFromSubjectSampling {
+                                v1::delivery::nats_message::LatestFromSubject {
                                     subject: subject.to_string(),
                                 }
                                 .into(),
@@ -503,7 +565,10 @@ mod tests {
 
     fn message<const N: usize>(content: &str, headers: [(&str, &str); N]) -> v1::Message {
         v1::Message {
-            content: content.to_string(),
+            content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+                content_type: "application/json".to_string(),
+                data: content.as_bytes().to_vec(),
+            }),
             headers: headers
                 .into_iter()
                 .map(|(name, value)| v1::Header {
@@ -551,6 +616,7 @@ mod tests {
 
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
 
+        // chrono::to_rfc3339() on a UTC DateTime produces "+00:00" offset
         assert_eq!(
             resolved
                 .schedule_headers()
@@ -671,14 +737,19 @@ mod tests {
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
         let mut job = base_job();
-        job.status = v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED;
+        job.status = MessageField::some(v1::ScheduleStatus {
+            kind: Some(v1::schedule_status::Paused {}.into()),
+        });
 
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
 
         assert_eq!(resolved.id(), "heartbeat");
         assert!(!resolved.enabled());
         assert_eq!(resolved.route(), "agent.run");
-        assert_eq!(resolved.schedule_body(), Bytes::from_static(br#"{"kind":"heartbeat"}"#));
+        assert_eq!(
+            resolved.schedule_body(),
+            Bytes::from(b"{\x22kind\x22:\x22heartbeat\x22}".to_vec())
+        );
         assert_eq!(resolved.source_subject(), None);
     }
 

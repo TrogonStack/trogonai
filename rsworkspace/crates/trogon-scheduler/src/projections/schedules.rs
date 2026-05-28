@@ -13,8 +13,10 @@ use trogon_decider_runtime::{Event, EventData, EventDecode, StreamEvent, StreamP
 use trogon_nats::SubjectTokenViolation;
 use trogon_nats::jetstream::{JetStreamGetKeyValue, JetStreamGetStream};
 
+use chrono::{TimeZone, Utc};
+
 use crate::{
-    DeliveryKind, SamplingSourceKind, ScheduleEventCase, ScheduleKind,
+    DeliveryKind, ScheduleEventCase, ScheduleKind, ScheduleStatusKind, SourceKind,
     error::SchedulerError,
     kv::{EVENTS_SUBJECT_PREFIX, SCHEDULES_CHECKPOINT_KEY, open_events_stream, open_schedules_bucket},
     read_model::{
@@ -84,8 +86,8 @@ pub fn apply(
     validate_event_payload_job_id(stream_id, event)?;
 
     match (state, &event.event) {
-        (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleAdded(inner))) => {
-            Ok(ScheduleStreamState::Present(project_added_job(inner)?))
+        (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleCreated(inner))) => {
+            Ok(ScheduleStreamState::Present(project_created_job(inner)?))
         }
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::SchedulePaused(_))) => {
             Err(ScheduleTransitionError::MissingJobForStateChange {
@@ -100,21 +102,21 @@ pub fn apply(
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleRemoved(_))) => {
             Ok(ScheduleStreamState::Deleted(stream_id.to_string()))
         }
-        (ScheduleStreamState::Present(job), Some(ScheduleEventCase::ScheduleAdded(_))) => {
+        (ScheduleStreamState::Present(job), Some(ScheduleEventCase::ScheduleCreated(_))) => {
             Err(ScheduleTransitionError::CannotAddExistingJob { id: job.id })
         }
         (ScheduleStreamState::Present(mut job), Some(ScheduleEventCase::SchedulePaused(_))) => {
-            job.status = ScheduleEventStatus::Disabled;
+            job.status = ScheduleEventStatus::Paused;
             Ok(ScheduleStreamState::Present(job))
         }
         (ScheduleStreamState::Present(mut job), Some(ScheduleEventCase::ScheduleResumed(_))) => {
-            job.status = ScheduleEventStatus::Enabled;
+            job.status = ScheduleEventStatus::Scheduled;
             Ok(ScheduleStreamState::Present(job))
         }
         (ScheduleStreamState::Present(job), Some(ScheduleEventCase::ScheduleRemoved(_))) => {
             Ok(ScheduleStreamState::Deleted(job.id))
         }
-        (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleAdded(_))) => {
+        (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleCreated(_))) => {
             Err(ScheduleTransitionError::CannotAddDeletedJob { id })
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::SchedulePaused(_))) => {
@@ -152,7 +154,7 @@ fn validate_event_payload_job_id(stream_id: &str, event: &v1::ScheduleEvent) -> 
 
 fn event_job_id(event: &v1::ScheduleEvent) -> Option<&str> {
     match &event.event {
-        Some(ScheduleEventCase::ScheduleAdded(inner)) => Some(&inner.schedule_id),
+        Some(ScheduleEventCase::ScheduleCreated(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::SchedulePaused(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::ScheduleResumed(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::ScheduleRemoved(inner)) => Some(&inner.schedule_id),
@@ -160,7 +162,7 @@ fn event_job_id(event: &v1::ScheduleEvent) -> Option<&str> {
     }
 }
 
-fn project_added_job(event: &v1::ScheduleAdded) -> Result<Schedule, ScheduleTransitionError> {
+fn project_created_job(event: &v1::ScheduleCreated) -> Result<Schedule, ScheduleTransitionError> {
     let schedule = event
         .schedule
         .as_option()
@@ -181,37 +183,58 @@ fn project_added_job(event: &v1::ScheduleAdded) -> Result<Schedule, ScheduleTran
         })?;
     Ok(Schedule {
         id: event.schedule_id.to_string(),
-        status: project_status(event.status),
+        status: project_status(event.status.as_option()),
         schedule: project_schedule(schedule)?,
         delivery: project_delivery(delivery)?,
         message: project_message(message),
     })
 }
 
-fn project_status(status: v1::ScheduleStatus) -> ScheduleEventStatus {
-    if status == v1::ScheduleStatus::SCHEDULE_STATUS_DISABLED {
-        ScheduleEventStatus::Disabled
+fn project_status(status: Option<&v1::ScheduleStatus>) -> ScheduleEventStatus {
+    if matches!(
+        status.and_then(|s| s.kind.as_ref()),
+        Some(ScheduleStatusKind::Paused(_))
+    ) {
+        ScheduleEventStatus::Paused
     } else {
-        ScheduleEventStatus::Enabled
+        ScheduleEventStatus::Scheduled
     }
+}
+
+fn timestamp_to_datetime(ts: &buffa_types::google::protobuf::Timestamp) -> chrono::DateTime<Utc> {
+    Utc.timestamp_opt(ts.seconds, ts.nanos as u32)
+        .single()
+        .unwrap_or_default()
 }
 
 fn project_schedule(schedule: &v1::Schedule) -> Result<ScheduleEventSchedule, ScheduleTransitionError> {
     match schedule.kind.as_ref() {
-        Some(ScheduleKind::At(inner)) => Ok(ScheduleEventSchedule::At { at: inner.at.clone() }),
-        Some(ScheduleKind::Every(inner)) => Ok(ScheduleEventSchedule::Every {
-            every_sec: inner.every_sec,
-        }),
+        Some(ScheduleKind::At(inner)) => {
+            let at = inner.at.as_option().map(timestamp_to_datetime).unwrap_or_default();
+            Ok(ScheduleEventSchedule::At { at })
+        }
+        Some(ScheduleKind::Every(inner)) => {
+            let every_sec = inner.every.as_option().map(|d| d.seconds as u64).unwrap_or(0);
+            Ok(ScheduleEventSchedule::Every { every_sec })
+        }
         Some(ScheduleKind::Cron(inner)) => Ok(ScheduleEventSchedule::Cron {
             expr: inner.expr.clone(),
-            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
+            timezone: inner
+                .timezone
+                .as_option()
+                .map(|tz| tz.id.clone())
+                .filter(|s| !s.is_empty()),
         }),
         Some(ScheduleKind::Rrule(inner)) => Ok(ScheduleEventSchedule::RRule {
-            dtstart: inner.dtstart.clone(),
+            dtstart: inner.dtstart.as_option().map(timestamp_to_datetime).unwrap_or_default(),
             rrule: inner.rrule.clone(),
-            timezone: (!inner.timezone.is_empty()).then(|| inner.timezone.clone()),
-            rdate: inner.rdate.clone(),
-            exdate: inner.exdate.clone(),
+            timezone: inner
+                .timezone
+                .as_option()
+                .map(|tz| tz.id.clone())
+                .filter(|s| !s.is_empty()),
+            rdate: inner.rdate.iter().map(timestamp_to_datetime).collect(),
+            exdate: inner.exdate.iter().map(timestamp_to_datetime).collect(),
         }),
         None => Err(ScheduleTransitionError::MalformedEvent {
             context: "job schedule has no supported case",
@@ -221,9 +244,9 @@ fn project_schedule(schedule: &v1::Schedule) -> Result<ScheduleEventSchedule, Sc
 
 fn project_delivery(delivery: &v1::Delivery) -> Result<ScheduleEventDelivery, ScheduleTransitionError> {
     match delivery.kind.as_ref() {
-        Some(DeliveryKind::NatsEvent(inner)) => Ok(ScheduleEventDelivery::NatsEvent {
-            route: inner.route.clone(),
-            ttl_sec: inner.ttl_sec,
+        Some(DeliveryKind::NatsMessage(inner)) => Ok(ScheduleEventDelivery::NatsMessage {
+            subject: inner.subject.clone(),
+            ttl_sec: inner.ttl.as_option().map(|d| d.seconds as u64),
             source: inner.source.as_option().map(project_sampling_source).transpose()?,
         }),
         None => Err(ScheduleTransitionError::MalformedEvent {
@@ -233,10 +256,10 @@ fn project_delivery(delivery: &v1::Delivery) -> Result<ScheduleEventDelivery, Sc
 }
 
 fn project_sampling_source(
-    source: &v1::SamplingSource,
+    source: &v1::delivery::nats_message::Source,
 ) -> Result<ScheduleEventSamplingSource, ScheduleTransitionError> {
     match source.kind.as_ref() {
-        Some(SamplingSourceKind::LatestFromSubject(inner)) => Ok(ScheduleEventSamplingSource::LatestFromSubject {
+        Some(SourceKind::LatestFromSubject(inner)) => Ok(ScheduleEventSamplingSource::LatestFromSubject {
             subject: inner.subject.clone(),
         }),
         None => Err(ScheduleTransitionError::MalformedEvent {
@@ -246,8 +269,13 @@ fn project_sampling_source(
 }
 
 fn project_message(message: &v1::Message) -> MessageEnvelope {
+    let content_str = message
+        .content
+        .as_option()
+        .map(|c| String::from_utf8_lossy(&c.data).into_owned())
+        .unwrap_or_default();
     MessageEnvelope {
-        content: MessageContent::new(message.content.clone()),
+        content: MessageContent::new(content_str),
         headers: MessageHeaders::from_pairs(
             message
                 .headers
@@ -864,22 +892,32 @@ fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
 #[cfg(test)]
 mod tests {
     use buffa::MessageField;
+    use buffa_types::google::protobuf::{Duration, Timestamp};
+    use chrono::{DateTime, Utc};
 
     use super::*;
-    use crate::commands::domain::proto_timestamp_rfc3339;
     use crate::v1;
     use crate::{
         MessageContent, MessageEnvelope, MessageHeaders, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
         ScheduleEventStatus,
     };
 
+    fn timestamp_from_str(rfc3339: &str) -> Timestamp {
+        let dt = DateTime::parse_from_rfc3339(rfc3339).unwrap();
+        Timestamp {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+            ..Default::default()
+        }
+    }
+
     fn expected_job(id: &str) -> Schedule {
         Schedule {
             id: id.to_string(),
-            status: ScheduleEventStatus::Enabled,
+            status: ScheduleEventStatus::Scheduled,
             schedule: ScheduleEventSchedule::Every { every_sec: 30 },
-            delivery: ScheduleEventDelivery::NatsEvent {
-                route: "agent.run".to_string(),
+            delivery: ScheduleEventDelivery::NatsMessage {
+                subject: "agent.run".to_string(),
                 ttl_sec: None,
                 source: None,
             },
@@ -892,53 +930,65 @@ mod tests {
 
     fn added_event(id: &str) -> v1::ScheduleEvent {
         v1::ScheduleEvent {
-            event: Some(proto_job_added(id).into()),
+            event: Some(proto_job_created(id).into()),
         }
     }
 
     fn rrule_added_event(id: &str) -> v1::ScheduleEvent {
-        let mut added = proto_job_added(id);
-        added.schedule = MessageField::some(v1::Schedule {
+        let mut created = proto_job_created(id);
+        created.schedule = MessageField::some(v1::Schedule {
             kind: Some(
-                v1::RRuleSchedule {
-                    dtstart: "2026-05-24T09:00:00+00:00".to_string(),
+                v1::schedule::RRule {
+                    dtstart: MessageField::some(timestamp_from_str("2026-05-24T09:00:00+00:00")),
                     rrule: "FREQ=WEEKLY;BYDAY=MO".to_string(),
-                    timezone: "UTC".to_string(),
-                    rdate: vec!["2026-05-26T09:00:00+00:00".to_string()],
-                    exdate: vec!["2026-06-01T09:00:00+00:00".to_string()],
+                    timezone: MessageField::some(trogonai_proto::google::r#type::TimeZone {
+                        id: "UTC".to_string(),
+                        ..Default::default()
+                    }),
+                    rdate: vec![timestamp_from_str("2026-05-26T09:00:00+00:00")],
+                    exdate: vec![timestamp_from_str("2026-06-01T09:00:00+00:00")],
                 }
                 .into(),
             ),
         });
         v1::ScheduleEvent {
-            event: Some(added.into()),
+            event: Some(created.into()),
         }
     }
 
-    fn proto_job_added(id: &str) -> v1::ScheduleAdded {
-        v1::ScheduleAdded {
+    fn proto_job_created(id: &str) -> v1::ScheduleCreated {
+        v1::ScheduleCreated {
             schedule_id: id.to_string(),
-            added_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-            status: v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
+            status: MessageField::some(v1::ScheduleStatus {
+                kind: Some(v1::schedule_status::Scheduled {}.into()),
+            }),
             schedule: MessageField::some(v1::Schedule {
-                kind: Some(v1::EverySchedule { every_sec: 30 }.into()),
+                kind: Some(
+                    v1::schedule::Every {
+                        every: MessageField::some(Duration {
+                            seconds: 30,
+                            ..Default::default()
+                        }),
+                    }
+                    .into(),
+                ),
             }),
             delivery: MessageField::some(v1::Delivery {
                 kind: Some(
-                    v1::NatsEventDelivery {
-                        route: "agent.run".to_string(),
-                        ttl_sec: None,
+                    v1::delivery::NatsMessage {
+                        subject: "agent.run".to_string(),
+                        ttl: MessageField::none(),
                         source: MessageField::none(),
                     }
                     .into(),
                 ),
             }),
             message: MessageField::some(v1::Message {
-                content: r#"{"kind":"heartbeat"}"#.to_string(),
+                content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+                    content_type: "application/json".to_string(),
+                    data: r#"{"kind":"heartbeat"}"#.as_bytes().to_vec(),
+                }),
                 headers: Vec::new(),
-            }),
-            added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                value: "test-actor".to_string(),
             }),
         }
     }
@@ -948,10 +998,6 @@ mod tests {
             event: Some(
                 v1::SchedulePaused {
                     schedule_id: id.to_string(),
-                    paused_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-                    paused_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                        value: "test-actor".to_string(),
-                    }),
                 }
                 .into(),
             ),
@@ -963,10 +1009,6 @@ mod tests {
             event: Some(
                 v1::ScheduleRemoved {
                     schedule_id: id.to_string(),
-                    removed_at: proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-                    removed_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-                        value: "test-actor".to_string(),
-                    }),
                 }
                 .into(),
             ),
@@ -992,14 +1034,18 @@ mod tests {
             panic!("expected projected job");
         };
 
+        let dtstart: DateTime<Utc> = "2026-05-24T09:00:00+00:00".parse().unwrap();
+        let rdate: DateTime<Utc> = "2026-05-26T09:00:00+00:00".parse().unwrap();
+        let exdate: DateTime<Utc> = "2026-06-01T09:00:00+00:00".parse().unwrap();
+
         assert_eq!(
             job.schedule,
             ScheduleEventSchedule::RRule {
-                dtstart: "2026-05-24T09:00:00+00:00".to_string(),
+                dtstart,
                 rrule: "FREQ=WEEKLY;BYDAY=MO".to_string(),
                 timezone: Some("UTC".to_string()),
-                rdate: vec!["2026-05-26T09:00:00+00:00".to_string()],
-                exdate: vec!["2026-06-01T09:00:00+00:00".to_string()],
+                rdate: vec![rdate],
+                exdate: vec![exdate],
             }
         );
     }
@@ -1037,7 +1083,7 @@ mod tests {
 
         let updated = apply("backup", after.clone(), &paused_event("backup")).unwrap();
         match projection_change(&after, &updated).unwrap() {
-            ProjectionChange::Upsert(job) => assert_eq!(job.status, ScheduleEventStatus::Disabled),
+            ProjectionChange::Upsert(job) => assert_eq!(job.status, ScheduleEventStatus::Paused),
             ProjectionChange::Delete(_) => panic!("expected upsert change"),
         }
     }

@@ -4,7 +4,7 @@ use buffa::MessageField;
 use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 use trogon_scheduler::{
     AddScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
-    PauseScheduleCommand, RemoveScheduleCommand, Schedule, ScheduleActor, ScheduleEventDelivery, ScheduleEventSchedule,
+    PauseScheduleCommand, RemoveScheduleCommand, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
     ScheduleEventStatus, ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
     commands::domain as command_domain,
     mocks::{MockLeaderLock, MockSchedulePublisher, MockSchedulerStore},
@@ -18,23 +18,13 @@ fn command_job_id(id: &str) -> command_domain::ScheduleId {
     command_domain::ScheduleId::parse(id).unwrap()
 }
 
-fn actor() -> ScheduleActor {
-    ScheduleActor::parse("test-actor").unwrap()
-}
-
-fn event_at() -> chrono::DateTime<chrono::Utc> {
-    chrono::DateTime::parse_from_rfc3339("2026-05-22T00:00:00+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Utc)
-}
-
 fn expected_job(id: &str) -> Schedule {
     Schedule {
         id: id.to_string(),
-        status: ScheduleEventStatus::Enabled,
+        status: ScheduleEventStatus::Scheduled,
         schedule: ScheduleEventSchedule::Every { every_sec: 30 },
-        delivery: ScheduleEventDelivery::NatsEvent {
-            route: "agent.run".to_string(),
+        delivery: ScheduleEventDelivery::NatsMessage {
+            subject: "agent.run".to_string(),
             ttl_sec: None,
             source: None,
         },
@@ -63,7 +53,7 @@ async fn client_register_then_get() {
     let store = MockSchedulerStore::new();
 
     let job = command_base_job("backup");
-    CommandExecution::new(&store, &AddScheduleCommand::new(job, actor(), event_at()))
+    CommandExecution::new(&store, &AddScheduleCommand::new(job))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -81,68 +71,53 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(
-        &store,
-        &AddScheduleCommand::new(command_base_job("toggle"), actor(), event_at()),
-    )
-    .with_snapshot(&store)
-    .with_task_runtime(ImmediateSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
-    CommandExecution::new(
-        &store,
-        &PauseScheduleCommand::new(command_job_id("toggle"), actor(), event_at()),
-    )
-    .with_snapshot(&store)
-    .with_task_runtime(ImmediateSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("toggle")))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
+    CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("toggle")))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
 
     let got = store
         .get_schedule(GetScheduleCommand::new(ScheduleId::parse("toggle").unwrap()))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(got.status, ScheduleEventStatus::Disabled);
+    assert_eq!(got.status, ScheduleEventStatus::Paused);
 }
 
 #[tokio::test]
 async fn client_remove_and_list_schedules_use_store_paths() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(
-        &store,
-        &AddScheduleCommand::new(command_base_job("alpha"), actor(), event_at()),
-    )
-    .with_snapshot(&store)
-    .with_task_runtime(ImmediateSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
-    CommandExecution::new(
-        &store,
-        &AddScheduleCommand::new(command_base_job("beta"), actor(), event_at()),
-    )
-    .with_snapshot(&store)
-    .with_task_runtime(ImmediateSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
+    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("beta")))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
 
     let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    CommandExecution::new(
-        &store,
-        &RemoveScheduleCommand::new(command_job_id("beta"), actor(), event_at()),
-    )
-    .with_snapshot(&store)
-    .with_task_runtime(ImmediateSnapshotTaskScheduler)
-    .execute()
-    .await
-    .unwrap();
+    CommandExecution::new(&store, &RemoveScheduleCommand::new(command_job_id("beta")))
+        .with_snapshot(&store)
+        .with_task_runtime(ImmediateSnapshotTaskScheduler)
+        .execute()
+        .await
+        .unwrap();
 
     assert!(
         store
@@ -201,30 +176,40 @@ async fn client_rejects_stale_version() {
 
 #[tokio::test]
 async fn mock_schedule_publisher_records_changes() {
+    use buffa_types::google::protobuf::Duration;
     let publisher = MockSchedulePublisher::new();
-    let job = trogon_scheduler::v1::ScheduleAdded {
+    let job = trogon_scheduler::v1::ScheduleCreated {
         schedule_id: "alpha".to_string(),
-        added_at: trogon_scheduler::commands::domain::proto_timestamp_rfc3339("2026-05-22T00:00:00+00:00").unwrap(),
-        status: trogon_scheduler::v1::ScheduleStatus::SCHEDULE_STATUS_ENABLED,
+        status: MessageField::some(trogon_scheduler::v1::ScheduleStatus {
+            kind: Some(trogon_scheduler::v1::schedule_status::Scheduled {}.into()),
+        }),
         schedule: MessageField::some(trogon_scheduler::v1::Schedule {
-            kind: Some(trogon_scheduler::v1::EverySchedule { every_sec: 30 }.into()),
+            kind: Some(
+                trogon_scheduler::v1::schedule::Every {
+                    every: MessageField::some(Duration {
+                        seconds: 30,
+                        ..Default::default()
+                    }),
+                }
+                .into(),
+            ),
         }),
         delivery: MessageField::some(trogon_scheduler::v1::Delivery {
             kind: Some(
-                trogon_scheduler::v1::NatsEventDelivery {
-                    route: "agent.run".to_string(),
-                    ttl_sec: None,
+                trogon_scheduler::v1::delivery::NatsMessage {
+                    subject: "agent.run".to_string(),
+                    ttl: MessageField::none(),
                     source: MessageField::none(),
                 }
                 .into(),
             ),
         }),
         message: MessageField::some(trogon_scheduler::v1::Message {
-            content: r#"{"kind":"heartbeat"}"#.to_string(),
+            content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+                content_type: "application/json".to_string(),
+                data: r#"{"kind":"heartbeat"}"#.as_bytes().to_vec(),
+            }),
             headers: Vec::new(),
-        }),
-        added_by: buffa::MessageField::some(trogonai_proto::actor::v1alpha1::ActorId {
-            value: "test-actor".to_string(),
         }),
     };
     let resolved = trogon_scheduler::ResolvedSchedule::from_event("alpha", &job).unwrap();
