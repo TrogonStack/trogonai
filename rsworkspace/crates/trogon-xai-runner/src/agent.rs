@@ -1211,7 +1211,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
             let header = format!(
-                "Current working directory: {cwd}\nPermission mode: {session_mode}"
+                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -4114,7 +4114,10 @@ mod tests {
             input[0].role().unwrap(), "system",
             "first input item must be the system prompt"
         );
-        assert_eq!(input[0].content().unwrap(), "You are a helpful assistant.");
+        assert!(
+            input[0].content().unwrap().contains("You are a helpful assistant."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
     }
 
     // ── prompt: stream error returns Ok ──────────────────────────────────────────
@@ -4214,8 +4217,8 @@ mod tests {
         assert_eq!(call.previous_response_id, None);
         assert_eq!(
             call.input.len(),
-            3,
-            "full history + new message sent when no previous_response_id"
+            4,
+            "system header + full history + new message sent when no previous_response_id"
         );
     }
 
@@ -4445,9 +4448,18 @@ mod tests {
         let calls = mock_http.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         let input = &calls[0].input;
+        assert_eq!(
+            input[0].role(), Some("system"),
+            "Trogon identity header is always prepended as system prompt"
+        );
+        let sys_content = input[0].content().unwrap();
         assert!(
-            input[0].role() != Some("system"),
-            "empty XAI_SYSTEM_PROMPT must not prepend a system input item"
+            sys_content.starts_with("You are Trogon"),
+            "system prompt must start with Trogon identity"
+        );
+        assert!(
+            !sys_content.contains("\n\n"),
+            "empty XAI_SYSTEM_PROMPT must not append extra content after header"
         );
     }
 
@@ -4688,7 +4700,10 @@ mod tests {
             "system + user + assistant + new_user = 4 items"
         );
         assert_eq!(input[0].role().unwrap(), "system", "item[0] must be the system prompt");
-        assert_eq!(input[0].content().unwrap(), "You are concise.");
+        assert!(
+            input[0].content().unwrap().contains("You are concise."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
         assert_eq!(
             input[1].role().unwrap(), "user",
             "item[1] must be history user message"
@@ -4780,12 +4795,12 @@ mod tests {
             .unwrap();
 
         let calls = agent.client.calls.lock().unwrap();
-        // input: [history-item (role=user), new user item] — no system prompt set
+        // input: [system header, history-item (role=user), new user item]
         assert_eq!(
-            calls[0].input[0].role().unwrap(), "user",
+            calls[0].input[1].role().unwrap(), "user",
             "non-assistant role must be mapped to 'user'"
         );
-        assert_eq!(calls[0].input[0].content().unwrap(), "injected");
+        assert_eq!(calls[0].input[1].content().unwrap(), "injected");
     }
 
     // ── with_deps: empty api_key sets global_api_key to None ─────────────────
@@ -4832,7 +4847,10 @@ mod tests {
             "system prompt + user item only (no history)"
         );
         assert_eq!(input[0].role().unwrap(), "system");
-        assert_eq!(input[0].content().unwrap(), "Be concise.");
+        assert!(
+            input[0].content().unwrap().contains("Be concise."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
         assert_eq!(input[1].role().unwrap(), "user");
     }
 
@@ -6519,7 +6537,12 @@ mod tests {
         let calls = mock_http.calls.lock().unwrap();
         let input = &calls.last().unwrap().input;
         let has_system = input.iter().any(|item| item.role() == Some("system"));
-        assert!(!has_system, "no system item expected when no TROGON.md and no session prompt");
+        assert!(has_system, "Trogon identity header must be present as system prompt even without TROGON.md");
+        let sys_item = input.iter().find(|item| item.role() == Some("system")).unwrap();
+        assert!(
+            sys_item.content().unwrap().starts_with("You are Trogon"),
+            "system prompt must start with Trogon identity"
+        );
     }
 
     #[tokio::test]

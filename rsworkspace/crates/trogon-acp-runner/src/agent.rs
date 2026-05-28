@@ -534,10 +534,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
         let trogon_md = self.md_loader.load(&state.cwd).await;
+        let identity = "You are Trogon, an AI coding assistant.";
         let system_prompt = match (trogon_md, state.system_prompt.clone()) {
-            (Some(tmd), Some(sp)) => Some(format!("{tmd}\n\n{sp}")),
-            (Some(tmd), None) => Some(tmd),
-            (None, sp) => sp,
+            (Some(tmd), Some(sp)) => Some(format!("{identity}\n\n{tmd}\n\n{sp}")),
+            (Some(tmd), None) => Some(format!("{identity}\n\n{tmd}")),
+            (None, Some(sp)) => Some(format!("{identity}\n\n{sp}")),
+            (None, None) => Some(identity.to_string()),
         };
 
         let system_prompt = if !state.additional_roots.is_empty() {

@@ -187,6 +187,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
+    skip_permissions: bool,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
@@ -215,6 +216,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     } else {
         start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
     };
+    if skip_permissions {
+        if let Err(e) = session.set_mode("bypassPermissions").await {
+            eprintln!("warning: could not set bypassPermissions: {e}");
+        }
+    }
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
         if resumed
@@ -242,8 +248,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     let mut session_used_tokens: u64 = 0;
     let mut session_context_size: u64 = 0;
-    let mut session_mode =
-        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
+    let mut session_mode = if skip_permissions {
+        "bypassPermissions".to_string()
+    } else {
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
+    };
 
     loop {
         permission_coordinator.cancel_pending();
@@ -304,8 +313,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 session = s;
                                 session_used_tokens = 0;
                                 session_context_size = 0;
-                                session_mode = std::env::var("TROGON_MODE")
-                                    .unwrap_or_else(|_| "default".into());
+                                if skip_permissions {
+                                    if let Err(e) = session.set_mode("bypassPermissions").await {
+                                        eprintln!("warning: could not set bypassPermissions: {e}");
+                                    }
+                                    session_mode = "bypassPermissions".to_string();
+                                } else {
+                                    session_mode = std::env::var("TROGON_MODE")
+                                        .unwrap_or_else(|_| "default".into());
+                                }
                                 // (falls through to persist + print below)
                                 if let Some(ref sup) = client_supervisor {
                                     sup.set_session(session.session_id());
@@ -491,8 +507,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // MED-5: the new runner starts a session with mode
                                     // initialized from TROGON_MODE; keep the REPL's tracked
                                     // mode in sync so /status and permission prompts match.
-                                    session_mode = std::env::var("TROGON_MODE")
-                                        .unwrap_or_else(|_| "default".into());
+                                    if skip_permissions {
+                                        if let Err(e) = session.set_mode("bypassPermissions").await {
+                                            eprintln!("warning: could not set bypassPermissions: {e}");
+                                        }
+                                        session_mode = "bypassPermissions".to_string();
+                                    } else {
+                                        session_mode = std::env::var("TROGON_MODE")
+                                            .unwrap_or_else(|_| "default".into());
+                                    }
                                     if let Some(ref sup) = client_supervisor
                                         && let Err(e) = sup
                                             .rebind(&outcome.new_prefix, session.session_id())
