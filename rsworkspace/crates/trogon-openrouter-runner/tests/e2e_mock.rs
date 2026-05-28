@@ -1345,7 +1345,7 @@ async fn max_tool_rounds_stops_after_10_cycles() {
             let sid = create_session(&h).await;
 
             // 11 ToolCallsReady: rounds 1-10 execute normally; on round 11 the
-            // MAX_TOOL_ROUNDS=10 guard fires before dispatching and returns Cancelled.
+            // MAX_TOOL_ROUNDS=10 guard fires before dispatching and returns MaxTurnRequests.
             for _ in 0..11 {
                 h.http.push(vec![OpenRouterEvent::ToolCallsReady {
                     calls: vec![AssembledToolCall {
@@ -1366,8 +1366,8 @@ async fn max_tool_rounds_stops_after_10_cycles() {
             let payloads = h.expect_n_publishes(2).await;
             let resp: PromptResponse = serde_json::from_slice(&payloads[1]).unwrap();
             assert!(
-                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
-                "must stop with Cancelled after 10 tool rounds: {:?}",
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::MaxTurnRequests),
+                "must stop with MaxTurnRequests after 10 tool rounds: {:?}",
                 resp.stop_reason
             );
         })

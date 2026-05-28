@@ -44,7 +44,7 @@ first prompt.
 
 ---
 
-## Solution: two additive layers
+## Solution: three additive layers
 
 ### Layer 1 — `acp-nats` (local crate)
 
@@ -61,6 +61,20 @@ forwarding to the IDE.
 
 Because `Bridge` is `!Send` (contains `RefCell`), all shared state uses `Rc<RefCell<...>>`
 and the entire agent runs on a `tokio::task::LocalSet`, consistent with the existing design.
+
+### Layer 3 — permission/elicitation relay (`client::run` pool + `RemappingClient`)
+
+Layers 1–2 route agent→runner traffic (prompt/cancel) and relay runner→IDE *notifications*
+(one-way). But interactive permissions and elicitation are request/reply (the IDE must
+answer), which the notification loop cannot carry. Reuse the existing ACP client protocol:
+spawn one `acp_nats::client::run` per external-runner prefix (the same per-prefix dispatcher
+`acp-nats-stdio` already runs), wrapped in a `RemappingClient` that rewrites
+`runner_sid → acp_sid`. This relays `request_permission`, `elicitation`, **and** terminal
+(external runners run bash via `CreateTerminalRequest`) back to the IDE, reusing the runners'
+existing `NatsClientProxy` emit path. The in-process Claude keeps its local `perm_tx` path
+untouched. Full design + rationale: see *"In-process `TrogonAgent` becomes unreachable"*
+under **Known limitations** (the verified fix, which replaces an earlier bespoke-subject
+proposal).
 
 ---
 
@@ -2000,28 +2014,85 @@ runner (graceful fallback), and the first prompt fails with "no model selected".
 
 **Consequence — permission dialogs:** The `perm_tx` channel exists specifically so the
 in-process `TrogonAgent` can ask the IDE to show tool-approval dialogs
-(`handle_permission_request` → `conn.request_permission()`). External runners (Docker)
-have no equivalent channel back to `trogon-acp`. After this PR, IDE permission dialogs
-work only when using the in-process runner; all external runners process tools without
-user confirmation in v1.
+(`handle_permission_request` → `conn.request_permission()`). External runners *can* emit
+permission requests over NATS — they already hold a `NatsClientProxy` in
+`session_notifier.rs`, and `acp-runner` calls `proxy.request_permission()` in
+`permission_bridge.rs:73` — but this PR adds **no responder** in `trogon-acp` for
+external-runner prefixes, and the external runners currently collapse
+`RuleDecision::Ask → Allow` (e.g. `xai-runner/src/agent.rs:225`). So after this PR, IDE
+permission dialogs work only with the in-process runner; external runners process tools
+without user confirmation in v1. The verified fix (below) reuses the existing ACP
+protocol — it does **not** require a bespoke subject.
 
-**Long-term fix (follow-up PR):** Move permission requests from the in-process `perm_tx`
-channel to a NATS request/reply pattern:
+**Verified solution (follow-up PR): reuse ACP `request_permission`/`elicitation` via a
+`client::run` relay pool — do NOT build a bespoke `.permission` subject.**
 
-1. Runner publishes a permission request to a dedicated NATS subject
-   (e.g. `{runner_prefix}.session.{session_id}.permission`) with a NATS `reply-to`
-   subject.
-2. `trogon-acp` subscribes to `{runner_prefix}.session.*.permission`, calls
-   `conn.request_permission()` on the IDE connection, and publishes the allow/deny
-   response to the reply subject.
-3. The runner receives the response and continues or cancels the tool.
+A codebase investigation showed the permission round-trip already exists end-to-end and is
+used by `acp-runner` today. The v1 gap is only that `trogon-acp` runs no *responder* for
+external-runner prefixes (and external runners collapse `Ask → Allow`). The correct fix
+reuses the existing protocol rather than inventing a new subject.
 
-This pattern is symmetric with how prompt/cancel already work (trogon-acp publishes,
-runner responds). Implementation touches `acp-nats-agent` (runner side, local crate) and
-`trogon-acp/src/main.rs` (subscriber side). It does not require modifying
-`agent-client-protocol` (external fixed crate). Once implemented the in-process
-`TrogonAgent` in `main.rs` can be removed, as all runners — including Claude — will
-support IDE permission dialogs via NATS.
+**What already exists (verified):**
+
+- **Runners emit** via `NatsClientProxy` (`acp-nats/src/client_proxy.rs`). `acp-runner`
+  does it in `permission_bridge.rs:73` (`proxy.request_permission(...)`); `xai`/`openrouter`
+  already construct a `NatsClientProxy` in `session_notifier.rs`. The proxy publishes to
+  `{prefix}.session.{sid}.client.session.request_permission` (and `.../session.elicitation`).
+- **The responder is `acp_nats::client::run`** (`acp-nats/src/client/mod.rs:56`). It
+  subscribes to the per-prefix wildcard `{prefix}.session.*.client.>` (mod.rs:68) and
+  dispatches `request_permission`, `elicitation`, `fs_read/write`, `terminal_create/kill`,
+  `session_update` to a `Client` impl, then publishes the reply. It is already run by
+  `acp-nats-stdio`/`ws`/`server` — `trogon-acp` simply never runs it.
+- **External runners use client-side terminal for bash** (`CreateTerminalRequest`,
+  `xai/src/agent.rs:2047`, `openrouter/src/agent.rs:1719`). So the relay must cover
+  terminal too — reusing the whole `client::run` dispatcher covers permission, elicitation,
+  **and** terminal at once; a permission-only subject would not.
+
+**Design (additive — does NOT touch the working in-process Claude path):**
+
+1. For each external-runner prefix the orchestrator routes to, spawn one
+   `acp_nats::client::run` task subscribed to that prefix, paired with the per-prefix
+   `Bridge` already in the pool. `Bridge` and `client::run` are already per-prefix and
+   parameterizable (prefix comes from `config`, `bridge.rs:93` / `prompt.rs:96`) — they
+   need **zero internal changes**; the orchestrator instantiates N of each.
+2. Wrap the IDE `AgentSideConnection` in a `RemappingClient` that implements
+   `Client + ElicitationClient` and rewrites `session_id: runner_sid → acp_sid` (using the
+   same `id_remap` table the notification loop uses) before delegating to the real
+   connection. The NATS reply path is unaffected by the remap — the response returns via the
+   NATS `reply-to`, which carries no `session_id`, and `RequestPermissionResponse` is
+   session-agnostic.
+3. External runners must stop collapsing `Ask → Allow` and instead emit `request_permission`.
+   `acp-runner`'s `permission_bridge::handle_permission_request_nats<S, N>` is already
+   generic; lift it to `trogon-runner-tools` for reuse by `xai`/`openrouter`. *(Runner-crate
+   change → separate PR, like the MCP fix below.)*
+
+**Why this, not the bespoke subject:** a `.permission` subject would re-implement a protocol
+(`request_permission` + `elicitation` + terminal) that already exists, is spec-compliant,
+tested, and used by `acp-runner`. Reuse dominates reinvention here.
+
+**Non-breaking guarantee:** the in-process Claude keeps its existing local
+`perm_tx → handle_permission_request → conn.request_permission()` path, untouched. The relay
+pool is added only for external-runner prefixes. This leaves a dual permission path
+(local for Claude, `client::run` pool for externals) — an acceptable interim; unify only
+after runners reach parity (see residuals).
+
+**Required addition for uniform switching:** the in-process Claude (`TrogonAgent`) is
+NATS-addressable (`main.rs:156`) and supports `session/export`/`session/import`
+(`trogon-acp-runner/src/agent.rs:1278,1313`), but is **not registered in the registry**, so
+`find_by_model("claude…")` cannot find it as a switch target. Register the in-process Claude
+in the registry (with its `acp_prefix`) so `CrossRunnerSwitcher` treats it uniformly with
+the other three runners — switching to/from Claude then needs no special-case.
+
+**Residual asymmetries (pre-existing runner gaps, NOT introduced by this design):**
+
+- `acp-runner.load_session` does not replay history (`agent.rs:935-948`); `xai`/`openrouter`
+  similar → resuming an external-runner session has thinner UX than Claude until runners add
+  replay.
+- MCP only in Claude/`acp-runner` (see the MCP limitation below).
+
+Once external runners reach parity (replay, gateway-auth capture, MCP) the in-process
+`TrogonAgent` can be removed and all four runners — including Claude — converge onto the
+single `client::run` permission path.
 
 ### MCP tools not transferred when using Docker `acp-runner`
 

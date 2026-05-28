@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionId, SessionNotification, SetSessionModelRequest,
+    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -1219,4 +1219,150 @@ async fn prompt_compacts_via_nats_and_clears_last_response_id() {
             );
         })
         .await;
+}
+
+// ── Permission emit e2e: xai emits request_permission on Ask and gates on the reply ──
+
+/// Notifier that records every notification so the test can assert the deny update.
+struct RecordingNotifier {
+    notes: Arc<std::sync::Mutex<Vec<SessionNotification>>>,
+}
+
+#[async_trait(?Send)]
+impl SessionNotifier for RecordingNotifier {
+    async fn notify(&self, n: SessionNotification) {
+        self.notes.lock().unwrap().push(n);
+    }
+}
+
+/// On the first turn asks to call the client-side `read_file` tool (no permission
+/// rule → `Ask`); ends on the continuation turn.
+struct ReadFileToolThenDone {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait(?Send)]
+impl XaiHttpClient for ReadFileToolThenDone {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _input: &[InputItem],
+        _api_key: &str,
+        _tools: &[trogon_xai_runner::ToolSpec],
+        _previous_response_id: Option<&str>,
+        _max_turns: Option<u32>,
+    ) -> LocalBoxStream<'static, XaiEvent> {
+        let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if n == 0 {
+            Box::pin(stream::iter(vec![
+                XaiEvent::ResponseId { id: "r1".to_string() },
+                XaiEvent::FunctionCall {
+                    call_id: "c1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"secret.txt"}"#.to_string(),
+                },
+                XaiEvent::Done,
+            ]))
+        } else {
+            Box::pin(stream::iter(vec![XaiEvent::Done]))
+        }
+    }
+}
+
+/// End-to-end: a tool hitting `RuleDecision::Ask` makes xai emit an ACP
+/// `request_permission` over NATS; the IDE stand-in replies "reject"; the runner
+/// gates (denies) the tool. Proves the runner-side half of the permission relay.
+#[tokio::test]
+async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
+    use acp_nats::acp_prefix::AcpPrefix;
+    use agent_client_protocol::{
+        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate,
+    };
+    use std::time::Duration;
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+
+    // IDE stand-in: capture the permission request, reply "reject".
+    let captured: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    let captured_c = captured.clone();
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder
+            .subscribe("acp.session.*.client.session.request_permission".to_string())
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            *captured_c.lock().unwrap() = Some(String::from_utf8_lossy(&msg.payload).to_string());
+            if let Some(reply) = msg.reply {
+                let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                    SelectedPermissionOutcome::new("reject"),
+                ));
+                responder
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let notes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = XaiAgent::with_deps(
+        RecordingNotifier { notes: notes.clone() },
+        "grok-4",
+        "dummy-key",
+        ReadFileToolThenDone { calls: std::sync::atomic::AtomicUsize::new(0) },
+    )
+    .with_permissions(nats.clone(), AcpPrefix::new("acp").unwrap());
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(tmp.path().to_path_buf()))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("read the file")]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    // 1. xai emitted request_permission for the gated tool.
+    let payload = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("xai must emit request_permission when a tool hits Ask");
+    assert!(
+        payload.contains("read_file"),
+        "permission request must carry the tool name; got: {payload}"
+    );
+
+    // 2. The IDE's reject decision gated the tool (denied, never executed).
+    let notes = notes.lock().unwrap();
+    let denied = notes.iter().any(|n| match &n.update {
+        SessionUpdate::ToolCallUpdate(tcu) => tcu
+            .fields
+            .raw_output
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("permission denied"))
+            .unwrap_or(false),
+        _ => false,
+    });
+    assert!(
+        denied,
+        "tool must be denied after the IDE rejected the permission request"
+    );
 }

@@ -266,3 +266,38 @@ where
         ext_notification::handle(self, args).await
     }
 }
+
+/// Multi-runner routing helpers: send a prompt/cancel to an explicit runner session id,
+/// independent of `args.session_id`. Used by the IDE orchestrator to route a request to
+/// whichever runner owns the session, while the IDE keeps its own (acp) session id.
+impl<
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
+    C: GetElapsed,
+    J: JetStreamPublisher + JetStreamGetStream,
+> Bridge<N, C, J>
+where
+    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
+{
+    /// Route a prompt to `target_session_id` (the runner's session id), bypassing
+    /// `args.session_id`. Mutates `args.session_id` so both the NATS subject and the
+    /// serialized payload carry the runner's id, then delegates to the existing `prompt`.
+    pub async fn prompt_to(
+        &self,
+        mut args: PromptRequest,
+        target_session_id: &str,
+    ) -> Result<PromptResponse> {
+        args.session_id = SessionId::new(target_session_id);
+        agent_client_protocol::Agent::prompt(self, args).await
+    }
+
+    /// Route a cancel to `target_session_id` (the runner's session id), bypassing
+    /// `args.session_id`.
+    pub async fn cancel_to(
+        &self,
+        mut args: CancelNotification,
+        target_session_id: &str,
+    ) -> Result<()> {
+        args.session_id = SessionId::new(target_session_id);
+        agent_client_protocol::Agent::cancel(self, args).await
+    }
+}

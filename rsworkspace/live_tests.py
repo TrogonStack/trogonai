@@ -1749,7 +1749,8 @@ def get_tool_result_content(mock_received, call_index=1):
 # TEST 25 — permission denied: runner asks, user rejects, tool NOT executed
 # ─────────────────────────────────────────────────────────────────────────────
 
-DENY_RESPONSE = json.dumps({"outcome": {"outcome": "selected", "optionId": "reject"}})
+DENY_RESPONSE  = json.dumps({"outcome": {"outcome": "selected", "optionId": "reject"}})
+ALLOW_RESPONSE = json.dumps({"outcome": {"outcome": "selected", "optionId": "allow"}})
 
 async def test_permission_denied():
     print("\n\033[1mTest 25: Permission denied — reject response, tool not executed\033[0m")
@@ -9954,6 +9955,349 @@ async def test_openrouter_bash_stateful_fork_independent_terminal():
             mock.stop()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers for interactive permission gate live tests (T180–T183)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _perm_gate_session_and_subscribe(nc, prefix, tmpdir, perm_response):
+    """Create a session, subscribe to request_permission for that session (reply with
+    perm_response), and return (sid, resp_sub, perm_received).
+    The caller must subscribe to prompt responses and publish the prompt afterwards."""
+    r = await nc.request(
+        f"{prefix}.agent.session.new",
+        json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+    sid = json.loads(r.data)["sessionId"]
+
+    perm_received = []
+
+    async def on_perm(msg):
+        perm_received.append(msg.subject)
+        print(f"    [perm-sub] request on {msg.subject} → replying", flush=True)
+        if msg.reply:
+            await nc.publish(msg.reply, perm_response.encode())
+
+    await nc.subscribe(
+        f"{prefix}.session.{sid}.client.session.request_permission", cb=on_perm)
+
+    return sid, perm_received
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 180 — xai-runner: Ask → allow → write_file executes
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_perm_gate_allow():
+    """Spec (interactive permission gate/xai-runner): when TROGON.md has a Permissions
+    section but the tool doesn't match any deny rule (→ Ask), the runner sends a NATS
+    request_permission to the client. If the client replies 'allow', the tool executes."""
+    print("\n\033[1mTest 180: xai-runner interactive permission gate — Ask → allow → tool executes\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Permissions section present but deny rule only matches /no-match.txt, not output_t180.txt
+        with open(os.path.join(tmpdir, "TROGON.md"), 'w') as f:
+            f.write("## Permissions\ndeny_paths: /no-match-t180.txt\n")
+
+        def sse(n):
+            if n == 1:
+                return xai_function_call_sse(
+                    "c180", "write_file",
+                    json.dumps({"path": "output_t180.txt", "content": "ALLOW_T180\n"}))
+            return xai_text_sse("written with permission")
+
+        mock = MockHttpServer(30208, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t180",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30208",
+               "XAI_MODELS": "grok-t180:grok-t180"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        prefix = "acp.t180"
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            sid, perm_received = await _perm_gate_session_and_subscribe(
+                nc, prefix, tmpdir, ALLOW_RESPONSE)
+
+            req_id = str(uuid.uuid4())
+            resp_subj = f"{prefix}.session.{sid}.agent.prompt.response.{req_id}"
+            resp_sub = await nc.subscribe(resp_subj)
+
+            await nc.publish(
+                f"{prefix}.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "write a file"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+
+            msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=25)
+            done = json.loads(msg.data)
+        finally:
+            await nc.close()
+
+        print(f"    done={done} api_calls={len(mock.received)} perm_requests={len(perm_received)}",
+              flush=True)
+
+        out_path = os.path.join(tmpdir, "output_t180.txt")
+        file_exists = os.path.exists(out_path)
+        print(f"    output_t180.txt exists: {file_exists}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if len(perm_received) == 0:
+            fail("xai perm gate allow: no request_permission received — gate not triggered",
+                 f"api_calls={len(mock.received)} TROGON.md Permissions section present")
+        elif file_exists and "ALLOW_T180" in open(out_path).read():
+            ok("xai perm gate allow: permission requested, user allowed → write_file executed, file created")
+        elif file_exists:
+            fail("xai perm gate allow: file exists but wrong content",
+                 f"content={open(out_path).read()!r}")
+        else:
+            fail("xai perm gate allow: permission requested but file NOT created after allow",
+                 f"api_calls={len(mock.received)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 181 — xai-runner: Ask → deny → write_file blocked
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_perm_gate_deny():
+    """Spec (interactive permission gate/xai-runner): when TROGON.md has a Permissions
+    section but the tool doesn't match any deny rule (→ Ask), the runner sends a NATS
+    request_permission to the client. If the client replies 'reject', the tool is blocked
+    and a 'permission denied' message is returned to the LLM."""
+    print("\n\033[1mTest 181: xai-runner interactive permission gate — Ask → deny → tool blocked\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "TROGON.md"), 'w') as f:
+            f.write("## Permissions\ndeny_paths: /no-match-t181.txt\n")
+
+        def sse(n):
+            if n == 1:
+                return xai_function_call_sse(
+                    "c181", "write_file",
+                    json.dumps({"path": "secret_t181.txt", "content": "SHOULD_NOT_EXIST\n"}))
+            return xai_text_sse("ok, I understand permission was denied")
+
+        mock = MockHttpServer(30209, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t181",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30209",
+               "XAI_MODELS": "grok-t181:grok-t181"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        prefix = "acp.t181"
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            sid, perm_received = await _perm_gate_session_and_subscribe(
+                nc, prefix, tmpdir, DENY_RESPONSE)
+
+            req_id = str(uuid.uuid4())
+            resp_subj = f"{prefix}.session.{sid}.agent.prompt.response.{req_id}"
+            resp_sub = await nc.subscribe(resp_subj)
+
+            await nc.publish(
+                f"{prefix}.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "write secret file"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+
+            msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=25)
+            done = json.loads(msg.data)
+        finally:
+            await nc.close()
+
+        print(f"    done={done} api_calls={len(mock.received)} perm_requests={len(perm_received)}",
+              flush=True)
+
+        out_path = os.path.join(tmpdir, "secret_t181.txt")
+        file_exists = os.path.exists(out_path)
+        print(f"    secret_t181.txt exists: {file_exists}", flush=True)
+
+        # Check second API call body contains the denial message
+        denied_in_body = False
+        if len(mock.received) >= 2:
+            call2_str = json.dumps(json.loads(mock.received[1]))
+            print(f"    call2 preview: {call2_str[:200]!r}", flush=True)
+            denied_in_body = "permission denied" in call2_str.lower()
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if len(perm_received) == 0:
+            fail("xai perm gate deny: no request_permission received — gate not triggered",
+                 f"api_calls={len(mock.received)}")
+        elif file_exists:
+            fail("xai perm gate deny: file WAS created despite deny response",
+                 f"perm_received={len(perm_received)}")
+        elif denied_in_body:
+            ok("xai perm gate deny: permission requested, user denied → tool blocked, denial sent to LLM")
+        else:
+            fail("xai perm gate deny: file not created but 'permission denied' missing from LLM call",
+                 f"api_calls={len(mock.received)} denied_in_body={denied_in_body}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 182 — openrouter-runner: Ask → allow → write_file executes
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_perm_gate_allow():
+    """Spec (interactive permission gate/openrouter-runner): same gate as xai-runner.
+    When client replies 'allow', the write_file tool executes and the file is created."""
+    print("\n\033[1mTest 182: openrouter-runner interactive permission gate — Ask → allow → tool executes\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "TROGON.md"), 'w') as f:
+            f.write("## Permissions\ndeny_paths: /no-match-t182.txt\n")
+
+        def sse(n):
+            if n == 1:
+                return or_tool_calls_sse(
+                    "c182", "write_file",
+                    json.dumps({"path": "output_t182.txt", "content": "ALLOW_T182\n"}))
+            return or_text_sse("written with permission")
+
+        mock = MockHttpServer(30210, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t182",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30210",
+               "OPENROUTER_MODELS": "gpt-t182:gpt-t182"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        prefix = "acp.t182"
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            sid, perm_received = await _perm_gate_session_and_subscribe(
+                nc, prefix, tmpdir, ALLOW_RESPONSE)
+
+            req_id = str(uuid.uuid4())
+            resp_subj = f"{prefix}.session.{sid}.agent.prompt.response.{req_id}"
+            resp_sub = await nc.subscribe(resp_subj)
+
+            await nc.publish(
+                f"{prefix}.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "write a file"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+
+            msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=25)
+            done = json.loads(msg.data)
+        finally:
+            await nc.close()
+
+        print(f"    done={done} api_calls={len(mock.received)} perm_requests={len(perm_received)}",
+              flush=True)
+
+        out_path = os.path.join(tmpdir, "output_t182.txt")
+        file_exists = os.path.exists(out_path)
+        print(f"    output_t182.txt exists: {file_exists}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if len(perm_received) == 0:
+            fail("openrouter perm gate allow: no request_permission received — gate not triggered",
+                 f"api_calls={len(mock.received)}")
+        elif file_exists and "ALLOW_T182" in open(out_path).read():
+            ok("openrouter perm gate allow: permission requested, user allowed → write_file executed, file created")
+        elif file_exists:
+            fail("openrouter perm gate allow: file exists but wrong content",
+                 f"content={open(out_path).read()!r}")
+        else:
+            fail("openrouter perm gate allow: permission requested but file NOT created after allow",
+                 f"api_calls={len(mock.received)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 183 — openrouter-runner: Ask → deny → write_file blocked
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_perm_gate_deny():
+    """Spec (interactive permission gate/openrouter-runner): when client replies 'reject',
+    the tool is blocked, the file is NOT created, and 'permission denied' is sent to LLM."""
+    print("\n\033[1mTest 183: openrouter-runner interactive permission gate — Ask → deny → tool blocked\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "TROGON.md"), 'w') as f:
+            f.write("## Permissions\ndeny_paths: /no-match-t183.txt\n")
+
+        def sse(n):
+            if n == 1:
+                return or_tool_calls_sse(
+                    "c183", "write_file",
+                    json.dumps({"path": "secret_t183.txt", "content": "SHOULD_NOT_EXIST\n"}))
+            return or_text_sse("ok, I understand permission was denied")
+
+        mock = MockHttpServer(30211, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t183",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30211",
+               "OPENROUTER_MODELS": "gpt-t183:gpt-t183"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+        prefix = "acp.t183"
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            sid, perm_received = await _perm_gate_session_and_subscribe(
+                nc, prefix, tmpdir, DENY_RESPONSE)
+
+            req_id = str(uuid.uuid4())
+            resp_subj = f"{prefix}.session.{sid}.agent.prompt.response.{req_id}"
+            resp_sub = await nc.subscribe(resp_subj)
+
+            await nc.publish(
+                f"{prefix}.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "write secret file"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+
+            msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=25)
+            done = json.loads(msg.data)
+        finally:
+            await nc.close()
+
+        print(f"    done={done} api_calls={len(mock.received)} perm_requests={len(perm_received)}",
+              flush=True)
+
+        out_path = os.path.join(tmpdir, "secret_t183.txt")
+        file_exists = os.path.exists(out_path)
+        print(f"    secret_t183.txt exists: {file_exists}", flush=True)
+
+        # Check second API call body contains the denial message
+        denied_in_body = False
+        if len(mock.received) >= 2:
+            call2_str = json.dumps(json.loads(mock.received[1]))
+            print(f"    call2 preview: {call2_str[:200]!r}", flush=True)
+            denied_in_body = "permission denied" in call2_str.lower()
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if len(perm_received) == 0:
+            fail("openrouter perm gate deny: no request_permission received — gate not triggered",
+                 f"api_calls={len(mock.received)}")
+        elif file_exists:
+            fail("openrouter perm gate deny: file WAS created despite deny response",
+                 f"perm_received={len(perm_received)}")
+        elif denied_in_body:
+            ok("openrouter perm gate deny: permission requested, user denied → tool blocked, denial sent to LLM")
+        else:
+            fail("openrouter perm gate deny: file not created but 'permission denied' missing from LLM call",
+                 f"api_calls={len(mock.received)} denied_in_body={denied_in_body}")
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -10127,6 +10471,10 @@ async def main():
     await test_openrouter_bash_stateful_terminal_release()
     await test_openrouter_bash_no_release_when_no_bash()
     await test_openrouter_bash_stateful_fork_independent_terminal()
+    await test_xai_perm_gate_allow()
+    await test_xai_perm_gate_deny()
+    await test_openrouter_perm_gate_allow()
+    await test_openrouter_perm_gate_deny()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 

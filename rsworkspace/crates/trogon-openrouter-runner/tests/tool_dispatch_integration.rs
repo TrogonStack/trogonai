@@ -1116,14 +1116,13 @@ async fn or_ext_method_list_children_returns_empty_array() {
 
             let val: serde_json::Value =
                 serde_json::from_str(resp.0.get()).expect("response must be valid JSON");
-            assert!(
-                val.is_array(),
-                "session/list_children must return a JSON array; got: {val}"
-            );
+            let children = val["children"]
+                .as_array()
+                .unwrap_or_else(|| panic!("session/list_children must return {{\"children\":[...]}}; got: {val}"));
             assert_eq!(
-                val.as_array().unwrap().len(),
+                children.len(),
                 0,
-                "OpenRouter session/list_children stub must return empty array; got: {val}"
+                "OpenRouter session/list_children stub must return empty children array; got: {val}"
             );
         })
         .await;

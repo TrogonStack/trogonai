@@ -33,6 +33,7 @@
 //! | `AGENT_MAX_ITERATIONS` | `10`                 | Max loop iterations per prompt     |
 
 mod agent;
+mod multi_runner;
 
 use std::sync::Arc;
 
@@ -166,6 +167,7 @@ async fn main() -> anyhow::Result<()> {
         auth: trogon_nats::NatsAuth::None,
     };
     let config = Config::new(AcpPrefix::new(acp_prefix.clone())?, nats_config);
+    let base_config = config.clone();
 
     let meter = opentelemetry::global::meter("trogon-acp");
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
@@ -178,9 +180,10 @@ async fn main() -> anyhow::Result<()> {
         notification_tx.clone(),
     );
 
-    // ── TrogonAcpAgent (handles lifecycle locally, routes prompt/cancel via Bridge) ──
+    // ── TrogonAcpAgent (embedded Claude; lifecycle local, prompt/cancel via Bridge) ──
 
-    let acp_agent = agent::TrogonAcpAgent::new(
+    let embedded_prefix = acp_prefix.clone();
+    let acp_agent_inner = agent::TrogonAcpAgent::new(
         bridge,
         store.clone(),
         NatsSessionNotifier::new(nats.clone()),
@@ -189,6 +192,30 @@ async fn main() -> anyhow::Result<()> {
         model.clone(),
         gateway_config,
     );
+
+    // ── MultiRunnerAgent (ADDITIVE: routes sessions whose model resolves to an external
+    //     runner prefix to a per-runner Bridge pool; Claude sessions delegate to the
+    //     embedded agent unchanged). The registry is the shared KV the runners register into. ──
+    let reg_store = trogon_registry::provision(&js)
+        .await
+        .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
+    let registry = trogon_registry::Registry::new(reg_store);
+    // Clones for the permission relay pool below (the wrapper consumes the originals).
+    let registry_relay = registry.clone();
+    let base_config_relay = base_config.clone();
+    let embedded_prefix_relay = embedded_prefix.clone();
+    let acp_agent = multi_runner::MultiRunnerAgent::new(
+        acp_agent_inner,
+        store.clone(), // for post_prompt_sync_kv (Gap 2)
+        nats.clone(),
+        trogon_nats::jetstream::NatsJetStreamClient::new(js.clone()),
+        trogon_std::time::SystemClock,
+        base_config,
+        registry,
+        notification_tx.clone(),
+        embedded_prefix,
+    );
+    let id_remap = acp_agent.id_remap_handle();
 
     // ── ACP connection over stdio ─────────────────────────────────────────────
 
@@ -206,18 +233,74 @@ async fn main() -> anyhow::Result<()> {
                 AgentSideConnection::new(acp_agent, stdout, stdin, |fut| {
                     tokio::task::spawn_local(fut);
                 });
+            let conn = std::rc::Rc::new(conn);
 
-            // Forward session notifications and handle permission requests in a single task
-            // so `conn` (which is !Send) is only used within this LocalSet task.
+            // ── Permission relay pool ─────────────────────────────────────────────
+            // One `client::run` per external runner prefix registered at startup. Each
+            // relays the runner's client-bound requests (request_permission, elicitation,
+            // terminal) to the IDE `conn`, wrapped in `RemappingClient` so the runner's
+            // session id is rewritten to the acp session id the IDE knows. The embedded
+            // Claude keeps its own local `perm_tx` path (handled in the select loop below).
+            // Limitation: only runners registered when trogon-acp starts are covered.
+            let relay_client = std::rc::Rc::new(acp_nats::RemappingClient::new(
+                conn.clone(),
+                id_remap.clone(),
+            ));
+            let caps = registry_relay.list_all().await.unwrap_or_default();
+            let mut relay_prefixes = std::collections::HashSet::new();
+            for cap in caps {
+                let Some(prefix) = cap
+                    .metadata
+                    .get("acp_prefix")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                else {
+                    continue;
+                };
+                if prefix == embedded_prefix_relay || !relay_prefixes.insert(prefix.clone()) {
+                    continue;
+                }
+                let Ok(acp_prefix) = AcpPrefix::new(&prefix) else {
+                    continue;
+                };
+                let cfg = base_config_relay.for_prefix(acp_prefix);
+                let bridge = std::rc::Rc::new(Bridge::new(
+                    nats.clone(),
+                    trogon_nats::jetstream::NatsJetStreamClient::new(js.clone()),
+                    trogon_std::time::SystemClock,
+                    &opentelemetry::global::meter("trogon-acp-perm-relay"),
+                    cfg,
+                    notification_tx.clone(),
+                ));
+                let nats_run = nats.clone();
+                let client_run = relay_client.clone();
+                tracing::info!(prefix = %prefix, "trogon-acp: permission relay listening for external runner");
+                tokio::task::spawn_local(async move {
+                    acp_nats::client::run(nats_run, client_run, bridge, acp_nats::StdJsonSerialize).await;
+                });
+            }
+
+            // Forward session notifications and handle the embedded Claude's permission
+            // requests in a single task so `conn` (which is !Send) stays on this task.
             let perm_store = store.clone();
             let perm_notif_tx = notification_tx.clone();
+            let conn_loop = conn.clone();
             tokio::task::spawn_local(async move {
                 loop {
                     tokio::select! {
                         maybe_notification = notification_rx.recv() => {
                             match maybe_notification {
-                                Some(notification) => {
-                                    if let Err(e) = conn.session_notification(notification).await {
+                                Some(mut notification) => {
+                                    // Remap runner_sid → acp_sid so the IDE recognizes the session
+                                    // (external-runner notifications arrive tagged with the runner's id).
+                                    let remapped = id_remap
+                                        .borrow()
+                                        .get(notification.session_id.0.as_ref())
+                                        .cloned();
+                                    if let Some(acp_sid) = remapped {
+                                        notification.session_id = agent_client_protocol::SessionId::from(acp_sid);
+                                    }
+                                    if let Err(e) = conn_loop.session_notification(notification).await {
                                         tracing::warn!(error = %e, "failed to forward session notification");
                                     }
                                 }
@@ -226,7 +309,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         maybe_perm = perm_rx.recv() => {
                             if let Some(req) = maybe_perm {
-                                handle_permission_request(&conn, req, &perm_store, &perm_notif_tx, &model).await;
+                                handle_permission_request(conn_loop.as_ref(), req, &perm_store, &perm_notif_tx, &model).await;
                             }
                             // perm channel closing doesn't stop the loop
                         }
