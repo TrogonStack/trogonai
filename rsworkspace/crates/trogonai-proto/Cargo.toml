@@ -1,0 +1,13 @@
+[package]
+name = "trogonai-proto"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+serde = { workspace = true }
