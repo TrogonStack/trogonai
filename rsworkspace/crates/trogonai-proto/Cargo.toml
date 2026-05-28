@@ -7,7 +7,12 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = []
+schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider-runtime"]
+
 [dependencies]
-buffa = { workspace = true }
-buffa-types = { workspace = true }
-serde = { workspace = true }
+buffa = { workspace = true, optional = true }
+buffa-types = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+trogon-decider-runtime = { workspace = true, optional = true }

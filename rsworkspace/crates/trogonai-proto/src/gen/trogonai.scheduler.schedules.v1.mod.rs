@@ -8,6 +8,7 @@ include!("trogonai.scheduler.schedules.v1.schedule_created.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_paused.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_removed.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_resumed.rs");
+include!("trogonai.scheduler.schedules.v1.events.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -33,12 +34,14 @@ pub mod __buffa {
         include!("trogonai.scheduler.schedules.v1.schedule_paused.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_removed.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_resumed.__view.rs");
+        include!("trogonai.scheduler.schedules.v1.events.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
             include!("trogonai.scheduler.schedules.v1.delivery.__view_oneof.rs");
             include!("trogonai.scheduler.schedules.v1.schedule.__view_oneof.rs");
             include!("trogonai.scheduler.schedules.v1.schedule_status.__view_oneof.rs");
+            include!("trogonai.scheduler.schedules.v1.events.__view_oneof.rs");
         }
     }
     pub mod oneof {
@@ -47,6 +50,7 @@ pub mod __buffa {
         include!("trogonai.scheduler.schedules.v1.delivery.__oneof.rs");
         include!("trogonai.scheduler.schedules.v1.schedule.__oneof.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_status.__oneof.rs");
+        include!("trogonai.scheduler.schedules.v1.events.__oneof.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
@@ -70,6 +74,7 @@ pub mod __buffa {
         reg.register_json_any(super::__SCHEDULE_PAUSED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_REMOVED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_RESUMED_JSON_ANY);
+        reg.register_json_any(super::__SCHEDULE_EVENT_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -90,5 +95,7 @@ pub use self::__buffa::view::SchedulePausedView;
 pub use self::__buffa::view::ScheduleRemovedView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleResumedView;
+#[doc(inline)]
+pub use self::__buffa::view::ScheduleEventView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
