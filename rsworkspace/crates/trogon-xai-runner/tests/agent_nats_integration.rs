@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
+    NewSessionRequest, PromptRequest, SessionId, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
