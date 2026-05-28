@@ -7,6 +7,14 @@ edition = "2024"
 test-helpers = []
 
 [[test]]
+name = "agent_nats_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "tool_dispatch_integration"
+required-features = ["test-helpers"]
+
+[[test]]
 name = "perm_integration"
 required-features = ["test-helpers"]
 

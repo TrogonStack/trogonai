@@ -18,6 +18,8 @@ use agent_client_protocol::{
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
+    Client as _, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    RequestPermissionRequest,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -25,6 +27,9 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::client_proxy::NatsClientProxy;
+use acp_nats::session_id::AcpSessionId;
 use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{AssembledToolCall, Message, OpenRouterClient, OpenRouterEvent, ToolDef};
 use crate::http_client::OpenRouterHttpClient;
@@ -36,21 +41,39 @@ use trogon_runner_tools::permission::AuditBuf;
 use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, append_audit_entries};
 
-fn apply_permission(
+/// Permission decision after applying bypass + the rule engine, before any interactive gate.
+enum PermDecision {
+    Allow,
+    Deny,
+    Ask,
+}
+
+/// Evaluate a tool call against bypass + the rule engine. Does not write audit and does
+/// not resolve `Ask` — the caller handles `Ask` via the interactive permission gate
+/// (`OpenRouterAgent::ask_permission`) and records the resolved outcome afterwards.
+fn evaluate_permission(
     tool_name: &str,
     input: &serde_json::Value,
     bypass: bool,
     rules: &PermissionRules,
+) -> PermDecision {
+    if bypass {
+        return PermDecision::Allow;
+    }
+    match rules.check(tool_name, input) {
+        RuleDecision::Deny => PermDecision::Deny,
+        RuleDecision::Allow => PermDecision::Allow,
+        RuleDecision::Ask => PermDecision::Ask,
+    }
+}
+
+/// Append an audit entry for a resolved permission outcome.
+fn record_permission_audit(
     audit: &AuditBuf,
-) -> bool {
-    let outcome = if bypass {
-        AuditOutcome::Allowed
-    } else {
-        match rules.check(tool_name, input) {
-            RuleDecision::Deny => AuditOutcome::Denied,
-            RuleDecision::Allow | RuleDecision::Ask => AuditOutcome::Allowed,
-        }
-    };
+    tool_name: &str,
+    input: &serde_json::Value,
+    outcome: AuditOutcome,
+) {
     let summary = if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
         path.to_string()
     } else if tool_name == "bash" {
@@ -65,10 +88,9 @@ fn apply_permission(
             timestamp: crate::session_store::now_iso(),
             tool: tool_name.to_string(),
             input_summary: summary,
-            outcome: outcome.clone(),
+            outcome,
         });
     }
-    !matches!(outcome, AuditOutcome::Denied)
 }
 
 fn internal_error(msg: impl Into<String>) -> Error {
@@ -210,6 +232,12 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     /// Independent of the execution backend. `None` disables compaction.
     compactor_nats: Option<async_nats::Client>,
     tool_http_client: reqwest::Client,
+    /// NATS client used to emit ACP `request_permission` to the client/IDE when a tool
+    /// hits `RuleDecision::Ask`. `None` falls back to allow (no interactive gate).
+    permission_nats: Option<async_nats::Client>,
+    /// ACP prefix the runner publishes client-bound permission requests under. Paired
+    /// with `permission_nats`; both are set by [`OpenRouterAgent::with_permissions`].
+    permission_prefix: Option<AcpPrefix>,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -327,6 +355,8 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             execution_nats: None,
             compactor_nats: None,
             tool_http_client: reqwest::Client::new(),
+            permission_nats: None,
+            permission_prefix: None,
         }
     }
 }
@@ -358,6 +388,8 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             execution_nats: self.execution_nats,
             compactor_nats: self.compactor_nats,
             tool_http_client: self.tool_http_client,
+            permission_nats: self.permission_nats,
+            permission_prefix: self.permission_prefix,
         }
     }
 
@@ -408,6 +440,60 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
         self.compactor_nats = Some(nats);
         self
+    }
+
+    /// Enable interactive permissions: when a tool hits `RuleDecision::Ask`, the runner
+    /// emits an ACP `request_permission` to the client/IDE over NATS and waits for the
+    /// allow/deny decision instead of auto-allowing. Without this, `Ask` falls back to
+    /// allow (preserving prior behavior).
+    pub fn with_permissions(mut self, nats: async_nats::Client, prefix: AcpPrefix) -> Self {
+        self.permission_nats = Some(nats);
+        self.permission_prefix = Some(prefix);
+        self
+    }
+
+    /// Ask the client/IDE to approve a tool via the ACP `request_permission` round-trip
+    /// over NATS. Returns `true` if approved. When no permission relay is configured
+    /// (`with_permissions` not called) this allows the tool — preserving prior behavior.
+    async fn ask_permission(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+    ) -> bool {
+        let (Some(nats), Some(prefix)) =
+            (self.permission_nats.clone(), self.permission_prefix.clone())
+        else {
+            return true;
+        };
+        let acp_session = match AcpSessionId::new(session_id) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, session_id, "openrouter: invalid session id for permission request — denying");
+                return false;
+            }
+        };
+        let proxy = NatsClientProxy::new(nats, acp_session, prefix, Duration::from_secs(30));
+        let options = vec![
+            PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+        ];
+        let fields = ToolCallUpdateFields::new()
+            .title(tool_name.to_string())
+            .raw_input(tool_input.clone());
+        let tool_call = ToolCallUpdate::new(tool_call_id.to_string(), fields);
+        let req = RequestPermissionRequest::new(session_id.to_string(), tool_call, options);
+        match proxy.request_permission(req).await {
+            Ok(resp) => matches!(
+                resp.outcome,
+                RequestPermissionOutcome::Selected(sel) if sel.option_id.0.as_ref() == "allow"
+            ),
+            Err(e) => {
+                warn!(error = %e, tool = tool_name, "openrouter: permission request failed — denying");
+                false
+            }
+        }
     }
 
     fn all_tool_config_options(enabled_tools: &[String]) -> Vec<SessionConfigOption> {
@@ -1394,7 +1480,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         if call.name == "bash" { serde_json::json!({"command": call.arguments}) }
                         else { serde_json::Value::Null }
                     });
-                if !apply_permission(&call.name, &call_input, bypass, &permission_rules, &audit_buf) {
+                let allowed = match evaluate_permission(&call.name, &call_input, bypass, &permission_rules) {
+                    PermDecision::Allow => true,
+                    PermDecision::Deny => false,
+                    PermDecision::Ask => {
+                        self.ask_permission(&notification_session_id, &call.id, &call.name, &call_input).await
+                    }
+                };
+                record_permission_audit(
+                    &audit_buf,
+                    &call.name,
+                    &call_input,
+                    if allowed { AuditOutcome::Allowed } else { AuditOutcome::Denied },
+                );
+                if !allowed {
                     let denied_result = format!("permission denied: {} blocked by security policy", call.name);
                     notifier.notify(agent_client_protocol::SessionNotification::new(
                         notification_session_id.clone(),
@@ -5841,34 +5940,48 @@ mod tests {
     // ── apply_permission ──────────────────────────────────────────────────────────
 
     #[test]
-    fn apply_permission_bypass_always_allows() {
+    fn evaluate_permission_bypass_allows() {
         use trogon_runner_tools::permission_rules::PermissionRules;
-        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let rules = PermissionRules::parse("## Permissions\ndeny_paths: src/**\n");
         let input = serde_json::json!({"path": "src/main.rs"});
-        assert!(apply_permission("read_file", &input, true, &rules, &audit));
-        let log = audit.lock().unwrap();
-        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Allowed);
+        // In bypass mode, deny rules are ignored.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, true, &rules),
+            PermDecision::Allow
+        ));
     }
 
     #[test]
-    fn apply_permission_deny_rule_blocks() {
+    fn evaluate_permission_deny_rule_denies() {
         use trogon_runner_tools::permission_rules::PermissionRules;
-        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let rules = PermissionRules::parse("## Permissions\ndeny_paths: .env\n");
         let input = serde_json::json!({"path": ".env"});
-        assert!(!apply_permission("read_file", &input, false, &rules, &audit));
-        let log = audit.lock().unwrap();
-        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Deny
+        ));
     }
 
     #[test]
-    fn apply_permission_no_rule_allows() {
+    fn evaluate_permission_no_rule_asks() {
         use trogon_runner_tools::permission_rules::PermissionRules;
-        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let rules = PermissionRules::default();
         let input = serde_json::json!({"path": "src/main.rs"});
-        assert!(apply_permission("read_file", &input, false, &rules, &audit));
+        // No matching rule no longer auto-allows — it falls through to the interactive gate.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Ask
+        ));
+    }
+
+    #[test]
+    fn record_permission_audit_writes_outcome() {
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let input = serde_json::json!({"path": ".env"});
+        record_permission_audit(&audit, "read_file", &input, AuditOutcome::Denied);
+        let log = audit.lock().unwrap();
+        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
+        assert_eq!(log[0].input_summary, ".env");
     }
 
     // ── granular permissions: integration via prompt ──────────────────────────

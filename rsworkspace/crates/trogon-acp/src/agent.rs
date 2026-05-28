@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    AvailableCommand, AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate,
+    AvailableCommand, AvailableCommandsUpdate, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ConfigOptionUpdate,
     ContentBlock, ContentChunk, CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification,
     ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
@@ -1295,6 +1296,11 @@ where
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
         ))
+    }
+
+    async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        self.close_session_impl(&args.session_id.0).await;
+        Ok(CloseSessionResponse::default())
     }
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
