@@ -239,6 +239,7 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         tenant_id: tenant_id.to_string(),
         name: "Test session".to_string(),
         model: Some("anthropic/claude-sonnet-4-6".to_string()),
+        compactor_model: None,
         tools: vec![],
         memory_path: None,
         agent_id: None,

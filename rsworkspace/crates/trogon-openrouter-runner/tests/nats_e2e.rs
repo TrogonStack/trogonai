@@ -858,6 +858,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         tenant_id: "default".to_string(),
         name: "Pre-fix session".to_string(),
         model: None,
+        compactor_model: None,
         tools: vec![],
         memory_path: None,
         messages: vec![],

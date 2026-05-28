@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::{
     Agent as _, CancelNotification, CloseSessionRequest, ContentBlock, ForkSessionRequest,
-    NewSessionRequest, PromptRequest, SessionNotification, SetSessionModelRequest,
+    NewSessionRequest, PromptRequest, SessionId, SessionNotification, SetSessionModelRequest,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -1096,6 +1096,126 @@ async fn cancel_prompt_token_totals_persisted_to_kv() {
             assert_eq!(
                 v["total_cache_read_tokens"], 15,
                 "cancel path must persist cache_read tokens to KV; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── Context compaction end-to-end (runner → compactor over NATS) ─────────────────
+
+/// Drives a prompt whose history exceeds 85 % of the model's context window, with
+/// a stand-in compactor responder on `trogon.compactor.compact`. Verifies the
+/// runner: (1) detects the threshold, (2) calls the compactor over NATS, (3)
+/// applies the compacted history, and (4) clears `last_response_id` (mandatory
+/// for xAI's stateful API so the next turn re-sends the compacted history).
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn prompt_compacts_via_nats_and_clears_last_response_id() {
+    use std::time::Duration;
+    use trogon_xai_runner::Message;
+
+    // Raw NATS client (needed for compactor_nats + the responder) + JetStream store.
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: replies with a 3-message compacted history.
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "recent"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // grok-3 → 131_072 token window; 85 % ≈ 111_411 tokens.
+    let agent = XaiAgent::with_deps(NoOpNotifier, "grok-3", "test-key", ReplyHttpClient)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // Insert a session whose history is well over the threshold (25 × 30 KB ≈
+    // 750 KB ≈ 187k tokens; even after trim_history to the recent window it stays
+    // over 111k). Pre-set last_response_id so we can prove it gets cleared.
+    let big = "x".repeat(30_000);
+    let mut history = Vec::new();
+    for i in 0..25 {
+        if i % 2 == 0 {
+            history.push(Message::user(format!("{big}{i}")));
+        } else {
+            history.push(Message::assistant_text(format!("{big}{i}")));
+        }
+    }
+    agent
+        .test_insert_session_with_response_id(
+            "s-compact",
+            "/tmp",
+            None,
+            Some("resp-old".to_string()),
+        )
+        .await;
+    agent.test_set_session_history("s-compact", history).await;
+    assert_eq!(
+        agent.test_last_response_id("s-compact").await,
+        Some("resp-old".to_string()),
+        "precondition: last_response_id is set before the turn"
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-compact"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            // The compactor's 3-message result replaced the large history.
+            let hist = agent.test_session_history("s-compact").await;
+            assert_eq!(
+                hist.len(),
+                3,
+                "history must be replaced by the compactor's compacted result"
+            );
+            assert!(
+                hist[0]
+                    .content
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("context-summary"),
+                "first message must be the summary checkpoint"
+            );
+            // Mandatory: last_response_id cleared so the next turn re-sends the
+            // full compacted history to xAI.
+            assert_eq!(
+                agent.test_last_response_id("s-compact").await,
+                None,
+                "last_response_id must be cleared after compaction"
             );
         })
         .await;
