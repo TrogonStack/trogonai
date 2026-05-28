@@ -10298,6 +10298,740 @@ async def test_openrouter_perm_gate_deny():
                  f"api_calls={len(mock.received)} denied_in_body={denied_in_body}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers shared by compaction and trogon-acp live tests (T184–T190)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _fake_compactor(nc, compact_received, reply_history=None, compacted=True):
+    """Subscribe to trogon.compactor.compact and reply with a compacted response.
+    compact_received is a list that will have request payloads appended.
+    reply_history is the messages array to return; defaults to a single summary message."""
+    if reply_history is None:
+        reply_history = [{"role": "user", "content": [{"type": "text", "text": "[compacted]"}]}]
+
+    async def on_compact(msg):
+        try:
+            payload = json.loads(msg.data)
+            compact_received.append(payload)
+            print(f"    [compactor] provider={payload.get('provider')} model={payload.get('model')!r} "
+                  f"cw={payload.get('context_window')} compactor_model={payload.get('compactor_model')!r}",
+                  flush=True)
+        except Exception as e:
+            compact_received.append({"_parse_error": str(e)})
+        resp = json.dumps({
+            "messages": reply_history,
+            "compacted": compacted,
+            "tokens_before": 125000,
+            "tokens_after": 100,
+            "kept_count": 0,
+        })
+        if msg.reply:
+            await nc.publish(msg.reply, resp.encode())
+
+    return await nc.subscribe("trogon.compactor.compact", cb=on_compact)
+
+
+async def _js_session_op(nc, prefix, sid, subject_suffix, payload, timeout=8):
+    """Publish a JetStream session operation and wait for the response."""
+    js = nc.jetstream()
+    req_id = str(uuid.uuid4())
+    resp_sub = await nc.subscribe(f"{prefix}.session.{sid}.agent.response.{req_id}")
+    await js.publish(
+        f"{prefix}.session.{sid}.agent.{subject_suffix}",
+        json.dumps(payload).encode(),
+        headers={"X-Req-Id": req_id})
+    msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=timeout)
+    await resp_sub.unsubscribe()
+    return json.loads(msg.data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 184 — xai-runner: compaction fires at 85% threshold, correct NATS
+#             request, last_response_id cleared after successful compaction
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_compaction_fires():
+    """Spec (compaction/xai-runner): when accumulated history exceeds 85% of the
+    model's context window, the runner fires a NATS request to trogon.compactor.compact
+    with provider='xai', the session model, and context_window. On success it clears
+    last_response_id so the next turn re-sends the full compacted history (no stale
+    previous_response_id on the xAI API)."""
+    print("\n\033[1mTest 184: xai-runner compaction — fires at 85% threshold, correct NATS request, clears last_response_id\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # grok-3 → 131,072 token context window.  85 % = 111,411 tokens ≈ 445,644 bytes.
+        # estimate_tokens = bytes / 4, so we need > 445,644 bytes of history.
+        # A single 500 KB mock response exceeds the threshold.
+        LARGE_TEXT = "x" * 500_000
+
+        compact_received = []
+        call_count = [0]
+
+        def sse(n):
+            call_count[0] = n
+            if n == 1:
+                # First call: return large text + a known response_id so runner stores it.
+                return xai_text_sse_with_id(LARGE_TEXT, "xai-resp-t184")
+            return xai_text_sse("ok t184")
+
+        mock = MockHttpServer(30212, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t184",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30212",
+               "XAI_MODELS": "grok-3:grok-3",
+               "XAI_DEFAULT_MODEL": "grok-3"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _fake_compactor(nc, compact_received)
+
+            r = await nc.request("acp.t184.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # First prompt: large response fills history above 85% threshold.
+            req1 = str(uuid.uuid4())
+            sub1 = await nc.subscribe(f"acp.t184.session.{sid}.agent.prompt.response.{req1}")
+            await nc.publish(f"acp.t184.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "fill context"}]}).encode(),
+                headers={"X-Req-Id": req1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=20)
+            await sub1.unsubscribe()
+
+            # Compaction is async post-turn — give it time to complete.
+            await asyncio.sleep(2.0)
+
+            # Second prompt: verify no previous_response_id (cleared by compaction).
+            req2 = str(uuid.uuid4())
+            sub2 = await nc.subscribe(f"acp.t184.session.{sid}.agent.prompt.response.{req2}")
+            await nc.publish(f"acp.t184.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "second turn"}]}).encode(),
+                headers={"X-Req-Id": req2})
+            await asyncio.wait_for(sub2.next_msg(), timeout=20)
+            await sub2.unsubscribe()
+        finally:
+            await nc.close()
+
+        print(f"    compact_requests={len(compact_received)} api_calls={call_count[0]}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if not compact_received:
+            fail("xai compaction: no NATS request sent to trogon.compactor.compact — threshold not reached or compaction disabled",
+                 f"api_calls={call_count[0]} history_bytes={len(LARGE_TEXT)}")
+            return
+
+        req = compact_received[0]
+        provider_ok = req.get("provider") == "xai"
+        model_ok    = req.get("model") == "grok-3"
+        cw_ok       = req.get("context_window") == 131_072
+
+        print(f"    NATS request: provider={req.get('provider')!r} model={req.get('model')!r} cw={req.get('context_window')}", flush=True)
+
+        if not (provider_ok and model_ok and cw_ok):
+            fail("xai compaction: NATS request has wrong fields",
+                 f"provider={req.get('provider')!r} model={req.get('model')!r} cw={req.get('context_window')}")
+            return
+
+        # Verify second API call has no previous_response_id (compaction cleared it).
+        if len(mock.received) < 2:
+            fail("xai compaction: second API call never sent", f"calls={call_count[0]}")
+            return
+
+        call2 = json.loads(mock.received[1])
+        has_prev_id = "previous_response_id" in call2 and bool(call2.get("previous_response_id"))
+        print(f"    call2 previous_response_id present: {has_prev_id}", flush=True)
+
+        if not has_prev_id:
+            ok("xai compaction: NATS request correct (provider, model, context_window) + last_response_id cleared after compaction")
+        else:
+            fail("xai compaction: compaction fired but previous_response_id NOT cleared in next API call",
+                 f"call2 previous_response_id={call2.get('previous_response_id')!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 185 — xai-runner: compactor_model config option propagated to NATS request
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_xai_compactor_model_propagated():
+    """Spec (compaction/xai-runner): when compactor_model is set via
+    set_session_config_option, the value is forwarded in the compactor NATS request
+    so the compaction service uses the override model instead of the session model."""
+    print("\n\033[1mTest 185: xai-runner compactor_model config propagated to compaction NATS request\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        LARGE_TEXT = "x" * 500_000
+        compact_received = []
+        call_count = [0]
+
+        def sse(n):
+            call_count[0] = n
+            if n == 1:
+                return xai_text_sse_with_id(LARGE_TEXT, "xai-resp-t185")
+            return xai_text_sse("ok t185")
+
+        mock = MockHttpServer(30213, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t185",
+               "XAI_API_KEY": "test", "XAI_BASE_URL": "http://127.0.0.1:30213",
+               "XAI_MODELS": "grok-3:grok-3",
+               "XAI_DEFAULT_MODEL": "grok-3"}
+        proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _fake_compactor(nc, compact_received)
+
+            r = await nc.request("acp.t185.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # Set compactor_model override before triggering compaction.
+            js = nc.jetstream()
+            cfg_req_id = str(uuid.uuid4())
+            cfg_resp_sub = await nc.subscribe(f"acp.t185.session.{sid}.agent.response.{cfg_req_id}")
+            await js.publish(
+                f"acp.t185.session.{sid}.agent.set_config_option",
+                json.dumps({"sessionId": sid, "configId": "compactor_model",
+                            "value": "grok-2-1212"}).encode(),
+                headers={"X-Req-Id": cfg_req_id})
+            await asyncio.wait_for(cfg_resp_sub.next_msg(), timeout=5)
+            await cfg_resp_sub.unsubscribe()
+
+            # First prompt: large response → history over threshold → compaction fires.
+            req1 = str(uuid.uuid4())
+            sub1 = await nc.subscribe(f"acp.t185.session.{sid}.agent.prompt.response.{req1}")
+            await nc.publish(f"acp.t185.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "fill ctx t185"}]}).encode(),
+                headers={"X-Req-Id": req1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=20)
+            await sub1.unsubscribe()
+
+            await asyncio.sleep(2.0)  # compaction is async post-turn
+        finally:
+            await nc.close()
+
+        print(f"    compact_requests={len(compact_received)} api_calls={call_count[0]}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if not compact_received:
+            fail("xai compactor_model: no compaction NATS request — threshold not reached",
+                 f"api_calls={call_count[0]}")
+            return
+
+        req = compact_received[0]
+        print(f"    compactor_model in request: {req.get('compactor_model')!r}", flush=True)
+        if req.get("compactor_model") == "grok-2-1212":
+            ok("xai compactor_model: override propagated correctly in compaction NATS request")
+        else:
+            fail("xai compactor_model: expected 'grok-2-1212' in compaction request",
+                 f"got compactor_model={req.get('compactor_model')!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 186 — openrouter-runner: pre-request compaction fires at 85% threshold
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_compaction_fires():
+    """Spec (compaction/openrouter-runner): compaction fires PRE-REQUEST when
+    history exceeds 85% of the model's context window. For gpt-4 (8192 tokens),
+    85% ≈ 6963 tokens ≈ 27852 bytes. The NATS request must have provider='openrouter'."""
+    print("\n\033[1mTest 186: openrouter-runner compaction — fires pre-request at 85% threshold, provider=openrouter\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # gpt-4 → 8192 token window. 85% = 6963 tokens ≈ 27,852 bytes.
+        # estimate_tokens = bytes / 4, so > 27,852 bytes triggers compaction.
+        # A 30 KB response is enough.
+        LARGE_TEXT = "y" * 30_000
+
+        compact_received = []
+        call_count = [0]
+
+        def sse(n):
+            call_count[0] = n
+            if n == 1:
+                return or_text_sse(LARGE_TEXT)   # first: large response
+            return or_text_sse("ok t186")         # second: after compaction
+
+        mock = MockHttpServer(30214, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t186",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30214",
+               "OPENROUTER_MODELS": "gpt-4:gpt-4",
+               "OPENROUTER_DEFAULT_MODEL": "gpt-4"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _fake_compactor(nc, compact_received)
+
+            r = await nc.request("acp.t186.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # First prompt: 30 KB response → history exceeds 85% of 8192-token window.
+            req1 = str(uuid.uuid4())
+            sub1 = await nc.subscribe(f"acp.t186.session.{sid}.agent.prompt.response.{req1}")
+            await nc.publish(f"acp.t186.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "fill ctx or t186"}]}).encode(),
+                headers={"X-Req-Id": req1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=20)
+            await sub1.unsubscribe()
+
+            # Second prompt: compaction fires PRE-REQUEST (before API call 2).
+            req2 = str(uuid.uuid4())
+            sub2 = await nc.subscribe(f"acp.t186.session.{sid}.agent.prompt.response.{req2}")
+            await nc.publish(f"acp.t186.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "second turn or t186"}]}).encode(),
+                headers={"X-Req-Id": req2})
+            await asyncio.wait_for(sub2.next_msg(), timeout=20)
+            await sub2.unsubscribe()
+        finally:
+            await nc.close()
+
+        print(f"    compact_requests={len(compact_received)} api_calls={call_count[0]}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if not compact_received:
+            fail("openrouter compaction: no NATS request to trogon.compactor.compact",
+                 f"api_calls={call_count[0]} history_bytes={len(LARGE_TEXT)}")
+            return
+
+        req = compact_received[0]
+        provider_ok = req.get("provider") == "openrouter"
+        model_ok    = req.get("model") == "gpt-4"
+        cw_ok       = req.get("context_window") == 8_192
+
+        print(f"    NATS request: provider={req.get('provider')!r} model={req.get('model')!r} cw={req.get('context_window')}", flush=True)
+
+        if provider_ok and model_ok and cw_ok:
+            ok("openrouter compaction: NATS request correct (provider=openrouter, model=gpt-4, context_window=8192)")
+        else:
+            fail("openrouter compaction: NATS request has wrong fields",
+                 f"provider={req.get('provider')!r} model={req.get('model')!r} cw={req.get('context_window')}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 187 — openrouter-runner: compactor_model config option propagated
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_openrouter_compactor_model_propagated():
+    """Spec (compaction/openrouter-runner): compactor_model set via
+    set_session_config_option is forwarded in the compaction NATS request."""
+    print("\n\033[1mTest 187: openrouter-runner compactor_model config propagated to compaction NATS request\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        LARGE_TEXT = "y" * 30_000
+        compact_received = []
+        call_count = [0]
+
+        def sse(n):
+            call_count[0] = n
+            if n == 1:
+                return or_text_sse(LARGE_TEXT)
+            return or_text_sse("ok t187")
+
+        mock = MockHttpServer(30215, sse).start()
+        env = {**os.environ,
+               "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t187",
+               "OPENROUTER_API_KEY": "test",
+               "OPENROUTER_BASE_URL": "http://127.0.0.1:30215",
+               "OPENROUTER_MODELS": "gpt-4:gpt-4",
+               "OPENROUTER_DEFAULT_MODEL": "gpt-4"}
+        proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(2.5)
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            await _fake_compactor(nc, compact_received)
+
+            r = await nc.request("acp.t187.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=5)
+            sid = json.loads(r.data)["sessionId"]
+
+            # Set compactor_model override.
+            js = nc.jetstream()
+            cfg_req_id = str(uuid.uuid4())
+            cfg_resp_sub = await nc.subscribe(f"acp.t187.session.{sid}.agent.response.{cfg_req_id}")
+            await js.publish(
+                f"acp.t187.session.{sid}.agent.set_config_option",
+                json.dumps({"sessionId": sid, "configId": "compactor_model",
+                            "value": "anthropic/claude-3-5-haiku"}).encode(),
+                headers={"X-Req-Id": cfg_req_id})
+            await asyncio.wait_for(cfg_resp_sub.next_msg(), timeout=5)
+            await cfg_resp_sub.unsubscribe()
+
+            # First prompt: fills history.
+            req1 = str(uuid.uuid4())
+            sub1 = await nc.subscribe(f"acp.t187.session.{sid}.agent.prompt.response.{req1}")
+            await nc.publish(f"acp.t187.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "fill ctx or t187"}]}).encode(),
+                headers={"X-Req-Id": req1})
+            await asyncio.wait_for(sub1.next_msg(), timeout=20)
+            await sub1.unsubscribe()
+
+            # Second prompt: triggers compaction pre-request.
+            req2 = str(uuid.uuid4())
+            sub2 = await nc.subscribe(f"acp.t187.session.{sid}.agent.prompt.response.{req2}")
+            await nc.publish(f"acp.t187.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "second turn or t187"}]}).encode(),
+                headers={"X-Req-Id": req2})
+            await asyncio.wait_for(sub2.next_msg(), timeout=20)
+            await sub2.unsubscribe()
+        finally:
+            await nc.close()
+
+        print(f"    compact_requests={len(compact_received)} api_calls={call_count[0]}", flush=True)
+
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+        mock.stop()
+
+        if not compact_received:
+            fail("openrouter compactor_model: no compaction NATS request",
+                 f"api_calls={call_count[0]}")
+            return
+
+        req = compact_received[0]
+        print(f"    compactor_model in request: {req.get('compactor_model')!r}", flush=True)
+        if req.get("compactor_model") == "anthropic/claude-3-5-haiku":
+            ok("openrouter compactor_model: override propagated correctly in compaction NATS request")
+        else:
+            fail("openrouter compactor_model: expected 'anthropic/claude-3-5-haiku' in request",
+                 f"got compactor_model={req.get('compactor_model')!r}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers for trogon-acp multi-runner live tests (T188–T190)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AcpClient:
+    """Minimal async ACP stdio client for testing trogon-acp's MultiRunnerAgent interface."""
+
+    def __init__(self, proc):
+        self._proc = proc
+        self._pending = {}   # req_id → Future
+
+    @classmethod
+    async def start(cls, **env_extra):
+        """Launch trogon-acp and return a connected AcpClient."""
+        env = {**os.environ, **env_extra}
+        proc = await asyncio.create_subprocess_exec(
+            f"{BIN}/trogon-acp",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env)
+        client = cls(proc)
+        asyncio.create_task(client._reader_task())
+        return client
+
+    async def _reader_task(self):
+        while True:
+            try:
+                line = await self._proc.stdout.readline()
+                if not line:
+                    break
+                msg = json.loads(line.decode().strip())
+                mid = msg.get("id")
+                if mid and mid in self._pending:
+                    fut = self._pending.pop(mid)
+                    if not fut.done():
+                        fut.set_result(msg)
+            except Exception:
+                break
+
+    async def call(self, method, params, timeout=20):
+        req_id = str(uuid.uuid4())
+        fut = asyncio.get_event_loop().create_future()
+        self._pending[req_id] = fut
+        msg = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}) + "\n"
+        self._proc.stdin.write(msg.encode())
+        await self._proc.stdin.drain()
+        return await asyncio.wait_for(fut, timeout=timeout)
+
+    async def initialize(self):
+        return await self.call("initialize", {"protocolVersion": "0.10.0", "capabilities": {}})
+
+    async def new_session(self, cwd="/tmp"):
+        return await self.call("session/new", {"cwd": cwd, "mcpServers": []}, timeout=15)
+
+    async def set_session_model(self, sid, model_id, timeout=15):
+        return await self.call("session/set_model",
+                               {"sessionId": sid, "modelId": model_id}, timeout=timeout)
+
+    async def prompt(self, sid, text, timeout=30):
+        return await self.call("session/prompt",
+                               {"sessionId": sid, "prompt": [{"type": "text", "text": text}]},
+                               timeout=timeout)
+
+    async def close_session(self, sid):
+        return await self.call("session/close", {"sessionId": sid}, timeout=10)
+
+    async def set_config_option(self, sid, config_id, value, timeout=8):
+        return await self.call("session/set_config_option",
+                               {"sessionId": sid, "configId": config_id, "value": value},
+                               timeout=timeout)
+
+    def terminate(self):
+        try:
+            self._proc.terminate()
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _start_trogon_acp(port_proxy, test_num, agent_model, nats_url=NATS_JS):
+    """Start trogon-acp binary. port_proxy is a mock HTTP server that acts as
+    PROXY_URL (for the embedded Claude — not exercised in external-runner tests).
+    Returns (proc, prefix)."""
+    prefix = f"acp.t{test_num}"
+    env = {**os.environ,
+           "NATS_URL": nats_url,
+           "ACP_PREFIX": prefix,
+           "PROXY_URL": f"http://127.0.0.1:{port_proxy}",
+           "ANTHROPIC_TOKEN": "test-token-not-used",
+           "AGENT_MODEL": agent_model,
+           "AGENT_MAX_ITERATIONS": "5"}
+    proc = subprocess.Popen([f"{BIN}/trogon-acp"], env=env,
+                             stdin=subprocess.PIPE,   # keep stdin open so ACP io_task doesn't see EOF
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    await asyncio.sleep(4.5)   # trogon-acp provisions streams + registry + bridges
+    return proc, prefix
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 188 — trogon-acp: new_session auto-routes to default external runner,
+#             model list includes external runner models, prompt routes correctly
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_trogon_acp_new_session_routes_to_external_runner():
+    """Spec (ide-multi-runner-plan/MultiRunnerAgent): new_session via the stdio ACP
+    interface (MultiRunnerAgent path) injects the model list from the registry,
+    including models from all registered external runners."""
+    print("\n\033[1mTest 188: trogon-acp new_session (stdio) injects registry model list\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xai_mock = MockHttpServer(30216, lambda n: xai_text_sse("ok")).start()
+
+        env_xai = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t188xai",
+                   "AGENT_TYPE": "xai-t188",
+                   "XAI_API_KEY": "test",
+                   "XAI_BASE_URL": "http://127.0.0.1:30216",
+                   "XAI_MODELS": "grok-t188:grok-t188"}
+        proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(3.5)   # xai-runner registers in registry
+
+        acp = await AcpClient.start(
+            NATS_URL=NATS_JS, ACP_PREFIX="acp.t188",
+            PROXY_URL="http://127.0.0.1:19999", ANTHROPIC_TOKEN="test-token",
+            AGENT_MODEL="grok-t188", AGENT_MAX_ITERATIONS="3")
+        await asyncio.sleep(5.0)   # trogon-acp provisions streams + registry + permission relay
+
+        try:
+            await acp.initialize()
+            sess_resp = await acp.new_session(tmpdir)
+            sid = sess_resp.get("result", {}).get("sessionId", "")
+            models = [m.get("modelId") for m in
+                      sess_resp.get("result", {}).get("models", {}).get("availableModels", [])]
+            print(f"    sid={sid[:8]}... models={models}", flush=True)
+        finally:
+            acp.terminate()
+
+        try: proc_xai.terminate(); proc_xai.wait(timeout=3)
+        except Exception: pass
+        xai_mock.stop()
+
+        if "grok-t188" in models:
+            ok("trogon-acp new_session: registry model list injected — external runner model visible")
+        else:
+            fail("trogon-acp new_session: grok-t188 NOT in available models",
+                 f"models={models}")
+
+
+async def test_trogon_acp_set_session_model_routes_prompt():
+    """Spec (ide-multi-runner-plan/MultiRunnerAgent): when set_session_model is called
+    for a model served by an external runner, MultiRunnerAgent creates a runner session
+    on that runner (None branch — no prior runner assigned) and subsequent prompts are
+    routed to it."""
+    print("\n\033[1mTest 189: trogon-acp set_session_model — creates external runner session, routes subsequent prompts\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xai_api_calls = [0]
+
+        def xai_sse(n):
+            xai_api_calls[0] = n
+            return xai_text_sse("routed after set_model t189")
+
+        xai_mock   = MockHttpServer(30218, xai_sse).start()
+        proxy_mock = MockHttpServer(30219, lambda n: 'HTTP/1.1 401 Unauthorized\r\n\r\n').start()
+
+        env_xai = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t189xai",
+                   "AGENT_TYPE": "xai-t189",
+                   "XAI_API_KEY": "test",
+                   "XAI_BASE_URL": "http://127.0.0.1:30218",
+                   "XAI_MODELS": "grok-t189:grok-t189"}
+        proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(3.0)
+
+        # Start trogon-acp with a nonexistent default model so no runner is
+        # auto-assigned at new_session time — testing the explicit set_session_model path.
+        proc_acp, prefix = await _start_trogon_acp(30219, 189, "no-such-model-t189")
+
+        nc = await natspy.connect(NATS_JS)
+        try:
+            r = await nc.request(
+                f"{prefix}.agent.session.new",
+                json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=10)
+            sid = json.loads(r.data)["sessionId"]
+            print(f"    sid={sid[:8]}...", flush=True)
+
+            # set_session_model to grok-t189 → MultiRunnerAgent None branch creates
+            # a runner session on xai-t189 prefix and registers routing.
+            js = nc.jetstream()
+            set_req_id = str(uuid.uuid4())
+            set_sub = await nc.subscribe(f"{prefix}.session.{sid}.agent.response.{set_req_id}")
+            await js.publish(
+                f"{prefix}.session.{sid}.agent.set_model",
+                json.dumps({"sessionId": sid, "modelId": "grok-t189"}).encode(),
+                headers={"X-Req-Id": set_req_id})
+            set_msg = await asyncio.wait_for(set_sub.next_msg(), timeout=10)
+            set_data = json.loads(set_msg.data)
+            await set_sub.unsubscribe()
+            print(f"    set_session_model response: {set_data}", flush=True)
+
+            # Prompt: should now route to xai-runner.
+            req_id = str(uuid.uuid4())
+            sub = await nc.subscribe(f"{prefix}.session.{sid}.agent.prompt.response.{req_id}")
+            await nc.publish(
+                f"{prefix}.session.{sid}.agent.prompt",
+                json.dumps({"sessionId": sid,
+                            "prompt": [{"type": "text", "text": "prompt after set_model t189"}]}).encode(),
+                headers={"X-Req-Id": req_id})
+            msg = await asyncio.wait_for(sub.next_msg(), timeout=25)
+            done = json.loads(msg.data)
+            await sub.unsubscribe()
+        finally:
+            await nc.close()
+
+        print(f"    done={done} xai_api_calls={xai_api_calls[0]}", flush=True)
+
+        for p in (proc_xai, proc_acp):
+            try: p.terminate(); p.wait(timeout=3)
+            except Exception: pass
+        xai_mock.stop(); proxy_mock.stop()
+
+        if xai_api_calls[0] > 0:
+            ok("trogon-acp set_session_model: runner session created on xai-runner, prompt routed correctly")
+        else:
+            fail("trogon-acp set_session_model: prompt NOT routed to xai-runner after set_session_model",
+                 f"xai_api_calls={xai_api_calls[0]} done={done}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 190 — trogon-acp: close_session sends close to external runner
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_trogon_acp_close_session_closes_runner():
+    """Spec (ide-multi-runner-plan/MultiRunnerAgent): close_session removes the
+    routing entry for the session AND sends close_session to the external runner.
+    Uses STDIO (AcpClient) with explicit set_session_model to establish routing first."""
+    print("\n\033[1mTest 190: trogon-acp close_session — removes routing, closes external runner session\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xai_api_calls = [0]
+        xai_close_received = []
+
+        def xai_sse(n):
+            xai_api_calls[0] = n
+            return xai_text_sse("xai reply t190")
+
+        xai_mock = MockHttpServer(30220, xai_sse).start()
+
+        env_xai = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t190xai",
+                   "AGENT_TYPE": "xai-t190",
+                   "XAI_API_KEY": "test",
+                   "XAI_BASE_URL": "http://127.0.0.1:30220",
+                   "XAI_MODELS": "grok-t190:grok-t190"}
+        proc_xai = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env_xai,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        await asyncio.sleep(3.0)
+
+        acp = await AcpClient.start(
+            NATS_URL=NATS_JS, ACP_PREFIX="acp.t190",
+            PROXY_URL="http://127.0.0.1:19999", ANTHROPIC_TOKEN="test-token",
+            AGENT_MODEL="no-such-model-t190", AGENT_MAX_ITERATIONS="3")
+        await asyncio.sleep(4.0)
+
+        nc = await natspy.connect(NATS_JS)
+        calls_before_close = 0
+        try:
+            async def on_xai_close(msg):
+                xai_close_received.append(msg.subject)
+                print(f"    [xai-t190] close on {msg.subject}", flush=True)
+                if msg.reply:
+                    await nc.publish(msg.reply, b"{}")
+            await nc.subscribe("acp.t190xai.session.*.agent.close", cb=on_xai_close)
+
+            await acp.initialize()
+            sess = await acp.new_session(tmpdir)
+            sid = sess.get("result", {}).get("sessionId", "")
+            await acp.set_session_model(sid, "grok-t190", timeout=15)
+            await acp.prompt(sid, "before close t190", timeout=30)
+            calls_before_close = xai_api_calls[0]
+            print(f"    calls_before_close={calls_before_close}", flush=True)
+
+            await acp.close_session(sid)
+            await asyncio.sleep(0.8)
+        finally:
+            await nc.close()
+            acp.terminate()
+
+        print(f"    xai_close_received={len(xai_close_received)}", flush=True)
+        try: proc_xai.terminate(); proc_xai.wait(timeout=3)
+        except Exception: pass
+        xai_mock.stop()
+
+        if calls_before_close == 0:
+            fail("trogon-acp close_session: precondition failed — prompt never reached xai-runner")
+        elif xai_close_received:
+            ok("trogon-acp close_session: close_session forwarded to external xai-runner")
+        else:
+            fail("trogon-acp close_session: close NOT forwarded to xai-runner on NATS",
+                 f"calls_before={calls_before_close}")
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -10475,6 +11209,13 @@ async def main():
     await test_xai_perm_gate_deny()
     await test_openrouter_perm_gate_allow()
     await test_openrouter_perm_gate_deny()
+    await test_xai_compaction_fires()
+    await test_xai_compactor_model_propagated()
+    await test_openrouter_compaction_fires()
+    await test_openrouter_compactor_model_propagated()
+    await test_trogon_acp_new_session_routes_to_external_runner()
+    await test_trogon_acp_set_session_model_routes_prompt()
+    await test_trogon_acp_close_session_closes_runner()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 
