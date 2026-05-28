@@ -173,6 +173,32 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "git_create_branch",
+            "Create a new git branch. Checks it out by default.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "branch":       { "type": "string",  "description": "Name of the new branch (required)" },
+                    "checkout":     { "type": "boolean", "description": "Switch to the new branch after creating it (default: true)" },
+                    "base":         { "type": "string",  "description": "Starting point for the branch (commit, tag, or branch name; defaults to HEAD)" }
+                },
+                "required": ["branch"]
+            }),
+        ),
+        tool_def(
+            "git_push",
+            "Push commits to a remote repository.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "remote":       { "type": "string",  "description": "Remote name (default: 'origin')" },
+                    "branch":       { "type": "string",  "description": "Branch to push (default: current branch)" },
+                    "set_upstream": { "type": "boolean", "description": "Set upstream tracking with -u (default: false)" }
+                },
+                "required": []
+            }),
+        ),
+        tool_def(
             "fetch_url",
             "Fetch the content of a URL. HTML is converted to plain text by default. Response is truncated at 8KB.",
             json!({
@@ -254,6 +280,8 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_diff"         => git::diff(ctx, input).await,
         "git_log"          => git::log(ctx, input).await,
         "git_commit"       => git::commit(ctx, input).await,
+        "git_create_branch" => git::create_branch(ctx, input).await,
+        "git_push"         => git::push(ctx, input).await,
         "fetch_url"        => web::fetch_url(ctx, input).await,
         "notebook_edit"    => fs::notebook_edit(ctx, input).await,
         "search_files"     => search::search_files(ctx, input).await,

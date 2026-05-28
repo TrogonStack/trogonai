@@ -104,6 +104,57 @@ pub async fn log(ctx: &ToolContext, _input: &Value) -> String {
     run_git(&ctx.cwd, &["log", "--oneline", "-20"]).await
 }
 
+/// Create a new branch, optionally checking it out.
+pub async fn create_branch(ctx: &ToolContext, input: &Value) -> String {
+    let branch = match input.get("branch").and_then(|v| v.as_str()) {
+        Some(b) if !b.trim().is_empty() => b,
+        _ => return "Error: `branch` is required for git_create_branch".to_string(),
+    };
+    if branch.contains('\0') {
+        return "Error: branch name must not contain NUL bytes".to_string();
+    }
+
+    let checkout = input.get("checkout").and_then(|v| v.as_bool()).unwrap_or(true);
+    let base = input.get("base").and_then(|v| v.as_str());
+
+    if checkout {
+        let mut args = vec!["checkout", "-b", branch];
+        if let Some(b) = base {
+            args.push(b);
+        }
+        run_git(&ctx.cwd, &args).await
+    } else {
+        let mut args = vec!["branch", branch];
+        if let Some(b) = base {
+            args.push(b);
+        }
+        run_git(&ctx.cwd, &args).await
+    }
+}
+
+/// Push the current branch (or a named branch) to a remote.
+pub async fn push(ctx: &ToolContext, input: &Value) -> String {
+    let remote = input
+        .get("remote")
+        .and_then(|v| v.as_str())
+        .unwrap_or("origin");
+    let branch = input.get("branch").and_then(|v| v.as_str());
+    let set_upstream = input
+        .get("set_upstream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut args = vec!["push"];
+    if set_upstream {
+        args.push("-u");
+    }
+    args.push(remote);
+    if let Some(b) = branch {
+        args.push(b);
+    }
+    run_git(&ctx.cwd, &args).await
+}
+
 /// Stage changed files and create a commit. Requires a non-empty `message`.
 pub async fn commit(ctx: &ToolContext, input: &Value) -> String {
     let message = match input.get("message").and_then(|v| v.as_str()) {
@@ -293,6 +344,58 @@ mod tests {
             cwd: path.to_string_lossy().into_owned(),
             http_client: reqwest::Client::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn git_create_branch_requires_branch_name() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        let ctx = ctx_in(dir.path());
+        let result = create_branch(&ctx, &json!({})).await;
+        assert!(result.contains("branch"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn git_create_branch_and_checkout() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        // need an initial commit so branch creation works
+        tokio::fs::write(dir.path().join("init.txt"), "init").await.unwrap();
+        let ctx = ctx_in(dir.path());
+        commit(&ctx, &json!({"message": "init", "paths": ["init.txt"]})).await;
+
+        let result = create_branch(&ctx, &json!({"branch": "feat/test", "checkout": true})).await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        // verify we are now on the new branch
+        let status = run_git(dir.path().to_str().unwrap(), &["branch", "--show-current"]).await;
+        assert_eq!(status.trim(), "feat/test", "got: {status}");
+    }
+
+    #[tokio::test]
+    async fn git_create_branch_without_checkout() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        tokio::fs::write(dir.path().join("init.txt"), "init").await.unwrap();
+        let ctx = ctx_in(dir.path());
+        commit(&ctx, &json!({"message": "init", "paths": ["init.txt"]})).await;
+
+        let result = create_branch(&ctx, &json!({"branch": "no-checkout", "checkout": false})).await;
+        assert!(!result.starts_with("Error"), "got: {result}");
+        // still on original branch
+        let current = run_git(dir.path().to_str().unwrap(), &["branch", "--show-current"]).await;
+        assert_eq!(current.trim(), "main", "got: {current}");
+    }
+
+    #[tokio::test]
+    async fn git_push_requires_remote_reachable() {
+        // Just verify the function doesn't panic on a repo with no remote.
+        // git push will fail with an error message — that's expected.
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path()).await;
+        let ctx = ctx_in(dir.path());
+        let result = push(&ctx, &json!({})).await;
+        // Either "no remote" / "does not have upstream" error — not a code panic.
+        assert!(!result.is_empty(), "push must return some output");
     }
 
     #[tokio::test]
