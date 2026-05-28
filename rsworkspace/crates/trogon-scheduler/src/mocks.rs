@@ -683,9 +683,9 @@ mod tests {
     use super::*;
     use crate::commands::domain as command_domain;
     use crate::{
-        AddScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
-        PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand, Schedule, ScheduleEventDelivery,
-        ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
+        CreateScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope,
+        MessageHeaders, PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand, Schedule,
+        ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -783,7 +783,7 @@ mod tests {
             .unwrap();
         assert_eq!(seeded, expected_job("seeded"));
 
-        CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -837,7 +837,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+        let deleted_error = CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -845,7 +845,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandError::Decide(crate::AddScheduleDecideError::JobDeleted { .. })
+            CommandError::Decide(crate::CreateScheduleDecideError::JobDeleted { .. })
         ));
     }
 
@@ -865,7 +865,7 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()

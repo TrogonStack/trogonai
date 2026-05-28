@@ -8,7 +8,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead, TokioSnapshotTaskScheduler};
 use trogon_nats::{NatsConfig, connect as nats_connect};
 use trogon_scheduler::{
-    AddScheduleCommand, GetScheduleCommand, PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand,
+    CreateScheduleCommand, GetScheduleCommand, PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand,
     ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, SchedulerController,
     commands::domain as command_domain, connect_store, get_schedule, state_v1, v1,
 };
@@ -174,7 +174,7 @@ async fn controller_reconciles_one_time_job() {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -205,7 +205,7 @@ async fn controller_reconciles_sampling_job() {
         source: Some(command_domain::SamplingSource::latest_from_subject("sensors.latest").unwrap()),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -238,7 +238,7 @@ async fn controller_reconciles_schedule_with_timezone() {
     let mut job = base_job("cron-timezone");
     job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -263,7 +263,7 @@ async fn disabling_job_removes_schedule_subject() {
     });
 
     let job = base_job("disabled");
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -299,7 +299,7 @@ async fn removing_job_removes_schedule_subject() {
     });
 
     let job = base_job("removed");
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -337,7 +337,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         timezone: Some("UTC".to_string()),
     };
 
-    CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -376,7 +376,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let job = base_job("lifecycle");
     let command_id = command_job_id("lifecycle");
 
-    let added = CommandExecution::new(&store.event_store, &AddScheduleCommand::new(job))
+    let added = CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()

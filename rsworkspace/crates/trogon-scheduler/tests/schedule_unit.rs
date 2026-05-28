@@ -3,7 +3,7 @@
 use buffa::MessageField;
 use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 use trogon_scheduler::{
-    AddScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
+    CreateScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
     PauseScheduleCommand, RemoveScheduleCommand, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
     ScheduleEventStatus, ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
     commands::domain as command_domain,
@@ -53,7 +53,7 @@ async fn client_register_then_get() {
     let store = MockSchedulerStore::new();
 
     let job = command_base_job("backup");
-    CommandExecution::new(&store, &AddScheduleCommand::new(job))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -71,7 +71,7 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("toggle")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("toggle")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -96,13 +96,13 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_schedules_use_store_paths() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("alpha")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &AddScheduleCommand::new(command_base_job("beta")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("beta")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
