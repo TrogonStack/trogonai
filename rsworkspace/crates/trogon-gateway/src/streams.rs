@@ -2,93 +2,15 @@ use tracing::info;
 use trogon_nats::jetstream::JetStreamContext;
 
 use crate::config::ResolvedConfig;
+use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-    for integration in &config.github {
-        crate::source::github::provision(client, &integration.config).await?;
-        info!(
-            source = "github",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
+    // Discord is gateway-WebSocket, not a webhook source; it doesn't fit `SourcePlugin`.
     if let Some(ref cfg) = config.discord {
         crate::source::discord::provision(client, cfg).await?;
         info!(source = "discord", "stream provisioned");
     }
-    for integration in &config.slack {
-        crate::source::slack::provision(client, &integration.config).await?;
-        info!(
-            source = "slack",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.telegram {
-        crate::source::telegram::provision(client, &integration.config).await?;
-        info!(
-            source = "telegram",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.twitter {
-        crate::source::twitter::provision(client, &integration.config).await?;
-        info!(
-            source = "twitter",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.gitlab {
-        crate::source::gitlab::provision(client, &integration.config).await?;
-        info!(
-            source = "gitlab",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.incidentio {
-        crate::source::incidentio::provision(client, &integration.config).await?;
-        info!(
-            source = "incidentio",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.linear {
-        crate::source::linear::provision(client, &integration.config).await?;
-        info!(
-            source = "linear",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.microsoft_graph {
-        crate::source::microsoft_graph::provision(client, &integration.config).await?;
-        info!(
-            source = "microsoft-graph",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.notion {
-        crate::source::notion::provision(client, &integration.config).await?;
-        info!(
-            source = "notion",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    for integration in &config.sentry {
-        crate::source::sentry::provision(client, &integration.config).await?;
-        info!(
-            source = "sentry",
-            integration = integration.id.as_str(),
-            "stream provisioned"
-        );
-    }
-    Ok(())
+    source_plugin::provision_webhook_sources(client, config).await
 }
 
 #[cfg(test)]
