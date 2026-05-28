@@ -185,27 +185,57 @@ fn estimate_token_count(messages: &[Message]) -> u64 {
 /// Returns the original messages unchanged if the compactor is not running or
 /// returns an error — compaction is always opt-in and never blocks the prompt.
 #[cfg_attr(coverage, coverage(off))]
+/// Request sent to `trogon-compactor`. acp is Anthropic-only, so `provider` is
+/// always `"anthropic"`; the service compacts with the session `model` unless a
+/// same-provider `compactor_model` override is set.
+#[derive(serde::Serialize)]
+struct CompactReq<'a> {
+    messages: &'a [Message],
+    provider: &'a str,
+    model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<&'a str>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompactResp {
+    messages: Vec<Message>,
+    #[serde(default)]
+    compacted: bool,
+    #[serde(default)]
+    tokens_before: usize,
+    #[serde(default)]
+    tokens_after: usize,
+    /// Number of kept trailing messages (Gap 2). acp ignores it — uses
+    /// `messages` directly since its format is already Anthropic-shaped.
+    #[serde(default)]
+    #[allow(dead_code)]
+    kept_count: usize,
+}
+
+/// Builds the JSON payload for a compaction request. Extracted so the wire
+/// contract (provider/model/compactor_model) is unit-testable without NATS.
+fn build_compact_payload(
+    messages: &[Message],
+    model: &str,
+    compactor_model: Option<&str>,
+) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(&CompactReq {
+        messages,
+        provider: "anthropic",
+        model,
+        compactor_model,
+    })
+}
+
 async fn compact_messages(
     nats: &async_nats::Client,
     messages: Vec<Message>,
     session_id: &str,
+    model: &str,
+    compactor_model: Option<&str>,
 ) -> Vec<Message> {
-    #[derive(serde::Serialize)]
-    struct CompactReq<'a> {
-        messages: &'a [Message],
-    }
-    #[derive(serde::Deserialize)]
-    struct CompactResp {
-        messages: Vec<Message>,
-        #[serde(default)]
-        compacted: bool,
-        #[serde(default)]
-        tokens_before: usize,
-        #[serde(default)]
-        tokens_after: usize,
-    }
-
-    let Ok(payload) = serde_json::to_vec(&CompactReq { messages: &messages }) else {
+    let Ok(payload) = build_compact_payload(&messages, model, compactor_model) else {
         return messages;
     };
 
@@ -466,8 +496,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         if let Some(ref nats) = self.compactor_nats
             && estimate_token_count(&state.messages) > state.token_budget * 85 / 100
         {
+            let model = state
+                .model
+                .as_deref()
+                .unwrap_or(&self.default_model)
+                .to_string();
+            let compactor_model = state.compactor_model.clone();
             let msgs = std::mem::take(&mut state.messages);
-            state.messages = compact_messages(nats, msgs, &session_id).await;
+            state.messages =
+                compact_messages(nats, msgs, &session_id, &model, compactor_model.as_deref()).await;
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
@@ -997,6 +1034,13 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     warn!(session_id, error = %e, "agent: failed to persist permission rules");
                 }
             }
+            "compactor_model" => {
+                state.compactor_model = if value.is_empty() { None } else { Some(value.clone()) };
+                state.updated_at = now_iso8601();
+                if let Err(e) = self.store.save(&session_id, &state).await {
+                    warn!(session_id, error = %e, "agent: failed to persist compactor_model");
+                }
+            }
             other => {
                 warn!(session_id, config_id = other, "agent: unknown config option");
             }
@@ -1407,6 +1451,32 @@ mod tests {
         assert_eq!(estimate_token_count(&[]), 0);
     }
 
+    // ── build_compact_payload: wire contract ──────────────────────────────────
+
+    #[test]
+    fn build_compact_payload_includes_provider_model_and_override() {
+        let msgs = vec![Message::user_text("hi")];
+        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", Some("claude-haiku-4-5")).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["provider"], "anthropic", "acp always compacts via anthropic");
+        assert_eq!(v["model"], "claude-opus-4-6", "session model is sent");
+        assert_eq!(v["compactor_model"], "claude-haiku-4-5", "override is sent when set");
+        assert!(v["messages"].is_array());
+    }
+
+    #[test]
+    fn build_compact_payload_omits_compactor_model_when_none() {
+        let msgs = vec![Message::user_text("hi")];
+        let bytes = build_compact_payload(&msgs, "claude-opus-4-6", None).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["model"], "claude-opus-4-6");
+        assert!(
+            v.get("compactor_model").is_none(),
+            "compactor_model must be omitted when unset (skip_serializing_if), so the service \
+             falls back to the session model"
+        );
+    }
+
     #[test]
     fn estimate_token_count_is_bytes_divided_by_four() {
         let msgs = vec![Message::user_text("hello")];
@@ -1567,6 +1637,53 @@ mod tests {
             AgentContentBlock::Text { text } => assert_eq!(text, "imported"),
             _ => panic!("expected Text block"),
         }
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_persists_to_store() {
+        use trogon_runner_tools::session_store::mock::MemorySessionStore;
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "s-cm",
+                "compactor_model",
+                "claude-haiku-4-5",
+            ))
+            .await
+            .unwrap();
+
+        // Must persist to the store (acp's SessionState is the persisted type).
+        let state = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(
+            state.compactor_model,
+            Some("claude-haiku-4-5".to_string()),
+            "compactor_model override must persist on the acp session"
+        );
+
+        // Empty value clears it.
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "s-cm",
+                "compactor_model",
+                "",
+            ))
+            .await
+            .unwrap();
+        let cleared = store_clone.load("s-cm").await.unwrap();
+        assert_eq!(cleared.compactor_model, None, "empty value clears the override");
     }
 
     #[cfg(feature = "test-helpers")]

@@ -17,6 +17,9 @@ pub struct SessionSnapshot {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Per-session context-compaction model override. Persisted like `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactor_model: Option<String>,
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -330,6 +333,7 @@ mod tests {
             tenant_id: "t1".to_string(),
             name: "Test".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             messages: vec![],
@@ -358,6 +362,7 @@ mod tests {
             tenant_id: "t1".to_string(),
             name: "Test".to_string(),
             model: Some("gpt-4".to_string()),
+            compactor_model: None,
             tools: vec![],
             memory_path: Some("/tmp".to_string()),
             messages: vec![],
@@ -387,6 +392,7 @@ mod tests {
             tenant_id: "t".to_string(),
             name: "N".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             messages: vec![],
@@ -412,6 +418,7 @@ mod tests {
             tenant_id: "t".to_string(),
             name: "N".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             messages: vec![SnapshotMessage {

@@ -91,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cfg.api_key.unwrap_or_default(),
     );
     agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
+    agent = agent.with_compactor(nats.clone());
 
     {
         let js = js_ctx;

@@ -149,6 +149,10 @@ fn context_window_tokens(model_id: &str) -> Option<u64> {
 struct OpenRouterSession {
     cwd: String,
     model: Option<String>,
+    /// Per-session context-compaction model override (any OpenRouter model).
+    /// `None` means compact with the session model. Set via `set_session_config_option`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<String>,
     api_key: Option<String>,
     history: Vec<Message>,
     system_prompt: Option<String>,
@@ -202,6 +206,9 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     tenant_id: String,
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     execution_nats: Option<async_nats::Client>,
+    /// Dedicated NATS client for the `trogon-compactor` service (context compaction).
+    /// Independent of the execution backend. `None` disables compaction.
+    compactor_nats: Option<async_nats::Client>,
     tool_http_client: reqwest::Client,
 }
 
@@ -318,6 +325,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             tenant_id,
             registry: None,
             execution_nats: None,
+            compactor_nats: None,
             tool_http_client: reqwest::Client::new(),
         }
     }
@@ -348,6 +356,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            compactor_nats: self.compactor_nats,
             tool_http_client: self.tool_http_client,
         }
     }
@@ -391,6 +400,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     ) -> Self {
         self.execution_nats = Some(nats);
         self.registry = Some(Arc::new(registry));
+        self
+    }
+
+    /// Enable context compaction by connecting to the `trogon-compactor` NATS service.
+    /// Independent of the execution backend. Mirrors `trogon-acp-runner::with_compactor`.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
         self
     }
 
@@ -463,6 +479,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
+            compactor_model: session.compactor_model.clone(),
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -672,6 +689,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: session_model_override,
+                compactor_model: None,
                 api_key,
                 history: Vec::new(),
                 system_prompt,
@@ -747,6 +765,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     })
                     .collect();
                 let model = snap.model.clone();
+                let compactor_model = snap.compactor_model.clone();
                 let created_at_iso = snap.created_at.clone();
                 let parent_session_id = snap.parent_session_id.clone();
                 let branched_at_index = snap.branched_at_index;
@@ -764,6 +783,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterSession {
                         cwd,
                         model,
+                        compactor_model,
                         api_key,
                         history,
                         system_prompt,
@@ -849,6 +869,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: inherited_model.clone(),
+                compactor_model: None,
                 api_key: inherited_key,
                 history,
                 system_prompt: inherited_system_prompt,
@@ -1017,6 +1038,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.permission_rules_text = if text.is_empty() { None } else { Some(text) };
                 info!(session_id, "openrouter: session permission rules updated");
             }
+        } else if config_id == "compactor_model" {
+            if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                let m = value.to_string();
+                s.compactor_model = if m.is_empty() { None } else { Some(m) };
+                info!(session_id, "openrouter: session compactor_model updated");
+            }
         } else if let SessionConfigOptionValue::ValueId { value } = &req.value {
             let val = value.to_string();
             match val.as_str() {
@@ -1066,6 +1093,44 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         if user_input.is_empty() {
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
+        }
+
+        // Context compaction (PRE-request). openrouter is stateless: the full
+        // history is sent each turn, so it must fit. Gap 3: pre-check the
+        // threshold before the NATS call (the async call runs WITHOUT the lock).
+        // Gap 2: the runner reuses its own original tail (no reverse conversion).
+        if let Some(nats) = self.compactor_nats.clone() {
+            let snapshot = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&session_id).map(|s| {
+                    (
+                        s.history.clone(),
+                        s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                        s.compactor_model.clone(),
+                    )
+                })
+            };
+            if let Some((history, model, compactor_model)) = snapshot {
+                let cw = context_window_tokens(&model);
+                if crate::compaction::should_compact(&history, cw) {
+                    let context_window = cw.unwrap_or_default();
+                    let (new_history, compacted) = crate::compaction::compact(
+                        &nats,
+                        history,
+                        &model,
+                        compactor_model.as_deref(),
+                        context_window,
+                    )
+                    .await;
+                    if compacted {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.history = new_history;
+                        }
+                        info!(session_id, "openrouter: context compacted pre-request");
+                    }
+                }
+            }
         }
 
         let (model, api_key, mut messages, session_system_prompt, enabled_tools, cwd, mut terminal_id, session_mode, permission_rules, permission_rules_text) = {
@@ -1769,6 +1834,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
+            compactor_model: None,
             api_key: None,
             history,
             system_prompt: None,
@@ -1810,6 +1876,14 @@ impl<H, N, M> OpenRouterAgent<H, N, M> {
 
     pub async fn test_session_mode(&self, id: &str) -> Option<String> {
         self.sessions.lock().await.get(id).map(|s| s.session_mode.clone())
+    }
+
+    pub async fn test_session_compactor_model(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).and_then(|s| s.compactor_model.clone())
+    }
+
+    pub async fn test_session_history(&self, id: &str) -> Vec<Message> {
+        self.sessions.lock().await.get(id).map(|s| s.history.clone()).unwrap_or_default()
     }
 
     pub async fn test_session_audit_log(&self, id: &str) -> Vec<trogon_runner_tools::session_store::AuditEntry> {
@@ -2005,6 +2079,7 @@ mod tests {
         OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
+            compactor_model: None,
             api_key: None,
             history: vec![],
             system_prompt: None,
@@ -2328,6 +2403,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "KV Session".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec!["read_file".to_string(), "write_file".to_string()],
             memory_path: None,
             messages: vec![],
@@ -2381,6 +2457,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Token Session".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             messages: vec![],
@@ -2564,6 +2641,42 @@ mod tests {
             agent.set_session_config_option(req).await.unwrap();
             let sessions = agent.sessions.lock().await;
             assert!(!sessions.get(&sid.to_string()).unwrap().enabled_tools.contains(&"read_file".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_is_stored_and_cleared() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let id = sid.to_string();
+            assert_eq!(agent.test_session_compactor_model(&id).await, None, "starts unset");
+
+            // Setting it stores the override.
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "compactor_model",
+                    "anthropic/claude-haiku-4-5",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                agent.test_session_compactor_model(&id).await,
+                Some("anthropic/claude-haiku-4-5".to_string()),
+                "compactor_model override must be stored"
+            );
+
+            // Empty value clears it.
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "compactor_model",
+                    "",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(agent.test_session_compactor_model(&id).await, None, "empty clears");
         }).await;
     }
 
@@ -4796,6 +4909,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Stub".to_string(),
             model: None,
+            compactor_model: None,
             tools,
             memory_path: None,
             messages: vec![],

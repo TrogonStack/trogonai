@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use agent_client_protocol::{
     Agent as _, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
     EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest,
-    PromptRequest, ResourceLink, SessionNotification, TextResourceContents,
+    PromptRequest, ResourceLink, SessionId, SessionNotification, TextResourceContents,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
@@ -1830,6 +1830,109 @@ async fn cancel_prompt_token_totals_persisted_to_kv() {
             assert_eq!(
                 v["total_cache_creation_tokens"], 10,
                 "cancel path must persist cache_creation tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── Context compaction end-to-end (Gap 2: reuse own tail) ────────────────────────
+
+/// Drives a prompt whose history exceeds 85 % of the model's window, with a
+/// stand-in compactor responder. Verifies openrouter compacts PRE-request via
+/// NATS AND applies Gap 2 correctly: it reuses its OWN original tail message
+/// (by `kept_count`), NOT the responder's kept message — so tool_calls/tool
+/// pairing is never reconstructed.
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn prompt_compacts_pre_request_and_reuses_own_tail() {
+    use std::time::Duration;
+    use trogon_openrouter_runner::{MockOpenRouterHttpClient, MockSessionNotifier};
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: returns summary + ack + a DIFFERENT placeholder for the
+    // kept message, plus kept_count=1. If openrouter (wrongly) used the responder's
+    // kept message, the tail would be "RESPONDER-PLACEHOLDER"; Gap 2 means it must
+    // instead reuse its OWN original tail ("RECENT-ORIGINAL").
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "RESPONDER-PLACEHOLDER"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // gpt-4 → 8192-token window; 85 % ≈ 6963 tokens ≈ 28 KB. Mock LLM returns a
+    // reply for the turn (test helpers live on the Mock-typed agent).
+    let http = MockOpenRouterHttpClient::new();
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "Hello back!".to_string() }]);
+    let agent = OpenRouterAgent::with_deps(MockSessionNotifier::new(), "gpt-4", "test-key", http)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // 12 messages × ~2.5 KB ≈ 30 KB ≈ 7500 tokens > threshold. Last message is the
+    // recognizable original tail that Gap 2 must reuse verbatim.
+    let pad = "y".repeat(2_500);
+    let mut history = Vec::new();
+    for i in 0..11 {
+        history.push(Message::user(format!("old {i} {pad}")));
+    }
+    history.push(Message::user(format!("RECENT-ORIGINAL {pad}")));
+    agent.test_insert_session_with_history("s-or-compact", history).await;
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-or-compact"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let hist = agent.test_session_history("s-or-compact").await;
+            // First message is the summary checkpoint.
+            assert!(
+                hist[0].content.contains("context-summary"),
+                "first message must be the summary; got: {:?}",
+                hist[0].content
+            );
+            // Gap 2: the kept tail is the runner's OWN original message…
+            assert!(
+                hist.iter().any(|m| m.content.contains("RECENT-ORIGINAL")),
+                "must reuse the runner's own original tail message"
+            );
+            // …NOT the responder's placeholder.
+            assert!(
+                !hist.iter().any(|m| m.content.contains("RESPONDER-PLACEHOLDER")),
+                "must NOT use the compactor's kept message (Gap 2: no reverse conversion)"
             );
         })
         .await;

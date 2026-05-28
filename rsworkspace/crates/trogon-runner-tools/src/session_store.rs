@@ -75,6 +75,10 @@ pub struct SessionState {
     /// Per-session model override. `None` means use the agent's default model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Per-session context-compaction model override (same provider). `None`
+    /// means compact with the session model. Set via `set_session_config_option`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactor_model: Option<String>,
     /// Permission mode (e.g. "default", "acceptEdits", "bypassPermissions").
     #[serde(default)]
     pub mode: String,
@@ -177,6 +181,7 @@ impl Default for SessionState {
         Self {
             messages: Vec::new(),
             model: None,
+            compactor_model: None,
             mode: String::new(),
             cwd: String::new(),
             created_at: String::new(),

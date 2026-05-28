@@ -1154,6 +1154,7 @@ where
         let new_state = SessionState {
             messages,
             model: src_state.model.clone(),
+            compactor_model: src_state.compactor_model.clone(),
             mode: src_state.mode.clone(),
             cwd,
             created_at: now_iso8601(),
