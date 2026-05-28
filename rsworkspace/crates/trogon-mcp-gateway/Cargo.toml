@@ -46,3 +46,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 trogon-sts = { workspace = true }
 trogon-sts-client = { workspace = true }
 uuid = { workspace = true }
+criterion = "=0.5.1"
+
+[[bench]]
+name = "latency_baseline"
+harness = false
