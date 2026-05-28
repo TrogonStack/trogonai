@@ -12,6 +12,7 @@ pub mod gateway;
 pub mod ingress;
 pub mod jwt;
 pub mod policy;
+pub mod redaction;
 pub mod rpc_codes;
 pub mod schema_cache;
 pub mod throttle;
