@@ -62,12 +62,12 @@ Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gat
 
 ### Block G — Operational tooling — CODE PENDING
 
-- [ ] Latency baseline (P50/P99 vs direct `mcp-nats`) → **ADR 0031**.
+- [x] Latency baseline (P50/P99 vs direct `mcp-nats`) → **ADR 0031**.
 - [x] CLI (`trogon-gateway-ctl`): inspect config, trace requests, validate bundles, dry-run policy → **ADR 0030**; contract: `tests/admin_api.rs`.
 - [ ] K8s controller projecting Gateway API CRDs into NATS KV → `docs/identity/k8s-controller.md`.
 - [ ] xDS interop layer → `docs/identity/xds-integration.md`.
-- [ ] Multi-region story → **ADR 0016**; contract: `tests/multi_region_failover.rs`.
-- [ ] OTel trace export + JetStream consumer for audit→SIEM → `docs/identity/otel-wiring.md`; contract: `tests/otel_span_shape.rs`.
+- [x] Multi-region story → **ADR 0016**; contract: `tests/multi_region_failover.rs`.
+- [x] OTel trace export + JetStream consumer for audit→SIEM → `docs/identity/otel-wiring.md`; contract: `tests/otel_span_shape.rs`.
 
 ## Reference Anchors
 
