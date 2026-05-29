@@ -243,3 +243,51 @@ mod jetstream {
         unimplemented!("queue-group forward worker audit correlation");
     }
 }
+
+mod wasm_boundary {
+    //! WASM `request-ctx.span` propagation (ADR 0032). NATS ingress/egress cases stay ignored above.
+
+    use trogon_mcp_gateway::wasm::{
+        extract_trace_id, parent_from_span_context, populate_request_span, traceparent_is_sampled,
+        RequestCtx, SpanContext,
+    };
+
+    const SAMPLE_TRACEPARENT: &str =
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    fn request_with_traceparent(traceparent: &str) -> RequestCtx {
+        RequestCtx {
+            request_id: "req-wasm-1".into(),
+            actor_id: "user:alice".into(),
+            subject_id: "user:alice".into(),
+            method: "tools/call".into(),
+            params_json: "{}".into(),
+            act_chain_json: "[]".into(),
+            attributes_json: "{}".into(),
+            span: SpanContext {
+                trace_id: extract_trace_id(traceparent).unwrap_or_default(),
+                traceparent: traceparent.into(),
+                tracestate: None,
+            },
+            tools: vec![],
+        }
+    }
+
+    #[test]
+    fn wasm_evaluate_span_trace_id_matches_ingress_traceparent() {
+        let mut request = request_with_traceparent(SAMPLE_TRACEPARENT);
+        populate_request_span(&mut request);
+        assert_eq!(request.span.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+        let parent = parent_from_span_context(&request.span).expect("parsed traceparent");
+        assert_eq!(parent.trace_id, request.span.trace_id);
+        assert_eq!(parent.parent_span_id, "00f067aa0ba902b7");
+    }
+
+    #[test]
+    fn wasm_request_ctx_preserves_sampled_flag_from_ingress_traceparent() {
+        assert!(traceparent_is_sampled(SAMPLE_TRACEPARENT));
+        assert!(!traceparent_is_sampled(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+        ));
+    }
+}

@@ -10,11 +10,14 @@ use wasmtime::component::{Component, Linker};
 use crate::bundle::{LoadedBundle, HOST_TARGET_WIT};
 use crate::cel_builtins::HostEvalContext;
 
+use tracing::Instrument;
+
 use super::bindings::{contract_identity, RequestCtx, WIT_PACKAGE, WIT_VERSION};
 use super::config::PoolConfig;
 use super::error::{EvaluateOutcome, WasmEngineError};
 use super::pool::ComponentPool;
 use super::store_state::WasmStoreState;
+use super::tracing::{populate_request_span, WASM_EVALUATE_SPAN_NAME};
 use super::wasi_stub;
 
 /// Process-wide Wasmtime engine with digest-keyed component pools.
@@ -127,6 +130,10 @@ impl WasmEngine {
     }
 
     /// Runs `policy-guest.evaluate` on a pooled instance for the given component id.
+    ///
+    /// Call inside the active gateway authz/request span so W3C context injects into
+    /// [`RequestCtx::span`] and host imports attach to [`WASM_EVALUATE_SPAN_NAME`]. For an
+    /// explicit parent, use [`Self::evaluate_with_span`].
     pub async fn evaluate(
         &self,
         handle: &WasmBundleHandle,
@@ -134,6 +141,20 @@ impl WasmEngine {
         request: &RequestCtx,
         host: HostEvalContext,
     ) -> Result<EvaluateOutcome, WasmEngineError> {
+        self.evaluate_with_span(handle, component_id, request, host, &tracing::Span::current())
+            .await
+    }
+
+    /// Same as [`Self::evaluate`] but enters `parent` before populating span context.
+    pub async fn evaluate_with_span(
+        &self,
+        handle: &WasmBundleHandle,
+        component_id: Option<&str>,
+        request: &RequestCtx,
+        host: HostEvalContext,
+        parent: &tracing::Span,
+    ) -> Result<EvaluateOutcome, WasmEngineError> {
+        let _guard = parent.enter();
         let component_id = component_id
             .or(handle.default_component.as_deref())
             .ok_or_else(|| WasmEngineError::UnknownComponent {
@@ -142,7 +163,14 @@ impl WasmEngine {
         let pool = handle.pools.get(component_id).ok_or_else(|| WasmEngineError::UnknownComponent {
             component_id: component_id.to_string(),
         })?;
-        pool.evaluate(request, host).await
+        let mut request = request.clone();
+        populate_request_span(&mut request);
+        let evaluate_span = tracing::info_span!(
+            WASM_EVALUATE_SPAN_NAME,
+            policy.tier = "wasm",
+            wasm.component = %component_id,
+        );
+        pool.evaluate(&request, host).instrument(evaluate_span).await
     }
 
     /// Drains and removes pools for a bundle revision (hot-swap eviction).
