@@ -56,6 +56,18 @@ async fn x509_svid_actor_token_mints_attested_wkl() {
         payload.get("wkl").and_then(|v| v.as_str()),
         Some("spiffe://acme.local/ns/prod/sa/oncall-agent")
     );
+    let attested_at = payload
+        .get("wkl_attested_at")
+        .and_then(|v| v.as_i64())
+        .expect("wkl_attested_at claim is minted alongside wkl");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    assert!(
+        attested_at > 0 && (now - attested_at).abs() < 30,
+        "wkl_attested_at should reflect a recent unix second; got {attested_at}, now {now}"
+    );
 
     let events = audit.take_events();
     assert!(events.iter().any(|e| e.outcome == "success"));

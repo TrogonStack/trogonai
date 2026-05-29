@@ -188,6 +188,7 @@ where
         let svid = self.attestor.attest(&presented).await?;
         self.trust_bundle.verify(&svid).await?;
         let actor_wkl = svid.wkl();
+        let wkl_attested_at = now_unix();
         let shadow_unattested = self.attestation_policy.is_shadow();
 
         self.limits.check(&actor_wkl, subject.agent_id.as_deref())?;
@@ -237,6 +238,7 @@ where
         claims.insert("scope".into(), json!(scope.clone()));
         claims.insert("purpose".into(), json!(request.purpose));
         claims.insert("wkl".into(), json!(actor_wkl));
+        claims.insert("wkl_attested_at".into(), json!(wkl_attested_at));
         claims.insert("act_chain".into(), json!(act_chain));
         if let Some(agent_id) = &subject.agent_id {
             claims.insert("agent_id".into(), json!(agent_id));
