@@ -1,13 +1,15 @@
 //! # trogon-source-slack
 //!
-//! Slack Events API webhook receiver that publishes events to NATS JetStream.
+//! Slack Events API receiver that publishes events to NATS JetStream.
 //!
 //! ## How it works
 //!
-//! 1. Slack sends `POST /webhook` with `X-Slack-Signature` and
-//!    `X-Slack-Request-Timestamp` headers plus a JSON payload.
-//! 2. The server validates the HMAC-SHA256 signature against `SLACK_SIGNING_SECRET`.
-//! 3. `url_verification` challenges are answered inline (no NATS publish).
+//! 1. Slack delivers payloads by HTTP webhook or Socket Mode, depending on the
+//!    configured integration transport.
+//! 2. HTTP webhooks are validated with HMAC-SHA256 signatures. Socket Mode uses
+//!    Slack's pre-authenticated WebSocket connection and acknowledges envelopes
+//!    after durable NATS publish.
+//! 3. HTTP `url_verification` challenges are answered inline (no NATS publish).
 //! 4. `event_callback` payloads are published to NATS JetStream on
 //!    `slack.{event.type}` subjects (e.g. `slack.message`, `slack.app_mention`).
 //! 5. The JetStream stream (`SLACK` by default, capturing `slack.>`) is created
@@ -37,6 +39,7 @@ pub mod config;
 pub mod constants;
 pub mod server;
 pub mod signature;
+pub mod socket_mode;
 
 pub use config::SlackConfig;
 pub use server::{provision, router};

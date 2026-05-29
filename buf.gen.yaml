@@ -1,0 +1,13 @@
+version: v2
+clean: true
+plugins:
+  - local: protoc-gen-buffa
+    out: rsworkspace/crates/trogonai-proto/src/gen
+    include_imports: true
+    opt:
+      - json=true
+      - unknown_fields=false
+  - local: protoc-gen-buffa-packaging
+    out: rsworkspace/crates/trogonai-proto/src/gen
+    include_imports: true
+    strategy: all

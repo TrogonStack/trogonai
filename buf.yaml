@@ -1,0 +1,20 @@
+version: v2
+
+deps:
+  - buf.build/googleapis/googleapis:c17df5b2beca46928cc87d5656bd5343
+  - buf.build/protocolbuffers/wellknowntypes:122a3d2fdc814e0bb6fcf821bcce7957
+  - buf.build/trogonstack/trogon-proto:v0.15.0
+
+modules:
+  - path: proto
+    name: buf.build/trogonstack/trogonai
+
+lint:
+  use:
+    - STANDARD
+  except:
+    - FIELD_NOT_REQUIRED
+
+breaking:
+  use:
+    - WIRE_JSON

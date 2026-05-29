@@ -119,3 +119,6 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # [sources.slack.integrations.primary.webhook]
 # signing_secret = { env = "SLACK_PRIMARY_SIGNING_SECRET" }
 # timestamp_max_drift_secs = 300
+#
+# [sources.slack.integrations.primary.socket_mode]
+# app_token = { env = "SLACK_PRIMARY_APP_TOKEN" }

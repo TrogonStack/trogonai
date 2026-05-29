@@ -1,0 +1,18 @@
+[package]
+name = "trogonai-proto"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider-runtime"]
+
+[dependencies]
+buffa = { workspace = true, optional = true }
+buffa-types = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+trogon-decider-runtime = { workspace = true, optional = true }

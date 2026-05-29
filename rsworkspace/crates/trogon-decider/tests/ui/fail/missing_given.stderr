@@ -1,0 +1,9 @@
+error[E0599]: no method named `when` found for struct `TestCase<TestCommand>` in the current scope
+ --> tests/ui/fail/missing_given.rs:9:36
+  |
+9 |     TestCase::<TestCommand>::new().when(TestCommand);
+  |                                    ^^^^ method not found in `TestCase<TestCommand>`
+  |
+  = note: the method was found for
+          - `TestCase<C, Given<<C as Decider>::Event>>`
+          - `TestCase<C, NoHistory>`
