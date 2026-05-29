@@ -253,7 +253,7 @@ Queue-grouping `_INBOX.gateway.{instance_id}.>` would deliver a backend reply to
 | `mcp-correlation-id` | Opaque client correlator in audit; does not route replies |
 | `traceparent` / `tracestate` | Span continuity across client → gateway → backend → gateway → client |
 
-Full header table: [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1.
+Full header table: [reference-nats-headers.md](reference-nats-headers.md).
 
 ---
 

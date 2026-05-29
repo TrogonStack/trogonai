@@ -388,7 +388,7 @@ Understanding what is **shipped in Phase 1** vs **planned** avoids expecting fea
 | Session KV + ZedToken per session | Specified | Implementation |
 | Rate limit distributed via KV | Partial (adaptive throttle in library) | Bundle-configured limits |
 
-When in doubt, read `MCP_GATEWAY_PLAN.md` TODO blocks D–H for the authoritative engineering checklist.
+When in doubt, consult the ADR series under [`docs/adr/`](../adr/) for the authoritative engineering rationale.
 
 ---
 

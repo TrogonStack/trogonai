@@ -284,7 +284,7 @@ Guest traps and host import failures become client-visible JSON-RPC errors and a
 
 ### JSON-RPC `error.data` shape (WASM paths)
 
-Aligned with [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §6:
+Aligned with [reference-error-codes.md](reference-error-codes.md):
 
 ```json
 {
@@ -378,7 +378,7 @@ This section describes how the WIT world fits the gateway pipeline — reference
 
 ### Pipeline position
 
-Per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Policy Engine, evaluation order is **CEL → NATS-callout plugin → WASM** (increasing power). WASM `evaluate` runs in **PostRouting** phase for methods selected by bundle manifest. A WASM `allow` does not skip mandatory SpiceDB when manifest declares SpiceDB as authoritative **(bundle config)** — v0.1.0 sketch allows either "WASM is sole PDP" or "WASM is advisory" via manifest flag **(proposed:** `wasm.mode: authoritative | advisory`).
+Evaluation order is **CEL → NATS-callout plugin → WASM** (increasing power). WASM `evaluate` runs in **PostRouting** phase for methods selected by bundle manifest. A WASM `allow` does not skip mandatory SpiceDB when manifest declares SpiceDB as authoritative **(bundle config)** — v0.1.0 sketch allows either "WASM is sole PDP" or "WASM is advisory" via manifest flag **(proposed:** `wasm.mode: authoritative | advisory`).
 
 ### Tracing **(Phase 3)**
 
@@ -398,7 +398,7 @@ Span context from `attributes-json.trace_id` / W3C headers is attached as a host
 
 5. **`challenge` vs risk library:** [adaptive-access.md](adaptive-access.md) implements risk in native Rust today (`policy::run_with_risk`). Should WASM `challenge` delegate to the same approval subjects, or can guests emit custom approval subjects? **Proposal:** gateway ignores guest-suggested subjects; always uses `mcp.approvals.{request_id}`.
 
-6. **WIT boundary one-world vs multi-protocol:** [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Open Questions §1 — generic `nats-policy.wit` vs MCP-aware world. This sketch commits to **MCP-aware** `policy-input` for Phase 3; extraction to `trogon-policy-core` in Block F is a refactor, not a second ABI.
+6. **WIT boundary one-world vs multi-protocol:** generic `nats-policy.wit` vs MCP-aware world. This sketch commits to **MCP-aware** `policy-input` for Phase 3; extraction to `trogon-policy-core` is a refactor, not a second ABI.
 
 7. **Fail-open on `*/list`:** Plan § SpiceDB Integration allows fail-open with log for list shaping. WASM v0.1.0 has no `log`-only decision variant — guest must return `allow` and rely on separate CEL tier, or we add `allow-with-audit` variant **(proposed)** in minor bump.
 
@@ -550,7 +550,7 @@ signature:
 
 ## Appendix I — Compatibility with earlier plan WIT fragment
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Tier 3 shows an earlier `world mcp-policy` with `authorize` / `shape-response` and split imports (`trogon:host/spicedb`, etc.). **This document supersedes that fragment for Block B sign-off** with a single `host` interface and `evaluate` export. Migration: first-party bundles rewrite to `policy-bundle` before Phase 3 code lands.
+An earlier Tier 3 sketch defined `world mcp-policy` with `authorize` / `shape-response` and split imports (`trogon:host/spicedb`, etc.). **This document supersedes that fragment** with a single `host` interface and `evaluate` export. Migration: first-party bundles rewrite to `policy-bundle` before Phase 3 code lands.
 
 ---
 

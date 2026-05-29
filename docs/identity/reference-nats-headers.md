@@ -17,7 +17,7 @@
 | W3C trace inject | `trogon-nats/src/messaging.rs` (`inject_trace_context`) |
 | Act-chain types | `trogon-identity-types` (`MAX_ACT_CHAIN_DEPTH = 8`) |
 
-Unless marked **proposed**, fields below match [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1.
+Unless marked **proposed**, fields below are normative Wire-Format Pin 1.
 
 ---
 

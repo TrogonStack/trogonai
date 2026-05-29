@@ -203,7 +203,7 @@ mcp.audit.{outcome}.callback.{method_root}
 | **Actor** (who initiates) | MCP **backend server** — `{server_id}` from session + attested backend workload (`wkl` from server NATS connection or SPIFFE SVID on STS exchange) | SpiceDB **subject** side: `mcp_server:{server_id}` |
 | **Subject** (who is affected) | MCP **client** / underlying **user** from session | SpiceDB **resource** side: `user:{originator_sub}` and/or `mcp_client:{client_id}` |
 
-This inverts client→server checks documented in [overview.md](overview.md) and [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § SpiceDB Integration Model.
+This inverts client→server checks documented in [overview.md](overview.md).
 
 ### Audience URI (callback egress)
 

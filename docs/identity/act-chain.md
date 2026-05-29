@@ -1,6 +1,6 @@
 # Actor chain (`act_chain`)
 
-**Status:** DRAFT — for human review before wire-format pin in `MCP_GATEWAY_PLAN.md`.
+**Status:** DRAFT — for human review before wire-format pin.
 
 **Related:** `docs/identity/jwt-claim-schema.md`.
 
@@ -270,7 +270,7 @@ Backends that do not parse JWTs receive the chain on egress headers. Same rules 
 
 ## Audit envelope embedding
 
-Per `MCP_GATEWAY_PLAN.md` §7 (audit envelope schema), embed the chain under `caller`:
+Per the audit envelope schema, embed the chain under `caller`:
 
 ```json
 {
