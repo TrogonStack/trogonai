@@ -33,93 +33,47 @@ This is a product-positioning decision, not a technical one. **ADR 0017 (Propose
 
 ### What "Next" Looks Like Concretely
 
-Pre-code paper work is **done** (modulo the leadership decision above):
-
-- Product positioning question — **ADR 0017 (Proposed)**.
-- Four irreversible technical decisions — DSL (**ADR 0008**), reply correlation (**ADR 0009**), tenancy (**ADR 0001**), host ABI (`docs/identity/reference-host-abi.md`).
-- On-bus vs. hybrid — **ADR 0007**.
-
-Phase 1 vertical slice **shipped** — see Block D. Active code work is Block E (Phase 2 hot-path).
+Pre-code paper work is **done** (modulo the leadership decision above): ADRs 0001-0032 cover every strategic, technical, and design question. Phase 1 vertical slice (queue-group consumer, JWT ingress, CEL gate, SpiceDB hook, audit-to-JetStream, end-to-end NATS harness) **shipped**. Active code work is Block E (Phase 2 hot-path).
 
 ## TODO
 
-Concrete work items. Block A/B/C/H are paper-complete. Block D shipped. Block E/F/G remain (mostly code, with test-scaffold contracts already in tree).
+Open work only. Strategic / technical paper decisions (ADRs 0001-0032), Phase 1 vertical slice, and operator docs are done; see `Reference Anchors` below for the canonical sources.
 
 ### Block A — Strategic decisions (paper)
 
 - [ ] Resolve product positioning: **feature inside TrogonStack** vs. **standalone security product**. **ADR 0017 (Proposed)** documents the question; awaiting leadership verdict.
-- [x] On-bus vs. hybrid → **ADR 0007** + `docs/identity/on-bus-vs-hybrid.md`.
-- [x] Tenancy boundary → **ADR 0001** + `docs/identity/tenancy-boundary.md`.
-
-### Block B — Irreversible technical decisions (paper)
-
-- [x] DSL choice → **ADR 0008** + `docs/identity/policy-dsl-choice.md`.
-- [x] Reply correlation mechanism → **ADR 0009** + `docs/identity/reply-correlation.md`.
-- [x] Host ABI surface → `docs/identity/reference-host-abi.md` + `docs/identity/mcp-policy-wit-sketch.md`; contract: `tests/wasm_host_abi.rs`.
-
-### Block C — Design specs (paper)
-
-- [x] Subject grammar → `docs/identity/reference-subject-grammar.md` + reference-{reply-inboxes,queue-groups,virtual-mcp,nats-headers}.md.
-- [x] Session model → **ADR 0018** + `docs/identity/mcp-session-model.md`.
-- [x] Schema cache + invalidation → **ADR 0023** + contract `tests/schema_cache_invalidation.rs`.
-- [x] Failure-mode matrix → **ADR 0024** + `docs/identity/failure-mode-matrix.md`.
-- [x] Rate-limit state placement → **ADR 0012** + `docs/identity/rate-limiting.md`.
-- [x] OAuth 2.0 MCP integration → **ADR 0019** + `docs/identity/oauth-mcp-integration.md`.
-- [x] Bidirectional enforcement → **ADR 0020** + `docs/identity/bidirectional-enforcement.md`; contract: `tests/subscription_scoping.rs`.
-- [x] Bootstrap / day-zero behavior → **ADR 0021** + `docs/identity/bootstrap-day-zero.md`.
-- [x] Integration touch-points → **ADR 0022** + `docs/identity/integration-touchpoints.md`.
-
-### Block D — Phase 1 vertical slice — SHIPPED
-
-- [x] Scaffold `rsworkspace/crates/trogon-mcp-gateway` (binary + library split).
-- [x] Queue-group consumer on `mcp.gateway.request.>`; optional tenant via message header `trogon-mcp-tenant`.
-- [x] JSON-RPC parser; verified workload JWT ingress; SpiceDB subject prefers JWT `sub` over forgeable tenant header.
-- [x] CEL gate selecting when the SpiceDB hook runs on `tools/call` / `resources/read`.
-- [x] SpiceDB `CheckPermission` per gated request (allow-all when endpoint unset).
-- [x] Reply correlation: ingress `reply` inbox preserved; gateway issues `request_with_headers`.
-- [x] Audit JSON envelope to JetStream (default stream `MCP_AUDIT`).
-- [x] End-to-end NATS harness — `tests/e2e_nats_forward.rs`.
-- [x] In-memory trace by JSON-RPC request id (`trace::TraceStore`).
 
 ### Block E — Phase 2 (CEL hardening + catalog shaping + redaction) — CODE PENDING
 
-Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gateway/tests/`. Implementation pending.
+Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gateway/tests/`.
 
 - [ ] CEL builtins per host-ABI sketch (`spicedb.check`, `cache.get/set`, `jsonpath.*`, `audit.emit`, `time.now`, `rate.acquire`) — contract: `tests/cel_authz_gate.rs`.
 - [ ] `tools/list` filtering via CEL re-evaluation → **ADR 0015**; contract: `tests/tools_list_filter.rs`.
-- [ ] `BulkCheckPermission` + ZedToken cache → **ADR 0014** + `docs/identity/bulk-check-permission.md`; contract: `tests/bulk_check_zedtoken_cache.rs`.
+- [ ] `BulkCheckPermission` + ZedToken cache → **ADR 0014**; contract: `tests/bulk_check_zedtoken_cache.rs`.
 - [ ] Schema cache populated by sniffing `tools/list` → **ADR 0023**; contract: `tests/schema_cache_invalidation.rs`.
-- [ ] Schema-driven redaction — contract: `tests/redaction_rules.rs`.
-- [ ] Hierarchical policy merge → **ADR 0013** + `docs/identity/hierarchical-policy-merge.md`; contract: `tests/hierarchical_policy_merge.rs`.
+- [ ] Schema-driven redaction → **ADR 0027**; contract: `tests/redaction_rules.rs`.
+- [ ] Hierarchical policy merge → **ADR 0013**; contract: `tests/hierarchical_policy_merge.rs`.
 - [ ] Rate limiting wired with chosen state placement → **ADR 0012**; contract: `tests/rate_limit_caps.rs`.
 
 ### Block F — Phase 3 (WASM components + bundles + multi-protocol) — CODE PENDING
 
 - [ ] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3 — sketch: `docs/identity/mcp-policy-wit-sketch.md`.
-- [ ] Wasmtime integration with component pooling per bundle version.
-- [ ] Tracing across the WASM boundary; span context as part of `request-ctx`.
-- [ ] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010** + `docs/identity/wasm-bundle-format.md`; contract: `tests/bundle_load_hot_reload.rs`.
-- [ ] Bundle loader from NATS KV with hot-swap and rollback.
-- [ ] First-party `mcp-pack` bundle: resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope.
-- [ ] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011** + `docs/identity/nats-callout-plugin.md`.
-- [ ] Engine extraction: `trogon-policy-core` + `trogon-policy-cel` as separate crates.
+- [ ] Wasmtime integration with component pooling per bundle version → **ADR 0025**.
+- [ ] Tracing across the WASM boundary; span context as part of `request-ctx` → **ADR 0032**.
+- [ ] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010**; contract: `tests/bundle_load_hot_reload.rs`.
+- [ ] Bundle loader from NATS KV with hot-swap and rollback → **ADR 0026**.
+- [ ] First-party `mcp-pack` bundle (resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope) → **ADR 0028**.
+- [ ] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011**.
+- [ ] Engine extraction: `trogon-policy-core` + `trogon-policy-cel` as separate crates → **ADR 0029 (deferred until forcing function)**.
 
 ### Block G — Operational tooling — CODE PENDING
 
-- [ ] Latency baseline (P50/P99 vs direct `mcp-nats`).
-- [ ] CLI (`trogon-gateway-ctl`): inspect config, trace requests, validate bundles, dry-run policy — contract: `tests/admin_api.rs`.
+- [ ] Latency baseline (P50/P99 vs direct `mcp-nats`) → **ADR 0031**.
+- [ ] CLI (`trogon-gateway-ctl`): inspect config, trace requests, validate bundles, dry-run policy → **ADR 0030**; contract: `tests/admin_api.rs`.
 - [ ] K8s controller projecting Gateway API CRDs into NATS KV → `docs/identity/k8s-controller.md`.
 - [ ] xDS interop layer → `docs/identity/xds-integration.md`.
-- [ ] Multi-region story → **ADR 0016** + `docs/identity/multi-region.md`; contract: `tests/multi_region_failover.rs`.
+- [ ] Multi-region story → **ADR 0016**; contract: `tests/multi_region_failover.rs`.
 - [ ] OTel trace export + JetStream consumer for audit→SIEM → `docs/identity/otel-wiring.md`; contract: `tests/otel_span_shape.rs`.
-
-### Block H — Docs and process — SHIPPED
-
-- [x] One-page operator overview → `docs/identity/mcp-gateway-operator-overview.md`.
-- [x] How-to: third-party MCP behind the gateway → `docs/identity/howto-integrate-third-party-mcp.md`.
-- [x] How-to: write a bundle pack → `docs/identity/howto-write-bundle.md`.
-- [x] Reference: subject grammar, CEL variables, host ABI, audit envelope → `docs/identity/reference-*.md`.
-- [x] RFC per Block-A and Block-B decision → ADRs 0001-0024 under `docs/adr/`.
 
 ## Reference Anchors
 
@@ -155,6 +109,14 @@ The original deep-dive sections (agentgateway mapping, NATS subject topology, po
 | Integration touch-points | ADR 0022 |
 | Schema cache + invalidation | ADR 0023 |
 | Failure-mode matrix | ADR 0024; `docs/identity/failure-mode-matrix.md` |
+| Wasmtime component pooling | ADR 0025 |
+| Bundle hot-swap & rollback | ADR 0026 |
+| Schema-driven redaction | ADR 0027 |
+| `mcp-pack` first-party bundle | ADR 0028 |
+| Engine extraction (deferred) | ADR 0029 |
+| `trogon-gateway-ctl` CLI surface | ADR 0030 |
+| Latency budget & benchmarking | ADR 0031 |
+| Tracing across WASM boundary | ADR 0032 |
 
 ## Inspiration (anchors)
 
