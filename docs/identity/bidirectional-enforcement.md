@@ -11,7 +11,7 @@
 
 ### Problem statement
 
-The Trogon MCP gateway today is optimized for **client→server** traffic: a caller publishes on `mcp.gateway.request.{server_id}.{method}`, the gateway authenticates, authorizes, redacts, audits, and forwards to `mcp.server.{server_id}.{method}`. NATS subject ACLs guarantee that clients cannot reach backend MCP servers without passing through the gateway ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Subject ACL per principal).
+The Trogon MCP gateway today is optimized for **client→server** traffic: a caller publishes on `mcp.gateway.request.{server_id}.{method}`, the gateway authenticates, authorizes, redacts, audits, and forwards to `mcp.server.{server_id}.{method}`. NATS subject ACLs guarantee that clients cannot reach backend MCP servers without passing through the gateway.
 
 MCP is **bidirectional**. After `initialize`, an MCP **server** may initiate JSON-RPC toward the **client** for capabilities the client advertised — sampling, elicitation, roots discovery, and lifecycle notifications. In `mcp-nats`, backend servers publish these on `mcp.client.{client_id}.{method}`; only the gateway may subscribe ([`mcp-nats` README](../../rsworkspace/crates/mcp-nats/README.md)). Without an explicit enforcement design, callback traffic risks becoming a **policy bypass**: a compromised backend could exfiltrate prompts, phish the user, or fingerprint filesystem layout while the gateway audits only the forward path.
 
@@ -52,7 +52,7 @@ sequenceDiagram
     end
 ```
 
-The gateway **terminates reply correlation** on both legs, identical to client→server request flow ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation).
+The gateway **terminates reply correlation** on both legs, identical to client→server request flow.
 
 ---
 
@@ -112,7 +112,7 @@ Example (`notifications/progress`):
 
 MCP also defines **client→server** notifications (`notifications/initialized`, `notifications/roots/list_changed`, `notifications/cancelled`, `notifications/progress`, etc.). Those traverse the **request** direction (`mcp.gateway.request.*` / `mcp.server.*`) and are out of scope for this document except where session state is shared.
 
-Additional **server→client** notifications exist in the gateway plan grammar (`notifications/tools/list_changed`, `notifications/resources/updated`, …). They follow the same enforcement **class** as `notifications/cancelled` and `notifications/progress` — authorize, redact, audit, forward — but are not in Block C's initial enforcement priority ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C open item).
+Additional **server→client** notifications exist in the gateway plan grammar (`notifications/tools/list_changed`, `notifications/resources/updated`, …). They follow the same enforcement **class** as `notifications/cancelled` and `notifications/progress` — authorize, redact, audit, forward — but are not in Block C's initial enforcement priority.
 
 ---
 
@@ -178,7 +178,7 @@ The gateway learns `{client_id}` from the MCP session established at `initialize
 
 ### Audit subjects (callback direction)
 
-Per pinned grammar ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Audit subjects):
+Per pinned grammar:
 
 ```text
 mcp.audit.{outcome}.callback.{method_root}
@@ -285,7 +285,7 @@ Extend `request-ctx` for callback direction (**proposed** names):
 
 ## 5. Authorization policy
 
-Same policy engine as client→server ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Policy engine), **separate rule bundle section** `callback:` with inverted SpiceDB tuples.
+Same policy engine as client→server, **separate rule bundle section** `callback:` with inverted SpiceDB tuples.
 
 ### SpiceDB tuple derivation (callback direction)
 
@@ -577,11 +577,11 @@ Deny envelope adds:
 
 ### Open questions
 
-1. **v1 scope** — Block C asks whether sampling and elicitation enforce from day one or defer ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) open question #5). Recommendation: enforce **session binding + audit** in Phase 1; full SpiceDB + HITL for sampling in Phase 2.
+1. **v1 scope** — Block C asks whether sampling and elicitation enforce from day one or defer. Recommendation: enforce **session binding + audit** in Phase 1; full SpiceDB + HITL for sampling in Phase 2.
 2. **`mcp_server` in `act_chain`** — Is `sub: mcp_server:{id}` the canonical hop shape, or should backends register as agents with `agent_id`?
 3. **Orphan notifications** — Should `notifications/cancelled` without a matching in-flight `requestId` be denied or allowed-with-audit?
 4. **Client UI proxy for `-32107`** — Should the host MCP client display approval UI for sampling, or is Slack/console mandatory?
-5. **OAuth-MCP third-party servers** — How callback policy interacts with externally issued OAuth tokens ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C OAuth item).
+5. **OAuth-MCP third-party servers** — How callback policy interacts with externally issued OAuth tokens.
 6. **Rate limits** — Separate callback rate limit bucket per `(tenant, server_id, client_id)` vs shared with client→server.
 7. **Output redaction on sampling results** — Model output returning through gateway may contain PII; schema for `sampling/createMessage` result redaction is undefined.
 8. **Federated virtual servers** — Callback when `server_id` is `virtual-*` fan-out member; session may bind to logical vs physical id.
@@ -661,7 +661,6 @@ mcp.gateway.callback.{client_id}.notifications.progress
 | [adaptive-access.md](adaptive-access.md) | Approvals, `-32107`, risk engine |
 | [sts-exchange.md](sts-exchange.md) | Callback direction token exchange |
 | [jwt-claim-schema.md](jwt-claim-schema.md) | `scope`, `wkl`, mesh claims |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) | Block C item, subject topology, SpiceDB table, Phase 4 |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Fail-closed/open defaults (pending) |
 
 ---

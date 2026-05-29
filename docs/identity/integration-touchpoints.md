@@ -61,7 +61,7 @@ The gateway does **not** perform bootstrap exchange on ingress in Phase 1; it **
 
 ## 2. Gateway ↔ trogon-decider
 
-`trogon-decider` is a **library** for event-sourced decisions; there is **no** NATS command subject between gateway and decider in the tree today. Block C intent: **audit-as-events** on the shared JetStream audit stream is the natural intersection ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C).
+`trogon-decider` is a **library** for event-sourced decisions; there is **no** NATS command subject between gateway and decider in the tree today. Block C intent: **audit-as-events** on the shared JetStream audit stream is the natural intersection.
 
 | Field | Value |
 |---|---|
@@ -364,4 +364,3 @@ flowchart TB
 | [adaptive-access.md](adaptive-access.md) | Approvals, throttle, anomaly features |
 | [agent-traffic.md](agent-traffic.md) | Audit consumers, OCSF, `agctl traffic` |
 | [act-chain.md](act-chain.md) | `act_chain` audit embedding |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) | Block C specs, subject grammar, audit schema target |

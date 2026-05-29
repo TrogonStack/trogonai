@@ -182,7 +182,7 @@ Hybrid hurts when operators must run **two** credential systems, two rate-limit 
 - **Split-brain policy.** Ingress HTTP path accidentally skips SpiceDB or mesh mint while NATS path enforces — classic dual-stack bug class.
 - **Secret concentration.** Upstream API keys in gateway HTTP egress pool versus isolated sidecar environments ([howto-integrate-third-party-mcp.md § Authentication](howto-integrate-third-party-mcp.md#12-authentication-the-server-expects)).
 - **False confidence in "MCP compatible".** Shipping HTTP before Streamable HTTP / session semantics are validated against a real vendor yields spec drift.
-- **Operational cost before demand.** Building hybrid without a paying design partner spreads Phase 2 capacity across HTTP infrastructure instead of catalog shaping, WASM policy, and decider integration ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Blocks D–F).
+- **Operational cost before demand.** Building hybrid without a paying design partner spreads Phase 2 capacity across HTTP infrastructure instead of catalog shaping, WASM policy, and decider integration.
 
 ---
 
@@ -192,7 +192,7 @@ Hybrid hurts when operators must run **two** credential systems, two rate-limit 
 
 **Adopt on-bus only for v1.** Defer hybrid (gateway-embedded north-south HTTP/SSE MCP listener) to **v2**, gated on at least one design partner requirement that cannot be satisfied by sidecar or `mcp-nats-server` remote adapter.
 
-**Argument (not assumption).** Phase 1 already proved the substrate on NATS: queue-group on `{prefix}.gateway.request.>`, SpiceDB on gated methods, mesh egress mint, JetStream audit ([MCP_GATEWAY_PLAN.md Block D](../../MCP_GATEWAY_PLAN.md#block-d--phase-1-vertical-slice-24-weeks)). The product positioning in *The Take* is an **MCP-aware feature inside TrogonStack's event-modeling platform**, not a generic HTTP API gateway ([MCP_GATEWAY_PLAN.md § The Take](../../MCP_GATEWAY_PLAN.md#the-take-read-this-first)). Trogon's differentiated story is mesh identity (`act_chain`), NATS-native audit, and schema-driven redaction — all of which are transport-agnostic once JSON-RPC reaches the policy engine, but all of which are **already wired on the bus**.
+**Argument (not assumption).** Phase 1 already proved the substrate on NATS: queue-group on `{prefix}.gateway.request.>`, SpiceDB on gated methods, mesh egress mint, JetStream audit. The product positioning in *The Take* is an **MCP-aware feature inside TrogonStack's event-modeling platform**, not a generic HTTP API gateway. Trogon's differentiated story is mesh identity (`act_chain`), NATS-native audit, and schema-driven redaction — all of which are transport-agnostic once JSON-RPC reaches the policy engine, but all of which are **already wired on the bus**.
 
 Third-party MCP integration for v1 is satisfied by documented sidecar and `nats-native` paths ([howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md)). GitHub-, Notion-, and Linear-class servers in the wild are overwhelmingly stdio-first; operators accept one bridge pod per `server_id` when policy and audit are mandatory. Remote HTTP SaaS is covered without gateway HTTP by `http-bridge` / `mcp-nats-server` as an **operator-managed adapter** on the backend lane — keeping the gateway itself a single-transport chokepoint.
 
@@ -238,7 +238,6 @@ Until then, mark HTTP MCP ingress on `trogon-mcp-gateway` as **proposed / out of
 | [oauth-mcp-integration.md](oauth-mcp-integration.md) | Move HTTP listener sections to **v2 / proposed**; keep NATS CONNECT + auth callout as v1 OAuth composition. |
 | [howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md) | Demote `http-bridge` to remote adapter pattern; remove implication that gateway terminates vendor HTTP. |
 | [integration-touchpoints.md](integration-touchpoints.md) | No HTTP ingress row until v2; optional footnote pointing to this decision. |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block A | Check off on-bus vs. hybrid when this paper merges. |
 
 Do **not** delete OAuth or HTTP transport research — v2 will reuse [oauth-mcp-integration.md](oauth-mcp-integration.md) verbatim with implementation tickets.
 
@@ -340,7 +339,6 @@ Switching **stdio sidecar → nats-native server** does not change the deploymen
 | [reference-subject-grammar.md](reference-subject-grammar.md) | Authoritative `{prefix}.gateway.request` / `{prefix}.server` grammar |
 | [reference-audit-envelope.md](reference-audit-envelope.md) | Audit families; HTTP metadata **proposed** |
 | [howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md) | v1 third-party path via sidecar |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block A | Parent checklist item resolved by this paper |
 | [ADR 0001](../adr/0001-tenancy-model.md) | Account-per-tenant vs hybrid HTTP routing |
 | [ADR 0004](../adr/0004-sts-form-factor.md) | NATS-first STS; HTTP STS facade optional later |
 
@@ -353,7 +351,6 @@ Switching **stdio sidecar → nats-native server** does not change the deploymen
 | **Decision** | On-bus only for v1; hybrid in v2 with design partner trigger |
 | **Date** | 2026-05-28 |
 | **Deciders** | Block A paper swarm (agent task) |
-| **Supersedes** | Open question in MCP_GATEWAY_PLAN.md Block A item 3 |
 | **Review by** | Before first HTTP listener PR: platform security + SRE sign-off |
 
 ---

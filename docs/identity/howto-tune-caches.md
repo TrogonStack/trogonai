@@ -278,7 +278,6 @@ Canonical failure semantics: [failure-mode matrix](failure-mode-matrix.md) rows 
 | [failure-mode-matrix.md](failure-mode-matrix.md) | ZedToken stale, SpiceDB unreachable |
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) | Deployment topology, cold path, control invalidate subject |
 | [How to integrate a third-party MCP server](howto-integrate-third-party-mcp.md) | When a new `server_id` enters the mesh |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) | Block E cache contracts and test scaffolds |
 
 ---
 

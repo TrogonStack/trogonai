@@ -25,7 +25,7 @@ These goals are in tension: residency wants data to stop at a border; consistenc
 ### 1.1 Non-goals (this paper)
 
 - Replacing NATS with a non-NATS mesh transport.
-- Defining HTTP STS or xDS control planes ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G v2 items).
+- Defining HTTP STS or xDS control planes.
 - Changing MCP subject grammar to include `{region}` segments ([ADR 0001](../adr/0001-tenancy-model.md) keeps region out of subjects).
 - Implementing multi-region in code on the current branch.
 
@@ -312,7 +312,7 @@ Auth callout may embed `https://trogon.ai/region` or `residency` claim ([microso
 
 ## 9. Latency budget
 
-Targets for capacity planning and Block G baseline work ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G latency item).
+Targets for capacity planning and Block G baseline work.
 
 ### 9.1 In-region hot path (p95 < 5 ms gateway-added)
 
@@ -445,7 +445,6 @@ Do **not** deploy one queue group spanning regions — NATS would deliver reques
 | [sts-exchange.md](sts-exchange.md) | Regional STS queue group, exchange schema |
 | [bootstrap-day-zero.md](bootstrap-day-zero.md) | KV bucket naming (`mcp-gateway-config`) |
 | [overview.md](overview.md) | Identity mental model, fail-closed enforce |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G | Multi-region story, latency baseline, K8s controller v2 |
 
 ---
 
@@ -499,7 +498,7 @@ No US JetStream bucket receives EU audit bytes. Registry revocation in Git propa
 
 ## 17. Schema cache (regional)
 
-Block G references schema-aware redaction ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Phase 3). Schema state is **regional**:
+Block G references schema-aware redaction. Schema state is **regional**:
 
 | State | Placement | On miss |
 |---|---|---|
