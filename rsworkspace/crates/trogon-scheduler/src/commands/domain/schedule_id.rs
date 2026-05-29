@@ -2,29 +2,50 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use trogon_nats::{NatsToken, SubjectTokenViolation};
+
+const MAX_LENGTH: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScheduleId(NatsToken);
+pub struct ScheduleId(String);
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScheduleIdViolation {
+    Empty,
+    TooLong { max: usize, actual: usize },
+    SurroundingWhitespace,
+}
 
 #[derive(Debug)]
 pub struct ScheduleIdError {
     raw: String,
-    source: SubjectTokenViolation,
+    violation: ScheduleIdViolation,
 }
 
 impl ScheduleId {
     pub fn parse(raw: &str) -> Result<Self, ScheduleIdError> {
-        NatsToken::new(raw)
-            .map(Self)
-            .map_err(|source| ScheduleIdError::new(raw, source))
+        if raw.is_empty() {
+            return Err(ScheduleIdError::new(raw, ScheduleIdViolation::Empty));
+        }
+
+        if raw.trim() != raw {
+            return Err(ScheduleIdError::new(raw, ScheduleIdViolation::SurroundingWhitespace));
+        }
+
+        let length = raw.chars().count();
+        if length > MAX_LENGTH {
+            return Err(ScheduleIdError::new(
+                raw,
+                ScheduleIdViolation::TooLong {
+                    max: MAX_LENGTH,
+                    actual: length,
+                },
+            ));
+        }
+
+        Ok(Self(raw.to_string()))
     }
 
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    pub fn as_token(&self) -> &NatsToken {
         &self.0
     }
 }
@@ -63,10 +84,10 @@ impl<'de> Deserialize<'de> for ScheduleId {
 }
 
 impl ScheduleIdError {
-    fn new(raw: &str, source: SubjectTokenViolation) -> Self {
+    fn new(raw: &str, violation: ScheduleIdViolation) -> Self {
         Self {
             raw: raw.to_string(),
-            source,
+            violation,
         }
     }
 }
@@ -77,29 +98,81 @@ impl fmt::Display for ScheduleId {
     }
 }
 
-impl fmt::Display for ScheduleIdError {
+impl fmt::Display for ScheduleIdViolation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "job id '{}' is invalid: {}", self.raw, self.source)
+        match self {
+            Self::Empty => f.write_str("must not be empty"),
+            Self::TooLong { max, actual } => {
+                write!(f, "must be at most {max} characters, got {actual}")
+            }
+            Self::SurroundingWhitespace => f.write_str("must not have leading or trailing whitespace"),
+        }
     }
 }
 
-impl std::error::Error for ScheduleIdError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
+impl fmt::Display for ScheduleIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "schedule id '{}' is invalid: {}", self.raw, self.violation)
     }
 }
+
+impl std::error::Error for ScheduleIdError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn invalid_job_id_preserves_subject_token_violation_as_source() {
+    fn rejects_empty() {
         let error = ScheduleId::parse("").unwrap_err();
+        assert_eq!(error.violation, ScheduleIdViolation::Empty);
+    }
 
-        let source = std::error::Error::source(&error).unwrap();
+    #[test]
+    fn rejects_surrounding_whitespace() {
+        for raw in [" backup", "backup ", "\tbackup", "backup\n"] {
+            let error = ScheduleId::parse(raw).unwrap_err();
+            assert_eq!(error.violation, ScheduleIdViolation::SurroundingWhitespace, "{raw:?}");
+        }
+    }
 
-        assert_eq!(source.to_string(), SubjectTokenViolation::Empty.to_string());
+    #[test]
+    fn accepts_max_length() {
+        let raw = "a".repeat(MAX_LENGTH);
+        assert_eq!(ScheduleId::parse(&raw).unwrap().as_str(), raw);
+    }
+
+    #[test]
+    fn rejects_over_max_length() {
+        let raw = "a".repeat(MAX_LENGTH + 1);
+        let error = ScheduleId::parse(&raw).unwrap_err();
+        assert_eq!(
+            error.violation,
+            ScheduleIdViolation::TooLong {
+                max: MAX_LENGTH,
+                actual: MAX_LENGTH + 1,
+            }
+        );
+    }
+
+    #[test]
+    fn counts_length_in_characters_not_bytes() {
+        let raw = "é".repeat(MAX_LENGTH);
+        assert_eq!(ScheduleId::parse(&raw).unwrap().as_str(), raw);
+    }
+
+    #[test]
+    fn accepts_values_a_nats_token_would_reject() {
+        for raw in ["report.v2", "orders/created", "ns:thing", "user@host", "a.b.c.d"] {
+            assert_eq!(ScheduleId::parse(raw).unwrap().as_str(), raw, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_non_ascii() {
+        for raw in ["café-nightly", "日次バックアップ", "Pública"] {
+            assert_eq!(ScheduleId::parse(raw).unwrap().as_str(), raw, "{raw:?}");
+        }
     }
 
     mod proptests {
@@ -108,62 +181,17 @@ mod tests {
 
         proptest! {
             #[test]
-            fn job_id_accepts_any_valid_single_token(s in "[a-z0-9_-]{1,128}") {
+            fn accepts_any_non_empty_bounded_value(s in "[a-zA-Z0-9._:@/-]{1,256}") {
                 let id = ScheduleId::parse(&s).unwrap();
                 prop_assert_eq!(id.as_str(), s.as_str());
             }
 
             #[test]
-            fn job_id_serde_round_trips(s in "[a-z0-9_-]{1,64}") {
+            fn serde_round_trips(s in "[a-zA-Z0-9._:@/-]{1,64}") {
                 let id = ScheduleId::parse(&s).unwrap();
                 let json = serde_json::to_string(&id).unwrap();
                 let decoded: ScheduleId = serde_json::from_str(&json).unwrap();
                 prop_assert_eq!(decoded, id);
-            }
-
-            #[test]
-            fn job_id_rejects_string_containing_dot(
-                prefix in "[a-z]{1,8}",
-                suffix in "[a-z]{0,8}",
-            ) {
-                let s = format!("{prefix}.{suffix}");
-                prop_assert!(ScheduleId::parse(&s).is_err());
-            }
-
-            #[test]
-            fn job_id_rejects_string_containing_wildcard(
-                prefix in "[a-z]{1,8}",
-                wildcard in prop_oneof![Just('*'), Just('>')],
-                suffix in "[a-z]{0,8}",
-            ) {
-                let s = format!("{prefix}{wildcard}{suffix}");
-                prop_assert!(ScheduleId::parse(&s).is_err());
-            }
-
-            #[test]
-            fn job_id_rejects_string_containing_whitespace(
-                prefix in "[a-z]{1,8}",
-                ws in prop_oneof![Just(' '), Just('\t'), Just('\n'), Just('\r')],
-                suffix in "[a-z]{0,8}",
-            ) {
-                let s = format!("{prefix}{ws}{suffix}");
-                prop_assert!(ScheduleId::parse(&s).is_err());
-            }
-
-            #[test]
-            fn job_id_rejects_non_ascii(
-                prefix in "[a-z]{0,5}",
-                non_ascii in "[^\x00-\x7F]{1,3}",
-                suffix in "[a-z]{0,5}",
-            ) {
-                let s = format!("{prefix}{non_ascii}{suffix}");
-                prop_assert!(ScheduleId::parse(&s).is_err());
-            }
-
-            #[test]
-            fn job_id_rejects_string_over_max_length(n in 129usize..200usize) {
-                let s = "a".repeat(n);
-                prop_assert!(ScheduleId::parse(&s).is_err());
             }
         }
     }
