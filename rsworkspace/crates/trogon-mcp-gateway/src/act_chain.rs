@@ -12,6 +12,8 @@ pub use crate::agent_identity::AgentIdentityMode;
 pub const MCP_ACT_CHAIN_HEADER: &str = "mcp-act-chain";
 
 const ENV_GATEWAY_IDENTITY_SUB: &str = "MCP_GATEWAY_IDENTITY_SUB";
+const ENV_GATEWAY_IDENTITY_AGENT_ID: &str = "MCP_GATEWAY_IDENTITY_AGENT_ID";
+const ENV_GATEWAY_IDENTITY_WKL: &str = "MCP_GATEWAY_IDENTITY_WKL";
 const DEFAULT_GATEWAY_IDENTITY_SUB: &str = "trogon-mcp-gateway";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +28,10 @@ fn gateway_identity_sub_from_env() -> String {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_GATEWAY_IDENTITY_SUB.to_string())
+}
+
+fn gateway_identity_field_from_env(var: &str) -> Option<String> {
+    std::env::var(var).ok().filter(|s| !s.trim().is_empty())
 }
 
 fn current_unix_time() -> i64 {
@@ -44,8 +50,18 @@ pub fn ingress_act_chain_raw(headers: Option<&HeaderMap>) -> Option<String> {
 
 pub fn project_act_chain_header(headers: &mut HeaderMap, ingress_raw: Option<&str>, mode: AgentIdentityMode) {
     let gateway_sub = gateway_identity_sub_from_env();
+    let gateway_agent_id = gateway_identity_field_from_env(ENV_GATEWAY_IDENTITY_AGENT_ID);
+    let gateway_wkl = gateway_identity_field_from_env(ENV_GATEWAY_IDENTITY_WKL);
     let now_iat = current_unix_time();
-    let _ = project_act_chain_header_inner(headers, ingress_raw, mode, gateway_sub.as_str(), now_iat);
+    let _ = project_act_chain_header_inner(
+        headers,
+        ingress_raw,
+        mode,
+        gateway_sub.as_str(),
+        gateway_agent_id.as_deref(),
+        gateway_wkl.as_deref(),
+        now_iat,
+    );
 }
 
 pub(crate) fn project_act_chain_header_inner(
@@ -53,6 +69,8 @@ pub(crate) fn project_act_chain_header_inner(
     ingress_raw: Option<&str>,
     mode: AgentIdentityMode,
     gateway_sub: &str,
+    gateway_agent_id: Option<&str>,
+    gateway_wkl: Option<&str>,
     now_iat: i64,
 ) -> ActChainProjectOutcome {
     if mode == AgentIdentityMode::Off {
@@ -85,8 +103,8 @@ pub(crate) fn project_act_chain_header_inner(
 
     chain.push(ActChainEntry {
         sub: gateway_sub.to_string(),
-        agent_id: None,
-        wkl: None,
+        agent_id: gateway_agent_id.map(str::to_string),
+        wkl: gateway_wkl.map(str::to_string),
         iat: now_iat,
     });
     let depth = chain.len();
@@ -126,8 +144,15 @@ mod tests {
     #[test]
     fn mode_off_leaves_header_absent() {
         let mut headers = HeaderMap::new();
-        let outcome =
-            project_act_chain_header_inner(&mut headers, None, AgentIdentityMode::Off, "trogon-mcp-gateway", 1);
+        let outcome = project_act_chain_header_inner(
+            &mut headers,
+            None,
+            AgentIdentityMode::Off,
+            "trogon-mcp-gateway",
+            None,
+            None,
+            1,
+        );
         assert_eq!(outcome, ActChainProjectOutcome::NoOp);
         assert!(headers.get(MCP_ACT_CHAIN_HEADER).is_none());
     }
@@ -140,6 +165,8 @@ mod tests {
             None,
             AgentIdentityMode::Shadow,
             "trogon-mcp-gateway",
+            None,
+            None,
             1_700_000_000,
         );
         assert_eq!(outcome, ActChainProjectOutcome::Projected { depth: 1 });
@@ -152,6 +179,28 @@ mod tests {
     }
 
     #[test]
+    fn registered_gateway_identity_populates_agent_id_and_wkl() {
+        let mut headers = HeaderMap::new();
+        let outcome = project_act_chain_header_inner(
+            &mut headers,
+            None,
+            AgentIdentityMode::Shadow,
+            "agent:trogon/gateway-prod-1",
+            Some("trogon/gateway-prod-1"),
+            Some("spiffe://trogon.local/ns/prod/sa/mcp-gateway"),
+            1_700_000_000,
+        );
+        assert_eq!(outcome, ActChainProjectOutcome::Projected { depth: 1 });
+        let chain = header_chain(&headers).unwrap();
+        assert_eq!(chain[0].sub, "agent:trogon/gateway-prod-1");
+        assert_eq!(chain[0].agent_id.as_deref(), Some("trogon/gateway-prod-1"));
+        assert_eq!(
+            chain[0].wkl.as_deref(),
+            Some("spiffe://trogon.local/ns/prod/sa/mcp-gateway")
+        );
+    }
+
+    #[test]
     fn existing_two_entry_chain_shadow_becomes_three() {
         let existing = vec![sample_entry("user-a", 100), sample_entry("agent-b", 200)];
         let raw = chain_json(&existing);
@@ -161,6 +210,8 @@ mod tests {
             Some(raw.as_str()),
             AgentIdentityMode::Shadow,
             "trogon-mcp-gateway",
+            None,
+            None,
             300,
         );
         assert_eq!(outcome, ActChainProjectOutcome::Projected { depth: 3 });
@@ -184,6 +235,8 @@ mod tests {
             Some(raw.as_str()),
             AgentIdentityMode::Shadow,
             "trogon-mcp-gateway",
+            None,
+            None,
             999,
         );
         assert_eq!(
@@ -205,6 +258,8 @@ mod tests {
             Some("not-json"),
             AgentIdentityMode::Shadow,
             "trogon-mcp-gateway",
+            None,
+            None,
             42,
         );
         assert_eq!(outcome, ActChainProjectOutcome::Projected { depth: 1 });

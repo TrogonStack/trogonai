@@ -99,7 +99,7 @@ Agent C holds a mesh token with `aud=backend-github` and calls the MCP gateway. 
 }
 ```
 
-**Note (gateway egress):** When the gateway mints a downstream token (Block 2.4), it appends **one more** entry for itself before egress to the backend. That path is out of scope for the four-hop acceptance test above but uses the same append-only rules.
+**Note (gateway egress):** When the gateway mints a downstream token (Block 2.4), it appends **one more** entry for itself before egress to the backend. That path is out of scope for the four-hop acceptance test above but uses the same append-only rules. The gateway runs as a registered agent — see `rsworkspace/crates/trogon-agent-registry/examples/mcp-gateway.toml` for the manifest template and the `MCP_GATEWAY_IDENTITY_{SUB,AGENT_ID,WKL}` env vars for the projection-side configuration.
 
 ### Example: batch / non-interactive originator
 
