@@ -30,7 +30,7 @@ The implementation already uses Authzed **`CheckBulkPermissions`** (Rust: `check
 
 **`tools/list` path (today):**
 
-- Backend reply is forwarded (or schema-sniffed) without PDP calls. Block E adds **response shaping**: each tool in `result.tools[]` must be filtered by `invoke` (or bundle-defined permission) on `trogon/mcp_tool:{server_id}|{tool_name}` per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § SpiceDB Integration and the `shape-tools-list` CEL sketch.
+- Backend reply is forwarded (or schema-sniffed) without PDP calls. Block E adds **response shaping**: each tool in `result.tools[]` must be filtered by `invoke` (or bundle-defined permission) on `trogon/mcp_tool:{server_id}|{tool_name}`.
 
 ### 1.2 What Block E makes expensive without this design
 

@@ -29,7 +29,7 @@
 
 ## 1. Pinned default limits (Wire-Format Pin 9)
 
-Reproduced verbatim from [MCP_GATEWAY_PLAN.md § Wire-Format Pin 9](../../MCP_GATEWAY_PLAN.md#9-per-target-inflight-cap-and-rate-limit-defaults):
+Reproduced verbatim:
 
 | Scope | Default cap | Configurable in | On exceed |
 |---|---|---|---|

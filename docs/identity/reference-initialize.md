@@ -4,7 +4,7 @@
 
 **Status banner:** Phase 1 contract. Gateway-terminated by default. Backends are lazy-initialized.
 
-**Related:** [MCP session model](mcp-session-model.md) · [Reference subject grammar](reference-subject-grammar.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins (pin 5) · [Reply correlation](reply-correlation.md) · [Tools/list filtering](tools-list-filtering.md)
+**Related:** [MCP session model](mcp-session-model.md) · [Reference subject grammar](reference-subject-grammar.md) · [Reply correlation](reply-correlation.md) · [Tools/list filtering](tools-list-filtering.md)
 
 **Implementation note:** Session KV and gateway-terminated `initialize` are specified here and in [mcp-session-model.md](mcp-session-model.md); they are **not** fully implemented in `trogon-mcp-gateway` yet. Wire pins that already exist in code include `mcp-session-id` header constant (`trogon-mcp-gateway/src/egress/cache.rs`) and ingress subject suffix `initialize` (`mcp-nats` transport mapping).
 
@@ -295,7 +295,7 @@ When the gateway forwards lazy `initialize` to `mcp.server.{backend_id}.initiali
 
 **Forbidden modifications:** The gateway MUST NOT rewrite client capability flags, substitute a different `clientInfo`, or downgrade `protocolVersion` for backend init. Policy that needs to hide client features belongs in egress JWT claims and method-level gates, not in falsified init params (backends may audit `clientInfo` for support contracts).
 
-**Gateway-added context (not in JSON-RPC params):** NATS headers on backend init per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins §1: `mcp-session-id`, `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, `traceparent`, `mcp-schema`, etc. Ingress hardening strips client-forged identity headers before lazy forward.
+**Gateway-added context (not in JSON-RPC params):** NATS headers on backend init: `mcp-session-id`, `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, `traceparent`, `mcp-schema`, etc. Ingress hardening strips client-forged identity headers before lazy forward.
 
 ---
 
