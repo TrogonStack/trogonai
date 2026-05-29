@@ -1,5 +1,7 @@
 //! CEL policy: selects when the SpiceDB-backed authorization hook runs (`tools/call`, `resources/read`).
 
+pub mod hierarchical;
+
 use cel_interpreter::extractors::This;
 use cel_interpreter::objects::Key;
 use cel_interpreter::{Context, Program, Value, functions};
@@ -146,9 +148,20 @@ pub struct SpicedbGatePolicy {
 
 impl SpicedbGatePolicy {
     pub fn phase1_hardcoded() -> Result<Self, PolicyError> {
-        Program::compile(SPICEDB_GATE_EXPR)
+        Self::from_cel(SPICEDB_GATE_EXPR)
+    }
+
+    pub fn from_cel(expr: &str) -> Result<Self, PolicyError> {
+        Program::compile(expr)
             .map(|program| Self { program })
             .map_err(|e| PolicyError(e.to_string()))
+    }
+
+    pub fn from_effective_config(config: &hierarchical::MergedConfig) -> Result<Self, PolicyError> {
+        match config.spicedb_gate_cel.as_deref() {
+            Some(expr) => Self::from_cel(expr),
+            None => Self::phase1_hardcoded(),
+        }
     }
 
     pub fn requires_spicedb_for_method(&self, jsonrpc_method: &str) -> Result<bool, PolicyError> {
@@ -272,6 +285,25 @@ pub fn configure_policy_cel_context(
     let chain_value = cel_interpreter::to_value(&chain).map_err(|e| PolicyError(e.to_string()))?;
     ctx.add_variable_from_value("chain", chain_value);
     Ok(())
+}
+
+/// Fresh CEL context with standard functions, policy variables, act-chain helpers, and `mcp` bindings.
+pub fn new_policy_cel_context_for_request(
+    identity: &GatewayIdentity,
+    claims: &VerifiedJwtClaims,
+    act_chain: &[ActChainEntry],
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+) -> Result<Context<'static>, PolicyError> {
+    let mut ctx = new_policy_cel_context(identity, claims, act_chain)?;
+    let mcp = if let Some(tool) = tool_name {
+        serde_json::json!({ "method": jsonrpc_method, "tool": { "name": tool } })
+    } else {
+        serde_json::json!({ "method": jsonrpc_method })
+    };
+    let value = cel_interpreter::to_value(&mcp).map_err(|e| PolicyError(e.to_string()))?;
+    ctx.add_variable_from_value("mcp", value);
+    Ok(ctx)
 }
 
 /// Fresh CEL context with standard functions, policy variables, and act-chain helpers.
