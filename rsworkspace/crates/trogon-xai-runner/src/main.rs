@@ -109,11 +109,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let spawn_model = default_model.clone();
     let spawn_prefix = prefix.clone();
 
+    let nats_config = acp_nats::NatsConfig { servers: vec![nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
         .with_execution_backend(nats.clone(), registry_for_agent)
         .with_compactor(nats.clone())
-        .with_permissions(nats.clone(), acp_prefix.clone());
+        .with_permissions(nats.clone(), acp_prefix.clone())
+        .with_runner_config(runner_config);
 
     // If AGENT_ID is set, attach console skill loaders so skills defined in
     // trogon-console are injected into every new session's system prompt.

@@ -145,6 +145,10 @@ struct XaiSession {
     /// Session-level permission rules text set via `set_session_config_option("permissions")`.
     /// Merged with TROGON.md rules at prompt time.
     permission_rules_text: Option<String>,
+    /// Nesting depth of spawn_agent calls (0 = top-level session).
+    /// Incremented on each sub-agent session so recursion can be bounded.
+    #[serde(default)]
+    spawn_depth: u32,
 }
 
 /// ACP Agent implementation backed by xAI's Grok API (Responses API).
@@ -219,6 +223,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     /// ACP prefix the runner publishes client-bound permission requests under. Paired
     /// with `permission_nats`; both are set by [`XaiAgent::with_permissions`].
     permission_prefix: Option<AcpPrefix>,
+    /// NATS/ACP config for this runner (prefix + NATS URL). Used by the
+    /// spawn_agent interceptor to build a Bridge for sub-agent sessions.
+    runner_config: Option<acp_nats::Config>,
 }
 
 /// Permission decision after applying bypass + the rule engine, before any interactive gate.
@@ -400,6 +407,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             tool_http_client: reqwest::Client::new(),
             permission_nats: None,
             permission_prefix: None,
+            runner_config: None,
         }
     }
 
@@ -443,6 +451,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tool_http_client: self.tool_http_client,
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
+            runner_config: self.runner_config,
         }
     }
 
@@ -495,6 +504,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     pub fn with_permissions(mut self, nats: async_nats::Client, prefix: AcpPrefix) -> Self {
         self.permission_nats = Some(nats);
         self.permission_prefix = Some(prefix);
+        self
+    }
+
+    /// Provide the runner's own ACP config so the `spawn_agent` tool can build a
+    /// Bridge for sub-agent sessions. Without this, `spawn_agent` falls back to
+    /// an error message.
+    pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
+        self.runner_config = Some(config);
         self
     }
 
@@ -867,6 +884,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 permission_rules,
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -965,7 +983,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         session_mode: "default".to_string(),
                         permission_rules: PermissionRules::default(),
                         audit_log: Vec::new(),
-                permission_rules_text: None,
+                        permission_rules_text: None,
+                        spawn_depth: 0,
                     },
                 );
                 info!(session_id, "xai: load_session restored from KV snapshot");
@@ -1055,6 +1074,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -1789,6 +1809,134 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 "bash not available: no execution backend configured".to_string()
                             }
                         }
+                        "spawn_agent" => {
+                            let input = serde_json::from_str::<serde_json::Value>(&arguments)
+                                .unwrap_or(serde_json::Value::Null);
+                            let task = input["prompt"].as_str().unwrap_or("").to_string();
+
+                            // Read parent context — lock released before any await
+                            let (parent_cwd, depth, parent_mode, perm_text) = {
+                                let sessions = self.sessions.lock().await;
+                                match sessions.get(&session_id) {
+                                    Some(s) => (s.cwd.clone(), s.spawn_depth, s.session_mode.clone(), s.permission_rules_text.clone()),
+                                    None => (cwd.clone(), 0, "default".to_string(), None),
+                                }
+                            };
+
+                            const MAX_SPAWN_DEPTH: u32 = 3;
+                            if depth >= MAX_SPAWN_DEPTH {
+                                "spawn_agent: max nesting depth reached".to_string()
+                            } else if let Some(nats) = self.execution_nats.as_ref() {
+                                if let Some(runner_cfg) = self.runner_config.clone() {
+                                    // Worktree for isolation
+                                    let worktree = trogon_runner_tools::worktree::create_worktree(&parent_cwd).await;
+                                    let sub_cwd: String = worktree.as_ref()
+                                        .map(|w| w.path.clone())
+                                        .unwrap_or_else(|| parent_cwd.clone());
+
+                                    // Bridge needs a notification_sender but we don't read from it:
+                                    // Bridge subscribes to agent.update.* (JetStream) but xai-runner publishes
+                                    // to client.session.update (plain NATS) — different subjects, Bridge never fires.
+                                    // We subscribe directly to the correct subject after sub_sid is known.
+                                    let (notif_tx, _notif_rx_bridge_unused) = tokio::sync::mpsc::channel::<agent_client_protocol::SessionNotification>(1);
+                                    // _notif_rx_bridge_unused dropped immediately → Bridge.send() silently fails → logged as warning, prompt continues
+
+                                    // Build Bridge (notif_tx is a dummy; clone runner_cfg first so acp_prefix() is available after move)
+                                    let acp_prefix_str = runner_cfg.acp_prefix().to_string();
+                                    let js = acp_nats::NatsJetStreamClient::new(
+                                        async_nats::jetstream::new(nats.clone())
+                                    );
+                                    let bridge = acp_nats::Bridge::new(
+                                        nats.clone(),
+                                        js,
+                                        trogon_std::time::SystemClock,
+                                        &opentelemetry::global::meter("trogon-xai-runner"),
+                                        runner_cfg,
+                                        notif_tx,
+                                    );
+
+                                    let create_result = trogon_runner_tools::spawn_session::create_sub_session(
+                                        &bridge, &sub_cwd, &parent_mode, perm_text.as_deref(),
+                                    ).await;
+
+                                    match create_result {
+                                        Err(e) => {
+                                            drop(worktree);
+                                            format!("spawn_agent error: {e}")
+                                        }
+                                        Ok(sub_sid) => {
+                                            // Set spawn depth on sub-session
+                                            {
+                                                let mut sessions = self.sessions.lock().await;
+                                                if let Some(s) = sessions.get_mut(&sub_sid) {
+                                                    s.spawn_depth = depth + 1;
+                                                }
+                                            }
+
+                                            // Subscribe to the correct subject AFTER sub_sid is known, BEFORE prompt starts.
+                                            // xai-runner publishes notifications to client.session.update (plain NATS).
+                                            let notif_subject = format!("{}.session.{}.client.session.update",
+                                                acp_prefix_str, &sub_sid);
+                                            let text_result = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+                                            let text_clone = text_result.clone();
+                                            let notifier_fwd = self.notifier.clone();
+                                            let parent_sid_fwd = session_id.clone();
+                                            let nats_for_notif = nats.clone();
+                                            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+                                            let notif_handle = tokio::task::spawn_local(async move {
+                                                let Ok(mut sub) = nats_for_notif.subscribe(notif_subject).await else { return; };
+                                                loop {
+                                                    tokio::select! {
+                                                        biased; // check message first — drains buffer before honoring stop
+                                                        msg = sub.next() => {
+                                                            let Some(msg) = msg else { break; };
+                                                            if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                                                if let agent_client_protocol::SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                                    if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                                        text_clone.lock().await.push_str(&t.text);
+                                                                    }
+                                                                }
+                                                                let mut fwd = notif;
+                                                                fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                                notifier_fwd.notify(fwd).await;
+                                                            }
+                                                        }
+                                                        _ = &mut stop_rx => break,
+                                                    }
+                                                }
+                                            });
+
+                                            let run_result = trogon_runner_tools::spawn_session::run_sub_session(
+                                                &bridge, &sub_sid, &task, std::time::Duration::from_secs(3600),
+                                            ).await;
+
+                                            // Signal stop and wait — drains any remaining buffered notifications
+                                            let _ = stop_tx.send(());
+                                            let _ = notif_handle.await;
+
+                                            drop(worktree);
+
+                                            let accumulated = text_result.lock().await.clone();
+                                            match run_result {
+                                                Ok(()) => {
+                                                    if accumulated.is_empty() {
+                                                        "Sub-agent completed.".to_string()
+                                                    } else {
+                                                        accumulated
+                                                    }
+                                                }
+                                                Err(e) => format!("spawn_agent error: {e}"),
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    "spawn_agent: runner_config not set — call with_runner_config() in main.rs".to_string()
+                                }
+                            } else {
+                                "spawn_agent: no execution backend configured".to_string()
+                            }
+                        }
                         _ => {
                             let input = serde_json::from_str::<serde_json::Value>(&arguments)
                                 .unwrap_or(serde_json::Value::Null);
@@ -2324,6 +2472,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2353,6 +2502,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2435,6 +2585,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2464,6 +2615,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2493,6 +2645,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 permission_rules: PermissionRules::default(),
                 audit_log: Vec::new(),
                 permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2566,6 +2719,12 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     pub async fn test_set_session_history(&self, id: &str, history: Vec<Message>) {
         if let Some(s) = self.sessions.lock().await.get_mut(id) {
             s.history = history;
+        }
+    }
+
+    pub async fn test_set_session_spawn_depth(&self, id: &str, depth: u32) {
+        if let Some(s) = self.sessions.lock().await.get_mut(id) {
+            s.spawn_depth = depth;
         }
     }
 
@@ -8069,6 +8228,99 @@ mod tests {
             audit_after.is_empty(),
             "audit_log must be empty after close+load — it is ephemeral by design, \
              not persisted to KV; got: {audit_after:?}"
+        );
+    }
+
+    // ── spawn_agent interceptor ───────────────────────────────────────────────
+
+    /// When spawn_depth is at MAX_SPAWN_DEPTH the interceptor returns an error
+    /// message without attempting any NATS sub-session.
+    #[tokio::test]
+    async fn spawn_agent_max_depth_guard_returns_error_message() {
+        let agent = make_agent();
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        // Elevate the session to MAX_SPAWN_DEPTH (3) so the guard fires.
+        agent.test_set_session_spawn_depth(&sid, 3).await;
+
+        // The model requests spawn_agent — the interceptor must reject it immediately.
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-spawn-max".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-spawn-max".to_string(),
+                name: "spawn_agent".to_string(),
+                arguments: r#"{"prompt":"do something"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        // Second call: model acknowledges the tool result and ends.
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+            .await
+            .unwrap();
+
+        // Inspect the second HTTP call's input to verify the interceptor's error message.
+        let calls = agent.client.calls.lock().unwrap();
+        let max_depth_output = calls[1].input.iter().any(|item| {
+            matches!(
+                item,
+                InputItem::FunctionCallOutput { output, .. }
+                    if output.contains("max nesting depth")
+            )
+        });
+        assert!(
+            max_depth_output,
+            "spawn_agent at MAX_SPAWN_DEPTH must return max-nesting-depth error in tool output"
+        );
+    }
+
+    /// When execution_nats is not configured the interceptor returns an error
+    /// message instead of attempting to create a sub-session.
+    #[tokio::test]
+    async fn spawn_agent_interceptor_no_nats_returns_error() {
+        // make_agent() does not call with_execution_nats() so execution_nats is None.
+        let agent = make_agent();
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-spawn-nonats".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-spawn-nonats".to_string(),
+                name: "spawn_agent".to_string(),
+                arguments: r#"{"prompt":"do something"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let no_backend_output = calls[1].input.iter().any(|item| {
+            matches!(
+                item,
+                InputItem::FunctionCallOutput { output, .. }
+                    if output.contains("no execution backend configured")
+            )
+        });
+        assert!(
+            no_backend_output,
+            "spawn_agent without execution_nats must return 'no execution backend configured'"
         );
     }
 }

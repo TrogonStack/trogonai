@@ -1209,6 +1209,7 @@ where
             total_output_tokens: 0,
             total_cache_creation_tokens: 0,
             total_cache_read_tokens: 0,
+            spawn_depth: 0,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);

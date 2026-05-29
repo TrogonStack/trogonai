@@ -137,6 +137,10 @@ pub struct SessionState {
     /// Merged with rules loaded from TROGON.md — session rules take precedence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_rules_text: Option<String>,
+    /// Spawn nesting depth: 0 for root sessions, 1 for direct sub-agents, etc.
+    /// Used to enforce a maximum spawn depth and prevent runaway recursion.
+    #[serde(default)]
+    pub spawn_depth: u32,
     /// Token budget used to decide when to compact the message history.
     /// Compaction triggers at 85 % of this value. Default: 200 000.
     #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
@@ -205,6 +209,7 @@ impl Default for SessionState {
             total_output_tokens: 0,
             total_cache_creation_tokens: 0,
             total_cache_read_tokens: 0,
+            spawn_depth: 0,
         }
     }
 }

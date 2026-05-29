@@ -562,6 +562,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         vec![(name, orig, client)],
                     );
                 }
+                if let Some(ref nats) = self.execution_nats {
+                    let spawn = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::new(
+                        nats.clone(),
+                        self.prefix.clone(),
+                        session_id.clone(),
+                    );
+                    let (name, orig, client) = spawn.into_dispatch();
+                    a.add_mcp_tools(
+                        vec![trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def()],
+                        vec![(name, orig, client)],
+                    );
+                }
                 if needs_perm
                     && let Some(ref perm_tx) = self.permission_tx
                 {

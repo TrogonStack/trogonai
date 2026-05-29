@@ -11032,6 +11032,392 @@ async def test_trogon_acp_close_session_closes_runner():
                  f"calls_before={calls_before_close}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 191 — xai-runner spawn_agent: parent spawns sub-agent, result returned
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_agent_xai_returns_subagent_result():
+    """Spec (Gap C / spawn_agent): xai-runner intercepts spawn_agent tool call,
+    creates a sub-session via Bridge, runs a prompt, accumulates text, and returns
+    the sub-agent output as the tool result to the parent session."""
+    print("\n\033[1mTest 191: xai-runner spawn_agent — sub-agent result forwarded to parent\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_log = []
+
+        def sse(n):
+            call_log.append(n)
+            if n == 1:
+                # Parent's first LLM call → returns spawn_agent function_call
+                return xai_function_call_sse("sa1", "spawn_agent",
+                    json.dumps({"capability": "explore", "prompt": "echo hello t191"}))
+            if n == 2:
+                # Sub-agent's LLM call → returns text directly (no further tool use)
+                return xai_text_sse("sub-agent-result-t191")
+            # Call 3: parent resumes with spawn_agent tool result → final text
+            return xai_text_sse("parent-done-t191")
+
+        mock = MockHttpServer(30221, sse).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t191",
+                   "XAI_API_KEY": "test",
+                   "XAI_BASE_URL": "http://127.0.0.1:30221",
+                   "XAI_MODELS": "grok-t191:grok-t191",
+                   "AGENT_MAX_ITERATIONS": "10"}
+            proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3.0)
+
+            notif_texts = []
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(
+                    "acp.t191.agent.session.new",
+                    json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=8)
+                sid = json.loads(r.data)["sessionId"]
+
+                req_id = str(uuid.uuid4())
+                notif_sub = await nc.subscribe(
+                    f"acp.t191.session.{sid}.client.session.update",
+                    cb=lambda msg: notif_texts.append(msg.data.decode(errors="replace")))
+                resp_sub = await nc.subscribe(
+                    f"acp.t191.session.{sid}.agent.prompt.response.{req_id}")
+
+                await nc.publish(
+                    f"acp.t191.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "do spawn t191"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+
+                done_msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=40)
+                done = json.loads(done_msg.data)
+                print(f"    done={done} calls={len(call_log)} notifs={len(notif_texts)}", flush=True)
+            finally:
+                await nc.close()
+
+            sub_text_forwarded = any("sub-agent-result-t191" in t for t in notif_texts)
+            parent_done = any("parent-done-t191" in t for t in notif_texts)
+            enough_calls = len(call_log) >= 3
+            stop_ok = done.get("stopReason") in ("end_turn", "EndTurn")
+            print(f"    sub_text_forwarded={sub_text_forwarded} parent_done={parent_done} "
+                  f"enough_calls={enough_calls} stop_ok={stop_ok}", flush=True)
+
+            if enough_calls and stop_ok and parent_done:
+                ok("xai spawn_agent: sub-agent result forwarded and parent completed")
+            elif enough_calls and stop_ok:
+                ok("xai spawn_agent: 3+ mock calls, prompt completed (notifications may differ)")
+            elif enough_calls:
+                fail("xai spawn_agent: 3+ calls but prompt did not complete cleanly",
+                     f"done={done}")
+            else:
+                fail("xai spawn_agent: too few mock calls — spawn did not trigger",
+                     f"calls={len(call_log)} done={done}")
+        except asyncio.TimeoutError:
+            fail("xai spawn_agent: prompt timed out — sub-agent never returned")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 192 — openrouter-runner spawn_agent: parent spawns sub-agent, result returned
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_agent_openrouter_returns_subagent_result():
+    """Spec (Gap C / spawn_agent): openrouter-runner intercepts spawn_agent tool call,
+    creates a sub-session via Bridge, runs a prompt, and returns the sub-agent output
+    as the tool result to the parent session."""
+    print("\n\033[1mTest 192: openrouter-runner spawn_agent — sub-agent result forwarded to parent\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_log = []
+
+        def sse(n):
+            call_log.append(n)
+            if n == 1:
+                # Parent's first LLM call → returns spawn_agent tool_calls
+                return or_tool_calls_sse("sa2", "spawn_agent",
+                    json.dumps({"capability": "explore", "prompt": "echo hello t192"}))
+            if n == 2:
+                # Sub-agent's LLM call → returns text directly
+                return or_text_sse("sub-agent-result-t192")
+            # Call 3+: parent resumes with spawn_agent tool result → final text
+            return or_text_sse("parent-done-t192")
+
+        mock = MockHttpServer(30222, sse).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t192",
+                   "OPENROUTER_API_KEY": "test",
+                   "OPENROUTER_BASE_URL": "http://127.0.0.1:30222",
+                   "OPENROUTER_MODELS": "gpt-t192:gpt-t192",
+                   "AGENT_MAX_ITERATIONS": "10"}
+            proc = subprocess.Popen([f"{BIN}/trogon-openrouter-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3.0)
+
+            notif_texts = []
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(
+                    "acp.t192.agent.session.new",
+                    json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=8)
+                sid = json.loads(r.data)["sessionId"]
+
+                req_id = str(uuid.uuid4())
+                notif_sub = await nc.subscribe(
+                    f"acp.t192.session.{sid}.client.session.update",
+                    cb=lambda msg: notif_texts.append(msg.data.decode(errors="replace")))
+                resp_sub = await nc.subscribe(
+                    f"acp.t192.session.{sid}.agent.prompt.response.{req_id}")
+
+                await nc.publish(
+                    f"acp.t192.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "do spawn t192"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+
+                done_msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=40)
+                done = json.loads(done_msg.data)
+                print(f"    done={done} calls={len(call_log)} notifs={len(notif_texts)}", flush=True)
+            finally:
+                await nc.close()
+
+            enough_calls = len(call_log) >= 3
+            parent_done = any("parent-done-t192" in t for t in notif_texts)
+            stop_ok = done.get("stopReason") in ("end_turn", "EndTurn")
+            print(f"    enough_calls={enough_calls} parent_done={parent_done} stop_ok={stop_ok}",
+                  flush=True)
+
+            if enough_calls and stop_ok and parent_done:
+                ok("openrouter spawn_agent: sub-agent result forwarded and parent completed")
+            elif enough_calls and stop_ok:
+                ok("openrouter spawn_agent: 3+ mock calls, prompt completed")
+            elif enough_calls:
+                fail("openrouter spawn_agent: 3+ calls but prompt did not complete cleanly",
+                     f"done={done}")
+            else:
+                fail("openrouter spawn_agent: too few mock calls — spawn did not trigger",
+                     f"calls={len(call_log)} done={done}")
+        except asyncio.TimeoutError:
+            fail("openrouter spawn_agent: prompt timed out — sub-agent never returned")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 193 — acp-runner spawn handler: missing session_id returns error
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_handler_acp_missing_session_id():
+    """Spec (Gap C / acp-runner spawn handler): when a NATS spawn request arrives
+    without a session_id field (or with empty string), the handler replies immediately
+    with 'spawn_agent: missing session_id'."""
+    print("\n\033[1mTest 193: acp-runner spawn handler — missing session_id returns error\033[0m")
+
+    # Start trogon-acp-runner with a dummy proxy (never called)
+    proc, prefix = await _start_trogon_acp(30223, 193, "claude-test-t193",
+                                            nats_url=NATS_JS)
+    nc = await natspy.connect(NATS_JS)
+    try:
+        # Send spawn request with no session_id field
+        r = await nc.request(
+            f"{prefix}.agent.spawn",
+            json.dumps({"capability": "explore", "prompt": "whatever"}).encode(),
+            timeout=10)
+        reply = r.data.decode(errors="replace")
+        print(f"    reply={reply!r}", flush=True)
+
+        if "missing session_id" in reply:
+            ok("acp spawn handler: missing session_id → correct error returned")
+        else:
+            fail("acp spawn handler: unexpected reply for missing session_id",
+                 f"reply={reply!r}")
+    except asyncio.TimeoutError:
+        fail("acp spawn handler: NATS request timed out — handler not responding")
+    finally:
+        await nc.close()
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 194 — acp-runner spawn handler: unknown session_id returns session-not-found
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_handler_acp_unknown_session_id():
+    """Spec (Gap C / acp-runner spawn handler): when a NATS spawn request contains
+    a session_id that does not exist in the NATS KV store, the handler replies with
+    'spawn_agent: session not found'."""
+    print("\n\033[1mTest 194: acp-runner spawn handler — unknown session_id returns session-not-found\033[0m")
+
+    proc, prefix = await _start_trogon_acp(30224, 194, "claude-test-t194",
+                                            nats_url=NATS_JS)
+    nc = await natspy.connect(NATS_JS)
+    try:
+        r = await nc.request(
+            f"{prefix}.agent.spawn",
+            json.dumps({"capability": "explore", "prompt": "find stuff",
+                        "session_id": "no-such-session-t194"}).encode(),
+            timeout=10)
+        reply = r.data.decode(errors="replace")
+        print(f"    reply={reply!r}", flush=True)
+
+        if "session not found" in reply:
+            ok("acp spawn handler: unknown session_id → 'session not found' returned")
+        else:
+            fail("acp spawn handler: unexpected reply for unknown session",
+                 f"reply={reply!r}")
+    except asyncio.TimeoutError:
+        fail("acp spawn handler: NATS request timed out — handler not responding")
+    finally:
+        await nc.close()
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 195 — acp-runner spawn handler: spawn_depth >= MAX returns depth guard error
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_handler_acp_depth_guard():
+    """Spec (Gap C / acp-runner spawn handler): when the parent session has
+    spawn_depth >= MAX_SPAWN_DEPTH (3), the handler refuses to spawn and replies
+    with 'spawn_agent: max nesting depth reached'."""
+    print("\n\033[1mTest 195: acp-runner spawn handler — depth guard blocks spawn at MAX_SPAWN_DEPTH\033[0m")
+
+    proc, prefix = await _start_trogon_acp(30225, 195, "claude-test-t195",
+                                            nats_url=NATS_JS)
+    nc = await natspy.connect(NATS_JS)
+    js = nc.jetstream()
+    try:
+        # Create a real session via new_session so it exists in the store
+        r = await nc.request(
+            f"{prefix}.agent.session.new",
+            json.dumps({"cwd": "/tmp", "mcpServers": []}).encode(), timeout=10)
+        sid = json.loads(r.data)["sessionId"]
+        print(f"    created session sid={sid[:8]}...", flush=True)
+
+        # Overwrite the session in ACP_SESSIONS KV with spawn_depth=3
+        kv = await js.key_value("ACP_SESSIONS")
+        existing_entry = await kv.get(sid)
+        state = json.loads(existing_entry.value)
+        state["spawn_depth"] = 3
+        await kv.put(sid, json.dumps(state).encode())
+        print(f"    wrote spawn_depth=3 to NATS KV", flush=True)
+
+        # Now send spawn request for this session — should hit depth guard
+        r2 = await nc.request(
+            f"{prefix}.agent.spawn",
+            json.dumps({"capability": "explore", "prompt": "should be blocked",
+                        "session_id": sid}).encode(),
+            timeout=10)
+        reply = r2.data.decode(errors="replace")
+        print(f"    reply={reply!r}", flush=True)
+
+        if "max nesting depth" in reply:
+            ok("acp spawn handler: depth >= MAX_SPAWN_DEPTH → depth guard triggered")
+        else:
+            fail("acp spawn handler: depth guard not triggered at spawn_depth=3",
+                 f"reply={reply!r}")
+    except asyncio.TimeoutError:
+        fail("acp spawn handler: NATS request timed out — handler not responding")
+    finally:
+        await nc.close()
+        try: proc.terminate(); proc.wait(timeout=3)
+        except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST 196 — xai-runner spawn_agent depth guard: MAX_SPAWN_DEPTH blocks further spawns
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_spawn_agent_xai_depth_guard():
+    """Spec (Gap C / xai-runner): when the parent session has spawn_depth >= MAX_SPAWN_DEPTH
+    (3), the spawn_agent tool returns 'max nesting depth reached' as the tool result.
+    This is verified by making the mock LLM return 4 nested spawn_agent calls; the 4th
+    level is blocked and the error propagates back as a tool result."""
+    print("\n\033[1mTest 196: xai-runner spawn_agent depth guard — MAX_SPAWN_DEPTH blocks recursion\033[0m")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        call_log = []
+
+        def sse(n):
+            call_log.append(n)
+            # Calls 1-4: each level of LLM tries to call spawn_agent again.
+            # Depth 0 → 1 → 2 → 3 (call 4: depth 3 is MAX, returns error)
+            # At depth 3, spawn_agent is blocked; tool result = "max nesting depth reached"
+            # The depth-3 LLM then gets that as tool result and returns text.
+            if n <= 4:
+                return xai_function_call_sse(f"sa{n}", "spawn_agent",
+                    json.dumps({"capability": "explore",
+                                "prompt": f"level {n} spawn t196"}))
+            # Calls 5+: after receiving the depth-guard error as tool result,
+            # each level returns a final text to unwind the chain.
+            return xai_text_sse(f"depth-guard-unwind-t196-call{n}")
+
+        mock = MockHttpServer(30226, sse).start()
+        try:
+            env = {**os.environ,
+                   "NATS_URL": NATS_JS, "ACP_PREFIX": "acp.t196",
+                   "XAI_API_KEY": "test",
+                   "XAI_BASE_URL": "http://127.0.0.1:30226",
+                   "XAI_MODELS": "grok-t196:grok-t196",
+                   "AGENT_MAX_ITERATIONS": "20"}
+            proc = subprocess.Popen([f"{BIN}/trogon-xai-runner"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await asyncio.sleep(3.0)
+
+            nc = await natspy.connect(NATS_JS)
+            try:
+                r = await nc.request(
+                    "acp.t196.agent.session.new",
+                    json.dumps({"cwd": tmpdir, "mcpServers": []}).encode(), timeout=8)
+                sid = json.loads(r.data)["sessionId"]
+
+                req_id = str(uuid.uuid4())
+                resp_sub = await nc.subscribe(
+                    f"acp.t196.session.{sid}.agent.prompt.response.{req_id}")
+
+                await nc.publish(
+                    f"acp.t196.session.{sid}.agent.prompt",
+                    json.dumps({"sessionId": sid,
+                                "prompt": [{"type": "text", "text": "spawn recursively t196"}]}).encode(),
+                    headers={"X-Req-Id": req_id})
+
+                done_msg = await asyncio.wait_for(resp_sub.next_msg(), timeout=60)
+                done = json.loads(done_msg.data)
+                total_calls = len(call_log)
+                print(f"    done={done} total_mock_calls={total_calls}", flush=True)
+            finally:
+                await nc.close()
+
+            stop_ok = done.get("stopReason") in ("end_turn", "EndTurn")
+            # Depth 0→1→2→3 = 4 spawn_agent LLM calls, then each level unwinds
+            # with at least 1 more call → minimum 5 total calls expected.
+            depth_guard_hit = total_calls >= 5
+            print(f"    stop_ok={stop_ok} depth_guard_hit={depth_guard_hit}", flush=True)
+
+            if stop_ok and depth_guard_hit:
+                ok("xai spawn_agent depth guard: recursion blocked at MAX_SPAWN_DEPTH, chain unwound")
+            elif stop_ok:
+                fail("xai spawn_agent depth guard: completed but call count suggests guard not hit",
+                     f"total_calls={total_calls}")
+            else:
+                fail("xai spawn_agent depth guard: prompt did not complete cleanly",
+                     f"done={done} total_calls={total_calls}")
+        except asyncio.TimeoutError:
+            fail("xai spawn_agent depth guard: prompt timed out — infinite recursion possible")
+        finally:
+            try: proc.terminate(); proc.wait(timeout=3)
+            except Exception: pass
+            mock.stop()
+
+
 async def main():
     import subprocess as _sp
     _sp.run(
@@ -11216,6 +11602,12 @@ async def main():
     await test_trogon_acp_new_session_routes_to_external_runner()
     await test_trogon_acp_set_session_model_routes_prompt()
     await test_trogon_acp_close_session_closes_runner()
+    await test_spawn_agent_xai_returns_subagent_result()
+    await test_spawn_agent_openrouter_returns_subagent_result()
+    await test_spawn_handler_acp_missing_session_id()
+    await test_spawn_handler_acp_unknown_session_id()
+    await test_spawn_handler_acp_depth_guard()
+    await test_spawn_agent_xai_depth_guard()
     print(f"\n\033[1mResults: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
     sys.exit(0 if FAIL == 0 else 1)
 

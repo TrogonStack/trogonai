@@ -28,6 +28,8 @@ workspace = true
 [dependencies]
 acp-nats        = { workspace = true }
 acp-nats-agent  = { path = "../acp-nats-agent" }
+opentelemetry   = { workspace = true }
+trogon-std      = { workspace = true }
 agent-client-protocol = { workspace = true, features = [
     "unstable_auth_methods",
     "unstable_boolean_config",

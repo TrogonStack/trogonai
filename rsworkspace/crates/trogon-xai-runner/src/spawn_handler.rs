@@ -1,3 +1,6 @@
+//! DEPRECATED: replaced by the spawn_agent interceptor in agent.rs.
+//! This spawn handler is no longer called when xai-runner is the primary model.
+
 use std::sync::Arc;
 use std::time::Duration;
 
