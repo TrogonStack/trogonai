@@ -1,4 +1,5 @@
-//! Integration test scaffold for adaptive-access risk features exposed to CEL as `risk.*`.
+//! Integration tests for anomaly side-stream emission (`mcp.anomaly.features.>`) and scaffold
+//! for adaptive-access risk features exposed to CEL as `risk.*`.
 //!
 //! The previously merged adaptive-access branch added risk evaluator hooks. Once Pin 8
 //! `risk.*` variables land, these tests drive the live NATS gateway harness and assert
@@ -33,9 +34,165 @@ use mcp_nats::{Config as McpConfig, McpPrefix};
 use trogon_mcp_gateway::authz::AllowAllPermissionChecker;
 use trogon_mcp_gateway::gateway::GatewaySettings;
 use trogon_mcp_gateway::rpc_codes;
+use futures::StreamExt;
+use trogon_mcp_gateway::anomaly::{
+    AnomalyEmitter, AnomalyFeatures, NoveltyTracker, RateTracker, subject_for_tenant,
+};
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 
 const POLICY_DENY: i32 = rpc_codes::POLICY_DENY;
+
+async fn connect_nats_or_skip() -> Option<(async_nats::Client, async_nats::Client)> {
+    let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
+    let connect = async move {
+        let publisher = async_nats::connect(url.clone()).await.ok()?;
+        let subscriber = async_nats::connect(url).await.ok()?;
+        Some((publisher, subscriber))
+    };
+    match tokio::time::timeout(Duration::from_secs(2), connect).await {
+        Ok(Some(clients)) => Some(clients),
+        _ => {
+            eprintln!("skip: NATS unavailable (set NATS_URL or start nats-server)");
+            None
+        }
+    }
+}
+
+mod side_stream {
+    use super::*;
+
+    #[test]
+    fn payload_shape_matches_anomaly_features_schema() {
+        let features = AnomalyFeatures {
+            chain_depth: 1,
+            is_novel_triple: false,
+            exchange_rate_per_min: 3,
+            tenant_id: "acme".into(),
+            agent_id: "agent/oncall".into(),
+            purpose: "incident_response".into(),
+            target: "urn:trogon:mcp:backend:acme:github".into(),
+            request_id: "req-shape".into(),
+            ts_unix_ms: 1_700_000_000_000,
+        };
+
+        let json = serde_json::to_value(&features).expect("serialize features");
+        for key in [
+            "chain_depth",
+            "is_novel_triple",
+            "exchange_rate_per_min",
+            "tenant_id",
+            "agent_id",
+            "purpose",
+            "target",
+            "request_id",
+            "ts_unix_ms",
+        ] {
+            assert!(json.get(key).is_some(), "missing key {key}");
+        }
+        assert_eq!(json["tenant_id"], "acme");
+        assert_eq!(json["is_novel_triple"], false);
+    }
+
+    #[tokio::test]
+    async fn novel_tuple_emit_publishes_is_novel_triple_flag() {
+        let Some((publisher, subscriber)) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let tenant = format!("tenant-{}", uuid::Uuid::now_v7().as_simple());
+        let subject = subject_for_tenant(&tenant);
+        let mut subscription = subscriber.subscribe(subject.clone()).await.expect("subscribe");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut novelty = NoveltyTracker::default();
+        let ts = trogon_mcp_gateway::anomaly::now_unix() * 1_000;
+        let is_novel = novelty.observe(&tenant, "agent/oncall", "ops", "server/github", ts);
+        assert!(is_novel);
+
+        let features = AnomalyFeatures {
+            chain_depth: 1,
+            is_novel_triple: is_novel,
+            exchange_rate_per_min: 1,
+            tenant_id: tenant.clone(),
+            agent_id: "agent/oncall".into(),
+            purpose: "ops".into(),
+            target: "server/github".into(),
+            request_id: "req-novel".into(),
+            ts_unix_ms: ts,
+        };
+
+        AnomalyEmitter::new(publisher)
+            .emit(&features)
+            .await
+            .expect("emit novel tuple features");
+
+        let msg = tokio::time::timeout(Duration::from_secs(3), subscription.next())
+            .await
+            .expect("timed out waiting for anomaly feature")
+            .expect("subscription closed");
+        assert_eq!(msg.subject.as_str(), subject.as_str());
+
+        let payload: AnomalyFeatures = serde_json::from_slice(&msg.payload).expect("decode payload");
+        assert!(payload.is_novel_triple);
+        assert_eq!(payload.tenant_id, tenant);
+        assert_eq!(payload.request_id, "req-novel");
+    }
+
+    #[tokio::test]
+    async fn rate_spike_emit_publishes_elevated_exchange_rate_per_min() {
+        let Some((publisher, subscriber)) = connect_nats_or_skip().await else {
+            return;
+        };
+
+        let tenant = format!("tenant-{}", uuid::Uuid::now_v7().as_simple());
+        let subject = subject_for_tenant(&tenant);
+        let mut subscription = subscriber.subscribe(subject.clone()).await.expect("subscribe");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut rate = RateTracker::default();
+        let agent = "agent/oncall";
+        let base_ms = 1_700_000_000_000_i64;
+        let current_minute = base_ms / 60_000 + 60;
+        for offset in 0..60 {
+            let minute = current_minute - 60 + offset;
+            rate.record(agent, minute * 60_000);
+        }
+        for _ in 0..200 {
+            rate.record(agent, current_minute * 60_000);
+        }
+        let ts = current_minute * 60_000;
+        let exchange_rate = rate.exchange_rate_per_min(agent, ts);
+        assert!(rate.is_spike(agent, ts));
+        assert_eq!(exchange_rate, 200);
+
+        let features = AnomalyFeatures {
+            chain_depth: 2,
+            is_novel_triple: false,
+            exchange_rate_per_min: exchange_rate,
+            tenant_id: tenant.clone(),
+            agent_id: agent.into(),
+            purpose: "ops".into(),
+            target: "server/github".into(),
+            request_id: "req-spike".into(),
+            ts_unix_ms: ts,
+        };
+
+        AnomalyEmitter::new(publisher)
+            .emit(&features)
+            .await
+            .expect("emit rate spike features");
+
+        let msg = tokio::time::timeout(Duration::from_secs(3), subscription.next())
+            .await
+            .expect("timed out waiting for anomaly feature")
+            .expect("subscription closed");
+        assert_eq!(msg.subject.as_str(), subject.as_str());
+
+        let payload: AnomalyFeatures = serde_json::from_slice(&msg.payload).expect("decode payload");
+        assert_eq!(payload.exchange_rate_per_min, 200);
+        assert_eq!(payload.request_id, "req-spike");
+    }
+}
 
 /// Shared harness constants (see `tests/e2e_nats_forward.rs` for wiring pattern).
 #[allow(dead_code)]
