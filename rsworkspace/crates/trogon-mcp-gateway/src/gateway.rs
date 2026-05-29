@@ -15,7 +15,7 @@ use trogon_nats::inject_trace_context;
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope};
-use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker};
+use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
     strip_inbound_credentials,
@@ -273,6 +273,7 @@ async fn handle_ingress_inner(
     };
 
     let server_id = parse_server_id(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
+    let session_id = session_id_from_headers(msg.headers.as_ref(), &jwt_claims);
 
     let mut spicedb_allowed: Option<bool> = None;
     if requires_spicedb {
@@ -282,6 +283,7 @@ async fn handle_ingress_inner(
                 caller_sub: gateway_identity.caller_sub.as_deref(),
                 identity_source: gateway_identity.source,
                 server_id,
+                session_id: Some(session_id.as_str()),
                 jsonrpc_method: &jsonrpc_method,
                 tool_name: tool_call.as_deref(),
                 resource_uri: resource_read.as_deref(),
@@ -343,7 +345,6 @@ async fn handle_ingress_inner(
         .or(legacy_tenant_hdr.as_deref())
         .unwrap_or("unknown");
     let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
-    let session_id = session_id_from_headers(msg.headers.as_ref(), &jwt_claims);
     let scope = scope_for_tools_call(server_id, tool_call.as_deref());
 
     let mesh_token = if let Some(egress) = settings.egress.as_ref() {
@@ -480,7 +481,19 @@ async fn handle_ingress_inner(
 
     match backend_result {
         Ok(Ok(response)) => {
-            dispatch_backend_response(client, &msg, response.payload).await?;
+            let payload = if jsonrpc_method == "tools/list" {
+                shape_tools_list_response(
+                    checker.as_ref(),
+                    &gateway_identity,
+                    server_id,
+                    session_id.as_str(),
+                    response.payload,
+                )
+                .await?
+            } else {
+                response.payload
+            };
+            dispatch_backend_response(client, &msg, payload).await?;
         }
         Ok(Err(e)) => {
             respond_with_jsonrpc_error(
@@ -739,6 +752,52 @@ fn parse_server_id<'a>(prefix: &str, subject: &'a str) -> Result<&'a str, &'stat
         return Err("empty server id");
     }
     Ok(server)
+}
+
+async fn shape_tools_list_response(
+    checker: &dyn PermissionChecker,
+    gateway_identity: &GatewayIdentity,
+    server_id: &str,
+    session_id: &str,
+    payload: Bytes,
+) -> Result<Bytes, GatewayError> {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&payload).map_err(|e| GatewayError(format!("tools/list response decode: {e}")))?;
+    let Some(tools) = value
+        .pointer_mut("/result/tools")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(payload);
+    };
+
+    let tool_names: Vec<String> = tools
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(serde_json::Value::as_str).map(str::to_string))
+        .collect();
+
+    let allowed = checker
+        .filter_tools_list(
+            ToolsListFilterContext {
+                tenant: gateway_identity.tenant.as_deref(),
+                caller_sub: gateway_identity.caller_sub.as_deref(),
+                identity_source: gateway_identity.source,
+                server_id,
+                session_id,
+            },
+            &tool_names,
+        )
+        .await
+        .map_err(|e| GatewayError(e.0))?;
+
+    let allowed_set: std::collections::HashSet<String> = allowed.into_iter().collect();
+    tools.retain(|tool| {
+        tool.get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|name| allowed_set.contains(name))
+    });
+
+    let shaped = serde_json::to_vec(&value).map_err(|e| GatewayError(format!("tools/list response encode: {e}")))?;
+    Ok(Bytes::from(shaped))
 }
 
 async fn dispatch_backend_response(
