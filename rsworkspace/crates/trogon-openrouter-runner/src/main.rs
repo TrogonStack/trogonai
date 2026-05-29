@@ -84,6 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let spawn_model = cfg.default_model.clone();
     let spawn_prefix = cfg.prefix.clone();
 
+    let nats_config = acp_nats::NatsConfig { servers: vec![cfg.nats_url.clone()], auth: acp_nats::NatsAuth::None };
+    let runner_config = acp_nats::Config::new(acp_prefix.clone(), nats_config);
+
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = OpenRouterAgent::new(
         notifier,
@@ -93,6 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
     agent = agent.with_compactor(nats.clone());
     agent = agent.with_permissions(nats.clone(), acp_prefix.clone());
+    agent = agent.with_runner_config(runner_config);
 
     {
         let js = js_ctx;

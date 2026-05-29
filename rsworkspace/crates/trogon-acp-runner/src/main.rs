@@ -44,6 +44,7 @@ use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
 use trogon_acp_runner::{ElicitationReq, PermissionReq};
+use trogon_runner_tools::session_store::SessionStore as _;
 
 use trogon_agent_core::agent_loop::AgentLoop;
 use trogon_agent_core::tools::ToolContext;
@@ -203,8 +204,18 @@ async fn main() -> anyhow::Result<()> {
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();
     let nats_for_elic = nats.clone();
+    let nats_for_spawn = nats.clone();
+    let js_for_spawn = js.clone();
     let prefix_for_perm = prefix.clone();
     let prefix_for_elic = prefix.clone();
+    let acp_prefix_for_spawn = acp_prefix.clone();
+    let runner_config = acp_nats::Config::new(
+        prefix.clone(),
+        trogon_nats::NatsConfig {
+            servers: vec![nats_url.clone()],
+            auth: trogon_nats::NatsAuth::None,
+        },
+    );
     let js_client = NatsJetStreamClient::new(js);
     let (_conn, io_task) =
         AgentSideNatsConnection::with_jetstream(agent, nats, js_client, acp_prefix_parsed, |fut| {
@@ -216,6 +227,8 @@ async fn main() -> anyhow::Result<()> {
     let local = LocalSet::new();
     local
         .run_until(async move {
+            let store_for_spawn = store.clone();
+
             // Drain PermissionReq messages and forward each to the ACP client via NATS.
             tokio::task::spawn_local(async move {
                 while let Some(req) = perm_rx.recv().await {
@@ -231,6 +244,179 @@ async fn main() -> anyhow::Result<()> {
                     let nats = nats_for_elic.clone();
                     let prefix = prefix_for_elic.clone();
                     handle_elicitation_request_nats(req, nats, prefix).await;
+                }
+            });
+
+            // Handle spawn_agent requests: create a sub-session, run a prompt, return output.
+            tokio::task::spawn_local({
+                let nats = nats_for_spawn;
+                let js = js_for_spawn;
+                let config = runner_config;
+                let store = store_for_spawn;
+                let acp_prefix_str = acp_prefix_for_spawn;
+                async move {
+                    use agent_client_protocol::SessionUpdate;
+                    use futures_util::StreamExt;
+
+                    let subject = format!("{acp_prefix_str}.agent.spawn");
+                    let mut sub = match nats.subscribe(subject).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(error = %e, "spawn handler: failed to subscribe");
+                            return;
+                        }
+                    };
+
+                    while let Some(msg) = sub.next().await {
+                        let Some(reply) = msg.reply.clone() else { continue };
+                        let Ok(req) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else {
+                            nats.publish(reply, "spawn_agent: invalid JSON payload".into()).await.ok();
+                            continue;
+                        };
+
+                        let task = req["prompt"].as_str().unwrap_or("").to_string();
+                        let session_id = req["session_id"].as_str().unwrap_or("").to_string();
+
+                        if session_id.is_empty() {
+                            nats.publish(reply, "spawn_agent: missing session_id".into()).await.ok();
+                            continue;
+                        }
+
+                        let parent_state = match store.load(&session_id).await {
+                            Ok(s) => s,
+                            Err(_) => {
+                                nats.publish(reply, "spawn_agent: session not found".into()).await.ok();
+                                continue;
+                            }
+                        };
+
+                        const MAX_SPAWN_DEPTH: u32 = 3;
+                        if parent_state.spawn_depth >= MAX_SPAWN_DEPTH {
+                            nats.publish(reply, "spawn_agent: max nesting depth reached".into()).await.ok();
+                            continue;
+                        }
+
+                        let worktree = trogon_runner_tools::worktree::create_worktree(&parent_state.cwd).await;
+                        let sub_cwd = worktree
+                            .as_ref()
+                            .map(|w| w.path.clone())
+                            .unwrap_or_else(|| parent_state.cwd.clone());
+
+                        // Dummy channel: Bridge's notification_sender will silently fail (warn and continue).
+                        let (notif_tx, _notif_rx_bridge_unused) = tokio::sync::mpsc::channel::<agent_client_protocol::SessionNotification>(1);
+                        drop(_notif_rx_bridge_unused);
+
+                        // Clone nats before moving into Bridge so we can subscribe below.
+                        let nats_for_notif = nats.clone();
+                        let acp_prefix_for_notif = acp_prefix_str.clone();
+
+                        let bridge = acp_nats::Bridge::new(
+                            nats.clone(),
+                            NatsJetStreamClient::new(js.clone()),
+                            trogon_std::time::SystemClock,
+                            &opentelemetry::global::meter("trogon-acp-runner"),
+                            config.clone(),
+                            notif_tx,
+                        );
+
+                        let sub_sid = match trogon_runner_tools::spawn_session::create_sub_session(
+                            &bridge,
+                            &sub_cwd,
+                            &parent_state.mode,
+                            parent_state.permission_rules_text.as_deref(),
+                        ).await {
+                            Ok(sid) => sid,
+                            Err(e) => {
+                                drop(worktree);
+                                nats.publish(reply, format!("spawn_agent error: {e}").into()).await.ok();
+                                continue;
+                            }
+                        };
+
+                        if let Ok(mut sub_state) = store.load(&sub_sid).await {
+                            sub_state.spawn_depth = parent_state.spawn_depth + 1;
+                            let _ = store.save(&sub_sid, &sub_state).await;
+                        }
+
+                        // Subscribe directly to the plain-NATS subject the runner publishes to.
+                        let notif_subject = format!("{acp_prefix_for_notif}.session.{sub_sid}.client.session.update");
+                        let mut notif_sub = match nats_for_notif.subscribe(notif_subject).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                drop(worktree);
+                                nats.publish(reply, format!("spawn_agent error: subscribe failed: {e}").into()).await.ok();
+                                continue;
+                            }
+                        };
+
+                        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+                        let text_result = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+                        let text_clone = text_result.clone();
+
+                        tokio::task::spawn_local(async move {
+                            loop {
+                                tokio::select! {
+                                    biased;
+                                    msg = notif_sub.next() => {
+                                        let Some(msg) = msg else { break; };
+                                        if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                            if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                    text_clone.lock().await.push_str(&t.text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ = &mut stop_rx => {
+                                        // Drain remaining buffered messages with a short timeout.
+                                        loop {
+                                            match tokio::time::timeout(
+                                                std::time::Duration::from_millis(50),
+                                                notif_sub.next(),
+                                            ).await {
+                                                Ok(Some(msg)) => {
+                                                    if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                                        if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                            if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                                text_clone.lock().await.push_str(&t.text);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                _ => break,
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+
+                        let run_result = trogon_runner_tools::spawn_session::run_sub_session(
+                            &bridge,
+                            &sub_sid,
+                            &task,
+                            std::time::Duration::from_secs(3600),
+                        ).await;
+
+                        drop(worktree);
+
+                        let _ = stop_tx.send(());
+                        // Give the notification task a moment to finish draining.
+                        tokio::task::yield_now().await;
+
+                        let accumulated = text_result.lock().await.clone();
+                        let text = match run_result {
+                            Ok(()) => if accumulated.is_empty() {
+                                "Sub-agent completed.".to_string()
+                            } else {
+                                accumulated
+                            },
+                            Err(e) => format!("spawn_agent error: {e}"),
+                        };
+
+                        nats.publish(reply, text.into()).await.ok();
+                    }
                 }
             });
 

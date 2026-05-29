@@ -1,3 +1,5 @@
+//! DEPRECATED: replaced by the spawn_agent interceptor in agent.rs.
+
 use std::sync::Arc;
 use std::time::Duration;
 
