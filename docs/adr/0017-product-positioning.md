@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Proposed (decision pending) |
+| **Status** | Accepted (2026-05-29) -- Option A: feature inside TrogonStack |
 | **Date** | 2026-05-29 |
-| **Deciders** | *(leadership / product -- TBD)* |
+| **Deciders** | Yordis Prieto (engineering owner exercising decision authority in absence of separate product DRI) |
 | **Blocks** | `MCP_GATEWAY_PLAN.md` Block A item 1 (product positioning: feature inside TrogonStack vs. standalone security product); gates Block A item 2 (on-bus vs hybrid), Block G items 3--4 (K8s controller, xDS), bundle distribution defaults, OSS envelope, and public naming |
 | **Related** | [Agent identity overview](../identity/overview.md); [MCP gateway operator overview](../identity/mcp-gateway-operator-overview.md); [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) (The Take, Block A); [ADR 0007](0007-on-bus-vs-hybrid.md); [ADR 0010](0010-bundle-format.md); [ADR 0011](0011-nats-auth-callout.md); [ADR 0012](0012-rate-limit-state.md) |
 
@@ -55,9 +55,34 @@ Until Block A item 1 is **Accepted** with an explicit verdict:
 
 ## Decision
 
-**No product positioning decision is recorded in this ADR.** Status remains **Proposed** until leadership selects one path and updates this document to **Accepted** with the chosen option named in the Decision section below.
+**Adopt Option A: the MCP gateway is a feature inside TrogonStack.**
 
-The two concrete operational shapes are documented so deciders compare like-for-like implementations, not slogans.
+Rationale, in three sentences: (1) every Accepted ADR (0001-0016, 0018-0032) and every shipped identity / operator doc was written assuming co-deployed Trogon mesh; reversing to Option B would require amending or invalidating sixteen Accepted records and re-homing the entire `docs/identity/` tree. (2) The plan's **Take** explicitly warns against "building Protect by itself" -- Option B contradicts that warning and forces months of generic-platform work before the MCP-specific differentiators (schema redaction, `tools/list` shaping, mesh lineage) reach market. (3) No standalone deal, signed partnership, or named pipeline currently requires positioning ambiguity; the cost of waiting for the perfect verdict exceeds the cost of being wrong and re-pivoting via a future ADR amendment.
+
+The two operational shapes (Option A / Option B) remain documented below as the comparison record; **Option A is the chosen path** unless and until a future ADR amends this record per the rules in `Resolution criteria`.
+
+### Authority and scope of this decision
+
+This ADR is being moved to Accepted by the engineering owner under explicit standing authorization ("for all the blockers, make a decision, document it but don't wait for me"). It is binding for **engineering ratchets** (default-deny day-zero, KV-primary bundle distribution, `docs/identity/` as canonical home, deferred Block G K8s controller / xDS, deferred policy engine extraction). It is **not** a commercial pricing record; SKU, SLA, license envelope, and public marketing language remain to be drafted under Option A framing -- those documents must cite this ADR but are out of scope here.
+
+### What Option A ratchets in immediately
+
+| Ratchet | Effect |
+|---|---|
+| Default-deny day-zero | `bootstrap-day-zero.md` and ADR 0021 stay as the canonical posture; shadow mode is operator opt-in, not product default. |
+| Bundle distribution | KV-primary at runtime, OCI-secondary for CI/CD (per ADR 0010); `mcp-pack` is platform-shipped, not marketplace-neutral. |
+| Documentation home | `docs/identity/` remains canonical; no `docs/mcp-gateway/` tree is created. |
+| Crate / repo naming | `trogon-mcp-gateway` stays; no separate GitHub org or public rename. |
+| Engine extraction | `trogon-policy-core` / `trogon-policy-cel` split stays deferred (ADR 0029) until a second protocol (ACP, A2A) pulls on it. |
+| Block G priorities | K8s controller + xDS interop drop to v2; latency baseline, CLI, multi-region, OTel export stay v1. |
+| Hybrid HTTP ingress | Phase 3+ optional per ADR 0007; not a Phase 2 deliverable. |
+| Competitive frame | Complementary to Synadia Protect (subject policy); differentiator vs agentgateway is NATS-native + JSON-RPC-aware redaction. |
+
+### What this decision does NOT do
+
+- Does **not** fix commercial pricing, SLA tiers, license envelope, or trademark.
+- Does **not** preclude a future Option A → Option B pivot via amendment ADR; the amendment must include a customer communication plan and compatibility window.
+- Does **not** answer Open question items 1-20 below; those remain useful evidence for the pricing / launch / GTM workstreams that flow from this verdict.
 
 ### Option A: Feature inside TrogonStack
 
@@ -93,9 +118,9 @@ The two concrete operational shapes are documented so deciders compare like-for-
 | **Competitive answer** | "JSON-RPC-aware governance on NATS" vs agentgateway (HTTP) and Protect (NATS subjects, not MCP methods). |
 | **Success metric** | Revenue from teams running MCP on NATS **without** adopting Trogon decider/event modeling; repeatable land-expand from security evaluation. |
 
-### Explicit deferral
+### Historical context: prior deferral (now resolved)
 
-Leadership must pick **Option A** or **Option B** (or a documented hybrid commercial model -- see Rejected alternatives). Engineering must not treat `MCP_GATEWAY_PLAN.md` Take section as decided. Implementation may continue on **reversible** technical ADRs; **irreversible product ratchets** (public rename, separate repo, default-deny vs shadow SKU split, standalone pricing page) wait for **Accepted** status on this ADR.
+The earlier draft of this ADR explicitly deferred the decision and recommended that engineering treat `MCP_GATEWAY_PLAN.md` Take as recommendation only. That deferral is **closed** with this acceptance. Implementers may now cite ADR 0017 (Accepted, Option A) instead of carrying "positioning open; do not ratchet" disclaimers.
 
 ---
 
@@ -290,14 +315,14 @@ This ADR moves from **Proposed** to **Accepted** when **all** of the following a
 
 | Item | Status | Notes |
 |---|---|---|
-| Block A item 1 (positioning) | **Open** | This ADR; leadership verdict pending |
-| Plan Take (feature recommendation) | **Recommendation only** | Not a decision record |
-| Operator overview | **Shipped** | Biased toward Trogon co-deployed stack |
+| Block A item 1 (positioning) | **Resolved** | This ADR (Accepted, Option A) |
+| Plan Take (feature recommendation) | **Now decision-backed** | Take aligns with Accepted Option A |
+| Operator overview | **Shipped** | Trogon co-deployed stack -- now the canonical framing |
 | Identity overview | **Shipped** | Mesh + STS + gateway chain |
-| Technical ADRs 0001--0016 | **Accepted** | Reversible if positioning pivot requires |
-| Phase 1 vertical slice | **Complete** | Substrate valid under either option |
-| Commercial pricing / SLA | **Not started** | Blocked on this ADR |
-| `docs/mcp-gateway/` tree | **Not created** | Blocked unless Option B |
+| Technical ADRs 0001--0016, 0018--0032 | **Accepted** | Consistent with Option A; no amendments triggered |
+| Phase 1 vertical slice | **Complete** | Substrate valid under Option A |
+| Commercial pricing / SLA | **Not started** | Out of scope here; needs separate GTM workstream under Option A framing |
+| `docs/mcp-gateway/` tree | **Not created** | Remains uncreated under Option A |
 
 ---
 

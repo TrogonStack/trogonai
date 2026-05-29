@@ -25,23 +25,17 @@ The full design space (generic policy engine, signed WASM bundles, multi-protoco
 4. **Defer the generic-protocol play until a second protocol pulls on it.** Today there is one protocol asking for this; one protocol does not justify a platform.
 5. **WASM Component Model is the long-term wedge vs agentgateway, but Phase 3 — not Phase 1.** Build with CEL only first.
 
-### The Strategic Question That Still Flips This
+### Positioning (resolved)
 
-The recommendation above assumes TrogonStack's pitch is **"an event-modeling / decider-driven agentic platform"** where MCP and ACP are surfaces, and the gateway is a feature of that platform. If the pitch is instead **"the security and governance layer for NATS-based agentic systems,"** the recommendation inverts: build the generic Protect-shaped product because *that is the company*.
-
-This is a product-positioning decision, not a technical one. **ADR 0017 (Proposed)** documents the question and the trade-offs; awaiting leadership verdict. Until resolved, planning continues assuming "feature inside TrogonStack."
+The gateway is a **feature inside TrogonStack** — see **ADR 0017 (Accepted, Option A)**. The pitch is "event-modeling / decider-driven agentic platform" with MCP and ACP as surfaces; the gateway is a queue-group service of that platform. A future amendment ADR may pivot to standalone if a forcing function emerges.
 
 ### What "Next" Looks Like Concretely
 
-Pre-code paper work is **done** (modulo the leadership decision above): ADRs 0001-0032 cover every strategic, technical, and design question. Phase 1 vertical slice (queue-group consumer, JWT ingress, CEL gate, SpiceDB hook, audit-to-JetStream, end-to-end NATS harness) **shipped**. Active code work is Block E (Phase 2 hot-path).
+Pre-code paper work is **done**: ADRs 0001-0032 cover every strategic, technical, and design question. Phase 1 vertical slice (queue-group consumer, JWT ingress, CEL gate, SpiceDB hook, audit-to-JetStream, end-to-end NATS harness) **shipped**. Active code work is Block E (Phase 2 hot-path).
 
 ## TODO
 
 Open work only. Strategic / technical paper decisions (ADRs 0001-0032), Phase 1 vertical slice, and operator docs are done; see `Reference Anchors` below for the canonical sources.
-
-### Block A — Strategic decisions (paper)
-
-- [ ] Resolve product positioning: **feature inside TrogonStack** vs. **standalone security product**. **ADR 0017 (Proposed)** documents the question; awaiting leadership verdict.
 
 ### Block E — Phase 2 (CEL hardening + catalog shaping + redaction) — CODE PENDING
 
