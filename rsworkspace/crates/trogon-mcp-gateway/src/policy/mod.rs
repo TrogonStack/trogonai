@@ -1,6 +1,7 @@
 //! CEL policy: selects when the SpiceDB-backed authorization hook runs (`tools/call`, `resources/read`).
 
 pub mod hierarchical;
+pub mod list_filter;
 
 use cel_interpreter::extractors::This;
 use cel_interpreter::objects::Key;
@@ -10,7 +11,7 @@ use serde_json::Value as JsonValue;
 use crate::act_chain::ActChainEntry;
 use crate::approvals::{build_approval_required, build_approval_required_step_up};
 use crate::authz::GatewayIdentity;
-use crate::cel_builtins::{register_all, with_host_eval, HostEvalContext};
+use crate::cel_builtins::{classify_list_filter_host_error, register_all, with_host_eval, HostEvalContext, HostFailure};
 use crate::jwt::VerifiedJwtClaims;
 use crate::rpc_codes;
 use crate::throttle::{ContextThrottler, ThrottleConfig, ThrottleKey};
@@ -322,6 +323,42 @@ pub fn evaluate_cel_with_host(
             .execute(&ctx)
             .map_err(|e| PolicyError(e.to_string()))
     })
+}
+
+/// Outcome of host-aware CEL evaluation for per-tool list filtering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CelHostEvalOutcome {
+    Bool(bool),
+    HostFailure(HostFailure, String),
+    Runtime(String),
+}
+
+/// Evaluate CEL with host builtins, preserving host failure classification for list shaping.
+pub fn evaluate_cel_with_host_classified(
+    program: &Program,
+    host: &HostEvalContext,
+    configure: impl FnOnce(&mut Context) -> Result<(), PolicyError>,
+) -> CelHostEvalOutcome {
+    let mut ctx = Context::default();
+    if let Err(err) = configure(&mut ctx) {
+        return CelHostEvalOutcome::Runtime(err.0);
+    }
+
+    match with_host_eval(host, || program.execute(&ctx)) {
+        Ok(Value::Bool(value)) => CelHostEvalOutcome::Bool(value),
+        Ok(other) => CelHostEvalOutcome::Runtime(format!(
+            "policy expression must yield bool, got {:?}",
+            other.type_of()
+        )),
+        Err(err) => {
+            let detail = err.to_string();
+            if let Some(failure) = classify_list_filter_host_error(&detail) {
+                CelHostEvalOutcome::HostFailure(failure, detail)
+            } else {
+                CelHostEvalOutcome::Runtime(detail)
+            }
+        }
+    }
 }
 
 /// Fresh CEL context with standard functions, policy variables, and act-chain helpers.
