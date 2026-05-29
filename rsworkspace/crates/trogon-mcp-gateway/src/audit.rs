@@ -55,6 +55,10 @@ pub struct AuditEnvelope {
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub act_chain: Option<Vec<AuditActChainEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 impl AuditEnvelope {
@@ -90,6 +94,8 @@ impl AuditEnvelope {
             purpose: None,
             session_id: None,
             act_chain: None,
+            rate_limit_scope: None,
+            retry_after_ms: None,
         };
         envelope.apply_identity_fields(identity);
         envelope
@@ -106,6 +112,11 @@ impl AuditEnvelope {
         self.purpose = id.purpose.clone();
         self.session_id = id.session_id.clone();
         self.act_chain = id.act_chain.clone();
+    }
+
+    pub fn apply_rate_limit_fields(&mut self, scope: &str, retry_after_ms: u64) {
+        self.rate_limit_scope = Some(scope.to_string());
+        self.retry_after_ms = Some(retry_after_ms);
     }
 }
 
