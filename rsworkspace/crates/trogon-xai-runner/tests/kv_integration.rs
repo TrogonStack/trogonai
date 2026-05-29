@@ -316,6 +316,7 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         tenant_id: tenant_id.to_string(),
         name: "Test session".to_string(),
         model: Some("grok-3".to_string()),
+        compactor_model: None,
         tools: vec![],
         memory_path: None,
         agent_id: None,
@@ -336,6 +337,9 @@ fn sample_snapshot(id: &str, tenant_id: &str) -> SessionSnapshot {
         parent_session_id: None,
         branched_at_index: None,
         mcp_servers: vec![],
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
     }
 }
 

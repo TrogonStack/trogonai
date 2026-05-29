@@ -18,6 +18,8 @@ use agent_client_protocol::{
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
+    Client as _, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    RequestPermissionRequest,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -25,6 +27,9 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::client_proxy::NatsClientProxy;
+use acp_nats::session_id::AcpSessionId;
 use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{AssembledToolCall, Message, OpenRouterClient, OpenRouterEvent, ToolDef};
 use crate::http_client::OpenRouterHttpClient;
@@ -33,13 +38,73 @@ use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, Snapsh
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
-use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
 };
-use trogon_runner_tools::session_store::{AuditEntry, ToolPolicy};
+use trogon_runner_tools::session_store::{
+    AuditEntry, AuditOutcome, ToolPolicy, append_audit_entries,
+};
 use trogon_runner_tools::permission::AuditBuf;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
+
+/// Permission decision after applying bypass + the rule engine, before any interactive gate.
+///
+/// Retained as the NATS-transport permission path (exercised by tests and wired by
+/// `with_permissions`); the active tool gate is the channel-based `check_tool_permission`.
+#[allow(dead_code)]
+enum PermDecision {
+    Allow,
+    Deny,
+    Ask,
+}
+
+/// Evaluate a tool call against bypass + the rule engine. Does not write audit and does
+/// not resolve `Ask` — the caller handles `Ask` via the interactive permission gate
+/// (`OpenRouterAgent::ask_permission`) and records the resolved outcome afterwards.
+#[allow(dead_code)]
+fn evaluate_permission(
+    tool_name: &str,
+    input: &serde_json::Value,
+    bypass: bool,
+    rules: &PermissionRules,
+) -> PermDecision {
+    if bypass {
+        return PermDecision::Allow;
+    }
+    match rules.check(tool_name, input) {
+        RuleDecision::Deny => PermDecision::Deny,
+        RuleDecision::Allow => PermDecision::Allow,
+        RuleDecision::Ask => PermDecision::Ask,
+    }
+}
+
+/// Append an audit entry for a resolved permission outcome.
+#[allow(dead_code)]
+fn record_permission_audit(
+    audit: &AuditBuf,
+    tool_name: &str,
+    input: &serde_json::Value,
+    outcome: AuditOutcome,
+) {
+    let summary = if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+        path.to_string()
+    } else if tool_name == "bash" {
+        input.get("command").and_then(|v| v.as_str())
+            .map(|s| s.chars().take(60).collect())
+            .unwrap_or_else(|| tool_name.to_string())
+    } else {
+        tool_name.to_string()
+    };
+    if let Ok(mut guard) = audit.lock() {
+        guard.push(AuditEntry {
+            timestamp: crate::session_store::now_iso(),
+            tool: tool_name.to_string(),
+            input_summary: summary,
+            outcome,
+        });
+    }
+}
 
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
@@ -147,6 +212,10 @@ fn context_window_tokens(model_id: &str) -> Option<u64> {
 struct OpenRouterSession {
     cwd: String,
     model: Option<String>,
+    /// Per-session context-compaction model override (any OpenRouter model).
+    /// `None` means compact with the session model. Set via `set_session_config_option`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<String>,
     // MED-25: never serialize the API key — session/get_state would otherwise
     // return it in plaintext to any ACP client, and it would be persisted to KV.
     // A restored/forked session falls back to the agent-wide global key.
@@ -171,6 +240,36 @@ struct OpenRouterSession {
     /// Per-session HTTP MCP servers captured from the `new_session` request.
     #[serde(default)]
     mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
+    #[serde(default)]
+    total_input_tokens: u64,
+    #[serde(default)]
+    total_output_tokens: u64,
+    #[serde(default)]
+    total_cache_read_tokens: u64,
+    #[serde(default)]
+    total_cache_creation_tokens: u64,
+    /// Terminal ID for the persistent bash shell. Set on first bash call; reused thereafter.
+    #[serde(skip)]
+    terminal_id: Option<String>,
+    /// NATS wasm prefix used when the terminal was created, needed for release on close.
+    #[serde(skip)]
+    terminal_wasm_prefix: Option<String>,
+    /// "default" or "bypassPermissions".
+    #[serde(default = "default_session_mode")]
+    session_mode: String,
+    /// Static rules parsed from TROGON.md at session creation.
+    #[serde(skip)]
+    permission_rules: trogon_runner_tools::permission_rules::PermissionRules,
+    /// Audit log of all permission decisions across all prompts.
+    #[serde(default)]
+    audit_log: Vec<trogon_runner_tools::session_store::AuditEntry>,
+    /// Session-level permission rules text set via `set_session_config_option("permissions")`.
+    /// Merged with TROGON.md rules at prompt time.
+    #[serde(default)]
+    permission_rules_text: Option<String>,
+    /// Nesting depth of this session within a spawn_agent chain. 0 = top-level.
+    #[serde(default)]
+    spawn_depth: u32,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -198,10 +297,22 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     tenant_id: String,
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     execution_nats: Option<async_nats::Client>,
+    /// Dedicated NATS client for the `trogon-compactor` service (context compaction).
+    /// Independent of the execution backend. `None` disables compaction.
+    compactor_nats: Option<async_nats::Client>,
     tool_http_client: reqwest::Client,
     permission_tx: Option<PermissionTx>,
     permission_store: AllowedToolsSessionStore,
     elicitation_tx: Option<trogon_runner_tools::ElicitationTx>,
+    /// NATS client used to emit ACP `request_permission` to the client/IDE when a tool
+    /// hits `RuleDecision::Ask`. `None` falls back to allow (no interactive gate).
+    permission_nats: Option<async_nats::Client>,
+    /// ACP prefix the runner publishes client-bound permission requests under. Paired
+    /// with `permission_nats`; both are set by [`OpenRouterAgent::with_permissions`].
+    permission_prefix: Option<AcpPrefix>,
+    /// NATS/ACP config used to create a `Bridge` for sub-sessions when `spawn_agent` is invoked.
+    /// Set via [`OpenRouterAgent::with_runner_config`]. `None` disables spawn_agent.
+    runner_config: Option<acp_nats::Config>,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -319,10 +430,14 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             tenant_id,
             registry: None,
             execution_nats: None,
+            compactor_nats: None,
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
             elicitation_tx: None,
+            permission_nats: None,
+            permission_prefix: None,
+            runner_config: None,
         }
     }
 }
@@ -353,10 +468,14 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            compactor_nats: self.compactor_nats,
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
             elicitation_tx: self.elicitation_tx,
+            permission_nats: self.permission_nats,
+            permission_prefix: self.permission_prefix,
+            runner_config: self.runner_config,
         }
     }
 
@@ -419,6 +538,75 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         self
     }
 
+    /// Enable context compaction by connecting to the `trogon-compactor` NATS service.
+    /// Independent of the execution backend. Mirrors `trogon-acp-runner::with_compactor`.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
+        self
+    }
+
+    /// Enable interactive permissions: when a tool hits `RuleDecision::Ask`, the runner
+    /// emits an ACP `request_permission` to the client/IDE over NATS and waits for the
+    /// allow/deny decision instead of auto-allowing. Without this, `Ask` falls back to
+    /// allow (preserving prior behavior).
+    pub fn with_permissions(mut self, nats: async_nats::Client, prefix: AcpPrefix) -> Self {
+        self.permission_nats = Some(nats);
+        self.permission_prefix = Some(prefix);
+        self
+    }
+
+    /// Enable `spawn_agent` by providing the NATS/ACP config used to create sub-session bridges.
+    /// Without this, `spawn_agent` returns an error.
+    pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
+        self.runner_config = Some(config);
+        self
+    }
+
+    /// Ask the client/IDE to approve a tool via the ACP `request_permission` round-trip
+    /// over NATS. Returns `true` if approved. When no permission relay is configured
+    /// (`with_permissions` not called) this allows the tool — preserving prior behavior.
+    #[allow(dead_code)]
+    async fn ask_permission(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+    ) -> bool {
+        let (Some(nats), Some(prefix)) =
+            (self.permission_nats.clone(), self.permission_prefix.clone())
+        else {
+            return true;
+        };
+        let acp_session = match AcpSessionId::new(session_id) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, session_id, "openrouter: invalid session id for permission request — denying");
+                return false;
+            }
+        };
+        let proxy = NatsClientProxy::new(nats, acp_session, prefix, Duration::from_secs(30));
+        let options = vec![
+            PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+        ];
+        let fields = ToolCallUpdateFields::new()
+            .title(tool_name.to_string())
+            .raw_input(tool_input.clone());
+        let tool_call = ToolCallUpdate::new(tool_call_id.to_string(), fields);
+        let req = RequestPermissionRequest::new(session_id.to_string(), tool_call, options);
+        match proxy.request_permission(req).await {
+            Ok(resp) => matches!(
+                resp.outcome,
+                RequestPermissionOutcome::Selected(sel) if sel.option_id.0.as_ref() == "allow"
+            ),
+            Err(e) => {
+                warn!(error = %e, tool = tool_name, "openrouter: permission request failed — denying");
+                false
+            }
+        }
+    }
+
     fn all_tool_config_options(enabled_tools: &[String]) -> Vec<SessionConfigOption> {
         trogon_tools::all_tool_defs()
             .into_iter()
@@ -435,6 +623,27 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
                 )
             })
             .collect()
+    }
+
+    /// Build the compactor_model select option for this session.
+    /// Shows "Default (same as session model)" plus all configured OpenRouter models.
+    /// Using available_models enforces same-provider naturally — all options route via OpenRouter.
+    fn compactor_model_config_option(
+        current: Option<&str>,
+        available_models: &[ModelInfo],
+    ) -> SessionConfigOption {
+        let mut opts = vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
+        opts.extend(
+            available_models
+                .iter()
+                .map(|m| SessionConfigSelectOption::new(m.model_id.0.to_string(), m.model_id.0.as_ref())),
+        );
+        SessionConfigOption::select(
+            "compactor_model".to_string(),
+            "Compaction Model".to_string(),
+            current.unwrap_or("").to_string(),
+            opts,
+        )
     }
 
     fn build_snapshot(&self, session_id: &str, session: &OpenRouterSession) -> SessionSnapshot {
@@ -488,6 +697,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
+            compactor_model: session.compactor_model.clone(),
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -497,6 +707,10 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
             mcp_servers: session.mcp_servers.clone(),
+            total_input_tokens: session.total_input_tokens,
+            total_output_tokens: session.total_output_tokens,
+            total_cache_read_tokens: session.total_cache_read_tokens,
+            total_cache_creation_tokens: session.total_cache_creation_tokens,
         }
     }
 
@@ -813,6 +1027,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .map(|s| s.to_string());
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
+        let bypass_perms = req.meta
+            .as_ref()
+            .and_then(|m| m.get("bypassPermissions"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let session_mode = if bypass_perms {
+            "bypassPermissions".to_string()
+        } else {
+            "default".to_string()
+        };
+        let permission_rules = self.md_loader.load(&cwd).await
+            .map(|md| PermissionRules::parse(&md))
+            .unwrap_or_default();
+
         let created_at_iso = now_iso();
         let mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
         let evicted_id = {
@@ -828,6 +1056,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: session_model_override,
+                compactor_model: None,
                 api_key,
                 history: Vec::new(),
                 system_prompt,
@@ -840,6 +1069,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                total_cache_creation_tokens: 0,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                session_mode,
+                permission_rules,
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -853,10 +1093,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         drop(sessions);
 
         info!(session_id, agent_id = ?self.agent_id, "openrouter: new session");
+        let mut cfg = Self::all_tool_config_options(&enabled_tools);
+        cfg.push(Self::compactor_model_config_option(None, &self.available_models));
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None))
-            .config_options(Self::all_tool_config_options(&enabled_tools)))
+            .config_options(cfg))
     }
 
     async fn load_session(
@@ -873,11 +1115,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let mode = s.mode.clone();
                 let model = s.model.clone();
                 let enabled_tools = s.enabled_tools.clone();
+                let compactor_model = s.compactor_model.clone();
                 drop(sessions);
+                let mut cfg = Self::all_tool_config_options(&enabled_tools);
+                cfg.push(Self::compactor_model_config_option(
+                    compactor_model.as_deref(),
+                    &self.available_models,
+                ));
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
                     .modes(self.session_mode_state(&mode))
                     .models(self.session_model_state(model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -902,10 +1150,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     })
                     .collect();
                 let model = snap.model.clone();
+                let compactor_model = snap.compactor_model.clone();
                 let created_at_iso = snap.created_at.clone();
                 let parent_session_id = snap.parent_session_id.clone();
                 let branched_at_index = snap.branched_at_index;
                 let mcp_servers = snap.mcp_servers.clone();
+                let total_input_tokens = snap.total_input_tokens;
+                let total_output_tokens = snap.total_output_tokens;
+                let total_cache_read_tokens = snap.total_cache_read_tokens;
+                let total_cache_creation_tokens = snap.total_cache_creation_tokens;
                 let api_key = self.global_api_key.clone();
                 let system_prompt = self.system_prompt.clone();
 
@@ -922,6 +1175,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterSession {
                         cwd,
                         model,
+                        compactor_model,
                         api_key,
                         history,
                         system_prompt,
@@ -934,9 +1188,23 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         mode: default_session_mode(),
                         tool_policies: Vec::new(),
                         mcp_servers,
+                        total_input_tokens,
+                        total_output_tokens,
+                        total_cache_read_tokens,
+                        total_cache_creation_tokens,
+                        terminal_id: None,
+                        terminal_wasm_prefix: None,
+                        session_mode: "default".to_string(),
+                        permission_rules: PermissionRules::default(),
+                        audit_log: Vec::new(),
+                        permission_rules_text: None,
+                        spawn_depth: 0,
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
+                let compactor_model_kv = sessions.get(&session_id).and_then(|s| s.compactor_model.clone());
+                let mut cfg = Self::all_tool_config_options(&enabled_tools);
+                cfg.push(Self::compactor_model_config_option(compactor_model_kv.as_deref(), &self.available_models));
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
                     .modes(self.session_mode_state(
                         sessions
@@ -947,7 +1215,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     .models(self.session_model_state(
                         sessions.get(&session_id).and_then(|s| s.model.as_deref()),
                     ))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+                    .config_options(cfg));
             }
 
         Err(not_found(format!("session {session_id} not found")))
@@ -971,8 +1239,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let s = sessions
             .get(&session_id)
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+        let mut cfg = Self::all_tool_config_options(&s.enabled_tools);
+        cfg.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
         Ok(ResumeSessionResponse::new()
-            .config_options(Self::all_tool_config_options(&s.enabled_tools)))
+            .config_options(cfg))
     }
 
     async fn fork_session(
@@ -1022,6 +1292,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             OpenRouterSession {
                 cwd,
                 model: inherited_model.clone(),
+                compactor_model: None,
                 api_key: inherited_key,
                 history,
                 system_prompt: inherited_system_prompt,
@@ -1034,6 +1305,17 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 mode: inherited_mode.clone(),
                 tool_policies: Vec::new(),
                 mcp_servers: inherited_mcp_servers,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                total_cache_creation_tokens: 0,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -1043,10 +1325,16 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
         drop(sessions);
 
+        let inherited_compactor = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&new_session_id).and_then(|s| s.compactor_model.clone())
+        };
+        let mut cfg = Self::all_tool_config_options(&inherited_tools);
+        cfg.push(Self::compactor_model_config_option(inherited_compactor.as_deref(), &self.available_models));
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref()))
-            .config_options(Self::all_tool_config_options(&inherited_tools)))
+            .config_options(cfg))
     }
 
     async fn close_session(
@@ -1065,6 +1353,24 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             let snapshot = self.build_snapshot(&session_id, s);
             store.save(&snapshot).await;
         }
+        // Release persistent bash terminal if one was created for this session.
+        if let Some(s) = sessions.get(&session_id) {
+            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+                s.terminal_id.clone(),
+                s.terminal_wasm_prefix.clone(),
+                &self.execution_nats,
+            ) {
+                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+                if let Ok(payload) = serde_json::to_vec(
+                    &agent_client_protocol::ReleaseTerminalRequest::new(
+                        session_id.clone(),
+                        tid,
+                    ),
+                ) {
+                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                }
+            }
+        }
         sessions.remove(&session_id);
         drop(sessions);
         info!(session_id, "openrouter: session closed");
@@ -1080,14 +1386,24 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .iter()
             .map(|(id, s)| {
                 let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
-                if s.parent_session_id.is_some() || s.branched_at_index.is_some() {
-                    let mut meta = serde_json::Map::new();
-                    if let Some(ref parent_id) = s.parent_session_id {
-                        meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                let mut meta = serde_json::Map::new();
+                if let Some(ref parent_id) = s.parent_session_id {
+                    meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                }
+                if let Some(idx) = s.branched_at_index {
+                    meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                }
+                if s.total_input_tokens > 0 {
+                    meta.insert("totalInputTokens".to_string(), serde_json::json!(s.total_input_tokens));
+                    meta.insert("totalOutputTokens".to_string(), serde_json::json!(s.total_output_tokens));
+                    if s.total_cache_read_tokens > 0 {
+                        meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(s.total_cache_read_tokens));
                     }
-                    if let Some(idx) = s.branched_at_index {
-                        meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                    if s.total_cache_creation_tokens > 0 {
+                        meta.insert("totalCacheCreationTokens".to_string(), serde_json::json!(s.total_cache_creation_tokens));
                     }
+                }
+                if !meta.is_empty() {
                     info = info.meta(meta);
                 }
                 info
@@ -1109,7 +1425,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
-                s.mode = mode_id;
+                s.mode = mode_id.clone();
+                s.session_mode = mode_id;
                 info!(session_id, mode = %s.mode, "openrouter: set_session_mode");
                 Ok(SetSessionModeResponse::new())
             }
@@ -1154,7 +1471,19 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             .get_mut(&session_id)
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
 
-        if let SessionConfigOptionValue::ValueId { value } = &req.value {
+        if config_id == "permissions" {
+            if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                let text = value.to_string();
+                s.permission_rules_text = if text.is_empty() { None } else { Some(text) };
+                info!(session_id, "openrouter: session permission rules updated");
+            }
+        } else if config_id == "compactor_model" {
+            if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                let m = value.to_string();
+                s.compactor_model = if m.is_empty() { None } else { Some(m) };
+                info!(session_id, "openrouter: session compactor_model updated");
+            }
+        } else if let SessionConfigOptionValue::ValueId { value } = &req.value {
             let val = value.to_string();
             match val.as_str() {
                 "enabled" => {
@@ -1173,7 +1502,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(config_id = %config_id, "openrouter: set_session_config_option unknown option — ignored");
         }
 
-        let config_options = Self::all_tool_config_options(&s.enabled_tools);
+        let mut config_options = Self::all_tool_config_options(&s.enabled_tools);
+        config_options.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
 
@@ -1205,7 +1535,59 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
+        // Context compaction (PRE-request). openrouter is stateless: the full
+        // history is sent each turn, so it must fit. Gap 3: pre-check the
+        // threshold before the NATS call (the async call runs WITHOUT the lock).
+        // Gap 2: the runner reuses its own original tail (no reverse conversion).
+        if let Some(nats) = self.compactor_nats.clone() {
+            let snapshot = {
+                let sessions = self.sessions.lock().await;
+                sessions.get(&session_id).map(|s| {
+                    (
+                        s.history.clone(),
+                        s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                        s.compactor_model.clone(),
+                    )
+                })
+            };
+            if let Some((history, model, compactor_model)) = snapshot {
+                let cw = context_window_tokens(&model);
+                if crate::compaction::should_compact(&history, cw) {
+                    let context_window = cw.unwrap_or_default();
+                    let (new_history, compacted) = crate::compaction::compact(
+                        &nats,
+                        history,
+                        &model,
+                        compactor_model.as_deref(),
+                        context_window,
+                    )
+                    .await;
+                    if compacted {
+                        let mut sessions = self.sessions.lock().await;
+                        if let Some(s) = sessions.get_mut(&session_id) {
+                            s.history = new_history;
+                        }
+                        info!(session_id, "openrouter: context compacted pre-request");
+                    }
+                }
+            }
+        }
+
+        let (
+            model,
+            api_key,
+            mut messages,
+            session_system_prompt,
+            enabled_tools,
+            mut cwd,
+            mut terminal_id,
+            session_mode,
+            session_tool_policies,
+            session_mcp_servers,
+            _permission_rules,
+            permission_rules_text,
+            spawn_depth,
+        ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1219,12 +1601,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
                 s.cwd.clone(),
+                s.terminal_id.clone(),
                 s.mode.clone(),
                 s.tool_policies.clone(),
                 s.mcp_servers.clone(),
+                s.permission_rules.clone(),
+                s.permission_rules_text.clone(),
+                s.spawn_depth,
             )
         };
-
         // MED-7: turn-scoped audit buffer, drained into session_audit after the turn.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
 
@@ -1376,6 +1761,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mut tool_rounds: u32 = 0;
         const MAX_TOOL_ROUNDS: u32 = 10;
 
+        let mut prompt_input_total: u64 = 0;
+        let mut prompt_output_total: u64 = 0;
+        let mut prompt_cache_read_total: u64 = 0;
+        let mut prompt_cache_creation_total: u64 = 0;
+
         let stop_reason = 'outer: loop {
             assistant_text.clear();
             usage = None;
@@ -1442,8 +1832,14 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     OpenRouterEvent::Usage {
                         prompt_tokens,
                         completion_tokens,
+                        cache_read_tokens,
+                        cache_creation_tokens,
                     } => {
                         usage = Some((prompt_tokens, completion_tokens));
+                        prompt_input_total += prompt_tokens;
+                        prompt_output_total += completion_tokens;
+                        prompt_cache_read_total += cache_read_tokens;
+                        prompt_cache_creation_total += cache_creation_tokens;
                         notifier
                             .notify(agent_client_protocol::SessionNotification::new(
                                 notification_session_id.clone(),
@@ -1598,7 +1994,18 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         }
                     } else if let Some(nats) = &self.execution_nats {
                         let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                        execute_bash_via_nats(nats, wasm, &session_id, &call.arguments).await
+                        let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &call.arguments).await;
+                        // Persist terminal_id back to session if it was just created
+                        if terminal_id.is_some() {
+                            let mut sessions = self.sessions.lock().await;
+                            if let Some(s) = sessions.get_mut(&session_id) {
+                                if s.terminal_id.is_none() {
+                                    s.terminal_id = terminal_id.clone();
+                                    s.terminal_wasm_prefix = Some(wasm.to_string());
+                                }
+                            }
+                        }
+                        result
                     } else {
                         "bash not available: no execution backend configured".to_string()
                     }
@@ -1615,6 +2022,146 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     match mcp_client.call_tool(original_name, &tool_input).await {
                         Ok(text) => text,
                         Err(e) => format!("MCP tool error: {e}"),
+                    }
+                } else if call.name == "spawn_agent" {
+                    // ── spawn_agent interceptor ──────────────────────────────────
+                    const MAX_SPAWN_DEPTH: u32 = 3;
+                    let input = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .unwrap_or(serde_json::Value::Null);
+                    let sub_prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                    if spawn_depth >= MAX_SPAWN_DEPTH {
+                        format!("spawn_agent: max nesting depth ({MAX_SPAWN_DEPTH}) reached")
+                    } else if let Some(ref runner_cfg) = self.runner_config.clone() {
+                        // Create a worktree for the sub-session (best-effort; falls back to parent cwd).
+                        let worktree = trogon_runner_tools::worktree::create_worktree(&cwd).await;
+                        let sub_cwd = worktree.as_ref().map(|w| w.path.clone()).unwrap_or_else(|| cwd.clone());
+
+                        let meter = opentelemetry::global::meter("openrouter-runner-spawn");
+                        let nats_for_js = self.execution_nats.clone()
+                            .or_else(|| self.permission_nats.clone());
+                        let result = if let Some(sub_nats) = nats_for_js {
+                            // Dummy channel: Bridge's notification_sender will silently fail (warn and continue).
+                            let (notif_tx, _notif_rx_bridge_unused) = tokio::sync::mpsc::channel::<agent_client_protocol::SessionNotification>(1);
+                            drop(_notif_rx_bridge_unused);
+
+                            let js = trogon_nats::jetstream::NatsJetStreamClient::new(
+                                async_nats::jetstream::new(sub_nats.clone()),
+                            );
+                            // Clone sub_nats before move into Bridge so we can subscribe below.
+                            let sub_nats_for_subscribe = sub_nats.clone();
+                            let runner_prefix = runner_cfg.acp_prefix().to_string();
+                            let bridge = acp_nats::Bridge::new(
+                                sub_nats,
+                                js,
+                                trogon_std::time::SystemClock,
+                                &meter,
+                                runner_cfg.clone(),
+                                notif_tx,
+                            );
+
+                            let accumulated_text = match trogon_runner_tools::spawn_session::create_sub_session(&bridge, &sub_cwd, &session_mode, permission_rules_text.as_deref()).await {
+                                Ok(sub_sid) => 'sub_session: {
+                                    // Set spawn_depth on the sub-session.
+                                    {
+                                        let mut sessions = self.sessions.lock().await;
+                                        if let Some(s) = sessions.get_mut(&sub_sid) {
+                                            s.spawn_depth = spawn_depth + 1;
+                                        }
+                                    }
+
+                                    // Subscribe directly to the plain-NATS subject the runner publishes to.
+                                    let notif_subject = format!("{runner_prefix}.session.{sub_sid}.client.session.update");
+                                    let mut notif_sub = match sub_nats_for_subscribe.subscribe(notif_subject).await {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            drop(bridge);
+                                            break 'sub_session format!("spawn_agent error: subscribe failed: {e}");
+                                        }
+                                    };
+
+                                    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+                                    let notifier_fwd = Arc::clone(&self.notifier);
+                                    let parent_sid_fwd = session_id.clone();
+                                    let accumulate_handle = tokio::task::spawn_local(async move {
+                                        let mut text = String::new();
+                                        loop {
+                                            tokio::select! {
+                                                biased;
+                                                msg = notif_sub.next() => {
+                                                    let Some(msg) = msg else { break; };
+                                                    if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                                        if let agent_client_protocol::SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                            if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                                text.push_str(&t.text);
+                                                            }
+                                                        }
+                                                        // Forward to parent session.
+                                                        let mut fwd = notif;
+                                                        fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                        notifier_fwd.notify(fwd).await;
+                                                    }
+                                                }
+                                                _ = &mut stop_rx => {
+                                                    // Stop received: drain remaining buffered messages with a short timeout.
+                                                    loop {
+                                                        match tokio::time::timeout(
+                                                            std::time::Duration::from_millis(50),
+                                                            notif_sub.next(),
+                                                        ).await {
+                                                            Ok(Some(msg)) => {
+                                                                if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                                                    if let agent_client_protocol::SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                                        if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                                            text.push_str(&t.text);
+                                                                        }
+                                                                    }
+                                                                    let mut fwd = notif;
+                                                                    fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                                    notifier_fwd.notify(fwd).await;
+                                                                }
+                                                            }
+                                                            _ => break,
+                                                        }
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        text
+                                    });
+
+                                    let text = match trogon_runner_tools::spawn_session::run_sub_session(&bridge, &sub_sid, &sub_prompt, std::time::Duration::from_secs(3600)).await {
+                                        Ok(()) => {
+                                            drop(bridge);
+                                            let _ = stop_tx.send(());
+                                            accumulate_handle.await.unwrap_or_default()
+                                        }
+                                        Err(e) => {
+                                            drop(bridge);
+                                            let _ = stop_tx.send(());
+                                            let _ = accumulate_handle.await;
+                                            format!("spawn_agent error: {e}")
+                                        }
+                                    };
+                                    text
+                                }
+                                Err(e) => {
+                                    drop(bridge);
+                                    format!("spawn_agent error: {e}")
+                                }
+                            };
+
+                            if let Some(wt) = worktree {
+                                wt.cleanup().await;
+                            }
+                            accumulated_text
+                        } else {
+                            "spawn_agent: no NATS client available for sub-session".to_string()
+                        };
+                        result
+                    } else {
+                        "spawn_agent requires a NATS runner config — runner not configured for spawn".to_string()
                     }
                 } else {
                     trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
@@ -1645,7 +2192,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         self.cancel_senders.lock().await.remove(&session_id);
 
         // MED-7: record this turn's tool-permission decisions in the per-session
-        // audit trail before the history write-back.
+        // audit trail before the history write-back. Both the in-memory audit
+        // index (session_audit) and the persisted session.audit_log are updated.
         let audit_entries = std::mem::take(&mut *audit_buf.lock().unwrap());
         if !audit_entries.is_empty() {
             self.session_audit
@@ -1653,7 +2201,11 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 .await
                 .entry(session_id.clone())
                 .or_default()
-                .extend(audit_entries);
+                .extend(audit_entries.clone());
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                append_audit_entries(&mut s.audit_log, audit_entries);
+            }
         }
 
         // MED-21: compact and persist WITHOUT holding the global sessions mutex
@@ -1678,6 +2230,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 Some(s) => {
                     s.history = history;
                     s.cwd = cwd.clone();
+                    // Token accounting + persistent terminal write-back (theirs).
+                    s.total_input_tokens += prompt_input_total;
+                    s.total_output_tokens += prompt_output_total;
+                    s.total_cache_read_tokens += prompt_cache_read_total;
+                    s.total_cache_creation_tokens += prompt_cache_creation_total;
+                    s.terminal_id = terminal_id.clone();
                     self.session_store
                         .as_ref()
                         .map(|_| self.build_snapshot(&session_id, s))
@@ -1708,7 +2266,22 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
     async fn ext_method(&self, args: ExtRequest) -> agent_client_protocol::Result<ExtResponse> {
         match args.method.as_ref() {
             "session/list_children" => {
-                let raw = serde_json::value::RawValue::from_string("[]".to_string())
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let parent_id = params
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                let children: Vec<String> = self
+                    .sessions
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|(_, s)| s.parent_session_id.as_deref() == Some(parent_id))
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                let result = serde_json::json!({ "children": children });
+                let raw = serde_json::value::RawValue::from_string(result.to_string())
                     .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
@@ -1789,16 +2362,21 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
 }
 
-async fn execute_bash_via_nats(
+const BASH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const BASH_EXIT_MARKER_PREFIX: &str = "__EXIT_";
+const BASH_EXIT_MARKER_SUFFIX: &str = "__";
+
+async fn execute_bash_stateful(
     nats: &async_nats::Client,
     wasm_prefix: &str,
     session_id: &str,
+    terminal_id: &mut Option<String>,
+    cwd: &str,
     arguments: &str,
 ) -> String {
-    use std::time::Duration;
     use agent_client_protocol::{
-        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
-        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+        CreateTerminalRequest, CreateTerminalResponse,
+        TerminalOutputRequest, TerminalOutputResponse,
     };
 
     let command = match serde_json::from_str::<serde_json::Value>(arguments)
@@ -1809,63 +2387,124 @@ async fn execute_bash_via_nats(
         None => return "error: missing 'command' in bash arguments".to_string(),
     };
 
-    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-    let session_id_owned = session_id.to_string();
-    let nats = nats.clone();
+    let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
 
-    let result = tokio::time::timeout(Duration::from_secs(30), async move {
-        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
-            .args(vec!["-c".to_string(), command]);
+    // Step 1: obtain or create the persistent terminal (outside timeout closure
+    // because &mut terminal_id cannot be moved into an async block)
+    let tid: String = if let Some(ref id) = *terminal_id {
+        id.clone()
+    } else {
+        let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
+            .cwd(std::path::PathBuf::from(cwd));
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+        let msg = match nats.request(format!("{term_base}.create"), payload.into()).await {
             Ok(m) => m,
             Err(e) => return format!("error: {e}"),
         };
-        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+        let resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
             Err(e) => return format!("error: {e}"),
         };
-        let tid = create_resp.terminal_id.clone();
+        let new_tid = resp.terminal_id.to_string();
+        *terminal_id = Some(new_tid.clone());
+        new_tid
+    };
 
-        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&wait_req) {
+    let nats = nats.clone();
+    let session_id = session_id.to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+
+    // 2. Snapshot baseline output length
+    let baseline_len = {
+        let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
-            return format!("error: {e}");
+        match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                Ok(r) => r.output.len(),
+                Err(_) => 0,
+            },
+            Err(_) => 0,
         }
+    };
 
-        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&out_req) {
-            Ok(p) => p,
-            Err(e) => return format!("error: {e}"),
-        };
-        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
-            Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
-        };
-        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
-            Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
-        };
-
-        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
-        if let Ok(payload) = serde_json::to_vec(&rel_req) {
-            let _ = nats.request(format!("{base}.release"), payload.into()).await;
-        }
-
-        out.output
-    })
-    .await;
-
-    match result {
-        Ok(output) => output,
-        Err(_elapsed) => "error: bash execution timed out".to_string(),
+    // 3. Write command with demarcation marker
+    let cmd_with_marker = format!(
+        "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
+    );
+    let write_req = serde_json::json!({
+        "terminal_id": tid,
+        "data": cmd_with_marker.as_bytes()
+    });
+    let payload = match serde_json::to_vec(&write_req) {
+        Ok(p) => p,
+        Err(e) => return format!("error: {e}"),
+    };
+    if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
+        return format!("error writing to terminal: {e}");
     }
+
+    // 4. Poll for output until marker found or timeout
+    loop {
+        tokio::time::sleep(BASH_POLL_INTERVAL).await;
+
+        let req = TerminalOutputRequest::new(session_id.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => match serde_json::from_slice::<TerminalOutputResponse>(&msg.payload) {
+                Ok(r) => r.output,
+                Err(e) => return format!("error reading output: {e}"),
+            },
+            Err(e) => return format!("error reading output: {e}"),
+        };
+
+        if full_output.len() > baseline_len {
+            let new_output = &full_output[baseline_len..];
+            if let Some(output) = bash_extract_before_marker(new_output) {
+                return output;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            let partial = if full_output.len() > baseline_len {
+                full_output[baseline_len..].to_string()
+            } else {
+                String::new()
+            };
+            return format!("error: bash timed out. Partial output:\n{partial}");
+        }
+    }
+}
+
+fn bash_extract_before_marker(output: &str) -> Option<String> {
+    let mut last_match: Option<usize> = None;
+    let mut search = output;
+    let mut offset = 0;
+    while let Some(pos) = search.find(BASH_EXIT_MARKER_PREFIX) {
+        let abs = offset + pos;
+        let after = &output[abs + BASH_EXIT_MARKER_PREFIX.len()..];
+        if let Some(end) = after.find(BASH_EXIT_MARKER_SUFFIX) {
+            let code_str = &after[..end];
+            if code_str.chars().all(|c| c.is_ascii_digit()) {
+                last_match = Some(abs);
+            }
+        }
+        offset = abs + BASH_EXIT_MARKER_PREFIX.len();
+        search = &output[offset..];
+    }
+    last_match.map(|pos| {
+        let before = &output[..pos];
+        before.strip_suffix('\n').unwrap_or(before).to_string()
+    })
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -1885,6 +2524,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
+            compactor_model: None,
             api_key: None,
             history,
             system_prompt: None,
@@ -1897,11 +2537,58 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             mode: default_session_mode(),
             tool_policies: Vec::new(),
             mcp_servers,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
+            terminal_id: None,
+            terminal_wasm_prefix: None,
+            session_mode: "default".to_string(),
+            permission_rules: PermissionRules::default(),
+            audit_log: Vec::new(),
+            permission_rules_text: None,
+            spawn_depth: 0,
         });
     }
 
     pub async fn test_insert_session(&self, id: &str) {
         self.test_insert_session_with_history(id, vec![]).await;
+    }
+
+}
+
+impl<H, N, M> OpenRouterAgent<H, N, M> {
+    pub async fn test_cancel_channels_len(&self) -> usize {
+        self.cancel_senders.lock().await.len()
+    }
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+impl<H, N, M> OpenRouterAgent<H, N, M> {
+    pub fn test_notifier(&self) -> &N {
+        &*self.notifier
+    }
+
+    pub async fn test_session_mode(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).map(|s| s.session_mode.clone())
+    }
+
+    pub async fn test_session_compactor_model(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).and_then(|s| s.compactor_model.clone())
+    }
+
+    pub async fn test_session_history(&self, id: &str) -> Vec<Message> {
+        self.sessions.lock().await.get(id).map(|s| s.history.clone()).unwrap_or_default()
+    }
+
+    pub async fn test_session_audit_log(&self, id: &str) -> Vec<trogon_runner_tools::session_store::AuditEntry> {
+        self.sessions.lock().await.get(id).map(|s| s.audit_log.clone()).unwrap_or_default()
+    }
+
+    pub async fn test_set_session_spawn_depth(&self, id: &str, depth: u32) {
+        if let Some(s) = self.sessions.lock().await.get_mut(id) {
+            s.spawn_depth = depth;
+        }
     }
 }
 
@@ -2094,6 +2781,7 @@ mod tests {
         OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
+            compactor_model: None,
             api_key: None,
             history: vec![],
             system_prompt: None,
@@ -2106,6 +2794,17 @@ mod tests {
             mode: default_session_mode(),
             tool_policies: Vec::new(),
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
+            terminal_id: None,
+            terminal_wasm_prefix: None,
+            session_mode: "default".to_string(),
+            permission_rules: PermissionRules::default(),
+            audit_log: Vec::new(),
+            permission_rules_text: None,
+            spawn_depth: 0,
         }
     }
 
@@ -2409,6 +3108,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "KV Session".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec!["read_file".to_string(), "write_file".to_string()],
             memory_path: None,
             messages: vec![],
@@ -2418,6 +3118,10 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         };
         let agent = make_agent()
             .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
@@ -2449,6 +3153,45 @@ mod tests {
                 sessions["kv-session"].enabled_tools,
                 vec!["read_file", "write_file"]
             );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        let snap = crate::session_store::SessionSnapshot {
+            id: "tok-sess".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Token Session".to_string(),
+            model: None,
+            compactor_model: None,
+            tools: vec![],
+            memory_path: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            agent_id: None,
+            parent_session_id: None,
+            branched_at_index: None,
+            mcp_servers: Vec::new(),
+            total_input_tokens: 200,
+            total_output_tokens: 80,
+            total_cache_read_tokens: 30,
+            total_cache_creation_tokens: 10,
+        };
+        let agent = make_agent()
+            .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
+        local().run_until(async move {
+            agent
+                .load_session(LoadSessionRequest::new(SessionId::from("tok-sess"), "/"))
+                .await
+                .expect("load from KV must succeed");
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get("tok-sess").expect("session must be in memory after load");
+            assert_eq!(s.total_input_tokens, 200, "total_input_tokens must be restored from KV");
+            assert_eq!(s.total_output_tokens, 80, "total_output_tokens must be restored from KV");
+            assert_eq!(s.total_cache_read_tokens, 30, "total_cache_read_tokens must be restored from KV");
+            assert_eq!(s.total_cache_creation_tokens, 10, "total_cache_creation_tokens must be restored from KV");
         }).await;
     }
 
@@ -2609,6 +3352,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_session_config_option_compactor_model_is_stored_and_cleared() {
+        let agent = make_agent_with_key("k");
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let id = sid.to_string();
+            assert_eq!(agent.test_session_compactor_model(&id).await, None, "starts unset");
+
+            // Setting it stores the override.
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "compactor_model",
+                    "anthropic/claude-haiku-4-5",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                agent.test_session_compactor_model(&id).await,
+                Some("anthropic/claude-haiku-4-5".to_string()),
+                "compactor_model override must be stored"
+            );
+
+            // Empty value clears it.
+            agent
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    sid.clone(),
+                    "compactor_model",
+                    "",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(agent.test_session_compactor_model(&id).await, None, "empty clears");
+        }).await;
+    }
+
+    #[tokio::test]
     async fn set_session_config_option_nonexistent_session_fails() {
         let agent = make_agent();
         local().run_until(async move {
@@ -2695,7 +3474,8 @@ mod tests {
             let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
             let config_options = resp.config_options.unwrap_or_default();
             let all_defs = trogon_tools::all_tool_defs();
-            assert_eq!(config_options.len(), all_defs.len(), "config_options must have one entry per trogon-tool");
+            // tool toggles + compactor_model
+            assert_eq!(config_options.len(), all_defs.len() + 1, "config_options must have one entry per trogon-tool plus compactor_model");
             for def in &all_defs {
                 assert!(
                     config_options.iter().any(|opt| opt.id.to_string() == def.name),
@@ -2704,6 +3484,10 @@ mod tests {
                 );
             }
             for opt in &config_options {
+                if opt.id.to_string() == "compactor_model" {
+                    // compactor_model defaults to "" (same as session model) — not "enabled"
+                    continue;
+                }
                 let current = match &opt.kind {
                     agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
                     _ => String::new(),
@@ -3429,7 +4213,7 @@ mod tests {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
@@ -4779,7 +5563,7 @@ mod tests {
         let agent = make_agent_with_key("k");
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8 },
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(std::path::PathBuf::from("/"))).await.unwrap().session_id;
@@ -4810,7 +5594,7 @@ mod tests {
         ]);
         agent.client.push_response(vec![
             OpenRouterEvent::TextDelta { text: "done".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20 },
+            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]);
         local().run_until(async move {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
@@ -4831,6 +5615,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Stub".to_string(),
             model: None,
+            compactor_model: None,
             tools,
             memory_path: None,
             messages: vec![],
@@ -4840,6 +5625,10 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: Vec::new(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
         }
     }
 
@@ -5431,6 +6220,467 @@ mod tests {
             ).unwrap();
             let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
             assert!(result.is_err(), "malformed messages must return Err");
+        }).await;
+    }
+
+    // ── token tracking ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn token_totals_accumulate_across_tool_rounds() {
+        // Two outer-loop iterations: first returns a tool call, second returns text.
+        // Each call reports Usage → totals must sum across both rounds.
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")])).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(s.total_input_tokens, 30, "input tokens must sum across both tool rounds");
+            assert_eq!(s.total_output_tokens, 13, "output tokens must sum across both tool rounds");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cache_read_tokens: 5, cache_creation_tokens: 2 },
+            OpenRouterEvent::TextDelta { text: "answer".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("hi")])).await.unwrap();
+
+            let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+            let info = resp.sessions.iter().find(|s| s.session_id == sid)
+                .expect("session must appear in list");
+            let meta = info.meta.as_ref().expect("meta must be set after prompt with usage");
+            assert_eq!(meta["totalInputTokens"], 42);
+            assert_eq!(meta["totalOutputTokens"], 7);
+            assert_eq!(meta["totalCacheReadTokens"], 5);
+            assert_eq!(meta["totalCacheCreationTokens"], 2);
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::TextDelta { text: "text".to_string() },
+        ]);
+        local().run_until(async move {
+            let src_id = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(src_id.clone(), vec![ContentBlock::from("prompt")])).await.unwrap();
+
+            let fork_id = agent.fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/f")))
+                .await.unwrap().session_id;
+
+            let sessions = agent.sessions.lock().await;
+            let fork = sessions.get(&fork_id.to_string()).unwrap();
+            assert_eq!(fork.total_input_tokens, 0, "forked session must start with zero input tokens");
+            assert_eq!(fork.total_output_tokens, 0, "forked session must start with zero output tokens");
+            assert_eq!(fork.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
+            assert_eq!(fork.total_cache_creation_tokens, 0, "forked session must start with zero cache creation tokens");
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn cache_creation_tokens_accumulate_across_tool_rounds() {
+        let agent = make_agent_with_key("k");
+        // Round 1: tool call with cache_creation_tokens = 5
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, cache_read_tokens: 0, cache_creation_tokens: 5 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        // Round 2: final answer with cache_creation_tokens = 8
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 3, cache_read_tokens: 0, cache_creation_tokens: 8 },
+            OpenRouterEvent::TextDelta { text: "done".to_string() },
+        ]);
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("go")])).await.unwrap();
+
+            let sessions = agent.sessions.lock().await;
+            let s = sessions.get(&sid.to_string()).unwrap();
+            assert_eq!(
+                s.total_cache_creation_tokens, 13,
+                "cache_creation_tokens must accumulate across tool rounds: 5 + 8 = 13"
+            );
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_saves_tokens_when_prompt_canceled() {
+        // Verify that tokens accumulated before cancel are updated in-memory so
+        // they will be persisted when the store save runs unconditionally after
+        // the streaming loop exits.
+        let agent = Arc::new(make_agent_with_key("k"));
+        let agent2 = Arc::clone(&agent);
+        let agent3 = Arc::clone(&agent);
+
+        // Round 1: Usage + tool call (forces a second HTTP call).
+        agent.client.push_response(vec![
+            OpenRouterEvent::Usage { prompt_tokens: 15, completion_tokens: 6, cache_read_tokens: 0, cache_creation_tokens: 0 },
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "c_cancel".to_string(),
+                    name: "list_directory".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }
+            ]},
+        ]);
+        // Round 2: slow — hangs until cancel fires.
+        agent.client.push_slow_response(OpenRouterEvent::TextDelta { text: "partial".to_string() });
+
+        local().run_until(async move {
+            let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
+            let sid_str = sid.to_string();
+            let sid2 = sid.clone();
+
+            let agent_prompt = Arc::clone(&agent);
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt.prompt(PromptRequest::new(
+                    sid,
+                    vec![ContentBlock::from("go")],
+                )).await.unwrap()
+            });
+
+            let cancel_handle = tokio::task::spawn_local(async move {
+                // Wait for UsageUpdate notification — confirms round-1 Usage was
+                // processed and prompt_input_total is already 15.
+                loop {
+                    let has_usage = agent2.notifier.notifications.lock().unwrap().iter()
+                        .any(|n| matches!(n.update, agent_client_protocol::SessionUpdate::UsageUpdate(_)));
+                    if has_usage { break; }
+                    tokio::task::yield_now().await;
+                }
+                agent2.cancel(CancelNotification::new(sid2)).await.unwrap();
+            });
+
+            let (result, _) = tokio::join!(prompt_handle, cancel_handle);
+            let result = result.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            // After cancel, the unconditional post-loop path must have updated in-memory tokens.
+            let sessions = agent3.sessions.lock().await;
+            let s = sessions.get(&sid_str).expect("session must still exist after cancel");
+            assert_eq!(
+                s.total_input_tokens, 15,
+                "cancelled prompt must accumulate input tokens in session state"
+            );
+            assert_eq!(
+                s.total_output_tokens, 6,
+                "cancelled prompt must accumulate output tokens in session state"
+            );
+        }).await;
+    }
+
+    // ── bash_extract_before_marker ────────────────────────────────────────────
+
+    #[test]
+    fn bash_extract_no_marker_returns_none() {
+        assert_eq!(bash_extract_before_marker("hello world\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_empty_input_returns_none() {
+        assert_eq!(bash_extract_before_marker(""), None);
+    }
+
+    #[test]
+    fn bash_extract_exit_zero_returns_preceding_output() {
+        assert_eq!(
+            bash_extract_before_marker("hello\n__EXIT_0__\n"),
+            Some("hello".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_exit_nonzero_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("oops\n__EXIT_1__\n"),
+            Some("oops".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_large_exit_code_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("missing\n__EXIT_127__\n"),
+            Some("missing".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_strips_single_trailing_newline() {
+        // The \n immediately before the marker is produced by the command's own output;
+        // strip it so the model sees clean text.
+        assert_eq!(
+            bash_extract_before_marker("line\n__EXIT_0__\n"),
+            Some("line".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_no_trailing_newline_before_marker_returned_verbatim() {
+        assert_eq!(
+            bash_extract_before_marker("no-newline__EXIT_0__\n"),
+            Some("no-newline".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_multiline_output_preserved() {
+        let output = "line1\nline2\nline3\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("line1\nline2\nline3".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_command_with_no_output_returns_empty_string() {
+        assert_eq!(
+            bash_extract_before_marker("__EXIT_0__\n"),
+            Some(String::new()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_code_is_ignored() {
+        assert_eq!(bash_extract_before_marker("x\n__EXIT_abc__\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_skipped_valid_marker_still_found() {
+        // Bad marker must not prevent a subsequent valid marker from being recognized.
+        let output = "__EXIT_abc__\nreal output\n__EXIT_0__\n";
+        let result = bash_extract_before_marker(output).expect("valid marker must be found");
+        assert!(result.contains("real output"), "got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_multiple_valid_markers_last_one_wins() {
+        // If two commands somehow write to the same terminal in one call,
+        // the function must return everything before the last marker.
+        let output = "first\n__EXIT_0__\nsecond\n__EXIT_1__\n";
+        let result = bash_extract_before_marker(output).expect("last marker must be found");
+        assert!(result.contains("second"), "content after first marker must be included; got: {result}");
+        assert!(result.contains("first"), "content before first marker must be included; got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_partial_marker_no_closing_suffix_not_matched() {
+        // __EXIT_0 without the closing __ is not a complete marker.
+        assert_eq!(bash_extract_before_marker("output\n__EXIT_0\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_marker_without_any_suffix_not_matched() {
+        assert_eq!(bash_extract_before_marker("__EXIT_42"), None);
+    }
+
+    #[test]
+    fn bash_extract_only_trailing_newline_stripped_not_internal() {
+        // Only the single \n immediately before the marker is stripped;
+        // internal newlines in the output must survive.
+        let output = "a\nb\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("a\nb".to_string()),
+        );
+    }
+
+    // ── set_session_mode stores mode ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_mode_bypass_permissions_stored() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "bypassPermissions")).await.unwrap();
+            assert_eq!(agent.test_session_mode("s1").await, Some("bypassPermissions".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_default_stored() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "default")).await.unwrap();
+            assert_eq!(agent.test_session_mode("s1").await, Some("default".to_string()));
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_unknown_rejected() {
+        let agent = make_agent();
+        local().run_until(async move {
+            agent.test_insert_session("s1").await;
+            assert!(agent.set_session_mode(SetSessionModeRequest::new(SessionId::from("s1"), "turbo")).await.is_err());
+        }).await;
+    }
+
+    // ── apply_permission ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn evaluate_permission_bypass_allows() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: src/**\n");
+        let input = serde_json::json!({"path": "src/main.rs"});
+        // In bypass mode, deny rules are ignored.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, true, &rules),
+            PermDecision::Allow
+        ));
+    }
+
+    #[test]
+    fn evaluate_permission_deny_rule_denies() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: .env\n");
+        let input = serde_json::json!({"path": ".env"});
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Deny
+        ));
+    }
+
+    #[test]
+    fn evaluate_permission_no_rule_asks() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::default();
+        let input = serde_json::json!({"path": "src/main.rs"});
+        // No matching rule no longer auto-allows — it falls through to the interactive gate.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Ask
+        ));
+    }
+
+    #[test]
+    fn record_permission_audit_writes_outcome() {
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let input = serde_json::json!({"path": ".env"});
+        record_permission_audit(&audit, "read_file", &input, AuditOutcome::Denied);
+        let log = audit.lock().unwrap();
+        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
+        assert_eq!(log[0].input_summary, ".env");
+    }
+
+    // ── spawn_agent interceptor ───────────────────────────────────────────────
+
+    /// When spawn_depth is at MAX_SPAWN_DEPTH the interceptor returns an error
+    /// message without attempting any NATS sub-session.
+    #[tokio::test]
+    async fn spawn_agent_max_depth_guard_returns_error_message() {
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-spawn-max".to_string(),
+                    name: "spawn_agent".to_string(),
+                    arguments: r#"{"prompt":"do something"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            // Elevate the session to MAX_SPAWN_DEPTH (3) so the guard fires.
+            agent.test_set_session_spawn_depth(&sid, 3).await;
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+                .await
+                .unwrap();
+
+            // The second HTTP call's messages must include a tool result with the
+            // max-depth error message.
+            let calls = agent.client.calls.lock().unwrap();
+            let max_depth_in_messages = calls[1].messages.iter().any(|m| {
+                m.tool_call_id.is_some() && m.content.contains("max nesting depth")
+            });
+            assert!(
+                max_depth_in_messages,
+                "spawn_agent at MAX_SPAWN_DEPTH must return max-nesting-depth error in tool result"
+            );
+        }).await;
+    }
+
+    /// When runner_config is not set (spawn disabled) the interceptor returns an
+    /// error message instead of attempting to create a sub-session.
+    #[tokio::test]
+    async fn spawn_agent_interceptor_no_runner_config_returns_error() {
+        // make_agent_with_key() does not call with_runner_config() so runner_config is None.
+        let agent = make_agent_with_key("k");
+        agent.client.push_response(vec![
+            OpenRouterEvent::ToolCallsReady { calls: vec![
+                crate::client::AssembledToolCall {
+                    id: "cid-spawn-nocfg".to_string(),
+                    name: "spawn_agent".to_string(),
+                    arguments: r#"{"prompt":"do something"}"#.to_string(),
+                }
+            ]},
+        ]);
+        agent.client.push_response(vec![OpenRouterEvent::Done]);
+
+        local().run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+                .await
+                .unwrap();
+
+            let calls = agent.client.calls.lock().unwrap();
+            let no_config_in_messages = calls[1].messages.iter().any(|m| {
+                m.tool_call_id.is_some() && m.content.contains("runner not configured for spawn")
+            });
+            assert!(
+                no_config_in_messages,
+                "spawn_agent without runner_config must return 'runner not configured for spawn'"
+            );
         }).await;
     }
 }

@@ -256,6 +256,12 @@ pub trait Session: Send + Sync + 'static {
         mode: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
+    fn set_session_config_option(
+        &self,
+        config_id: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
 
@@ -640,6 +646,44 @@ impl<N: NatsClient> Session for TrogonSession<N> {
                 return Err(anyhow::anyhow!("{}", msg));
             }
             *model.lock().unwrap() = model_id;
+            Ok(())
+        }
+    }
+
+    fn set_session_config_option(
+        &self,
+        config_id: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+    {
+        let config_id = config_id.to_string();
+        let value = value.to_string();
+        let prefix = self.prefix.clone();
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        async move {
+            let req_id = Uuid::now_v7().to_string();
+            let subject = format!("{prefix}.session.{session_id}.agent.set_config_option");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
+
+            let mut resp_rx = nats
+                .subscribe_bytes(resp_subject)
+                .await
+                .map_err(|e| anyhow::anyhow!("subscribe set_config_option response: {e}"))?;
+
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "sessionId": session_id,
+                "configId": config_id,
+                "value": value,
+            }))?;
+
+            nats.publish_with_req_id_bytes(subject, req_id, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("publish set_config_option: {e}"))?;
+
+            tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for config option update"))?;
             Ok(())
         }
     }
@@ -1040,6 +1084,9 @@ pub mod mock {
         set_model_error: Mutex<Option<String>>,
         compact_error: Mutex<Option<String>>,
         last_cwd: Mutex<Option<PathBuf>>,
+        /// Last prompt text passed to `prompt()`. Used in tests to verify the
+        /// content of prompts sent to the session (e.g., language detection in /init).
+        pub last_prompt_text: Mutex<Option<String>>,
     }
 
     impl MockSession {
@@ -1054,7 +1101,12 @@ pub mod mock {
                 set_model_error: Mutex::new(None),
                 compact_error: Mutex::new(None),
                 last_cwd: Mutex::new(None),
+                last_prompt_text: Mutex::new(None),
             }
+        }
+
+        pub fn last_prompt(&self) -> Option<String> {
+            self.last_prompt_text.lock().unwrap().clone()
         }
 
         pub fn queue_turn(&self, events: Vec<StreamEvent>) {
@@ -1105,9 +1157,10 @@ pub mod mock {
 
         fn prompt(
             &self,
-            _text: &str,
+            text: &str,
         ) -> impl std::future::Future<Output = anyhow::Result<mpsc::Receiver<StreamEvent>>> + Send + '_
         {
+            *self.last_prompt_text.lock().unwrap() = Some(text.to_string());
             let events = self
                 .turns
                 .lock()
@@ -1199,8 +1252,19 @@ pub mod mock {
             async move { Ok(()) }
         }
 
-        async fn close(&self) {
-            *self.closed.lock().unwrap() += 1;
+        fn set_session_config_option(
+            &self,
+            _config_id: &str,
+            _value: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+        {
+            async move { Ok(()) }
+        }
+
+        fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
+            async move {
+                *self.closed.lock().unwrap() += 1;
+            }
         }
     }
 
@@ -1271,6 +1335,15 @@ pub mod mock {
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
         {
             (**self).set_mode(mode)
+        }
+
+        fn set_session_config_option(
+            &self,
+            config_id: &str,
+            value: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+        {
+            (**self).set_session_config_option(config_id, value)
         }
 
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
@@ -1494,9 +1567,10 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        // set_model uses subscribe_bytes + publish_with_req_id_bytes
+        let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(1);
+        tx.send(Bytes::from(b"{}".as_slice())).await.unwrap();
         nats.add_subscription(rx);
-        tx.send(Bytes::from(b"{}".as_ref())).await.unwrap();
         let result = session.set_model("claude-opus-4-7").await;
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
         assert_eq!(session.current_model(), "claude-opus-4-7");
@@ -1509,7 +1583,7 @@ mod tests {
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
-        // no subscription queued — subscribe_bytes will fail
+        // No subscription queued — subscribe_bytes returns an error
         let err = session.set_model("claude-opus-4-7").await.unwrap_err();
         assert!(err.to_string().contains("NATS error"), "got: {err}");
     }

@@ -155,6 +155,14 @@ pub trait JetStreamKvKeys: Send + Sync + Clone + 'static {
     fn keys(&self) -> impl Future<Output = Result<Self::Keys, kv::HistoryError>> + Send;
 }
 
+pub trait JetStreamStreamUpdater: Send + Sync + Clone + 'static {
+    type UpdateError: Error + Send + Sync;
+    fn update_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> impl Future<Output = Result<(), Self::UpdateError>> + Send;
+}
+
 pub trait JetStreamCreateConsumer: Send + 'static {
     type Error: Error + Send + Sync;
     type Consumer: JetStreamConsumer;

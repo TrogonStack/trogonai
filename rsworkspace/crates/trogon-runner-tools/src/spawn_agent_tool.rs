@@ -15,13 +15,19 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct SpawnAgentTool {
     nats: async_nats::Client,
     prefix: String,
+    session_id: String,
 }
 
 impl SpawnAgentTool {
-    pub fn new(nats: async_nats::Client, prefix: impl Into<String>) -> Self {
+    pub fn new(
+        nats: async_nats::Client,
+        prefix: impl Into<String>,
+        session_id: impl Into<String>,
+    ) -> Self {
         Self {
             nats,
             prefix: prefix.into(),
+            session_id: session_id.into(),
         }
     }
 
@@ -79,6 +85,7 @@ impl McpCallTool for SpawnAgentTool {
             let payload = serde_json::to_vec(&serde_json::json!({
                 "capability": capability,
                 "prompt": prompt,
+                "session_id": self.session_id,
             }))
             .map_err(|e| e.to_string())?;
 

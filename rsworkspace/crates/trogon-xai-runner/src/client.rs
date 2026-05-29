@@ -147,6 +147,7 @@ impl Serialize for ToolSpec {
                 //   { "type": "function", "name": ..., "description": ..., "parameters": ... }
                 // (not the OpenAI Chat Completions shape where name/description/parameters
                 // are nested under a "function" key.)
+                // https://docs.x.ai/api
                 serde_json::json!({
                     "type": "function",
                     "name": name,
@@ -282,6 +283,7 @@ pub enum XaiEvent {
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
+        cached_tokens: u64,
     },
     /// Why the model stopped — included in the `response.completed` event.
     ///
@@ -729,12 +731,17 @@ fn process_sse_line(
                 });
             }
         }
-        // ── Non-streaming text delivery via output_item.done ─────────────────
+        // ── output_item.done — text completion AND authoritative function-call ─
         // Reasoning models (e.g. grok-4) may skip `response.output_text.delta`
         // entirely and deliver the assistant text non-incrementally via this
-        // event. Extract text from each `output_text` content block and emit
-        // `TextComplete` (not `TextDelta`) so the agent can skip it when
-        // streaming deltas were already received for this turn.
+        // event (item.type == "message"): emit `TextComplete` so the agent can
+        // skip it when streaming deltas were already received this turn.
+        //
+        // For function-call items (item.type == "function_call") this event
+        // carries the final, authoritative `call_id`/`name`/`arguments`. It is
+        // the ONLY reliable emission point for the new grok-4 format, where
+        // `response.function_call_arguments.done` uses `item_id` (not `call_id`)
+        // and has no `name`, so that handler's guard never fires.
         "response.output_item.done" => {
             if val["item"]["type"].as_str() == Some("message") {
                 if let Some(content) = val["item"]["content"].as_array() {
@@ -748,6 +755,22 @@ fn process_sse_line(
                                 }
                             }
                         }
+                    }
+                }
+            } else if val["item"]["type"].as_str() == Some("function_call") {
+                // Authoritative function-call completion. Emit ONLY if
+                // `response.function_call_arguments.done` hasn't already emitted
+                // this call: that handler removes the `pending_fc` entry (keyed by
+                // item_id) when it fires, so a still-present entry means this event
+                // is the sole reliable signal. Dedup by item_id (the `id` field),
+                // since `pending_fc` is keyed by item_id, not call_id.
+                let item_id = val["item"]["id"].as_str().unwrap_or("").to_string();
+                if pending_fc.remove(&item_id).is_some() {
+                    let call_id = val["item"]["call_id"].as_str().unwrap_or("").to_string();
+                    let name = val["item"]["name"].as_str().unwrap_or("").to_string();
+                    let arguments = val["item"]["arguments"].as_str().unwrap_or("").to_string();
+                    if !call_id.is_empty() || !name.is_empty() {
+                        pending.push_back(XaiEvent::FunctionCall { call_id, name, arguments });
                     }
                 }
             }
@@ -816,10 +839,12 @@ fn process_sse_line(
                 .as_u64()
                 .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
+            let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,
                     completion_tokens: c,
+                    cached_tokens: cached,
                 });
             }
             let incomplete_reason = val["response"]["incomplete_details"]["reason"]
@@ -889,10 +914,12 @@ fn process_sse_line(
                 .as_u64()
                 .or_else(|| usage["completion_tokens"].as_u64())
                 .unwrap_or(0);
+            let cached = usage["input_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
             if p > 0 || c > 0 {
                 pending.push_back(XaiEvent::Usage {
                     prompt_tokens: p,
                     completion_tokens: c,
+                    cached_tokens: cached,
                 });
             }
             // Emit the finish reason from response.status (Responses API field).
@@ -1054,7 +1081,8 @@ mod tests {
                 event,
                 XaiEvent::Usage {
                     prompt_tokens: 42,
-                    completion_tokens: 7
+                    completion_tokens: 7,
+                    ..
                 }
             ),
             "unexpected event: {event:?}"
@@ -1071,7 +1099,8 @@ mod tests {
                 event,
                 XaiEvent::Usage {
                     prompt_tokens: 100,
-                    completion_tokens: 50
+                    completion_tokens: 50,
+                    ..
                 }
             ),
             "unexpected event: {event:?}"
@@ -1466,7 +1495,8 @@ mod tests {
                 e,
                 XaiEvent::Usage {
                     prompt_tokens: 10,
-                    completion_tokens: 20
+                    completion_tokens: 20,
+                    ..
                 }
             )),
             "usage nested in response object must be extracted: {events:?}"
@@ -1833,7 +1863,8 @@ mod tests {
                 e,
                 XaiEvent::Usage {
                     prompt_tokens: 5,
-                    completion_tokens: 0
+                    completion_tokens: 0,
+                    ..
                 }
             )),
             "asymmetric usage (p=5, c=0) must still be emitted: {events:?}"
@@ -2325,6 +2356,8 @@ mod tests {
 
     #[test]
     fn tool_spec_function_serializes_correctly() {
+        // xAI Responses API expects a flat structure — name/description/parameters
+        // at the top level, NOT nested under a "function" key (that's OpenAI format).
         let spec = ToolSpec::Function {
             name: "bash".to_string(),
             description: "Run a shell command".to_string(),
@@ -2701,5 +2734,57 @@ mod tests {
             Some(true),
             "'stream' must always be true in request body; body: {body}"
         );
+    }
+
+    // ── grok-4 new streaming format regression test ───────────────────────────
+
+    /// Verifies that the parser correctly emits a FunctionCall event when grok-4
+    /// sends the new Responses API event sequence (output_item.added →
+    /// function_call_arguments.delta → function_call_arguments.done →
+    /// output_item.done), as captured from the real xAI API 2026-05.
+    ///
+    /// The bug: `response.function_call_arguments.done` uses `item_id` (not
+    /// `call_id`) and has no `name` field — so the parser's guard
+    /// `!call_id.is_empty() || !name.is_empty()` evaluated to false and the
+    /// FunctionCall event was never emitted. `response.output_item.done`
+    /// (which carries all three fields) had no handler and fell through to `_ => {}`.
+    #[test]
+    fn grok4_function_call_new_event_format_emits_function_call_event() {
+        // Actual SSE data lines captured from the real grok-4 API (2026-05).
+        // The function_call_arguments.done event uses `item_id` (not `call_id`)
+        // and has no `name` field — both absent from the old xAI format the
+        // parser was written for.
+        let lines = [
+            // output_item.added — announces the function call, provides call_id + name
+            r#"data: {"sequence_number":22,"type":"response.output_item.added","item":{"arguments":"","call_id":"call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0","name":"write_file","type":"function_call","id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","status":"in_progress"},"output_index":1}"#,
+            // function_call_arguments.delta — uses item_id (not call_id), full args in one chunk
+            r#"data: {"sequence_number":23,"type":"response.function_call_arguments.delta","delta":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","item_id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","output_index":1}"#,
+            // function_call_arguments.done — uses item_id (not call_id), no name field
+            r#"data: {"sequence_number":24,"type":"response.function_call_arguments.done","arguments":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","item_id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","output_index":1}"#,
+            // output_item.done — has call_id, name, AND complete arguments
+            r#"data: {"sequence_number":25,"type":"response.output_item.done","item":{"arguments":"{\"path\":\"hello.txt\",\"content\":\"hello\"}","call_id":"call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0","name":"write_file","type":"function_call","id":"fc_60f879b8-36d1-9a07-b63a-6ccdc3e14f74_0","status":"completed"},"output_index":1}"#,
+        ];
+
+        let events = parse_lines(&lines);
+
+        let fc_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, XaiEvent::FunctionCall { .. }))
+            .collect();
+
+        assert_eq!(
+            fc_events.len(),
+            1,
+            "exactly one FunctionCall event must be emitted from the grok-4 new format; got: {events:?}"
+        );
+
+        if let XaiEvent::FunctionCall { call_id, name, arguments } = &fc_events[0] {
+            assert_eq!(call_id, "call-6c6123e5-196b-493d-ba2c-fd8925cb0c64-0",
+                "call_id must match the value from response.output_item.done");
+            assert_eq!(name, "write_file",
+                "name must match the value from response.output_item.done");
+            assert!(arguments.contains("hello.txt"),
+                "arguments must contain the path; got: {arguments}");
+        }
     }
 }

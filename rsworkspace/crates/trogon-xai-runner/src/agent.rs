@@ -17,6 +17,8 @@ use agent_client_protocol::{
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ExtRequest, ExtResponse, ToolKind, UsageUpdate,
+    Client as _, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    RequestPermissionRequest,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
@@ -24,6 +26,9 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use acp_nats::acp_prefix::AcpPrefix;
+use acp_nats::client_proxy::NatsClientProxy;
+use acp_nats::session_id::AcpSessionId;
 use crate::agent_loader::{AgentConfig, AgentLoading};
 use crate::client::{FinishReason, InputItem, Message, ToolSpec, XaiClient, XaiEvent};
 use crate::http_client::XaiHttpClient;
@@ -36,9 +41,9 @@ use trogon_runner_tools::{
 };
 use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
-use trogon_runner_tools::permission_rules::PermissionRules;
+use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
-use trogon_runner_tools::session_store::{AuditEntry, ToolPolicy};
+use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, ToolPolicy, append_audit_entries};
 use trogon_runner_tools::permission::AuditBuf;
 use trogon_tools::{ContentBlock as WireContentBlock, Message as WireMessage};
 
@@ -105,6 +110,10 @@ struct XaiSession {
     cwd: String,
     /// Per-session model override. None means use the agent default.
     model: Option<String>,
+    /// Per-session context-compaction model override (same provider). None means
+    /// compact with the session model. Set via `set_session_config_option`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<String>,
     /// API key bound to this session at `new_session` time.
     /// Falls back to the agent-wide `global_api_key` if None.
     // MED-25: never serialize the API key — session/get_state would otherwise
@@ -149,6 +158,41 @@ struct XaiSession {
     /// (via `build_session_mcp`) so their tools are advertised to the model.
     #[serde(default)]
     mcp_servers: Vec<StoredMcpServer>,
+    /// Terminal ID for the persistent bash shell. Set on first bash call; reused thereafter.
+    #[serde(skip)]
+    terminal_id: Option<String>,
+    /// NATS wasm prefix used when the terminal was created, needed for release on close.
+    #[serde(skip)]
+    terminal_wasm_prefix: Option<String>,
+    /// Cumulative input tokens billed across all prompts in this session.
+    #[serde(default)]
+    total_input_tokens: u64,
+    /// Cumulative output tokens billed across all prompts in this session.
+    #[serde(default)]
+    total_output_tokens: u64,
+    /// Cumulative cache-read input tokens across all prompts in this session.
+    #[serde(default)]
+    total_cache_read_tokens: u64,
+    /// "default" or "bypassPermissions".
+    #[serde(default = "default_session_mode")]
+    session_mode: String,
+    /// Static rules parsed from TROGON.md at session creation.
+    /// Part of the NATS-transport permission path; the active gate uses the
+    /// per-session checker built in `check_tool_permission`.
+    #[serde(skip)]
+    #[allow(dead_code)]
+    permission_rules: trogon_runner_tools::permission_rules::PermissionRules,
+    /// Audit log of all permission decisions across all prompts.
+    #[serde(default)]
+    audit_log: Vec<trogon_runner_tools::session_store::AuditEntry>,
+    /// Session-level permission rules text set via `set_session_config_option("permissions")`.
+    /// Merged with TROGON.md rules at prompt time.
+    #[serde(default)]
+    permission_rules_text: Option<String>,
+    /// Nesting depth of spawn_agent calls (0 = top-level session).
+    /// Incremented on each sub-agent session so recursion can be bounded.
+    #[serde(default)]
+    spawn_depth: u32,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -231,6 +275,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to the bash execution helper when a wasm-runtime is available.
     execution_nats: Option<async_nats::Client>,
+    /// Dedicated NATS client for the `trogon-compactor` service (context compaction).
+    /// Independent of the execution backend. `None` disables compaction.
+    compactor_nats: Option<async_nats::Client>,
     /// HTTP client used by trogon-tools (fetch_url and similar web tools).
     tool_http_client: reqwest::Client,
     /// Permission gate channel — forwards requests to the ACP client via NATS.
@@ -239,6 +286,73 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     permission_store: AllowedToolsSessionStore,
     /// Elicitation channel — forwards `ask_user` requests to the ACP client via NATS.
     elicitation_tx: Option<ElicitationTx>,
+    /// NATS client used to emit ACP `request_permission` to the client/IDE when a tool
+    /// hits `RuleDecision::Ask`. `None` falls back to allow (no interactive gate).
+    permission_nats: Option<async_nats::Client>,
+    /// ACP prefix the runner publishes client-bound permission requests under. Paired
+    /// with `permission_nats`; both are set by [`XaiAgent::with_permissions`].
+    permission_prefix: Option<AcpPrefix>,
+    /// NATS/ACP config for this runner (prefix + NATS URL). Used by the
+    /// spawn_agent interceptor to build a Bridge for sub-agent sessions.
+    runner_config: Option<acp_nats::Config>,
+}
+
+/// Permission decision after applying bypass + the rule engine, before any interactive gate.
+///
+/// Retained as the NATS-transport permission path (exercised by tests and wired by
+/// `with_permissions`); the active tool gate is the channel-based `check_tool_permission`.
+#[allow(dead_code)]
+enum PermDecision {
+    Allow,
+    Deny,
+    Ask,
+}
+
+/// Evaluate a tool call against bypass + the rule engine. Does not write audit and does
+/// not resolve `Ask` — the caller handles `Ask` via the interactive permission gate
+/// (`XaiAgent::ask_permission`) and records the resolved outcome afterwards.
+#[allow(dead_code)]
+fn evaluate_permission(
+    tool_name: &str,
+    input: &serde_json::Value,
+    bypass: bool,
+    rules: &PermissionRules,
+) -> PermDecision {
+    if bypass {
+        return PermDecision::Allow;
+    }
+    match rules.check(tool_name, input) {
+        RuleDecision::Deny => PermDecision::Deny,
+        RuleDecision::Allow => PermDecision::Allow,
+        RuleDecision::Ask => PermDecision::Ask,
+    }
+}
+
+/// Append an audit entry for a resolved permission outcome.
+#[allow(dead_code)]
+fn record_permission_audit(
+    audit: &AuditBuf,
+    tool_name: &str,
+    input: &serde_json::Value,
+    outcome: AuditOutcome,
+) {
+    let summary = if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+        path.to_string()
+    } else if tool_name == "bash" {
+        input.get("command").and_then(|v| v.as_str())
+            .map(|s| s.chars().take(60).collect())
+            .unwrap_or_else(|| tool_name.to_string())
+    } else {
+        tool_name.to_string()
+    };
+    if let Ok(mut guard) = audit.lock() {
+        guard.push(AuditEntry {
+            timestamp: crate::session_store::now_iso(),
+            tool: tool_name.to_string(),
+            input_summary: summary,
+            outcome,
+        });
+    }
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -365,10 +479,14 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             tenant_id,
             registry: None,
             execution_nats: None,
+            compactor_nats: None,
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
             elicitation_tx: None,
+            permission_nats: None,
+            permission_prefix: None,
+            runner_config: None,
         }
     }
 
@@ -409,10 +527,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            compactor_nats: self.compactor_nats,
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
             elicitation_tx: self.elicitation_tx,
+            permission_nats: self.permission_nats,
+            permission_prefix: self.permission_prefix,
+            runner_config: self.runner_config,
         }
     }
 
@@ -468,6 +590,76 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self.execution_nats = Some(nats);
         self.registry = Some(Arc::new(registry));
         self
+    }
+
+    /// Enable context compaction by connecting to the `trogon-compactor` NATS service.
+    /// Independent of the execution backend. Mirrors `trogon-acp-runner::with_compactor`.
+    pub fn with_compactor(mut self, nats: async_nats::Client) -> Self {
+        self.compactor_nats = Some(nats);
+        self
+    }
+
+    /// Enable interactive permissions: when a tool hits `RuleDecision::Ask`, the runner
+    /// emits an ACP `request_permission` to the client/IDE over NATS and waits for the
+    /// allow/deny decision instead of auto-allowing. Without this, `Ask` falls back to
+    /// allow (preserving prior behavior).
+    pub fn with_permissions(mut self, nats: async_nats::Client, prefix: AcpPrefix) -> Self {
+        self.permission_nats = Some(nats);
+        self.permission_prefix = Some(prefix);
+        self
+    }
+
+    /// Provide the runner's own ACP config so the `spawn_agent` tool can build a
+    /// Bridge for sub-agent sessions. Without this, `spawn_agent` falls back to
+    /// an error message.
+    pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
+        self.runner_config = Some(config);
+        self
+    }
+
+    /// Ask the client/IDE to approve a tool via the ACP `request_permission` round-trip
+    /// over NATS. Returns `true` if approved. When no permission relay is configured
+    /// (`with_permissions` not called) this allows the tool — preserving prior behavior.
+    #[allow(dead_code)]
+    async fn ask_permission(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+    ) -> bool {
+        let (Some(nats), Some(prefix)) =
+            (self.permission_nats.clone(), self.permission_prefix.clone())
+        else {
+            return true;
+        };
+        let acp_session = match AcpSessionId::new(session_id) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, session_id, "xai: invalid session id for permission request — denying");
+                return false;
+            }
+        };
+        let proxy = NatsClientProxy::new(nats, acp_session, prefix, Duration::from_secs(30));
+        let options = vec![
+            PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+        ];
+        let fields = ToolCallUpdateFields::new()
+            .title(tool_name.to_string())
+            .raw_input(tool_input.clone());
+        let tool_call = ToolCallUpdate::new(tool_call_id.to_string(), fields);
+        let req = RequestPermissionRequest::new(session_id.to_string(), tool_call, options);
+        match proxy.request_permission(req).await {
+            Ok(resp) => matches!(
+                resp.outcome,
+                RequestPermissionOutcome::Selected(sel) if sel.option_id.0.as_ref() == "allow"
+            ),
+            Err(e) => {
+                warn!(error = %e, tool = tool_name, "xai: permission request failed — denying");
+                false
+            }
+        }
     }
 
     /// Restore a session from the KV snapshot store into the in-memory map.
@@ -527,6 +719,17 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: snap.mcp_servers.clone(),
+                compactor_model: snap.compactor_model.clone(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: snap.total_input_tokens,
+                total_output_tokens: snap.total_output_tokens,
+                total_cache_read_tokens: snap.total_cache_read_tokens,
+                session_mode: default_session_mode(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
         info!(session_id, "xai: session restored from KV snapshot");
@@ -585,6 +788,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
+            compactor_model: session.compactor_model.clone(),
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -594,6 +798,9 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
             mcp_servers: session.mcp_servers.clone(),
+            total_input_tokens: session.total_input_tokens,
+            total_output_tokens: session.total_output_tokens,
+            total_cache_read_tokens: session.total_cache_read_tokens,
         }
     }
 
@@ -661,6 +868,27 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 Self::tool_config_option(id, label, enabled)
             })
             .collect()
+    }
+
+    /// Build the compactor_model select option for this session.
+    /// Shows "Default (same as session model)" plus all configured xAI models.
+    /// Using available_models enforces same-provider naturally — all options are xAI models.
+    fn compactor_model_config_option(
+        current: Option<&str>,
+        available_models: &[ModelInfo],
+    ) -> SessionConfigOption {
+        let mut opts = vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
+        opts.extend(
+            available_models
+                .iter()
+                .map(|m| SessionConfigSelectOption::new(m.model_id.0.to_string(), m.model_id.0.as_ref())),
+        );
+        SessionConfigOption::select(
+            "compactor_model".to_string(),
+            "Compaction Model".to_string(),
+            current.unwrap_or("").to_string(),
+            opts,
+        )
     }
 }
 
@@ -800,6 +1028,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Capture the client's MCP servers; they are connected per-prompt.
         let mcp_servers = convert_mcp_servers(&req.mcp_servers);
+        let bypass_perms = req.meta
+            .as_ref()
+            .and_then(|m| m.get("bypassPermissions"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let session_mode = if bypass_perms {
+            "bypassPermissions".to_string()
+        } else {
+            "default".to_string()
+        };
+        let permission_rules = self.md_loader.load(&cwd).await
+            .map(|md| PermissionRules::parse(&md))
+            .unwrap_or_default();
 
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
@@ -814,6 +1055,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: session_model_override,
+                compactor_model: None,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
@@ -830,6 +1072,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode,
+                permission_rules,
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -843,10 +1095,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         drop(sessions);
 
         info!(session_id, agent_id = ?self.agent_id, "xai: new session");
+        let mut config_opts = Self::all_tool_config_options(&[]);
+        config_opts.push(Self::compactor_model_config_option(None, &self.available_models));
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None))
-            .config_options(Self::all_tool_config_options(&[])))
+            .config_options(config_opts))
     }
 
     async fn load_session(
@@ -863,11 +1117,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 let mode = s.mode.clone();
                 let model = s.model.clone();
                 let enabled_tools = s.enabled_tools.clone();
+                let compactor_model = s.compactor_model.clone();
                 drop(sessions);
+                let mut cfg = Self::all_tool_config_options(&enabled_tools);
+                cfg.push(Self::compactor_model_config_option(compactor_model.as_deref(), &self.available_models));
                 return Ok(LoadSessionResponse::new()
                     .modes(self.session_mode_state(&mode))
                     .models(self.session_model_state(model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -875,10 +1132,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if self.try_restore_from_kv(&session_id, cwd).await {
             let sessions = self.sessions.lock().await;
             let s = sessions.get(&session_id).expect("just restored");
+            let mut cfg = Self::all_tool_config_options(&s.enabled_tools);
+            cfg.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
             return Ok(LoadSessionResponse::new()
                 .modes(self.session_mode_state(&s.mode))
                 .models(self.session_model_state(s.model.as_deref()))
-                .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+                .config_options(cfg));
         }
 
         Err(not_found(format!("session {session_id} not found")))
@@ -954,6 +1213,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: inherited_model.clone(),
+                compactor_model: None,
                 api_key: inherited_key,
                 history,
                 // Forks start without a response ID — xAI's server cache is per-response,
@@ -969,6 +1229,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 mode: inherited_mode.clone(),
                 tool_policies: Vec::new(),
                 mcp_servers: inherited_mcp_servers,
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: inherited_mode.clone(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
 
@@ -978,10 +1248,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
         drop(sessions);
 
+        let inherited_compactor = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&new_session_id).and_then(|s| s.compactor_model.clone())
+        };
+        let mut cfg = Self::all_tool_config_options(&inherited_tools);
+        cfg.push(Self::compactor_model_config_option(inherited_compactor.as_deref(), &self.available_models));
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref()))
-            .config_options(Self::all_tool_config_options(&inherited_tools)))
+            .config_options(cfg))
     }
 
     async fn close_session(
@@ -1001,6 +1277,22 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let snapshot = self.build_snapshot(&session_id, s);
             store.save(&snapshot).await;
         }
+        // Release persistent bash terminal if one was created for this session.
+        if let Some(s) = sessions.get(&session_id) {
+            if let (Some(tid), Some(wasm_prefix), Some(nats)) = (
+                s.terminal_id.clone(),
+                s.terminal_wasm_prefix.clone(),
+                &self.execution_nats,
+            ) {
+                let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+                if let Ok(payload) = serde_json::to_vec(&agent_client_protocol::ReleaseTerminalRequest::new(
+                    session_id.clone(),
+                    tid,
+                )) {
+                    let _ = nats.request(format!("{base}.release"), payload.into()).await;
+                }
+            }
+        }
         sessions.remove(&session_id);
         drop(sessions);
         info!(session_id, "xai: session closed");
@@ -1016,14 +1308,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             .iter()
             .map(|(id, s)| {
                 let mut info = SessionInfo::new(id.clone(), s.cwd.clone());
-                if s.parent_session_id.is_some() || s.branched_at_index.is_some() {
-                    let mut meta = serde_json::Map::new();
-                    if let Some(ref parent_id) = s.parent_session_id {
-                        meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                let mut meta = serde_json::Map::new();
+                if let Some(ref parent_id) = s.parent_session_id {
+                    meta.insert("parentSessionId".to_string(), serde_json::json!(parent_id));
+                }
+                if let Some(idx) = s.branched_at_index {
+                    meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
+                }
+                if s.total_input_tokens > 0 {
+                    meta.insert("totalInputTokens".to_string(), serde_json::json!(s.total_input_tokens));
+                    meta.insert("totalOutputTokens".to_string(), serde_json::json!(s.total_output_tokens));
+                    if s.total_cache_read_tokens > 0 {
+                        meta.insert("totalCacheReadTokens".to_string(), serde_json::json!(s.total_cache_read_tokens));
                     }
-                    if let Some(idx) = s.branched_at_index {
-                        meta.insert("branchedAtIndex".to_string(), serde_json::json!(idx));
-                    }
+                }
+                if !meta.is_empty() {
                     info = info.meta(meta);
                 }
                 info
@@ -1045,7 +1344,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
-                s.mode = mode_id;
+                s.mode = mode_id.clone();
+                s.session_mode = mode_id;
                 info!(session_id, mode = %s.mode, "xai: set_session_mode");
                 Ok(SetSessionModeResponse::new())
             }
@@ -1121,11 +1421,25 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         }
                     }
                 }
+            } else if config_id == "permissions" {
+                if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                    let text = value.to_string();
+                    s.permission_rules_text = if text.is_empty() { None } else { Some(text) };
+                    info!(session_id, "xai: session permission rules updated");
+                }
+            } else if config_id == "compactor_model" {
+                if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                    let m = value.to_string();
+                    s.compactor_model = if m.is_empty() { None } else { Some(m) };
+                    info!(session_id, "xai: session compactor_model updated");
+                }
             } else {
                 warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
             }
             // ACP spec: response must include the full set of config options and their current values.
-            Self::all_tool_config_options(&s.enabled_tools)
+            let mut opts = Self::all_tool_config_options(&s.enabled_tools);
+            opts.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
+            opts
         };
 
         Ok(SetSessionConfigOptionResponse::new(config_options))
@@ -1172,7 +1486,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !self.sessions.lock().await.contains_key(&session_id) {
             self.try_restore_from_kv(&session_id, String::new()).await;
         }
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
+        let (
+            model,
+            api_key,
+            mut history,
+            last_response_id,
+            enabled_tools,
+            session_system_prompt,
+            mut cwd,
+            session_mode,
+            session_tool_policies,
+            session_mcp_servers,
+            mut terminal_id,
+        ) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1191,6 +1517,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.mode.clone(),
                 s.tool_policies.clone(),
                 s.mcp_servers.clone(),
+                s.terminal_id.clone(),
             )
         };
 
@@ -1198,14 +1525,24 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // checks; drained into session_audit once the turn finishes.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
 
+        // Context compaction (theirs): summarize the oldest portion via the
+        // trogon-compactor service. Falls back to history trimming when the
+        // compactor is unavailable or did not reduce the history below threshold.
         let mut pre_turn_compacted = false;
-        if let Some(nats) = &self.execution_nats {
+        if let Some(nats) = &self.compactor_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
+            if let Ok(Some(compacted)) =
+                maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await
+            {
                 history = xai_history_from_wire(compacted);
                 pre_turn_compacted = true;
             }
+        }
+        // Fallback trim (ours): if compaction did not run or did not shrink the
+        // history, drop the oldest messages so the request stays within bounds.
+        if !pre_turn_compacted && history.len() > self.max_history {
+            trim_history(&mut history, self.max_history);
         }
 
         let trogon_md = self.md_loader.load(&cwd).await;
@@ -1398,6 +1735,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let mut continuations: u32 = 0;
         const MAX_CONTINUATIONS: u32 = 5;
 
+        // Per-prompt token accumulators. Sum across all outer-loop iterations
+        // (tool rounds + continuations) so the total reflects all billed API calls.
+        let mut prompt_input_total: u64 = 0;
+        let mut prompt_output_total: u64 = 0;
+        let mut prompt_cache_read_total: u64 = 0;
+
         // Outer loop — normally executes once. Re-runs when:
         //   Stale-ID retry: a stale `previous_response_id` causes an error →
         //          retry with full history and no ID (transparent recovery).
@@ -1557,12 +1900,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     XaiEvent::Usage {
                         prompt_tokens,
                         completion_tokens,
+                        cached_tokens,
                     } => {
                         info!(
                             session_id,
-                            prompt_tokens, completion_tokens, "xai: token usage"
+                            prompt_tokens, completion_tokens, cached_tokens, "xai: token usage"
                         );
                         current_turn_usage = Some((prompt_tokens, completion_tokens));
+                        prompt_input_total += prompt_tokens;
+                        prompt_output_total += completion_tokens;
+                        prompt_cache_read_total += cached_tokens;
                         let notif = SessionNotification::new(
                             session_id.clone(),
                             SessionUpdate::UsageUpdate(UsageUpdate::new(
@@ -1672,6 +2019,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 let mut outputs: Vec<InputItem> = Vec::with_capacity(pending_tool_calls.len());
                 for (call_id, name, arguments) in pending_tool_calls.drain(..) {
                     let kind = if name == "bash" { ToolKind::Execute } else { ToolKind::Other };
+
                     self.notifier.notify(SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::ToolCall(
@@ -1776,9 +2124,148 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 }
                             } else if let Some(nats) = &self.execution_nats {
                                 let wasm = wasm_prefix.as_deref().unwrap_or("acp.wasm");
-                                execute_bash_via_nats(nats, wasm, &session_id, &arguments, &cwd).await
+                                let result = execute_bash_stateful(nats, wasm, &session_id, &mut terminal_id, &cwd, &arguments).await;
+                                // Persist terminal_id back to session if it was just created
+                                if terminal_id.is_some() {
+                                    let mut sessions = self.sessions.lock().await;
+                                    if let Some(s) = sessions.get_mut(&session_id) {
+                                        if s.terminal_id.is_none() {
+                                            s.terminal_id = terminal_id.clone();
+                                            s.terminal_wasm_prefix = Some(wasm.to_string());
+                                        }
+                                    }
+                                }
+                                result
                             } else {
                                 "bash not available: no execution backend configured".to_string()
+                            }
+                        }
+                        "spawn_agent" => {
+                            let input = serde_json::from_str::<serde_json::Value>(&arguments)
+                                .unwrap_or(serde_json::Value::Null);
+                            let task = input["prompt"].as_str().unwrap_or("").to_string();
+
+                            // Read parent context — lock released before any await
+                            let (parent_cwd, depth, parent_mode, perm_text) = {
+                                let sessions = self.sessions.lock().await;
+                                match sessions.get(&session_id) {
+                                    Some(s) => (s.cwd.clone(), s.spawn_depth, s.session_mode.clone(), s.permission_rules_text.clone()),
+                                    None => (cwd.clone(), 0, "default".to_string(), None),
+                                }
+                            };
+
+                            const MAX_SPAWN_DEPTH: u32 = 3;
+                            if depth >= MAX_SPAWN_DEPTH {
+                                "spawn_agent: max nesting depth reached".to_string()
+                            } else if let Some(nats) = self.execution_nats.as_ref() {
+                                if let Some(runner_cfg) = self.runner_config.clone() {
+                                    // Worktree for isolation
+                                    let worktree = trogon_runner_tools::worktree::create_worktree(&parent_cwd).await;
+                                    let sub_cwd: String = worktree.as_ref()
+                                        .map(|w| w.path.clone())
+                                        .unwrap_or_else(|| parent_cwd.clone());
+
+                                    // Bridge needs a notification_sender but we don't read from it:
+                                    // Bridge subscribes to agent.update.* (JetStream) but xai-runner publishes
+                                    // to client.session.update (plain NATS) — different subjects, Bridge never fires.
+                                    // We subscribe directly to the correct subject after sub_sid is known.
+                                    let (notif_tx, _notif_rx_bridge_unused) = tokio::sync::mpsc::channel::<agent_client_protocol::SessionNotification>(1);
+                                    // _notif_rx_bridge_unused dropped immediately → Bridge.send() silently fails → logged as warning, prompt continues
+
+                                    // Build Bridge (notif_tx is a dummy; clone runner_cfg first so acp_prefix() is available after move)
+                                    let acp_prefix_str = runner_cfg.acp_prefix().to_string();
+                                    let js = acp_nats::NatsJetStreamClient::new(
+                                        async_nats::jetstream::new(nats.clone())
+                                    );
+                                    let bridge = acp_nats::Bridge::new(
+                                        nats.clone(),
+                                        js,
+                                        trogon_std::time::SystemClock,
+                                        &opentelemetry::global::meter("trogon-xai-runner"),
+                                        runner_cfg,
+                                        notif_tx,
+                                    );
+
+                                    let create_result = trogon_runner_tools::spawn_session::create_sub_session(
+                                        &bridge, &sub_cwd, &parent_mode, perm_text.as_deref(),
+                                    ).await;
+
+                                    match create_result {
+                                        Err(e) => {
+                                            drop(worktree);
+                                            format!("spawn_agent error: {e}")
+                                        }
+                                        Ok(sub_sid) => {
+                                            // Set spawn depth on sub-session
+                                            {
+                                                let mut sessions = self.sessions.lock().await;
+                                                if let Some(s) = sessions.get_mut(&sub_sid) {
+                                                    s.spawn_depth = depth + 1;
+                                                }
+                                            }
+
+                                            // Subscribe to the correct subject AFTER sub_sid is known, BEFORE prompt starts.
+                                            // xai-runner publishes notifications to client.session.update (plain NATS).
+                                            let notif_subject = format!("{}.session.{}.client.session.update",
+                                                acp_prefix_str, &sub_sid);
+                                            let text_result = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+                                            let text_clone = text_result.clone();
+                                            let notifier_fwd = self.notifier.clone();
+                                            let parent_sid_fwd = session_id.clone();
+                                            let nats_for_notif = nats.clone();
+                                            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+                                            let notif_handle = tokio::task::spawn_local(async move {
+                                                let Ok(mut sub) = nats_for_notif.subscribe(notif_subject).await else { return; };
+                                                loop {
+                                                    tokio::select! {
+                                                        biased; // check message first — drains buffer before honoring stop
+                                                        msg = sub.next() => {
+                                                            let Some(msg) = msg else { break; };
+                                                            if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload) {
+                                                                if let agent_client_protocol::SessionUpdate::AgentMessageChunk(ref chunk) = notif.update {
+                                                                    if let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content {
+                                                                        text_clone.lock().await.push_str(&t.text);
+                                                                    }
+                                                                }
+                                                                let mut fwd = notif;
+                                                                fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                                notifier_fwd.notify(fwd).await;
+                                                            }
+                                                        }
+                                                        _ = &mut stop_rx => break,
+                                                    }
+                                                }
+                                            });
+
+                                            let run_result = trogon_runner_tools::spawn_session::run_sub_session(
+                                                &bridge, &sub_sid, &task, std::time::Duration::from_secs(3600),
+                                            ).await;
+
+                                            // Signal stop and wait — drains any remaining buffered notifications
+                                            let _ = stop_tx.send(());
+                                            let _ = notif_handle.await;
+
+                                            drop(worktree);
+
+                                            let accumulated = text_result.lock().await.clone();
+                                            match run_result {
+                                                Ok(()) => {
+                                                    if accumulated.is_empty() {
+                                                        "Sub-agent completed.".to_string()
+                                                    } else {
+                                                        accumulated
+                                                    }
+                                                }
+                                                Err(e) => format!("spawn_agent error: {e}"),
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    "spawn_agent: runner_config not set — call with_runner_config() in main.rs".to_string()
+                                }
+                            } else {
+                                "spawn_agent: no execution backend configured".to_string()
                             }
                         }
                         _ => {
@@ -1908,13 +2395,19 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             };
 
             if let Some(mut compacted) = history_for_compaction {
-                compact_or_trim_xai_history(&self.execution_nats, &mut compacted, self.max_history)
+                compact_or_trim_xai_history(&self.compactor_nats, &mut compacted, self.max_history)
                     .await;
                 let snapshot = {
                     let mut sessions = self.sessions.lock().await;
                     match sessions.get_mut(&session_id) {
                         Some(s) => {
                             s.history = compacted;
+                            // Persist cumulative token usage and the terminal ID for
+                            // stateful bash so list_sessions and resume stay accurate.
+                            s.total_input_tokens += prompt_input_total;
+                            s.total_output_tokens += prompt_output_total;
+                            s.total_cache_read_tokens += prompt_cache_read_total;
+                            s.terminal_id = terminal_id.clone();
                             self.session_store
                                 .as_ref()
                                 .map(|_| self.build_snapshot(&session_id, s))
@@ -1925,6 +2418,77 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 };
                 if let (Some(store), Some(snapshot)) = (&self.session_store, snapshot) {
                     store.save(&snapshot).await;
+                }
+            }
+        } else if prompt_input_total > 0 {
+            // Canceled but tokens were already billed — save them so list_sessions
+            // reflects accurate cumulative usage even for canceled prompts.
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.total_input_tokens += prompt_input_total;
+                s.total_output_tokens += prompt_output_total;
+                s.total_cache_read_tokens += prompt_cache_read_total;
+                if let Some(store) = &self.session_store {
+                    let snapshot = self.build_snapshot(&session_id, s);
+                    store.save(&snapshot).await;
+                }
+            }
+        }
+
+        // Context compaction (post-turn). Gap 3: pre-check the threshold before
+        // the NATS call. The async call runs WITHOUT holding the sessions lock.
+        // xAI is stateful: when compaction fires we clear `last_response_id` so
+        // the next turn re-sends the full compacted history (otherwise the server
+        // keeps the old context and the summary never takes effect).
+        if !canceled {
+            if let Some(nats) = self.compactor_nats.clone() {
+                let snapshot = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(&session_id).map(|s| {
+                        (
+                            s.history.clone(),
+                            s.model.clone().unwrap_or_else(|| self.default_model.clone()),
+                            s.compactor_model.clone(),
+                        )
+                    })
+                };
+                if let Some((history, model, compactor_model)) = snapshot {
+                    let context_window = context_window_tokens(&model);
+                    if crate::compaction::should_compact(&history, context_window) {
+                        let (new_history, compacted) = crate::compaction::compact(
+                            &nats,
+                            history,
+                            &model,
+                            compactor_model.as_deref(),
+                            context_window,
+                        )
+                        .await;
+                        if compacted {
+                            let mut sessions = self.sessions.lock().await;
+                            if let Some(s) = sessions.get_mut(&session_id) {
+                                s.history = new_history;
+                                s.last_response_id = None;
+                            }
+                            if let (Some(store), Some(s)) =
+                                (&self.session_store, sessions.get(&session_id))
+                            {
+                                let snap = self.build_snapshot(&session_id, s);
+                                store.save(&snap).await;
+                            }
+                            info!(session_id, "xai: context compacted post-turn");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Save audit entries accumulated during this prompt to the session.
+        {
+            let new_entries = audit_buf.lock().map(|g| g.clone()).unwrap_or_default();
+            if !new_entries.is_empty() {
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    append_audit_entries(&mut s.audit_log, new_entries);
                 }
             }
         }
@@ -2152,22 +2716,27 @@ fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
         .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string()))
 }
 
-/// Execute a bash command by delegating to the wasm-runtime over NATS.
+const BASH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const BASH_EXIT_MARKER_PREFIX: &str = "__EXIT_";
+const BASH_EXIT_MARKER_SUFFIX: &str = "__";
+
+/// Execute a bash command using a persistent terminal per session.
 ///
-/// Sends four NATS requests against `{wasm_prefix}.session.{session_id}.client.terminal.*`:
-/// create → wait_for_exit → output → release. Returns the captured stdout/stderr,
-/// or an error message string on failure (never propagates errors — the model
-/// receives the error text as the tool result and can decide how to proceed).
-async fn execute_bash_via_nats(
+/// On the first call, creates a `bash` terminal (no `-c` args) with `cwd` as
+/// the working directory and stores its ID in `terminal_id`. Subsequent calls
+/// reuse the same terminal. The demarcation protocol
+/// `<command>; echo "__EXIT_$?__"` is used to detect completion.
+async fn execute_bash_stateful(
     nats: &async_nats::Client,
     wasm_prefix: &str,
     session_id: &str,
-    arguments: &str,
+    terminal_id: &mut Option<String>,
     cwd: &str,
+    arguments: &str,
 ) -> String {
     use agent_client_protocol::{
-        CreateTerminalRequest, CreateTerminalResponse, ReleaseTerminalRequest,
-        TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+        CreateTerminalRequest, CreateTerminalResponse,
+        TerminalOutputRequest,
     };
 
     let command = match serde_json::from_str::<serde_json::Value>(arguments)
@@ -2178,68 +2747,128 @@ async fn execute_bash_via_nats(
         None => return "error: missing 'command' in bash arguments".to_string(),
     };
 
-    let base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
-    let session_id_owned = session_id.to_string();
-    let nats = nats.clone();
+    let term_base = format!("{wasm_prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{wasm_prefix}.session.{session_id}.client.ext");
 
-    let result = tokio::time::timeout(Duration::from_secs(30), async move {
-        // 1. create terminal
-        let create_req = CreateTerminalRequest::new(session_id_owned.clone(), "bash")
-            .args(vec!["-c".to_string(), command])
+    // 1. Obtain or create the persistent terminal (outside timeout closure to
+    //    allow mutation of terminal_id, which cannot be captured by &mut in async move).
+    let tid: String = if let Some(id) = terminal_id.as_deref() {
+        id.to_string()
+    } else {
+        let create_req = CreateTerminalRequest::new(session_id.to_string(), "bash")
             .cwd(std::path::PathBuf::from(cwd));
         let payload = match serde_json::to_vec(&create_req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        let msg = match nats.request(format!("{base}.create"), payload.into()).await {
+        let msg = match nats.request(format!("{term_base}.create"), payload.into()).await {
             Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
+            Err(e) => return format!("error: creating terminal: {e}"),
         };
-        let create_resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
+        let resp: CreateTerminalResponse = match serde_json::from_slice(&msg.payload) {
             Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
+            Err(e) => return format!("error: parsing create response: {e}"),
         };
-        let tid = create_resp.terminal_id.clone();
+        let new_tid = resp.terminal_id.0.to_string();
+        *terminal_id = Some(new_tid.clone());
+        new_tid
+    };
 
-        // 2. wait for exit
-        let wait_req = WaitForTerminalExitRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&wait_req) {
+    let nats = nats.clone();
+    let session_id_owned = session_id.to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+
+    // 2. Snapshot baseline output length
+    let baseline_len = {
+        let req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
             Ok(p) => p,
             Err(e) => return format!("error: {e}"),
         };
-        if let Err(e) = nats.request(format!("{base}.wait_for_exit"), payload.into()).await {
-            return format!("error: {e}");
+        match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => {
+                serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                    .ok()
+                    .and_then(|v| v["output"].as_str().map(|s| s.len()))
+                    .unwrap_or(0)
+            }
+            Err(_) => 0,
         }
+    };
 
-        // 3. collect output
-        let out_req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
-        let payload = match serde_json::to_vec(&out_req) {
-            Ok(p) => p,
-            Err(e) => return format!("error: {e}"),
-        };
-        let msg = match nats.request(format!("{base}.output"), payload.into()).await {
-            Ok(m) => m,
-            Err(e) => return format!("error: {e}"),
-        };
-        let out: TerminalOutputResponse = match serde_json::from_slice(&msg.payload) {
-            Ok(r) => r,
-            Err(e) => return format!("error: {e}"),
-        };
-
-        // 4. release (best-effort)
-        let rel_req = ReleaseTerminalRequest::new(session_id_owned, tid);
-        if let Ok(payload) = serde_json::to_vec(&rel_req) {
-            let _ = nats.request(format!("{base}.release"), payload.into()).await;
-        }
-
-        out.output
-    })
-    .await;
-
-    match result {
-        Ok(output) => output,
-        Err(_elapsed) => "error: bash execution timed out".to_string(),
+    // 3. Write command with demarcation marker
+    let cmd_with_marker = format!(
+        "{command}; echo \"{BASH_EXIT_MARKER_PREFIX}$?{BASH_EXIT_MARKER_SUFFIX}\"\n"
+    );
+    let write_req = serde_json::json!({
+        "terminal_id": tid,
+        "data": cmd_with_marker.as_bytes()
+    });
+    let payload = match serde_json::to_vec(&write_req) {
+        Ok(p) => p,
+        Err(e) => return format!("error: {e}"),
+    };
+    if let Err(e) = nats.request(format!("{ext_base}.terminal.write_stdin"), payload.into()).await {
+        return format!("error writing to terminal: {e}");
     }
+
+    // 4. Poll for output until marker found or timeout
+    loop {
+        tokio::time::sleep(BASH_POLL_INTERVAL).await;
+
+        let req = TerminalOutputRequest::new(session_id_owned.clone(), tid.clone());
+        let payload = match serde_json::to_vec(&req) {
+            Ok(p) => p,
+            Err(e) => return format!("error: {e}"),
+        };
+        let full_output = match nats.request(format!("{term_base}.output"), payload.into()).await {
+            Ok(msg) => {
+                serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                    .ok()
+                    .and_then(|v| v["output"].as_str().map(str::to_string))
+                    .unwrap_or_default()
+            }
+            Err(e) => return format!("error reading output: {e}"),
+        };
+
+        if full_output.len() > baseline_len {
+            let new_output = &full_output[baseline_len..];
+            if let Some(output) = bash_extract_before_marker(new_output) {
+                return output;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            let partial = if full_output.len() > baseline_len {
+                full_output[baseline_len..].to_string()
+            } else {
+                String::new()
+            };
+            return format!("error: bash timed out. Partial output:\n{partial}");
+        }
+    }
+}
+
+fn bash_extract_before_marker(output: &str) -> Option<String> {
+    let mut last_match: Option<usize> = None;
+    let mut search = output;
+    let mut offset = 0;
+    while let Some(pos) = search.find(BASH_EXIT_MARKER_PREFIX) {
+        let abs = offset + pos;
+        let after = &output[abs + BASH_EXIT_MARKER_PREFIX.len()..];
+        if let Some(end) = after.find(BASH_EXIT_MARKER_SUFFIX) {
+            let code_str = &after[..end];
+            if code_str.chars().all(|c| c.is_ascii_digit()) {
+                last_match = Some(abs);
+            }
+        }
+        offset = abs + BASH_EXIT_MARKER_PREFIX.len();
+        search = &output[offset..];
+    }
+    last_match.map(|pos| {
+        let before = &output[..pos];
+        before.strip_suffix('\n').unwrap_or(before).to_string()
+    })
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
@@ -2252,6 +2881,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2265,6 +2895,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: Vec::new(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2275,6 +2915,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2288,6 +2929,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: Vec::new(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2302,6 +2953,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
 
     pub async fn test_session_cwd(&self, id: &str) -> Option<String> {
         self.sessions.lock().await.get(id).map(|s| s.cwd.clone())
+    }
+
+    pub async fn test_session_compactor_model(&self, id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.compactor_model.clone())
     }
 
     pub async fn test_session_count(&self) -> usize {
@@ -2343,6 +3002,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: response_id,
@@ -2356,6 +3016,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: Vec::new(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2366,6 +3036,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: None,
                 history: Vec::new(),
                 last_response_id: None,
@@ -2379,6 +3050,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: Vec::new(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2389,6 +3070,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history,
                 last_response_id: None,
@@ -2402,6 +3084,16 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
                 mcp_servers: Vec::new(),
+                terminal_id: None,
+                terminal_wasm_prefix: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_cache_read_tokens: 0,
+                session_mode: "default".to_string(),
+                permission_rules: PermissionRules::default(),
+                audit_log: Vec::new(),
+                permission_rules_text: None,
+                spawn_depth: 0,
             },
         );
     }
@@ -2478,6 +3170,12 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         }
     }
 
+    pub async fn test_set_session_spawn_depth(&self, id: &str, depth: u32) {
+        if let Some(s) = self.sessions.lock().await.get_mut(id) {
+            s.spawn_depth = depth;
+        }
+    }
+
     pub async fn test_cancel_channels_len(&self) -> usize {
         self.cancel_senders.lock().await.len()
     }
@@ -2492,6 +3190,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
 
     pub fn test_notifier(&self) -> &N {
         &self.notifier
+    }
+
+    pub async fn test_session_mode(&self, id: &str) -> Option<String> {
+        self.sessions.lock().await.get(id).map(|s| s.session_mode.clone())
+    }
+
+    pub async fn test_session_audit_log(&self, id: &str) -> Vec<trogon_runner_tools::session_store::AuditEntry> {
+        self.sessions.lock().await.get(id).map(|s| s.audit_log.clone()).unwrap_or_default()
     }
 }
 
@@ -2626,6 +3332,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Test".to_string(),
             model: Some("grok-3".to_string()),
+            compactor_model: None,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -2641,6 +3348,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         let resp = agent
@@ -2679,6 +3389,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Test".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -2688,6 +3399,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         assert_eq!(agent.test_session_count().await, 0, "session must not be in memory before load");
@@ -2721,6 +3435,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_session_restores_nonzero_token_totals_from_kv() {
+        use crate::session_store::mock::MockSessionStore;
+        use crate::session_store::{SessionSnapshot, SessionStoring};
+
+        let mock_http = Arc::new(crate::http_client::mock::MockXaiHttpClient::new());
+        let mock_notifier = Arc::new(crate::session_notifier::MockSessionNotifier::new());
+        let store = Arc::new(MockSessionStore::new());
+        let agent = XaiAgent::with_deps(mock_notifier, "grok-3", "test-key", mock_http)
+            .with_session_store(Arc::clone(&store) as Arc<dyn SessionStoring>);
+
+        store.loads.lock().unwrap().push(SessionSnapshot {
+            id: "sess-tok".to_string(),
+            tenant_id: "default".to_string(),
+            name: "Test".to_string(),
+            model: None,
+            compactor_model: None,
+            tools: vec![],
+            memory_path: None,
+            agent_id: None,
+            messages: vec![],
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+            updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+            parent_session_id: None,
+            branched_at_index: None,
+            mcp_servers: vec![],
+            total_input_tokens: 100,
+            total_output_tokens: 50,
+            total_cache_read_tokens: 25,
+        });
+
+        agent
+            .load_session(LoadSessionRequest::new("sess-tok", "/tmp"))
+            .await
+            .expect("must succeed via KV fallback");
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == "sess-tok")
+            .expect("session must appear in list after KV restore");
+        let meta = info.meta.as_ref().expect("meta must be present when token totals > 0");
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(100),
+            "totalInputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalOutputTokens").and_then(|v| v.as_u64()),
+            Some(50),
+            "totalOutputTokens must be restored from KV snapshot"
+        );
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "totalCacheReadTokens must be restored from KV snapshot"
+        );
+    }
+
+    #[tokio::test]
     async fn load_session_kv_empty_tools_re_enables_all() {
         use crate::session_store::mock::MockSessionStore;
         use crate::session_store::{SessionSnapshot, SessionStoring};
@@ -2737,6 +3511,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Old".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -2746,6 +3521,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         agent
@@ -2785,6 +3563,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "History test".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -2810,6 +3589,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         agent
@@ -2843,6 +3625,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Model test".to_string(),
             model: Some("grok-3-mini".to_string()),
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -2852,6 +3635,9 @@ mod tests {
             parent_session_id: None,
             branched_at_index: None,
             mcp_servers: vec![],
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_read_tokens: 0,
         });
 
         let resp = agent
@@ -3286,11 +4072,60 @@ mod tests {
             ))
             .await
             .unwrap();
+        // AVAILABLE_TOOLS toggles + compactor_model
         assert_eq!(
             resp.config_options.len(),
-            AVAILABLE_TOOLS.len(),
-            "response must include all known config options even for unknown option ids"
+            AVAILABLE_TOOLS.len() + 1,
+            "response must include all known config options (tools + compactor_model) even for unknown option ids"
         );
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_is_stored() {
+        let agent = make_agent();
+        agent.test_insert_session("cfg-cm", "/tmp", None).await;
+        assert_eq!(
+            agent.test_session_compactor_model("cfg-cm").await,
+            None,
+            "starts unset"
+        );
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "cfg-cm",
+                "compactor_model",
+                "grok-4-fast",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            agent.test_session_compactor_model("cfg-cm").await,
+            Some("grok-4-fast".to_string()),
+            "compactor_model override must be stored on the session"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_empty_clears() {
+        let agent = make_agent();
+        agent.test_insert_session("cfg-cm2", "/tmp", None).await;
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "cfg-cm2",
+                "compactor_model",
+                "grok-4-fast",
+            ))
+            .await
+            .unwrap();
+        // Empty value clears the override (back to compacting with the session model).
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "cfg-cm2",
+                "compactor_model",
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(agent.test_session_compactor_model("cfg-cm2").await, None);
     }
 
     #[tokio::test]
@@ -4526,6 +5361,7 @@ mod tests {
             XaiEvent::Usage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
+                cached_tokens: 0,
             },
             XaiEvent::TextDelta {
                 text: "answer".to_string(),
@@ -5283,6 +6119,7 @@ mod tests {
             XaiEvent::Usage {
                 prompt_tokens: 42,
                 completion_tokens: 10,
+                cached_tokens: 0,
             },
             XaiEvent::Done,
         ]);
@@ -6309,7 +7146,7 @@ mod tests {
 
         agent.client.push_response(vec![
             XaiEvent::TextDelta { text: "Hello!".into() },
-            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7 },
+            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cached_tokens: 0 },
             XaiEvent::Done,
         ]);
         agent
@@ -7196,5 +8033,460 @@ mod tests {
         ).unwrap();
         let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
         assert!(result.is_err(), "malformed messages must return Err");
+    }
+
+    // ── token tracking ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn token_totals_accumulate_across_continuation_rounds() {
+        // Two outer-loop iterations: Incomplete on first call, Done on second.
+        // Each call reports Usage → totals must sum across both.
+        let (agent, store) = make_agent_with_store();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cached_tokens: 0 },
+            XaiEvent::Finished {
+                reason: crate::client::FinishReason::Incomplete,
+                incomplete_reason: Some("max_output_tokens".to_string()),
+            },
+        ]);
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 8, cached_tokens: 0 },
+            XaiEvent::TextDelta { text: "done".to_string() },
+            XaiEvent::Done,
+        ]);
+
+        agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::from("continue")],
+        )).await.unwrap();
+
+        let saves = store.saves.lock().unwrap();
+        let snap = saves.last().expect("at least one save after prompt");
+        assert_eq!(snap.total_input_tokens, 30, "input tokens must sum across both rounds");
+        assert_eq!(snap.total_output_tokens, 13, "output tokens must sum across both rounds");
+        assert_eq!(snap.total_cache_read_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_saves_tokens_when_usage_received_before_cancel() {
+        // Emits Usage on first (continuation-triggering) response, then the second
+        // stream blocks forever so cancel() fires while usage has already accumulated.
+        let (agent, store) = make_agent_with_store();
+        let resp = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let session_id = resp.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::Usage { prompt_tokens: 7, completion_tokens: 3, cached_tokens: 0 },
+            XaiEvent::Finished {
+                reason: crate::client::FinishReason::Incomplete,
+                incomplete_reason: Some("max_output_tokens".to_string()),
+            },
+        ]);
+        agent.client.push_slow_response(XaiEvent::TextDelta { text: "partial".to_string() });
+
+        let prompt_fut = agent.prompt(PromptRequest::new(
+            session_id.clone(),
+            vec![ContentBlock::from("hi")],
+        ));
+        let cancel_fut = async {
+            loop {
+                if agent.test_cancel_channels_len().await > 0 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            agent.cancel(CancelNotification::new(session_id.clone())).await.unwrap();
+        };
+
+        let (result, _) = tokio::join!(prompt_fut, cancel_fut);
+        assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
+
+        let saves = store.saves.lock().unwrap();
+        // new_session save + cancel-path save (because prompt_input_total > 0)
+        assert!(saves.len() >= 2, "cancel must trigger store.save when usage accumulated");
+        let last = saves.last().unwrap();
+        assert_eq!(last.total_input_tokens, 7, "cancelled prompt must persist accumulated input tokens");
+        assert_eq!(last.total_output_tokens, 3, "cancelled prompt must persist accumulated output tokens");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_exposes_token_totals_after_prompt() {
+        let agent = make_agent();
+        agent.test_insert_session("tok1", "/tmp", None).await;
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 42, completion_tokens: 7, cached_tokens: 3 },
+            XaiEvent::TextDelta { text: "answer".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            "tok1",
+            vec![ContentBlock::from("hello")],
+        )).await.unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp.sessions.iter().find(|s| s.session_id.to_string() == "tok1")
+            .expect("tok1 must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be set after prompt with usage");
+        assert_eq!(meta["totalInputTokens"], 42, "totalInputTokens must equal accumulated input");
+        assert_eq!(meta["totalOutputTokens"], 7, "totalOutputTokens must equal accumulated output");
+        assert_eq!(meta["totalCacheReadTokens"], 3, "totalCacheReadTokens must equal accumulated cache reads");
+    }
+
+    #[tokio::test]
+    async fn fork_session_resets_token_totals_to_zero() {
+        let (agent, store) = make_agent_with_store();
+        let src = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+        let src_id = src.session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 50, completion_tokens: 20, cached_tokens: 0 },
+            XaiEvent::TextDelta { text: "text".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            src_id.clone(),
+            vec![ContentBlock::from("prompt")],
+        )).await.unwrap();
+
+        let fork_resp = agent.fork_session(ForkSessionRequest::new(src_id.clone(), "/fork")).await.unwrap();
+        let fork_id = fork_resp.session_id.to_string();
+
+        let saves = store.saves.lock().unwrap();
+        let fork_snap = saves.iter().find(|s| s.id == fork_id)
+            .expect("fork snapshot must be saved to store");
+        assert_eq!(fork_snap.total_input_tokens, 0, "forked session must start with zero input tokens");
+        assert_eq!(fork_snap.total_output_tokens, 0, "forked session must start with zero output tokens");
+        assert_eq!(fork_snap.total_cache_read_tokens, 0, "forked session must start with zero cache read tokens");
+    }
+
+    #[tokio::test]
+    async fn cache_read_tokens_accumulate_across_prompt() {
+        let agent = make_agent();
+        let sid = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap().session_id.to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 10 },
+            XaiEvent::TextDelta { text: "first".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("a")],
+        )).await.unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::Usage { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 15 },
+            XaiEvent::TextDelta { text: "second".to_string() },
+            XaiEvent::Done,
+        ]);
+        agent.prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::from("b")],
+        )).await.unwrap();
+
+        let resp = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = resp
+            .sessions
+            .iter()
+            .find(|s| s.session_id.to_string() == sid)
+            .expect("session must appear in list");
+        let meta = info.meta.as_ref().expect("meta must be present when tokens > 0");
+        assert_eq!(
+            meta.get("totalCacheReadTokens").and_then(|v| v.as_u64()),
+            Some(25),
+            "cache_read tokens must accumulate across prompts: 10 + 15 = 25"
+        );
+        assert_eq!(
+            meta.get("totalInputTokens").and_then(|v| v.as_u64()),
+            Some(40),
+            "input tokens must also accumulate: 20 + 20 = 40"
+        );
+    }
+
+    // ── bash_extract_before_marker ────────────────────────────────────────────
+
+    #[test]
+    fn bash_extract_no_marker_returns_none() {
+        assert_eq!(bash_extract_before_marker("hello world\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_empty_input_returns_none() {
+        assert_eq!(bash_extract_before_marker(""), None);
+    }
+
+    #[test]
+    fn bash_extract_exit_zero_returns_preceding_output() {
+        assert_eq!(
+            bash_extract_before_marker("hello\n__EXIT_0__\n"),
+            Some("hello".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_exit_nonzero_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("oops\n__EXIT_1__\n"),
+            Some("oops".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_large_exit_code_is_valid() {
+        assert_eq!(
+            bash_extract_before_marker("missing\n__EXIT_127__\n"),
+            Some("missing".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_strips_single_trailing_newline() {
+        // The \n immediately before the marker is produced by the command's own output;
+        // strip it so the model sees clean text.
+        assert_eq!(
+            bash_extract_before_marker("line\n__EXIT_0__\n"),
+            Some("line".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_no_trailing_newline_before_marker_returned_verbatim() {
+        assert_eq!(
+            bash_extract_before_marker("no-newline__EXIT_0__\n"),
+            Some("no-newline".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_multiline_output_preserved() {
+        let output = "line1\nline2\nline3\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("line1\nline2\nline3".to_string()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_command_with_no_output_returns_empty_string() {
+        assert_eq!(
+            bash_extract_before_marker("__EXIT_0__\n"),
+            Some(String::new()),
+        );
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_code_is_ignored() {
+        assert_eq!(bash_extract_before_marker("x\n__EXIT_abc__\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_non_numeric_skipped_valid_marker_still_found() {
+        // Bad marker must not prevent a subsequent valid marker from being recognized.
+        let output = "__EXIT_abc__\nreal output\n__EXIT_0__\n";
+        let result = bash_extract_before_marker(output).expect("valid marker must be found");
+        assert!(result.contains("real output"), "got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_multiple_valid_markers_last_one_wins() {
+        // If two commands somehow write to the same terminal in one call,
+        // the function must return everything before the last marker.
+        let output = "first\n__EXIT_0__\nsecond\n__EXIT_1__\n";
+        let result = bash_extract_before_marker(output).expect("last marker must be found");
+        assert!(result.contains("second"), "content after first marker must be included; got: {result}");
+        assert!(result.contains("first"), "content before first marker must be included; got: {result}");
+    }
+
+    #[test]
+    fn bash_extract_partial_marker_no_closing_suffix_not_matched() {
+        // __EXIT_0 without the closing __ is not a complete marker.
+        assert_eq!(bash_extract_before_marker("output\n__EXIT_0\n"), None);
+    }
+
+    #[test]
+    fn bash_extract_marker_without_any_suffix_not_matched() {
+        assert_eq!(bash_extract_before_marker("__EXIT_42"), None);
+    }
+
+    #[test]
+    fn bash_extract_only_trailing_newline_stripped_not_internal() {
+        // Only the single \n immediately before the marker is stripped;
+        // internal newlines in the output must survive.
+        let output = "a\nb\n__EXIT_0__\n";
+        assert_eq!(
+            bash_extract_before_marker(output),
+            Some("a\nb".to_string()),
+        );
+    }
+
+    // ── set_session_mode ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_session_mode_bypass_permissions_stored() {
+        let agent = make_agent();
+        agent.test_insert_session("s1", "/tmp", None).await;
+        agent.set_session_mode(SetSessionModeRequest::new("s1", "bypassPermissions")).await.unwrap();
+        assert_eq!(agent.test_session_mode("s1").await, Some("bypassPermissions".to_string()));
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_default_stored() {
+        let agent = make_agent();
+        agent.test_insert_session("s1", "/tmp", None).await;
+        agent.set_session_mode(SetSessionModeRequest::new("s1", "default")).await.unwrap();
+        assert_eq!(agent.test_session_mode("s1").await, Some("default".to_string()));
+    }
+
+    #[tokio::test]
+    async fn set_session_mode_unknown_rejected() {
+        let agent = make_agent();
+        agent.test_insert_session("s1", "/tmp", None).await;
+        assert!(agent.set_session_mode(SetSessionModeRequest::new("s1", "turbo")).await.is_err());
+    }
+
+    // ── permission checks ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn evaluate_permission_bypass_allows() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: src/**\n");
+        let input = serde_json::json!({"path": "src/main.rs"});
+        // In bypass mode, deny rules are ignored.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, true, &rules),
+            PermDecision::Allow
+        ));
+    }
+
+    #[test]
+    fn evaluate_permission_deny_rule_denies() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::parse("## Permissions\ndeny_paths: .env\n");
+        let input = serde_json::json!({"path": ".env"});
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Deny
+        ));
+    }
+
+    #[test]
+    fn evaluate_permission_no_rule_asks() {
+        use trogon_runner_tools::permission_rules::PermissionRules;
+        let rules = PermissionRules::default();
+        let input = serde_json::json!({"path": "src/main.rs"});
+        // No matching rule no longer auto-allows — it falls through to the interactive gate.
+        assert!(matches!(
+            evaluate_permission("read_file", &input, false, &rules),
+            PermDecision::Ask
+        ));
+    }
+
+    #[test]
+    fn record_permission_audit_writes_outcome() {
+        let audit: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let input = serde_json::json!({"path": ".env"});
+        record_permission_audit(&audit, "read_file", &input, AuditOutcome::Denied);
+        let log = audit.lock().unwrap();
+        assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
+        assert_eq!(log[0].input_summary, ".env");
+    }
+
+    // ── spawn_agent interceptor ───────────────────────────────────────────────
+
+    /// When spawn_depth is at MAX_SPAWN_DEPTH the interceptor returns an error
+    /// message without attempting any NATS sub-session.
+    #[tokio::test]
+    async fn spawn_agent_max_depth_guard_returns_error_message() {
+        let agent = make_agent();
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        // Elevate the session to MAX_SPAWN_DEPTH (3) so the guard fires.
+        agent.test_set_session_spawn_depth(&sid, 3).await;
+
+        // The model requests spawn_agent — the interceptor must reject it immediately.
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-spawn-max".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-spawn-max".to_string(),
+                name: "spawn_agent".to_string(),
+                arguments: r#"{"prompt":"do something"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        // Second call: model acknowledges the tool result and ends.
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+            .await
+            .unwrap();
+
+        // Inspect the second HTTP call's input to verify the interceptor's error message.
+        let calls = agent.client.calls.lock().unwrap();
+        let max_depth_output = calls[1].input.iter().any(|item| {
+            matches!(
+                item,
+                InputItem::FunctionCallOutput { output, .. }
+                    if output.contains("max nesting depth")
+            )
+        });
+        assert!(
+            max_depth_output,
+            "spawn_agent at MAX_SPAWN_DEPTH must return max-nesting-depth error in tool output"
+        );
+    }
+
+    /// When execution_nats is not configured the interceptor returns an error
+    /// message instead of attempting to create a sub-session.
+    #[tokio::test]
+    async fn spawn_agent_interceptor_no_nats_returns_error() {
+        // make_agent() does not call with_execution_nats() so execution_nats is None.
+        let agent = make_agent();
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await
+            .unwrap()
+            .session_id
+            .to_string();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r-spawn-nonats".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-spawn-nonats".to_string(),
+                name: "spawn_agent".to_string(),
+                arguments: r#"{"prompt":"do something"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent
+            .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("spawn")]))
+            .await
+            .unwrap();
+
+        let calls = agent.client.calls.lock().unwrap();
+        let no_backend_output = calls[1].input.iter().any(|item| {
+            matches!(
+                item,
+                InputItem::FunctionCallOutput { output, .. }
+                    if output.contains("no execution backend configured")
+            )
+        });
+        assert!(
+            no_backend_output,
+            "spawn_agent without execution_nats must return 'no execution backend configured'"
+        );
     }
 }

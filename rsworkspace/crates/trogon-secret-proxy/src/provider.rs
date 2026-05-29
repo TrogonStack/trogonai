@@ -24,6 +24,8 @@ pub fn base_url(provider: &str) -> Option<&'static str> {
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "cohere" => Some("https://api.cohere.ai"),
         "mistral" => Some("https://api.mistral.ai"),
+        "xai" => Some("https://api.x.ai"),
+        "openrouter" => Some("https://openrouter.ai/api"),
         // External API providers (used by trogon-agent tools)
         "github" => Some("https://api.github.com"),
         "linear" => Some("https://api.linear.app"),
@@ -46,6 +48,8 @@ mod tests {
         );
         assert_eq!(base_url("cohere"), Some("https://api.cohere.ai"));
         assert_eq!(base_url("mistral"), Some("https://api.mistral.ai"));
+        assert_eq!(base_url("xai"), Some("https://api.x.ai"));
+        assert_eq!(base_url("openrouter"), Some("https://openrouter.ai/api"));
         assert_eq!(base_url("github"), Some("https://api.github.com"));
         assert_eq!(base_url("linear"), Some("https://api.linear.app"));
         assert_eq!(base_url("slack"), Some("https://slack.com/api"));
