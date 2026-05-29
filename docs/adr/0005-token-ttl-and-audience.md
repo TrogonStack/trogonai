@@ -12,7 +12,6 @@ This ADR pins the numeric and semantic contracts for mesh tokens so STS, gateway
 
 References:
 
-- `PENDING_TODO.md` Block 0 (TTL and `aud` discipline), Block 2.1 (STS), Block 2.4 (gateway egress mint)
 - Uber: [Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/)
 
 ## Decision Points
@@ -145,5 +144,5 @@ Per gateway instance, budget **~256 bytes × entry count**. Rule of thumb: `entr
 3. **Scope canonicalization** — exact string format for tool scopes (`tool:{server}::{name}` vs. SpiceDB resource id) before `scope_fingerprint` hashing.
 4. **Callback exchange symmetry** — confirm server→client callbacks always re-exchange with `aud=client_id` even when the inbound mesh token has minutes remaining.
 5. **Cross-region STS** — does cache key need a `region` segment when STS is regional (see Block 0 open questions on trust-bundle replication)?
-6. **OAuth-MCP composition** — does the OAuth access token become the bootstrap credential with the same TTL/`aud` rules, or a parallel profile?
+6. **OAuth-MCP composition** — does the OAuth access token become the bootstrap credential with the same TTL/`aud` rules, or a parallel profile? **Resolved: deferred until first OAuth-fronted MCP client. Semantics pinned (OAuth access token enters STS as `subject_token`); multi-issuer config is a same-day add when the first caller arrives, not standing work.**
 7. **Error code** — dedicate `-32109 audience_mismatch` vs. overload `-32106 auth_expired` with structured `data.reason`.

@@ -6,7 +6,7 @@
 
 ## Context
 
-The Security Token Service (STS) is the mesh identity plane introduced in Block 2.1 (`PENDING_TODO.md`). It exchanges a caller's current credential (bootstrap or upstream mesh token) plus workload attestation for a short-lived, audience-scoped mesh JWT with an appended `act_chain` entry. Every cross-hop agent call and every gateway egress to a backend is expected to pass through STS before the target sees the token.
+The Security Token Service (STS) is the mesh identity plane. It exchanges a caller's current credential (bootstrap or upstream mesh token) plus workload attestation for a short-lived, audience-scoped mesh JWT with an appended `act_chain` entry. Every cross-hop agent call and every gateway egress to a backend is expected to pass through STS before the target sees the token.
 
 The question this ADR resolves is **where that service lives at runtime** — not what it validates (registry, SVID, `aud`, scope) or how keys are stored (ADR 0006). Those behaviors are identical across form factors; only transport, deployment topology, and operational boundaries change.
 
@@ -139,23 +139,22 @@ SDK must not embed minting logic; it calls STS over NATS. CI lint (Block 3) flag
 
 1. **Failure mode — STS unavailable.** Default recommendation: **fail-closed** (mesh stops; gateways return structured error, agents retry with backoff). A degraded-mode escape hatch (propagate bootstrap token without exchange) increases blast radius and breaks `aud` guarantees — if ever allowed, it must be explicit, tenant-scoped, and heavily audited. **Needs human sign-off.**
 
-2. **Is STS itself a `trogon-decider` aggregate?** Exchange validation could be event-sourced (command → events → minted token projection). Lighter alternative: stateless service with JetStream audit only. Decider adds replay/consistency benefits at implementation cost.
+2. **Is STS itself a `trogon-decider` aggregate?** Exchange validation could be event-sourced (command → events → minted token projection). Lighter alternative: stateless service with JetStream audit only. Decider adds replay/consistency benefits at implementation cost. **Resolved: stateless service + JetStream audit; not event-sourced. Reopen only with a concrete replay-or-consistency requirement.**
 
 3. **Registry outage behavior.** Fail-closed vs. stale-cache grace period (how stale is acceptable for `allowed_workloads`?).
 
-4. **Multi-region topology.** Regional STS instances with local registry cache vs. global STS with cross-region NATS latency. Trust-bundle replication SLA.
+4. **Multi-region topology.** Regional STS instances with local registry cache vs. global STS with cross-region NATS latency. Trust-bundle replication SLA. **Resolved: single-region in v1. Regional STS instances with local registry cache when expanding; trust-bundle replication SLA is set at first multi-region deploy (no SLA without a region pair).**
 
-5. **HTTP facade timing.** Do user-facing clients (Block 5 step-up, UI) need STS access in v1, or only mesh-internal services?
+5. **HTTP facade timing.** Do user-facing clients (Block 5 step-up, UI) need STS access in v1, or only mesh-internal services? **Resolved: mesh-internal only in v1. Wire contract is transport-agnostic, so the HTTP facade is a future PR triggered by the first user-facing caller, not a planning gap.**
 
 6. **Non-SPIFFE callers.** Documented allow-list (`wkl: "human"`, `auth_method: "oidc"`) — does STS run the same NATS subject or a separate `mcp.sts.exchange.human`?
 
 7. **SpiceDB on exchange path.** Block 2.1 mentions circuit breaker on SpiceDB outages — is SpiceDB consulted synchronously during exchange or only via precomputed registry ACLs?
 
-8. **OAuth-MCP composition** (`MCP_GATEWAY_PLAN.md:67`). If MCP OAuth tokens enter via callout, does STS accept them as `subject_token`, or only NATS User JWTs?
+8. **OAuth-MCP composition** (`MCP_GATEWAY_PLAN.md:67`). If MCP OAuth tokens enter via callout, does STS accept them as `subject_token`, or only NATS User JWTs? **Resolved: deferred until first OAuth-fronted MCP client. ADR 0005 §OQ6 pins the semantics (OAuth access token enters STS as `subject_token`); the multi-issuer config is a same-day add when the first caller arrives.**
 
 ## References
 
-- `PENDING_TODO.md` — Block 0 (STS form factor), Block 2.1 (STS spec), Block 3 (SDK), Block 7 (docs)
 - `MCP_GATEWAY_PLAN.md` — audit envelope, JetStream subjects, `trogon-decider` touch-points
 - [Uber — Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/) — P99 latency target, per-hop token model
 - [RFC 8693 — OAuth 2.0 Token Exchange](https://www.rfc-editor.org/rfc/rfc8693)

@@ -97,7 +97,7 @@ Full schema: [jwt-claim-schema.md](jwt-claim-schema.md).
 | High-risk tool / HITL required | Park; return approval handle | `-32107` `approval_required` ([adaptive-access.md](adaptive-access.md)) |
 | Context throttle exceeded | Reject with retry hint | `-32105` `rate_limited` |
 
-Shadow mode logs the same violations with `would_deny: true` but allows the bootstrap path ([Block 6](../../PENDING_TODO.md)).
+Shadow mode logs the same violations with `would_deny: true` but allows the bootstrap path.
 
 ---
 
@@ -109,7 +109,11 @@ Shadow mode logs the same violations with `would_deny: true` but allows the boot
 | `shadow` | Full validation + audit; bootstrap still authoritative for allow/deny; exchange runs in parallel for metrics |
 | `enforce` | Mesh token required for gated RPCs; hard reject on violations; egress mint mandatory |
 
-Cutover: zero shadow violations for 7 days, STS P99 < 40 ms, then flip to `enforce`. Rollback: set `shadow`, drain mesh cache ([ADR 0003](../adr/0003-bootstrap-vs-mesh-tokens.md), [Block 6](../../PENDING_TODO.md)).
+### Rollout posture (greenfield)
+
+No legacy fleet, no backfill step. Every caller is onboarded into `trogon-agent-registry` via signed manifest commits processed by `trogon-agent-registry-controller`; SVIDs come from SPIRE (service workloads) or file PEM (dev/CI). The shadow→enforce gradient is a first-deploy safety net rather than a coexistence mechanism.
+
+First-deploy gate: every onboarded caller passes shadow-mode without `aud_mismatch` / `agent_id_missing` / `act_chain_depth_overflow` events across acceptance traffic, and STS P99 < 40 ms over the same window. When real traffic begins to accumulate, escalate to the steady-state bar — zero shadow-mode events for 7 consecutive days — before flipping `MCP_GATEWAY_AGENT_IDENTITY=enforce`. Rollback: set `MCP_GATEWAY_AGENT_IDENTITY=shadow`, drain mesh-token cache ([ADR 0003](../adr/0003-bootstrap-vs-mesh-tokens.md)).
 
 ---
 
