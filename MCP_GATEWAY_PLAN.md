@@ -47,7 +47,7 @@ Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gat
 - [x] Schema cache populated by sniffing `tools/list` → **ADR 0023**; contract: `tests/schema_cache_invalidation.rs`.
 - [ ] Schema-driven redaction → **ADR 0027**; contract: `tests/redaction_rules.rs`.
 - [ ] Hierarchical policy merge → **ADR 0013**; contract: `tests/hierarchical_policy_merge.rs`.
-- [ ] Rate limiting wired with chosen state placement → **ADR 0012**; contract: `tests/rate_limit_caps.rs`.
+- [x] Rate limiting wired with chosen state placement → **ADR 0012**; contract: `tests/rate_limit_caps.rs`.
 
 ### Block F — Phase 3 (WASM components + bundles + multi-protocol) — CODE PENDING
 
