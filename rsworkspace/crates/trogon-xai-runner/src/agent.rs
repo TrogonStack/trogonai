@@ -2038,12 +2038,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             .unwrap_or(serde_json::Value::Null)
                     };
 
-                    let session_mode = {
+                    let (session_mode, permission_rules_text) = {
                         let sessions = self.sessions.lock().await;
                         sessions
                             .get(&session_id)
-                            .map(|s| s.mode.clone())
-                            .unwrap_or_else(default_session_mode)
+                            .map(|s| (s.mode.clone(), s.permission_rules_text.clone()))
+                            .unwrap_or_else(|| (default_session_mode(), None))
                     };
 
                     // `ask_user` is a benign interactive tool — it bypasses the
@@ -2051,11 +2051,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     let allowed = if name == "ask_user" {
                         true
                     } else {
-                        let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
+                        let mut rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
                             PermissionRules::parse(&tmd)
                         } else {
                             PermissionRules::default()
                         };
+                        // Merge runtime permission rules set via the `permissions`
+                        // config option (mirrors trogon-acp-runner) so a deny set at
+                        // runtime is honored, not silently ignored.
+                        if let Some(ref extra) = permission_rules_text {
+                            rules.merge(PermissionRules::parse(extra));
+                        }
                         let allowed_tools = self.permission_store.allowed_tools(&session_id);
                         check_tool_permission(
                             &session_mode,
@@ -2341,6 +2347,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // MED-7: record this turn's tool-permission decisions in the per-session
         // audit trail (recorded even on cancel — the decisions still happened).
+        // Drain ONCE into both the in-memory index (session_audit) and the
+        // persisted session.audit_log; a second drain would find an empty buffer.
         let audit_entries = std::mem::take(&mut *audit_buf.lock().unwrap());
         if !audit_entries.is_empty() {
             self.session_audit
@@ -2348,7 +2356,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 .await
                 .entry(session_id.clone())
                 .or_default()
-                .extend(audit_entries);
+                .extend(audit_entries.clone());
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                append_audit_entries(&mut s.audit_log, audit_entries);
+            }
         }
 
         // Update session history.
@@ -2482,16 +2494,8 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             }
         }
 
-        // Save audit entries accumulated during this prompt to the session.
-        {
-            let new_entries = audit_buf.lock().map(|g| g.clone()).unwrap_or_default();
-            if !new_entries.is_empty() {
-                let mut sessions = self.sessions.lock().await;
-                if let Some(s) = sessions.get_mut(&session_id) {
-                    append_audit_entries(&mut s.audit_log, new_entries);
-                }
-            }
-        }
+        // (audit entries were already drained into session_audit + session.audit_log
+        // above, right after the cancel-channel cleanup.)
 
         Ok(PromptResponse::new(stop_reason))
     }
@@ -8395,6 +8399,49 @@ mod tests {
         let log = audit.lock().unwrap();
         assert_eq!(log[0].outcome, trogon_runner_tools::session_store::AuditOutcome::Denied);
         assert_eq!(log[0].input_summary, ".env");
+    }
+
+    /// A deny rule set at runtime via the `permissions` config option must be
+    /// honored by the tool gate (merged on top of TROGON.md rules), not silently
+    /// ignored. Regression test for the cross-runner permission consistency fix.
+    #[tokio::test]
+    async fn prompt_permission_rules_text_via_config_option_denies_tool() {
+        // No TROGON.md rules; inject deny via set_session_config_option.
+        // A permission channel must be configured (as main.rs does) for the gate
+        // to consult rules; a rule-based deny resolves before the channel is used.
+        let (perm_tx, _perm_rx) =
+            tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+        let agent = make_agent()
+            .with_md_loader(MockTrogonMdLoader(None))
+            .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
+        let sid = agent
+            .new_session(NewSessionRequest::new(std::path::PathBuf::from("/tmp")))
+            .await.unwrap().session_id.to_string();
+
+        agent.set_session_config_option(SetSessionConfigOptionRequest::new(
+            sid.clone(),
+            "permissions",
+            "## Permissions\ndeny_paths: .env\n",
+        )).await.unwrap();
+
+        agent.client.push_response(vec![
+            XaiEvent::ResponseId { id: "r1".to_string() },
+            XaiEvent::FunctionCall {
+                call_id: "cid-perm-txt".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":".env"}"#.to_string(),
+            },
+            XaiEvent::Done,
+        ]);
+        agent.client.push_response(vec![XaiEvent::Done]);
+
+        agent.prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("read")]))
+            .await.unwrap();
+
+        let audit = agent.test_session_audit_log(&sid).await;
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].outcome, AuditOutcome::Denied,
+            "deny rule from permission_rules_text must block the tool");
     }
 
     // ── spawn_agent interceptor ───────────────────────────────────────────────
