@@ -14,6 +14,7 @@ pub(crate) mod jsonrpc;
 pub mod nats;
 pub(crate) mod pending_prompt_waiters;
 pub mod prompt_event;
+pub mod remapping_client;
 pub mod req_id;
 pub mod session_id;
 pub(crate) mod telemetry;
@@ -27,6 +28,7 @@ pub use error::AGENT_UNAVAILABLE;
 pub use ext_method_name::ExtMethodName;
 pub use nats::session::agent::{PromptResponseSubject, ResponseSubject, UpdateSubject};
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+pub use remapping_client::{IdRemap, RemappingClient};
 pub use req_id::ReqId;
 pub use session_id::AcpSessionId;
 #[cfg(not(coverage))]

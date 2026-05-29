@@ -215,6 +215,133 @@ async fn openrouter_runner_registers_with_correct_acp_prefix_metadata() {
     );
 }
 
+/// Verifies that openrouter main.rs correctly registers model IDs in metadata.models
+/// so that CrossRunnerSwitcher can resolve the runner by model ID.
+#[tokio::test]
+async fn openrouter_runner_registers_with_model_ids_in_metadata() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let prefix = "acp.openrouter";
+    let agent_type = "openrouter";
+    // Replicate main.rs OPENROUTER_MODELS parsing
+    let or_models_env = "anthropic/claude-3-5-sonnet,openai/gpt-4o";
+    let model_ids: Vec<String> = or_models_env
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix, "models": model_ids }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    let models = entry.metadata["models"].as_array().expect("metadata.models must be array");
+    let model_strings: Vec<&str> = models.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        model_strings.contains(&"anthropic/claude-3-5-sonnet"),
+        "metadata.models must contain 'anthropic/claude-3-5-sonnet'; got: {model_strings:?}"
+    );
+    assert!(
+        model_strings.contains(&"openai/gpt-4o"),
+        "metadata.models must contain 'openai/gpt-4o'; got: {model_strings:?}"
+    );
+}
+
+/// `find_by_model` routes to the correct runner when xai, openrouter, and codex are all
+/// registered with distinct model ID sets — as happens in a full platform deployment.
+#[tokio::test]
+async fn find_by_model_returns_correct_runner_for_multi_runner_registry() {
+    let (_container, nats) = start_nats().await;
+    let js = async_nats::jetstream::new(nats.clone());
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "xai".to_string(),
+            capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+            nats_subject: "acp.xai.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.xai", "models": ["grok-4"] }),
+        })
+        .await
+        .expect("register xai");
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "openrouter".to_string(),
+            capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
+            nats_subject: "acp.or.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({
+                "acp_prefix": "acp.or",
+                "models": ["anthropic/claude-3-5-sonnet", "openai/gpt-4o"]
+            }),
+        })
+        .await
+        .expect("register openrouter");
+
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "codex".to_string(),
+            capabilities: vec!["chat".to_string(), "code_edit".to_string()],
+            nats_subject: "acp.codex.agent.>".to_string(),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": "acp.codex", "models": ["o4-mini"] }),
+        })
+        .await
+        .expect("register codex");
+
+    // grok-4 → xai
+    let xai = registry.find_by_model("grok-4").await.unwrap().expect("grok-4 must resolve");
+    assert_eq!(xai.agent_type, "xai", "grok-4 must route to xai; got: {}", xai.agent_type);
+    assert_eq!(xai.metadata["acp_prefix"].as_str(), Some("acp.xai"));
+
+    // anthropic/claude-3-5-sonnet → openrouter
+    let or1 = registry
+        .find_by_model("anthropic/claude-3-5-sonnet")
+        .await
+        .unwrap()
+        .expect("claude must resolve");
+    assert_eq!(or1.agent_type, "openrouter", "claude must route to openrouter");
+    assert_eq!(or1.metadata["acp_prefix"].as_str(), Some("acp.or"));
+
+    // openai/gpt-4o → openrouter
+    let or2 = registry
+        .find_by_model("openai/gpt-4o")
+        .await
+        .unwrap()
+        .expect("gpt-4o must resolve");
+    assert_eq!(or2.agent_type, "openrouter", "gpt-4o must route to openrouter");
+
+    // o4-mini → codex
+    let codex = registry.find_by_model("o4-mini").await.unwrap().expect("o4-mini must resolve");
+    assert_eq!(codex.agent_type, "codex", "o4-mini must route to codex");
+    assert_eq!(codex.metadata["acp_prefix"].as_str(), Some("acp.codex"));
+
+    // unknown model → None
+    assert!(
+        registry.find_by_model("gpt-5-unknown").await.unwrap().is_none(),
+        "unknown model must return None from multi-runner registry"
+    );
+}
+
 /// Calling `provision_streams` twice on the same NATS server must succeed —
 /// it creates-or-updates, not create-or-fail.
 #[tokio::test]
@@ -731,6 +858,7 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         tenant_id: "default".to_string(),
         name: "Pre-fix session".to_string(),
         model: None,
+        compactor_model: None,
         tools: vec![],
         memory_path: None,
         messages: vec![],
@@ -740,6 +868,10 @@ async fn pre_fix_snapshot_empty_tools_restores_trogon_tools() {
         parent_session_id: None,
         branched_at_index: None,
         mcp_servers: Vec::new(),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
+        total_cache_creation_tokens: 0,
     };
     use trogon_openrouter_runner::SessionStoring as _;
     store.save(&snap).await;
@@ -893,3 +1025,381 @@ async fn ext_method_export_import_round_trip_with_nats_store() {
         })
         .await;
 }
+
+// ── Stateful bash: terminal lifecycle integration tests (OpenRouter) ──────────
+
+fn spawn_stateful_terminal_responder_openrouter(
+    nats: async_nats::Client,
+    subject_prefix: &str,
+) -> (Arc<Mutex<u32>>, Arc<Mutex<std::collections::HashMap<String, String>>>) {
+    use futures_util::StreamExt as _;
+
+    let create_count = Arc::new(Mutex::new(0u32));
+    let session_outputs: Arc<Mutex<std::collections::HashMap<String, String>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    let cc = create_count.clone();
+    let so = session_outputs.clone();
+    let wildcard = format!("{subject_prefix}.session.>");
+    // session_id segment index: {prefix_parts}.session.{sid}.*
+    let prefix_depth = subject_prefix.split('.').count();
+    tokio::spawn(async move {
+        let mut sub = nats.subscribe(wildcard).await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let sid = subject.split('.').nth(prefix_depth + 1).unwrap_or("").to_string();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                let mut guard = cc.lock().unwrap();
+                *guard += 1;
+                let n = *guard;
+                drop(guard);
+                serde_json::to_vec(&CreateTerminalResponse::new(format!("tid-{n}"))).unwrap()
+            } else if subject.contains("write_stdin") {
+                so.lock()
+                    .unwrap()
+                    .entry(sid)
+                    .or_default()
+                    .push_str("done\n__EXIT_0__\n");
+                vec![]
+            } else if subject.ends_with(".output") {
+                let out = so.lock().unwrap().get(&sid).cloned().unwrap_or_default();
+                serde_json::to_vec(&TerminalOutputResponse::new(out, false)).unwrap()
+            } else {
+                vec![]
+            };
+            let _ = nats.publish(reply, payload.into()).await;
+        }
+    });
+
+    (create_count, session_outputs)
+}
+
+async fn setup_openrouter_execution_registry(
+    nats: &async_nats::Client,
+    wasm_prefix: &str,
+) -> trogon_registry::Registry<async_nats::jetstream::kv::Store> {
+    let js = async_nats::jetstream::new(nats.clone());
+    let reg_store = trogon_registry::provision(&js).await.unwrap();
+    let registry = trogon_registry::Registry::new(reg_store);
+    registry
+        .register(&trogon_registry::AgentCapability {
+            agent_type: "wasm-runtime".to_string(),
+            capabilities: vec!["execution".to_string()],
+            nats_subject: format!("{wasm_prefix}.agent.>"),
+            current_load: 0,
+            metadata: serde_json::json!({ "acp_prefix": wasm_prefix }),
+        })
+        .await
+        .unwrap();
+    registry
+}
+
+/// The bash terminal is created once and reused on all subsequent bash calls
+/// within the same session — the `.create` NATS request must fire exactly once.
+#[tokio::test]
+async fn openrouter_bash_stateful_terminal_reused_on_second_call_same_session() {
+    let (_container, nats) = start_nats().await;
+    let wasm_prefix = "wasm";
+
+    let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
+    let (create_count, _outputs) =
+        spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let http = QueuedHttpClient::new();
+    // Prompt 1: bash call then text
+    http.push(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo a"}"#.to_string(),
+        }],
+    }]);
+    http.push(vec![OpenRouterEvent::TextDelta { text: "done 1".to_string() }]);
+    // Prompt 2 (same session): bash call again
+    http.push(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c2".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo b"}"#.to_string(),
+        }],
+    }]);
+    http.push(vec![OpenRouterEvent::TextDelta { text: "done 2".to_string() }]);
+
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
+        .with_execution_backend(nats.clone(), registry);
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sid = sess.session_id.to_string();
+
+            let r1 = agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("first bash call")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(r1.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "prompt 1 must end with EndTurn: {:?}",
+                r1.stop_reason
+            );
+
+            let r2 = agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("second bash call")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(r2.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "prompt 2 must end with EndTurn: {:?}",
+                r2.stop_reason
+            );
+        })
+        .await;
+
+    assert_eq!(
+        *create_count.lock().unwrap(),
+        1,
+        "terminal must be created once and reused for subsequent bash calls in the same session"
+    );
+}
+
+/// close_session must send a `.release` NATS request to free the bash terminal
+/// that was allocated during the session.
+#[tokio::test]
+async fn openrouter_bash_stateful_terminal_released_on_close_session() {
+    use futures_util::StreamExt as _;
+
+    let (_container, nats) = start_nats().await;
+    let wasm_prefix = "wasm";
+
+    let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
+
+    let released = Arc::new(Mutex::new(false));
+    let output_ready = Arc::new(Mutex::new(false));
+
+    let nats_srv = nats.clone();
+    let rel = released.clone();
+    let out_rdy = output_ready.clone();
+    let wildcard = format!("{wasm_prefix}.session.>");
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe(wildcard).await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let reply = match msg.reply.clone() {
+                Some(r) => r,
+                None => continue,
+            };
+            let subject: &str = msg.subject.as_ref();
+            let payload: Vec<u8> = if subject.ends_with(".create") {
+                serde_json::to_vec(&CreateTerminalResponse::new("tid-1")).unwrap()
+            } else if subject.contains("write_stdin") {
+                *out_rdy.lock().unwrap() = true;
+                vec![]
+            } else if subject.ends_with(".output") {
+                let output = if *out_rdy.lock().unwrap() {
+                    "done\n__EXIT_0__\n".to_string()
+                } else {
+                    String::new()
+                };
+                serde_json::to_vec(&TerminalOutputResponse::new(output, false)).unwrap()
+            } else if subject.ends_with(".release") {
+                *rel.lock().unwrap() = true;
+                vec![]
+            } else {
+                vec![]
+            };
+            let _ = nats_srv.publish(reply, payload.into()).await;
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let http = QueuedHttpClient::new();
+    http.push(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "c1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo hi"}"#.to_string(),
+        }],
+    }]);
+    http.push(vec![OpenRouterEvent::TextDelta { text: "done".to_string() }]);
+
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
+        .with_execution_backend(nats.clone(), registry);
+    let released_check = released.clone();
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sid = sess.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("run bash")]))
+                .await
+                .unwrap();
+
+            assert!(!*released_check.lock().unwrap(), "release must not be sent before close_session");
+
+            agent
+                .close_session(CloseSessionRequest::new(sid))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    assert!(
+        *released.lock().unwrap(),
+        "close_session must send a .release NATS request to free the terminal"
+    );
+}
+
+/// close_session must NOT send a `.release` request when no bash was called
+/// during the session — no terminal was allocated.
+#[tokio::test]
+async fn openrouter_bash_stateful_no_release_when_no_bash_called() {
+    use futures_util::StreamExt as _;
+
+    let (_container, nats) = start_nats().await;
+    let wasm_prefix = "wasm";
+
+    let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
+
+    let released = Arc::new(Mutex::new(false));
+    let nats_srv = nats.clone();
+    let rel = released.clone();
+    let wildcard = format!("{wasm_prefix}.session.>");
+    tokio::spawn(async move {
+        let mut sub = nats_srv.subscribe(wildcard).await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let subject: &str = msg.subject.as_ref();
+            if subject.ends_with(".release") {
+                *rel.lock().unwrap() = true;
+            }
+            if let Some(reply) = msg.reply {
+                let _ = nats_srv.publish(reply, vec![].into()).await;
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // HTTP returns plain text — no bash call
+    let http = QueuedHttpClient::new();
+    http.push(vec![OpenRouterEvent::TextDelta { text: "hello".to_string() }]);
+
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
+        .with_execution_backend(nats.clone(), registry);
+    let released_check = released.clone();
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sid = sess.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(sid.clone(), vec![ContentBlock::from("just answer")]))
+                .await
+                .unwrap();
+
+            agent
+                .close_session(CloseSessionRequest::new(sid))
+                .await
+                .unwrap();
+
+            assert!(
+                !*released_check.lock().unwrap(),
+                "close_session must not send .release when no bash terminal was created"
+            );
+        })
+        .await;
+}
+
+/// Forking a session always starts with `terminal_id: None`. The forked session
+/// must create its own independent bash terminal rather than sharing the parent's.
+#[tokio::test]
+async fn openrouter_bash_stateful_fork_creates_independent_terminal() {
+    let (_container, nats) = start_nats().await;
+    let wasm_prefix = "wasm";
+
+    let registry = setup_openrouter_execution_registry(&nats, wasm_prefix).await;
+    let (create_count, _outputs) =
+        spawn_stateful_terminal_responder_openrouter(nats.clone(), wasm_prefix);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let http = QueuedHttpClient::new();
+    // Parent session: bash call
+    http.push(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "cA1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo parent"}"#.to_string(),
+        }],
+    }]);
+    http.push(vec![OpenRouterEvent::TextDelta { text: "parent done".to_string() }]);
+    // Forked session: bash call (must create a NEW independent terminal)
+    http.push(vec![OpenRouterEvent::ToolCallsReady {
+        calls: vec![AssembledToolCall {
+            id: "cB1".to_string(),
+            name: "bash".to_string(),
+            arguments: r#"{"command":"echo fork"}"#.to_string(),
+        }],
+    }]);
+    http.push(vec![OpenRouterEvent::TextDelta { text: "fork done".to_string() }]);
+
+    let prefix = AcpPrefix::new("acp").unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone(), prefix);
+    let agent = OpenRouterAgent::with_deps(notifier, "test-model", "test-key", http)
+        .with_execution_backend(nats.clone(), registry);
+    let cc_check = create_count.clone();
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sess_a = agent.new_session(NewSessionRequest::new("/tmp")).await.unwrap();
+            let sid_a = sess_a.session_id.to_string();
+
+            let r_a = agent
+                .prompt(PromptRequest::new(sid_a.clone(), vec![ContentBlock::from("parent bash")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(r_a.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "parent prompt must end with EndTurn"
+            );
+            assert_eq!(
+                *cc_check.lock().unwrap(),
+                1,
+                "parent session must create exactly one terminal"
+            );
+
+            // Fork — the fork starts with terminal_id: None (correct by design)
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(sid_a.clone(), "/tmp"))
+                .await
+                .unwrap();
+            let sid_b = fork.session_id.to_string();
+
+            let r_b = agent
+                .prompt(PromptRequest::new(sid_b.clone(), vec![ContentBlock::from("forked bash")]))
+                .await
+                .unwrap();
+            assert!(
+                matches!(r_b.stop_reason, agent_client_protocol::StopReason::EndTurn),
+                "forked prompt must end with EndTurn"
+            );
+
+            assert_eq!(
+                *cc_check.lock().unwrap(),
+                2,
+                "forked session must create its own independent terminal, not inherit the parent's"
+            );
+        })
+        .await;
+}
+

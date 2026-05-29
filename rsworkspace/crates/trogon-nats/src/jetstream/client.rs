@@ -10,7 +10,7 @@ use bytes::Bytes;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
     JetStreamContext, JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage,
-    JetStreamPublisher,
+    JetStreamPublisher, JetStreamStreamUpdater,
 };
 
 #[derive(Clone)]
@@ -37,6 +37,19 @@ impl JetStreamContext for NatsJetStreamClient {
         config: S,
     ) -> Result<jetstream::stream::Stream, async_nats::jetstream::context::CreateStreamError> {
         self.context.get_or_create_stream(config).await
+    }
+}
+
+pub type UpdateStreamError = async_nats::jetstream::context::UpdateStreamError;
+
+impl JetStreamStreamUpdater for NatsJetStreamClient {
+    type UpdateError = UpdateStreamError;
+
+    async fn update_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), Self::UpdateError> {
+        self.context.update_stream(config.into()).await.map(|_| ())
     }
 }
 

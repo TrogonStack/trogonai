@@ -156,6 +156,8 @@ pub enum OpenRouterEvent {
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
+        cache_read_tokens: u64,
+        cache_creation_tokens: u64,
     },
     Finished {
         reason: FinishReason,
@@ -514,9 +516,17 @@ fn process_sse_line(
                 .get("completion_tokens")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
+            let cache_read_tokens = val["usage"]["prompt_tokens_details"]["cached_tokens"]
+                .as_u64()
+                .unwrap_or(0);
+            let cache_creation_tokens = val["usage"]["prompt_tokens_details"]["cache_write_tokens"]
+                .as_u64()
+                .unwrap_or(0);
             pending.push_back(OpenRouterEvent::Usage {
                 prompt_tokens,
                 completion_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
             });
         }
 }
@@ -560,7 +570,7 @@ mod tests {
             r#"data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#,
         ]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 })
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, .. })
         );
     }
 
@@ -594,7 +604,7 @@ mod tests {
 
         assert!(matches!(&events[0], OpenRouterEvent::TextDelta { text } if text == "Hi"));
         assert!(matches!(&events[1], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-        assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 5, completion_tokens: 2 }));
+        assert!(matches!(&events[2], OpenRouterEvent::Usage { prompt_tokens: 5, completion_tokens: 2, .. }));
         assert!(matches!(&events[3], OpenRouterEvent::Done));
     }
 
@@ -729,7 +739,7 @@ mod tests {
         ]);
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], OpenRouterEvent::Finished { reason: FinishReason::Stop }));
-        assert!(matches!(&events[1], OpenRouterEvent::Usage { prompt_tokens: 3, completion_tokens: 1 }));
+        assert!(matches!(&events[1], OpenRouterEvent::Usage { prompt_tokens: 3, completion_tokens: 1, .. }));
     }
 
     #[test]
@@ -738,7 +748,7 @@ mod tests {
             r#"data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":0,"total_tokens":7}}"#,
         ]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 0 })
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 7, completion_tokens: 0, .. })
         );
     }
 
@@ -854,7 +864,7 @@ mod tests {
             r#"data: {"choices":[],"usage":{"prompt_tokens":10}}"#,
         ]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 0 }),
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 0, .. }),
             "missing completion_tokens must default to 0: {events:?}"
         );
     }
@@ -865,7 +875,7 @@ mod tests {
             r#"data: {"choices":[],"usage":{"completion_tokens":5}}"#,
         ]);
         assert!(
-            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 0, completion_tokens: 5 }),
+            matches!(&events[0], OpenRouterEvent::Usage { prompt_tokens: 0, completion_tokens: 5, .. }),
             "missing prompt_tokens must default to 0: {events:?}"
         );
     }

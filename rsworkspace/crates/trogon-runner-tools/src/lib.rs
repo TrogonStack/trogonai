@@ -9,10 +9,12 @@ pub mod permission;
 pub mod permission_bridge;
 pub mod permission_rules;
 pub mod portable_session;
+pub mod spawn_session;
 pub mod trogon_md;
 pub mod session_store;
 pub mod spawn_agent_tool;
 pub mod wasm_bash_tool;
+pub mod worktree;
 
 pub use compaction::{
     compaction_settings_from_env, estimate_tokens, maybe_compact, over_threshold, CompactError,

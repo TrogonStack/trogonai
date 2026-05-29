@@ -6,6 +6,18 @@ edition = "2024"
 [features]
 test-helpers = []
 
+[[test]]
+name = "agent_nats_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "tool_dispatch_integration"
+required-features = ["test-helpers"]
+
+[[test]]
+name = "perm_integration"
+required-features = ["test-helpers"]
+
 [lints]
 workspace = true
 
@@ -28,7 +40,9 @@ async-nats      = { workspace = true, features = ["jetstream", "kv"] }
 trogon-nats         = { workspace = true }
 trogon-registry     = { workspace = true }
 trogon-runner-tools = { path = "../trogon-runner-tools" }
+trogon-std          = { workspace = true }
 trogon-tools        = { path = "../trogon-tools" }
+opentelemetry       = { workspace = true }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }
 futures-util    = { workspace = true }
@@ -44,5 +58,7 @@ uuid            = { workspace = true }
 axum                    = { workspace = true }
 futures                 = { workspace = true }
 httpmock                = "0.7"
+tempfile                = { workspace = true }
 testcontainers-modules  = { version = "0.15", features = ["nats"] }
 trogon-nats             = { workspace = true, features = ["test-support"] }
+trogon-registry         = { workspace = true, features = ["test-support"] }

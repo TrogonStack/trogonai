@@ -64,11 +64,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let agent = DefaultCodexAgent::with_nats(nats.clone(), acp_prefix_parsed.clone(), default_model);
+    let js = trogon_nats::jetstream::NatsJetStreamClient::new(js_ctx);
 
     let local = tokio::task::LocalSet::new();
     let result = local
         .run_until(async {
-            let (_conn, io_task) = AgentSideNatsConnection::new(agent, nats, acp_prefix_parsed, |fut| {
+            let (_conn, io_task) = AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix_parsed, |fut| {
                 tokio::task::spawn_local(fut);
             });
             info!("codex-runner listening on NATS");

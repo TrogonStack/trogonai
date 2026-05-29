@@ -11,13 +11,13 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use agent_client_protocol::{
-    Agent as _, BlobResourceContents, CloseSessionRequest, ContentBlock, EmbeddedResource,
-    EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest, PromptRequest, ResourceLink,
-    SessionNotification, TextResourceContents,
+    Agent as _, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
+    EmbeddedResource, EmbeddedResourceResource, ForkSessionRequest, NewSessionRequest,
+    PromptRequest, ResourceLink, SessionId, SessionNotification, TextResourceContents,
 };
 use async_nats::jetstream;
 use async_trait::async_trait;
-use futures_util::stream::{self, LocalBoxStream};
+use futures_util::stream::{self, LocalBoxStream, StreamExt as _};
 use testcontainers_modules::{
     nats::Nats,
     testcontainers::{ImageExt, runners::AsyncRunner},
@@ -142,7 +142,7 @@ impl OpenRouterHttpClient for UsageHttpClient {
     ) -> LocalBoxStream<'static, OpenRouterEvent> {
         Box::pin(stream::iter(vec![
             OpenRouterEvent::TextDelta { text: "reply".to_string() },
-            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5 },
+            OpenRouterEvent::Usage { prompt_tokens: 10, completion_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
         ]))
     }
 }
@@ -1502,4 +1502,585 @@ async fn new_session_meta_system_prompt_stored_in_session_state() {
         );
         })
         .await;
+}
+
+// ── token tracking persisted to KV ───────────────────────────────────────────
+
+/// After a prompt with token usage, `totalInputTokens` and `totalOutputTokens`
+/// must appear in the SESSIONS KV snapshot.
+#[tokio::test]
+async fn token_totals_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("track my tokens")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(v["total_input_tokens"], 10, "total_input_tokens must be 10 after prompt");
+            assert_eq!(v["total_output_tokens"], 5, "total_output_tokens must be 5 after prompt");
+        })
+        .await;
+}
+
+/// After forking a session that has token totals, the fork's KV snapshot must
+/// not carry the parent's totals (zero values are omitted from JSON).
+#[tokio::test]
+async fn fork_session_token_totals_absent_in_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let src = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let src_id = src.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    src.session_id,
+                    vec![ContentBlock::from("prompt")],
+                ))
+                .await
+                .unwrap();
+
+            let fork = agent
+                .fork_session(ForkSessionRequest::new(src_id.clone(), PathBuf::from("/fork")))
+                .await
+                .unwrap();
+            let fork_id = fork.session_id.to_string();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{fork_id}"))
+                .await
+                .unwrap()
+                .expect("fork snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert!(
+                v.get("total_input_tokens").is_none(),
+                "fork must not inherit parent's total_input_tokens; got: {v}"
+            );
+            assert!(
+                v.get("total_output_tokens").is_none(),
+                "fork must not inherit parent's total_output_tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cache tokens in KV ────────────────────────────────────────────────────────
+
+/// HTTP client that returns non-zero cache_read and cache_creation tokens.
+struct CacheUsageHttpClient;
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for CacheUsageHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        Box::pin(stream::iter(vec![
+            OpenRouterEvent::TextDelta {
+                text: "cached".to_string(),
+            },
+            OpenRouterEvent::Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                cache_read_tokens: 30,
+                cache_creation_tokens: 15,
+            },
+        ]))
+    }
+}
+
+/// After a prompt with non-zero cache_read_tokens and cache_creation_tokens,
+/// both fields must be persisted to the SESSIONS KV bucket.
+#[tokio::test]
+async fn cache_tokens_persisted_to_sessions_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent =
+        OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", CacheUsageHttpClient)
+            .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            agent
+                .prompt(PromptRequest::new(
+                    resp.session_id,
+                    vec![ContentBlock::from("use cache")],
+                ))
+                .await
+                .unwrap();
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_cache_read_tokens"], 30,
+                "total_cache_read_tokens must be 30; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_creation_tokens"], 15,
+                "total_cache_creation_tokens must be 15; got: {v}"
+            );
+        })
+        .await;
+}
+
+/// Token totals must accumulate across multiple prompts in the same session.
+/// UsageHttpClient returns 10 prompt + 5 completion per call, so three prompts
+/// must yield total_input_tokens=30 and total_output_tokens=15.
+#[tokio::test]
+async fn token_totals_accumulate_across_three_prompts() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let agent = OpenRouterAgent::with_deps(NoOpNotifier, "test-model", "dummy-key", UsageHttpClient)
+        .with_session_store(Arc::new(store));
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let resp = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap();
+            let session_id = resp.session_id.to_string();
+
+            for i in 0..3u32 {
+                agent
+                    .prompt(PromptRequest::new(
+                        resp.session_id.clone(),
+                        vec![ContentBlock::from(format!("prompt {i}"))],
+                    ))
+                    .await
+                    .unwrap();
+            }
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 30,
+                "total_input_tokens must accumulate to 30 across 3 prompts (10 each); got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 15,
+                "total_output_tokens must accumulate to 15 across 3 prompts (5 each); got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── cancel path persists tokens to KV ────────────────────────────────────────
+
+/// HTTP client that emits Usage + text then blocks forever.
+/// Signals `ready` when `chat_stream` is invoked so the test can send cancel
+/// after Usage has been processed.
+struct SlowCancelHttpClient {
+    ready: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for SlowCancelHttpClient {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        self.ready.notify_one();
+        let initial = stream::iter(vec![
+            OpenRouterEvent::TextDelta {
+                text: "partial".to_string(),
+            },
+            OpenRouterEvent::Usage {
+                prompt_tokens: 12,
+                completion_tokens: 7,
+                cache_read_tokens: 25,
+                cache_creation_tokens: 10,
+            },
+        ]);
+        Box::pin(initial.chain(stream::pending()))
+    }
+}
+
+/// When a prompt is cancelled after the OpenRouter Usage event has been
+/// received, the cancel path must persist the billed tokens to the SESSIONS KV
+/// bucket.
+#[tokio::test]
+async fn cancel_prompt_token_totals_persisted_to_kv() {
+    let (js, _c) = make_js().await;
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let agent = Arc::new(
+        OpenRouterAgent::with_deps(
+            NoOpNotifier,
+            "test-model",
+            "dummy-key",
+            SlowCancelHttpClient {
+                ready: Arc::clone(&ready),
+            },
+        )
+        .with_session_store(Arc::new(store)),
+    );
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let session_id = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/tmp")))
+                .await
+                .unwrap()
+                .session_id
+                .to_string();
+
+            let agent_prompt = Arc::clone(&agent);
+            let sid_for_prompt = session_id.clone();
+            let prompt_handle = tokio::task::spawn_local(async move {
+                agent_prompt
+                    .prompt(PromptRequest::new(
+                        sid_for_prompt,
+                        vec![ContentBlock::from("partial call")],
+                    ))
+                    .await
+                    .unwrap()
+            });
+
+            // `chat_stream` was called → Usage event is in the stream buffer.
+            // Cancel fires after Usage has been processed by the streaming loop.
+            ready.notified().await;
+            agent
+                .cancel(CancelNotification::new(session_id.clone()))
+                .await
+                .unwrap();
+
+            let result = prompt_handle.await.unwrap();
+            assert_eq!(
+                result.stop_reason,
+                agent_client_protocol::StopReason::Cancelled,
+                "stop_reason must be Cancelled"
+            );
+
+            let kv = js.get_key_value("SESSIONS").await.expect("get KV");
+            let bytes = kv
+                .get(&format!("default.{session_id}"))
+                .await
+                .unwrap()
+                .expect("snapshot must exist after cancel with billed tokens");
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+            assert_eq!(
+                v["total_input_tokens"], 12,
+                "cancel path must persist input tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_output_tokens"], 7,
+                "cancel path must persist output tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_read_tokens"], 25,
+                "cancel path must persist cache_read tokens; got: {v}"
+            );
+            assert_eq!(
+                v["total_cache_creation_tokens"], 10,
+                "cancel path must persist cache_creation tokens; got: {v}"
+            );
+        })
+        .await;
+}
+
+// ── Context compaction end-to-end (Gap 2: reuse own tail) ────────────────────────
+
+/// Drives a prompt whose history exceeds 85 % of the model's window, with a
+/// stand-in compactor responder. Verifies openrouter compacts PRE-request via
+/// NATS AND applies Gap 2 correctly: it reuses its OWN original tail message
+/// (by `kept_count`), NOT the responder's kept message — so tool_calls/tool
+/// pairing is never reconstructed.
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn prompt_compacts_pre_request_and_reuses_own_tail() {
+    use std::time::Duration;
+    use trogon_openrouter_runner::{MockOpenRouterHttpClient, MockSessionNotifier};
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    let js = jetstream::new(nats.clone());
+    let store = NatsSessionStore::open(&js, 0).await.expect("store");
+
+    // Stand-in compactor: returns summary + ack + a DIFFERENT placeholder for the
+    // kept message, plus kept_count=1. If openrouter (wrongly) used the responder's
+    // kept message, the tail would be "RESPONDER-PLACEHOLDER"; Gap 2 means it must
+    // instead reuse its OWN original tail ("RECENT-ORIGINAL").
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            if let Some(reply) = msg.reply {
+                let body = serde_json::json!({
+                    "messages": [
+                        {"role": "user", "content": [{"type": "text", "text": "<context-summary>\nsummary\n</context-summary>"}]},
+                        {"role": "assistant", "content": [{"type": "text", "text": "ack"}]},
+                        {"role": "user", "content": [{"type": "text", "text": "RESPONDER-PLACEHOLDER"}]}
+                    ],
+                    "compacted": true,
+                    "tokens_before": 999_999,
+                    "tokens_after": 100,
+                    "kept_count": 1
+                });
+                responder
+                    .publish(reply, serde_json::to_vec(&body).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // gpt-4 → 8192-token window; 85 % ≈ 6963 tokens ≈ 28 KB. Mock LLM returns a
+    // reply for the turn (test helpers live on the Mock-typed agent).
+    let http = MockOpenRouterHttpClient::new();
+    http.push_response(vec![OpenRouterEvent::TextDelta { text: "Hello back!".to_string() }]);
+    let agent = OpenRouterAgent::with_deps(MockSessionNotifier::new(), "gpt-4", "test-key", http)
+        .with_session_store(Arc::new(store))
+        .with_compactor(nats.clone());
+
+    // 12 messages × ~2.5 KB ≈ 30 KB ≈ 7500 tokens > threshold. Last message is the
+    // recognizable original tail that Gap 2 must reuse verbatim.
+    let pad = "y".repeat(2_500);
+    let mut history = Vec::new();
+    for i in 0..11 {
+        history.push(Message::user(format!("old {i} {pad}")));
+    }
+    history.push(Message::user(format!("RECENT-ORIGINAL {pad}")));
+    agent.test_insert_session_with_history("s-or-compact", history).await;
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            agent
+                .prompt(PromptRequest::new(
+                    SessionId::from("s-or-compact"),
+                    vec![ContentBlock::from("hi".to_string())],
+                ))
+                .await
+                .unwrap();
+
+            let hist = agent.test_session_history("s-or-compact").await;
+            // First message is the summary checkpoint.
+            assert!(
+                hist[0].content.contains("context-summary"),
+                "first message must be the summary; got: {:?}",
+                hist[0].content
+            );
+            // Gap 2: the kept tail is the runner's OWN original message…
+            assert!(
+                hist.iter().any(|m| m.content.contains("RECENT-ORIGINAL")),
+                "must reuse the runner's own original tail message"
+            );
+            // …NOT the responder's placeholder.
+            assert!(
+                !hist.iter().any(|m| m.content.contains("RESPONDER-PLACEHOLDER")),
+                "must NOT use the compactor's kept message (Gap 2: no reverse conversion)"
+            );
+        })
+        .await;
+}
+
+// ── Permission emit e2e: openrouter emits request_permission on Ask and gates on the reply ──
+
+/// Notifier that records every notification so the test can assert the deny update.
+struct OrRecordingNotifier {
+    notes: Arc<Mutex<Vec<SessionNotification>>>,
+}
+
+#[async_trait(?Send)]
+impl SessionNotifier for OrRecordingNotifier {
+    async fn notify(&self, n: SessionNotification) {
+        self.notes.lock().unwrap().push(n);
+    }
+}
+
+/// First turn asks to call the client-side `read_file` tool (no permission rule →
+/// `Ask`); ends on the continuation turn.
+struct AskReadFileThenDone {
+    calls: Arc<Mutex<u32>>,
+}
+
+#[async_trait(?Send)]
+impl OpenRouterHttpClient for AskReadFileThenDone {
+    async fn chat_stream(
+        &self,
+        _model: &str,
+        _messages: &[Message],
+        _api_key: &str,
+        _tools: &[ToolDef],
+    ) -> LocalBoxStream<'static, OpenRouterEvent> {
+        let mut n = self.calls.lock().unwrap();
+        *n += 1;
+        let call = *n;
+        drop(n);
+        if call == 1 {
+            Box::pin(stream::iter(vec![OpenRouterEvent::ToolCallsReady {
+                calls: vec![AssembledToolCall {
+                    id: "c1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path":"secret.txt"}"#.to_string(),
+                }],
+            }]))
+        } else {
+            Box::pin(stream::iter(vec![OpenRouterEvent::TextDelta {
+                text: "done".to_string(),
+            }]))
+        }
+    }
+}
+
+/// End-to-end: a tool hitting `RuleDecision::Ask` makes openrouter emit an ACP
+/// `request_permission` over NATS; the IDE stand-in replies "reject"; the runner
+/// gates (denies) the tool. Proves the runner-side half of the permission relay.
+#[tokio::test]
+async fn prompt_ask_emits_request_permission_and_gates_on_reply() {
+    use acp_nats::acp_prefix::AcpPrefix;
+    use agent_client_protocol::{
+        RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate,
+    };
+    use std::time::Duration;
+
+    let container = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("start NATS container");
+    let port = container.get_host_port_ipv4(4222).await.expect("port");
+    let nats = async_nats::connect(format!("nats://127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+
+    // IDE stand-in: capture the permission request, reply "reject".
+    let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured_c = captured.clone();
+    let responder = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = responder
+            .subscribe("acp.session.*.client.session.request_permission".to_string())
+            .await
+            .unwrap();
+        while let Some(msg) = sub.next().await {
+            *captured_c.lock().unwrap() = Some(String::from_utf8_lossy(&msg.payload).to_string());
+            if let Some(reply) = msg.reply {
+                let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                    SelectedPermissionOutcome::new("reject"),
+                ));
+                responder
+                    .publish(reply, serde_json::to_vec(&resp).unwrap().into())
+                    .await
+                    .ok();
+            }
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let notes = Arc::new(Mutex::new(Vec::new()));
+    let agent = OpenRouterAgent::with_deps(
+        OrRecordingNotifier { notes: notes.clone() },
+        "openai/gpt-4o",
+        "dummy-key",
+        AskReadFileThenDone { calls: Arc::new(Mutex::new(0)) },
+    )
+    .with_permissions(nats.clone(), AcpPrefix::new("acp").unwrap());
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let sid = agent
+                .new_session(NewSessionRequest::new(PathBuf::from("/")))
+                .await
+                .unwrap()
+                .session_id;
+            agent
+                .prompt(PromptRequest::new(sid, vec![ContentBlock::from("read the file")]))
+                .await
+                .unwrap();
+        })
+        .await;
+
+    // 1. openrouter emitted request_permission for the gated tool.
+    let payload = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("openrouter must emit request_permission when a tool hits Ask");
+    assert!(
+        payload.contains("read_file"),
+        "permission request must carry the tool name; got: {payload}"
+    );
+
+    // 2. The IDE's reject decision gated the tool (denied, never executed).
+    let notes = notes.lock().unwrap();
+    let denied = notes.iter().any(|n| match &n.update {
+        SessionUpdate::ToolCallUpdate(tcu) => tcu
+            .fields
+            .raw_output
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(|s| s.contains("permission denied"))
+            .unwrap_or(false),
+        _ => false,
+    });
+    assert!(
+        denied,
+        "tool must be denied after the IDE rejected the permission request"
+    );
 }
