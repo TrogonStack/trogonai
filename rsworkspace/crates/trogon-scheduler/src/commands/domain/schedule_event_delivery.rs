@@ -1,5 +1,5 @@
 use buffa::MessageField;
-use buffa_types::google::protobuf::Duration;
+use trogonai_proto::convert::duration_from_seconds;
 use trogonai_proto::scheduler::schedules::v1;
 
 use super::{DeliveryRoute, ScheduleEventSamplingSource, TtlSeconds};
@@ -25,13 +25,7 @@ impl From<&ScheduleEventDelivery> for v1::Delivery {
                     v1::delivery::NatsMessage {
                         subject: subject.as_str().to_string(),
                         ttl: ttl_sec
-                            .map(|secs| {
-                                MessageField::some(Duration {
-                                    seconds: i64::try_from(secs.as_u64()).unwrap_or(i64::MAX),
-                                    nanos: 0,
-                                    ..Duration::default()
-                                })
-                            })
+                            .map(|secs| MessageField::some(duration_from_seconds(secs.as_u64())))
                             .unwrap_or_else(MessageField::none),
                         source: source
                             .as_ref()
