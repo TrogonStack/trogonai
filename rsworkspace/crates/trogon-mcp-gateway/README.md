@@ -66,7 +66,7 @@ Both methods use the same **subject**: type `trogon/principal` (configurable), i
 
 ### JSON-RPC codes (gateway)
 
-Client-visible errors partially align with `MCP_GATEWAY_PLAN.md` Trogon allocation (`rpc_codes`): `-32100` policy deny after SpiceDB refusal, `-32102` upstream timeout, `-32103` upstream request failure, `-32106` expired JWT bearer, `-32107` SpiceDB unreachable / PDP error, `-32109` auth required when **`require`** and gate applies, `-32110` malformed or invalid Bearer token under **`require`**.
+Client-visible errors partially align with the Trogon allocation in `rpc_codes` (see `docs/identity/reference-error-codes.md`): `-32100` policy deny after SpiceDB refusal, `-32102` upstream timeout, `-32103` upstream request failure, `-32106` expired JWT bearer, `-32107` SpiceDB unreachable / PDP error, `-32109` auth required when **`require`** and gate applies, `-32110` malformed or invalid Bearer token under **`require`**.
 
 | Variable | Meaning |
 |---------|---------|
