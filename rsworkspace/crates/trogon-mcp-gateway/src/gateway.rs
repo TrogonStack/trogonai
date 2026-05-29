@@ -14,7 +14,7 @@ use trogon_nats::inject_trace_context;
 
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
-use crate::audit::{self, AuditEnvelope};
+use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
@@ -23,6 +23,10 @@ use crate::egress::{
 use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
+use crate::redaction::{
+    RedactionApplyResult, RedactionDirection, RedactionOutcome, RedactionRegistry, RewriteEntry, SchemaRedactionContext,
+    apply_schema_redaction, merge_outcomes,
+};
 use crate::rpc_codes;
 use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
@@ -515,9 +519,57 @@ async fn handle_ingress_inner(
         }
     };
 
+    let tenant_for_redaction = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant_hdr.as_deref());
+    let (forward_payload, request_redaction, request_redaction_skip) = redact_tools_call_payload(
+        server_id,
+        tool_call.as_deref(),
+        &jsonrpc_method,
+        tenant_for_redaction,
+        RedactionDirection::Request,
+        &msg.payload,
+    )
+    .await?;
+
+    if let Some(reason) = request_redaction_skip.as_ref() {
+        warn!(
+            server_id = %server_id,
+            tool = tool_call.as_deref().unwrap_or(""),
+            reason = %reason,
+            "schema-driven redaction skipped on request"
+        );
+        publish_redaction_skipped_audit(
+            jetstream,
+            prefix,
+            "request",
+            &msg.subject,
+            &backend_subject,
+            &jsonrpc_method,
+            &gateway_identity,
+            request_id.clone(),
+            reason,
+        )
+        .await;
+    } else if !request_redaction.rewrites.is_empty() {
+        publish_redaction_rule_audits(
+            jetstream,
+            prefix,
+            "request",
+            &msg.subject,
+            &backend_subject,
+            &jsonrpc_method,
+            &gateway_identity,
+            request_id.clone(),
+            &request_redaction.rewrites,
+        )
+        .await;
+    }
+
     if msg.reply.is_none() {
         client
-            .publish_with_headers(backend_subject.clone(), outbound_headers, msg.payload.clone())
+            .publish_with_headers(backend_subject.clone(), outbound_headers, forward_payload)
             .await
             .map_err(|e| GatewayError(e.to_string()))?;
         client.flush().await.map_err(|e| GatewayError(e.to_string()))?;
@@ -530,6 +582,7 @@ async fn handle_ingress_inner(
             &jsonrpc_method,
             &gateway_identity,
             request_id.clone(),
+            &request_redaction,
         )
         .await;
         return Ok(());
@@ -538,7 +591,7 @@ async fn handle_ingress_inner(
     let timeout = settings.mcp.operation_timeout();
     let backend_result = tokio::time::timeout(
         timeout,
-        client.request_with_headers(backend_subject.clone(), outbound_headers, msg.payload.clone()),
+        client.request_with_headers(backend_subject.clone(), outbound_headers, forward_payload),
     )
     .await;
 
@@ -547,6 +600,58 @@ async fn handle_ingress_inner(
         Ok(Err(_)) => "error",
         Err(_) => "error",
     };
+
+    let mut combined_redaction = request_redaction;
+    let mut redacted_response_payload: Option<Bytes> = None;
+    if let Ok(Ok(response)) = &backend_result {
+        let (response_payload, response_redaction, response_skip) = redact_tools_call_payload(
+            server_id,
+            tool_call.as_deref(),
+            &jsonrpc_method,
+            tenant_for_redaction,
+            RedactionDirection::Response,
+            &response.payload,
+        )
+        .await?;
+        if let Some(reason) = response_skip.as_ref() {
+            warn!(
+                server_id = %server_id,
+                tool = tool_call.as_deref().unwrap_or(""),
+                reason = %reason,
+                "schema-driven redaction skipped on response"
+            );
+            publish_redaction_skipped_audit(
+                jetstream,
+                prefix,
+                "response",
+                &msg.subject,
+                &backend_subject,
+                &jsonrpc_method,
+                &gateway_identity,
+                request_id.clone(),
+                reason,
+            )
+            .await;
+            redacted_response_payload = Some(response.payload.clone());
+        } else {
+            if !response_redaction.rewrites.is_empty() {
+                publish_redaction_rule_audits(
+                    jetstream,
+                    prefix,
+                    "response",
+                    &msg.subject,
+                    &backend_subject,
+                    &jsonrpc_method,
+                    &gateway_identity,
+                    request_id.clone(),
+                    &response_redaction.rewrites,
+                )
+                .await;
+            }
+            combined_redaction = merge_outcomes(combined_redaction, response_redaction);
+            redacted_response_payload = Some(response_payload);
+        }
+    }
 
     publish_audit_inner(
         jetstream,
@@ -558,6 +663,7 @@ async fn handle_ingress_inner(
         &jsonrpc_method,
         &gateway_identity,
         request_id.clone(),
+        &combined_redaction,
     )
     .await;
 
@@ -603,7 +709,7 @@ async fn handle_ingress_inner(
                 )
                 .await?
             } else {
-                response.payload
+                redacted_response_payload.unwrap_or(response.payload)
             };
             dispatch_backend_response(client, &msg, payload).await?;
         }
@@ -655,6 +761,7 @@ async fn publish_allow_audit_and_maybe_trace_no_reply(
     jsonrpc_method: &str,
     gateway_identity: &GatewayIdentity,
     request_id: Option<serde_json::Value>,
+    redaction: &RedactionOutcome,
 ) {
     publish_audit_inner(
         jetstream,
@@ -666,6 +773,7 @@ async fn publish_allow_audit_and_maybe_trace_no_reply(
         jsonrpc_method,
         gateway_identity,
         request_id,
+        redaction,
     )
     .await;
 }
@@ -681,8 +789,9 @@ async fn publish_audit_inner(
     jsonrpc_method: &str,
     gateway_identity: &GatewayIdentity,
     request_id: Option<serde_json::Value>,
+    redaction: &RedactionOutcome,
 ) {
-    let audit_envelope = AuditEnvelope::new(
+    let mut audit_envelope = AuditEnvelope::new(
         subject_in.to_string(),
         subject_out.to_string(),
         outcome,
@@ -695,6 +804,7 @@ async fn publish_audit_inner(
         request_id,
         None,
     );
+    audit_envelope.apply_rewrites(&redaction.rewrites);
     let method_root = audit::jsonrpc_method_root(jsonrpc_method);
     let audit_subject = audit::audit_publish_subject(prefix, outcome, direction, &method_root);
     audit::publish_audit(
@@ -704,6 +814,129 @@ async fn publish_audit_inner(
         std::time::Duration::from_secs(5),
     )
     .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn publish_redaction_rule_audits(
+    jetstream: &jetstream::Context,
+    prefix: &str,
+    direction: &'static str,
+    subject_in: &async_nats::Subject,
+    subject_out: &str,
+    jsonrpc_method: &str,
+    gateway_identity: &GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+    rewrites: &[RewriteEntry],
+) {
+    for rewrite in rewrites {
+        let mut envelope = AuditEnvelope::new(
+            subject_in.to_string(),
+            subject_out.to_string(),
+            AUDIT_OUTCOME_REDACTED,
+            direction,
+            jsonrpc_method.to_string(),
+            gateway_identity.tenant.clone(),
+            gateway_identity.caller_sub.clone(),
+            gateway_identity.issuer.clone(),
+            gateway_identity.source,
+            request_id.clone(),
+            None,
+        );
+        envelope.apply_rewrites(std::slice::from_ref(rewrite));
+        let method_root = audit::jsonrpc_method_root(jsonrpc_method);
+        let audit_subject =
+            audit::audit_publish_subject(prefix, AUDIT_OUTCOME_REDACTED, direction, &method_root);
+        audit::publish_audit(
+            jetstream,
+            audit_subject,
+            &envelope,
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn publish_redaction_skipped_audit(
+    jetstream: &jetstream::Context,
+    prefix: &str,
+    direction: &'static str,
+    subject_in: &async_nats::Subject,
+    subject_out: &str,
+    jsonrpc_method: &str,
+    gateway_identity: &GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+    reason: &str,
+) {
+    let mut envelope = AuditEnvelope::new(
+        subject_in.to_string(),
+        subject_out.to_string(),
+        AUDIT_OUTCOME_REDACTION_SKIPPED,
+        direction,
+        jsonrpc_method.to_string(),
+        gateway_identity.tenant.clone(),
+        gateway_identity.caller_sub.clone(),
+        gateway_identity.issuer.clone(),
+        gateway_identity.source,
+        request_id,
+        None,
+    );
+    envelope.apply_redaction_skip_reason(reason);
+    let method_root = audit::jsonrpc_method_root(jsonrpc_method);
+    let audit_subject = audit::audit_publish_subject(
+        prefix,
+        AUDIT_OUTCOME_REDACTION_SKIPPED,
+        direction,
+        &method_root,
+    );
+    audit::publish_audit(
+        jetstream,
+        audit_subject,
+        &envelope,
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+}
+
+async fn redact_tools_call_payload(
+    server_id: &str,
+    tool_name: Option<&str>,
+    jsonrpc_method: &str,
+    tenant: Option<&str>,
+    direction: RedactionDirection,
+    payload: &Bytes,
+) -> Result<(Bytes, RedactionOutcome, Option<String>), GatewayError> {
+    if jsonrpc_method != "tools/call" {
+        return Ok((payload.clone(), RedactionOutcome::empty(), None));
+    }
+    let Some(tool_name) = tool_name else {
+        return Ok((payload.clone(), RedactionOutcome::empty(), None));
+    };
+
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|e| GatewayError(format!("jsonrpc payload decode: {e}")))?;
+    let ctx = SchemaRedactionContext {
+        server_id,
+        tool_name,
+        direction,
+        hash_salt: tenant,
+    };
+    match apply_schema_redaction(
+        SchemaCacheRuntime::shared().as_deref(),
+        RedactionRegistry::shared().as_deref(),
+        ctx,
+        &mut doc,
+    )
+    .await
+    {
+        RedactionApplyResult::Passthrough => Ok((payload.clone(), RedactionOutcome::empty(), None)),
+        RedactionApplyResult::Skipped { reason } => Ok((payload.clone(), RedactionOutcome::empty(), Some(reason))),
+        RedactionApplyResult::Applied(outcome) => {
+            let bytes =
+                serde_json::to_vec(&doc).map_err(|e| GatewayError(format!("jsonrpc payload encode: {e}")))?;
+            Ok((Bytes::from(bytes), outcome, None))
+        }
+    }
 }
 
 struct FinishIngressBlockedParams<'a> {
