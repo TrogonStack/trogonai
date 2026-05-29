@@ -326,7 +326,7 @@ CEL + SpiceDB are the substrate; this block delivers the policies and flows on t
 Cutover is incremental: keep the bootstrap path while shadow-mode validates the mesh path, then flip to enforce.
 
 - [x] **Feature flag — landed.** `MCP_GATEWAY_AGENT_IDENTITY = off (default) / shadow / enforce`. `enforce` is no longer log-only — hard rejects per the enforce-mode hardening section above.
-- [ ] **Shadow-mode completion.** Already: missing `agent_id` on `tools/call` and `act_chain` depth overflow WARN in shadow. Still to do: validate `aud == self` and emit `aud_mismatch` audit events in shadow (no rejection until enforce).
+- [x] **Shadow-mode completion.** Already: missing `agent_id` on `tools/call` and `act_chain` depth overflow WARN in shadow. Still to do: validate `aud == self` and emit `aud_mismatch` audit events in shadow (no rejection until enforce).
 - [x] **Coexistence — decided.** During shadow: bootstrap auth-callout JWT remains authoritative for NATS subject ACL; new claims only inform CEL and audit. ADR 0003 retires the transitional hybrid once enforce is live.
 - [ ] **Backfill implementation.** Inventory current callers; assign `agent_id`; register in the new registry; provision SVIDs (file-based for legacy, SPIRE for service workloads).
 - [x] **Cutover criteria — decided.** Zero shadow-mode `aud_mismatch` / `agent_id_missing` / `act_chain_depth_overflow` events for 7 consecutive days at production traffic; STS P99 < 40 ms over the same window; rollback runbook reviewed (set `MCP_GATEWAY_AGENT_IDENTITY=shadow`, drain mesh-token cache).
