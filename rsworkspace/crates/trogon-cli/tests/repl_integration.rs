@@ -149,6 +149,15 @@ impl Session for QueuedSession {
         async move { Ok(()) }
     }
 
+    fn set_session_config_option(
+        &self,
+        _config_id: &str,
+        _value: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+    {
+        async move { Ok(()) }
+    }
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
         async move {}
     }
