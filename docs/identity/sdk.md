@@ -28,13 +28,13 @@ Several behaviors in this contract **cannot ship** until upstream identity primi
 
 | Dependency | Block | What the SDK needs |
 |------------|-------|-------------------|
-| **STS token exchange** | [2.1](../PENDING_TODO.md#21-security-token-service-sts) | `call()` must exchange bootstrap/mesh token for `aud=target` before publish. Without STS, SDK can only wrap today's connect-time JWT (bootstrap mode). |
-| **Agent registry lookup** | [1.1](../PENDING_TODO.md#11-agent-registry) | Resolve `target_agent` → allowed workloads, gateway subject, lifecycle state. STS also uses registry to bind `agent_id` ↔ `wkl`. |
-| **`act_chain` schema + verification** | [2.2](../PENDING_TODO.md#22-actor-chain-act_chain) | `serve()` must verify chain depth, loop detection, and expose typed `Caller`. |
-| **`purpose` claim** | [2.3](../PENDING_TODO.md#23-intent--purpose-claim) | Propagated on `call()`; validated against registry `allowed_purposes`. |
-| **Workload attestation (SVID)** | [1.2](../PENDING_TODO.md#12-workload-attestation-spiffe--spire) | Constructor `svid_source` feeds STS `actor_token`. Dev fallback: file-based SVID; prod: SPIRE. |
-| **Block 0 ADRs** | [0](../PENDING_TODO.md#block-0--cross-cutting-decisions-that-gate-everything-else) | Tenancy model, bootstrap-vs-mesh, TTL/`aud` discipline affect constructor defaults and error semantics. |
-| **Gateway egress mint** | [2.4](../PENDING_TODO.md#24-gateway-egress-mint-dont-propagate) | Transparent to SDK on A2A ingress; relevant when callee is an MCP backend reached via `trogon-mcp-gateway`. |
+| **STS token exchange** | `docs/identity/sts-exchange.md` | `call()` must exchange bootstrap/mesh token for `aud=target` before publish. Without STS, SDK can only wrap today's connect-time JWT (bootstrap mode). |
+| **Agent registry lookup** | `docs/identity/registry.md` | Resolve `target_agent` → allowed workloads, gateway subject, lifecycle state. STS also uses registry to bind `agent_id` ↔ `wkl`. |
+| **`act_chain` schema + verification** | `docs/identity/act-chain.md` | `serve()` must verify chain depth, loop detection, and expose typed `Caller`. |
+| **`purpose` claim** | `docs/identity/jwt-claim-schema.md` | Propagated on `call()`; validated against registry `allowed_purposes`. |
+| **Workload attestation (SVID)** | `docs/adr/0006-mesh-token-signing-keys.md` | Constructor `svid_source` feeds STS `actor_token`. Dev fallback: file-based SVID; prod: SPIRE. |
+| **Cross-cutting ADRs** | ADRs 0001, 0003, 0005 | Tenancy model, bootstrap-vs-mesh, TTL/`aud` discipline affect constructor defaults and error semantics. |
+| **Gateway egress mint** | ADR 0003 | Transparent to SDK on A2A ingress; relevant when callee is an MCP backend reached via `trogon-mcp-gateway`. |
 
 **Bootstrap mode (interim):** Until STS ships, the SDK MAY operate in `SdkMode::BootstrapOnly`: attach connect-time [`MintedUserJwt`](../../rsworkspace/crates/a2a-auth-callout) via gateway ingress (today's `a2a_nats::Client::routing_via_gateway_ingress`). Mesh mode becomes default once Block 2.1 is accepted.
 

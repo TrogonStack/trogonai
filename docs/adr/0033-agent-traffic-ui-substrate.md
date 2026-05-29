@@ -5,12 +5,12 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `PENDING_TODO.md` Block 4 final open item ("Decide UI substrate"); unblocks the v1 acceptance for `docs/identity/agent-traffic.md` ("A security engineer can answer 'what did agent X do on behalf of user Y in the last hour, and what was blocked' in < 30 seconds"). |
+| **Blocks** | Unblocks the v1 acceptance for `docs/identity/agent-traffic.md` ("A security engineer can answer 'what did agent X do on behalf of user Y in the last hour, and what was blocked' in < 30 seconds"). |
 | **Related** | [ADR 0030](0030-gateway-ctl-cli-surface.md) (`trogon-gateway-ctl` taxonomy and output envelope); [docs/identity/agent-traffic.md](../identity/agent-traffic.md) (v1 view spec: schema, projector, OCSF export); `rsworkspace/crates/trogon-traffic-view` (indexer + OCSF exporter); `rsworkspace/crates/agctl/src/traffic.rs` (`agctl traffic query` / `agctl traffic tail`). |
 
 ## Context
 
-Block 4 of `PENDING_TODO.md` ships an agent-traffic view: a query-optimized projection of audit envelopes (`agent_id`, `wkl`, `purpose`, `session_id`, `act_chain`) suitable for timelines, chain exploration, top-N dashboards, and SIEM export. The schema, projector, OCSF v1 export, and Postgres indexer are accepted (`docs/identity/agent-traffic.md`) and a working skeleton lives at `rsworkspace/crates/trogon-traffic-view`.
+The agent-traffic view is a query-optimized projection of audit envelopes (`agent_id`, `wkl`, `purpose`, `session_id`, `act_chain`) suitable for timelines, chain exploration, top-N dashboards, and SIEM export. The schema, projector, OCSF v1 export, and Postgres indexer are accepted (`docs/identity/agent-traffic.md`) and a working skeleton lives at `rsworkspace/crates/trogon-traffic-view`.
 
 The remaining decision is **which surface** the on-call operator and security engineer use to answer the acceptance question. Three candidates were on the table:
 
@@ -29,7 +29,7 @@ A web console is **not on the critical path** for the v1 acceptance — every qu
 - `agctl traffic query --tenant <t> [--agent-id <a/b>] --since <dur> [--json]` answers the headline acceptance question.
 - `agctl traffic tail --tenant <t> [--since <dur>] [--limit <n>] [--json]` covers the live-tail workflow.
 - OCSF export remains a separate JetStream durable consumer (`trogon-traffic-view::ocsf`), not a CLI surface — SIEM systems pull from the stream, not from the CLI.
-- A web console is **explicitly deferred**. It is not in scope for any block in `PENDING_TODO.md` and will require its own ADR if ever revisited; that ADR must justify the additional auth surface, the duplicated envelope schema work, and the operational cost of hosting a service that does not exist today.
+- A web console is **explicitly deferred**. It is not in scope and will require its own ADR if ever revisited; that ADR must justify the additional auth surface, the duplicated envelope schema work, and the operational cost of hosting a service that does not exist today.
 - The CLI's JSON envelope is the contract: any future UI (terminal TUI, Grafana panel, web console) consumes `--json` output or queries `trogon-traffic-view::TrafficIndex` directly — it does **not** introduce a parallel REST surface.
 
 ## Consequences

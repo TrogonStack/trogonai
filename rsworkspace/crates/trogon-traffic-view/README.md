@@ -1,6 +1,6 @@
 # trogon-traffic-view
 
-**Spec + skeleton only.** v1 implementation is tracked in `PENDING_TODO.md` Block 4.
+**Spec + skeleton only.** v1 implementation lives in this crate against the spec below.
 
 ## Spec
 

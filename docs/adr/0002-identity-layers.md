@@ -15,7 +15,7 @@ The TrogonAI MCP gateway and A2A surface today authenticate callers at the NATS 
 | `jwt.roles` | Coarse authorization roles |
 | `caller_id` | Token-safe NATS ACL segment (not the same as `sub`) |
 
-This is sufficient for **perimeter authentication** and subject ACL binding. It is **not** sufficient for agent-delegation semantics described in [Uber's agent identity model](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/) and enumerated in `PENDING_TODO.md` under "Missing vs. Uber's target model":
+This is sufficient for **perimeter authentication** and subject ACL binding. It is **not** sufficient for agent-delegation semantics described in [Uber's agent identity model](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/):
 
 - No distinction between the **workload** running code (process/pod) and the **agent** (registered logical actor).
 - No stable **originator** (human or system principal) separate from the current hop.
@@ -266,7 +266,6 @@ Bootstrap callers without registry entries still operate in shadow mode; enforce
 
 ## References
 
-- `PENDING_TODO.md` — Block 0 (identity layering), Block 1.2 (attestation), Block 1.3 (claim schema)
 - `MCP_GATEWAY_PLAN.md` — § Audit, § Wire-Format Pins, § CEL variable namespace
 - `docs/a2a/explanation/auth-callout-design.md` — bootstrap JWT claim layout
 - [Uber: Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/)

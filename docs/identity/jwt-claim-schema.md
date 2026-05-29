@@ -4,7 +4,7 @@
 
 **DRAFT** — for human review. Several claims depend on ADRs `0001`–`0006` (not yet finalized). Claims marked **ADR-pending** must not be treated as wire pins until the referenced ADR merges.
 
-Related docs: [`act-chain.md`](act-chain.md) (Block 2.2), [`MCP_GATEWAY_PLAN.md`](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins, [`PENDING_TODO.md`](../../PENDING_TODO.md) Block 1.3.
+Related docs: [`act-chain.md`](act-chain.md), [`MCP_GATEWAY_PLAN.md`](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins.
 
 ## Scope
 
@@ -23,13 +23,13 @@ This document defines claim names, types, validation, CEL exposure, ingress hard
 | **Mesh token** | STS (future) | 60–300 s (**ADR 0005**) | Target hop (gateway/backend) | Per-hop identity + narrowed scope |
 | **Gateway-validated bearer** | Either kind above (or reminted egress token) | As minted | `trogon-mcp-gateway` (ingress default) | MCP gateway policy input |
 
-Until Block 2 ships, treat the auth-callout JWT as the **bootstrap credential** (`PENDING_TODO.md` verified snapshot). Mesh tokens are additive; bootstrap claims remain for NATS transport ACLs.
+Until mesh STS ships end-to-end, treat the auth-callout JWT as the **bootstrap credential**. Mesh tokens are additive; bootstrap claims remain for NATS transport ACLs.
 
 ---
 
 ## Existing claims
 
-Claims below are **in production or pinned in plan** as of the `yordis/agentgateway` branch snapshot (`PENDING_TODO.md`, 2026-05-26).
+Claims below are **in production or pinned in spec** as of the `yordis/agentgateway` branch.
 
 ### Registered (RFC 7519)
 
@@ -107,7 +107,7 @@ Each entry (summary — full schema deferred):
 { "sub": "user:alice", "agent_id": "acme/oncall-agent", "wkl": "spiffe://…", "iat": 1748343600 }
 ```
 
-Order: oldest originator first, current actor last (`PENDING_TODO.md` Block 2.2).
+Order: oldest originator first, current actor last.
 
 ### Intent
 
@@ -191,7 +191,7 @@ STS and auth-callout are the only approved minters for forgeable identity claims
 
 ## Compatibility: shadow vs. enforce
 
-Controlled by `MCP_GATEWAY_AGENT_IDENTITY` (`PENDING_TODO.md` Block 6), mirroring `MCP_GATEWAY_JWT_MODE` (`off` / `validate` / `require`).
+Controlled by `MCP_GATEWAY_AGENT_IDENTITY`, mirroring `MCP_GATEWAY_JWT_MODE` (`off` / `validate` / `require`).
 
 | Mode | Missing optional new claim | Invalid / unsigned new claim | Missing required new claim (per enforce table) |
 |---|---|---|---|
@@ -209,7 +209,7 @@ Suggested enforce requirements (pending ADR finalization):
 | `aud` | Gateway audience | Must match receiving hop |
 | `purpose` | Optional until Block 2.3 | Optional unless registry mandates |
 
-During shadow rollout, existing connect-time JWTs remain authoritative for NATS subject ACL; new claims inform CEL and audit only (`PENDING_TODO.md` Block 6).
+During shadow rollout, existing connect-time JWTs remain authoritative for NATS subject ACL; new claims inform CEL and audit only.
 
 ### Gateway JSON-RPC errors (`MCP_GATEWAY_AGENT_IDENTITY=enforce`)
 
@@ -271,7 +271,7 @@ Forgeable identity claims from issuers outside `MCP_GATEWAY_TRUSTED_MINT_ISSUERS
 1. **`purpose` vs. `intent`:** single canonical claim name and refinement rules (Block 2.3).
 2. **`wkl_attested_at` wire form:** standardize Unix s vs. RFC 3339 for all minters.
 3. **Bootstrap carry-over:** which new claims may appear on connect JWT vs. STS-only (**ADR 0003**).
-4. **`agent_id` on gateway process:** does the gateway itself carry an `agent_id`, or only `wkl` + privileged role? (`PENDING_TODO.md` open questions).
+4. **`agent_id` on gateway process:** does the gateway itself carry an `agent_id`, or only `wkl` + privileged role?
 5. **Batch / non-human originators:** sentinel `wkl` values and `act_chain` root shape.
 6. **`roles` extraction:** promote from plan-only CEL to gateway-validated claim, or keep in `data` for bootstrap only.
 7. **Per-entry `act_chain` signatures** vs. outer-JWT integrity only (affects size and STS cost).

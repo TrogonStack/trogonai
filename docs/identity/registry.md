@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — for human review. Blocks implementation until Block 0 ADRs land.
 
-Companion: `PENDING_TODO.md` Block 1.1, `MCP_GATEWAY_PLAN.md` § NATS Subject Topology.
+Companion: `MCP_GATEWAY_PLAN.md` § NATS Subject Topology.
 
 ---
 
@@ -22,7 +22,7 @@ The Agent Registry is the **authoritative record** that binds an `agent_id` to e
 
 The registry does **not** mint tokens, attest workloads, or enforce policy. It is the read-mostly catalog that STS, the gateway, and operators consult. Every mutation is auditable.
 
-**Acceptance criterion** (from `PENDING_TODO.md`): a workload (SPIFFE ID) cannot present `agent_id=X` to the STS unless the registry confirms the SPIFFE ID is in `allowed_workloads` for `X`.
+**Acceptance criterion:** a workload (SPIFFE ID) cannot present `agent_id=X` to the STS unless the registry confirms the SPIFFE ID is in `allowed_workloads` for `X`.
 
 ---
 
@@ -291,7 +291,7 @@ Lookup operations are not audited per call (volume). STS exchange audit captures
 
 ### Bootstrap JWT → mesh token handoff
 
-Per `PENDING_TODO.md` Block 0 / ADR 0003 (pending):
+Per ADR 0003:
 
 ```
 Connect:  auth-callout JWT  (broad NATS ACL, no agent_id required)
@@ -338,7 +338,7 @@ STS rate limiting during registry outage: circuit-break after N consecutive look
 4. **Historical lookup** — When verifying `act_chain`, must entry `iat` resolve against the registry version valid at that timestamp, or current state only?
 5. **Definition digest scope** — Container image only, or include policy bundle hash and tool manifest hash in a composite digest?
 6. **Multi-region** — Is KV replicated cross-region, or regional registry with global Git SoT and async sync (affects revocation SLA)?
-7. **Gateway `agent_id`** — Does the gateway have its own registry entry, or is it identified purely by SPIFFE + privileged role? (`PENDING_TODO.md` open question.)
+7. **Gateway `agent_id`** — Does the gateway have its own registry entry, or is it identified purely by SPIFFE + privileged role?
 8. **Batch / non-interactive jobs** — Registry entry shape for jobs without a human originator: sentinel purpose set? Separate `agent_id` namespace?
 9. **Event sourcing** — Should `trogon-decider` own registry state as an aggregate, or is Git+KV projection sufficient?
 10. **OAuth-MCP composition** — Does OAuth client registration map 1:1 to `agent_id`, or can one OAuth client rotate across agents?
@@ -347,7 +347,7 @@ STS rate limiting during registry outage: circuit-break after N consecutive look
 
 ## Related documents
 
-`PENDING_TODO.md` Blocks 0, 1.2, 2.1, 2.3 · `docs/adr/0005-token-ttl-and-audience.md` (pending) · `MCP_GATEWAY_PLAN.md:537` · `docs/a2a/explanation/auth-callout-design.md` · `docs/identity/registry-operations.md` (operator runbook)
+`docs/adr/0005-token-ttl-and-audience.md` · `MCP_GATEWAY_PLAN.md:537` · `docs/a2a/explanation/auth-callout-design.md` · `docs/identity/registry-operations.md` (operator runbook)
 
 ---
 
