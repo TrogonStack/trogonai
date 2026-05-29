@@ -580,12 +580,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "arc-swap"
-version = "1.9.1"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
-dependencies = [
- "rustversion",
-]
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "asn1-rs"
@@ -7512,6 +7509,33 @@ dependencies = [
  "trogon-mcp-gateway",
  "trogon-nats",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-gateway-xds"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "clap",
+ "futures",
+ "prost",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-gateway-xds",
+ "trogon-nats",
 ]
 
 [[package]]
