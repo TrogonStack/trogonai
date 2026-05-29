@@ -1,13 +1,10 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use nkeys::KeyPair;
 use sha2::{Digest, Sha256};
 
 use super::errors::BundleLoadError;
 use super::manifest::SIGNATURE_PATH;
-
-const NKEYS_UNAVAILABLE: &str =
-    "the `nkeys` crate is not a direct dependency of trogon-mcp-gateway; \
-     add `nkeys = {{ workspace = true }}` to enable Ed25519 NKey verification";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrustedKeys {
@@ -79,12 +76,14 @@ pub fn verify_manifest_signature(
         )));
     }
 
-    let _digest = manifest_digest_bytes(manifest_bytes);
-    let _signature = signature;
-
-    Err(BundleLoadError::SignatureVerificationUnavailable {
-        reason: NKEYS_UNAVAILABLE,
-    })
+    let digest = manifest_digest_bytes(manifest_bytes);
+    let public = KeyPair::from_public_key(signer_nkey_pub).map_err(|error| {
+        BundleLoadError::SignatureMalformed(format!("invalid signing NKey public key: {error}"))
+    })?;
+    public
+        .verify(&digest, &signature)
+        .map_err(|_| BundleLoadError::SignatureInvalid)?;
+    Ok(())
 }
 
 pub fn signature_path() -> &'static str {
@@ -109,18 +108,18 @@ mod tests {
     }
 
     #[test]
-    fn trusted_signer_reports_dependency_gap() {
+    fn trusted_signer_with_invalid_signature_bytes_is_malformed() {
         let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
         let error = verify_manifest_signature(
             b"manifest",
-            &[0u8; 64],
+            &[0u8; 8],
             "UABTRUSTED",
             &trusted,
         )
-        .expect_err("crypto unavailable");
+        .expect_err("short signature");
         assert!(matches!(
             error,
-            BundleLoadError::SignatureVerificationUnavailable { .. }
+            BundleLoadError::SignatureMalformed(_) | BundleLoadError::SignatureInvalid
         ));
     }
 
