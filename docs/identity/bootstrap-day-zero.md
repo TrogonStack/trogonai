@@ -1,6 +1,6 @@
 # Bootstrap / day-zero — operator how-to and posture
 
-**Status:** Design spec (Block C, paper). Resolves the open item in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C — *Bootstrap / day-zero behavior with empty bundle*.
+**Status:** Design spec (Block C, paper). Resolves the open item — *Bootstrap / day-zero behavior with empty bundle*.
 
 **Diátaxis:** This document is a **how-to** (numbered bootstrap sequence, idempotency, failure recovery) plus **explanation** (why the default posture is mixed, how partial state behaves, migration semantics).
 

@@ -290,7 +290,6 @@ Full fail-closed semantics: [failure-mode-matrix.md](failure-mode-matrix.md) row
 - [ADR 0010](../adr/0010-bundle-format.md) · [ADR 0026](../adr/0026-bundle-hot-swap-rollback.md) · [ADR 0006](../adr/0006-mesh-token-signing-keys.md) (mesh keys only)
 - [wasm-bundle-format.md](wasm-bundle-format.md) · [howto-write-bundle.md](howto-write-bundle.md) · [failure-mode-matrix.md](failure-mode-matrix.md)
 - [hierarchical-policy-merge.md §6](hierarchical-policy-merge.md#6-storage) · [bootstrap-day-zero.md §7](bootstrap-day-zero.md#7-migration--returning-a-production-tenant-to-day-zero-without-availability-gap)
-- [MCP_GATEWAY_PLAN.md Block F](../../MCP_GATEWAY_PLAN.md)
 
 ---
 

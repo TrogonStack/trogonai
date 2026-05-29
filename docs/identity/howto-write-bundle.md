@@ -291,7 +291,7 @@ agctl mcp bundle dry-run \
   --output json
 ```
 
-**Status:** **proposed** CLI. Flags mirror future gateway evaluation: inject `mcp.*`, `jwt.*`, `nats.*` bindings per [wire pins §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace).
+**Status:** **proposed** CLI. Flags mirror future gateway evaluation: inject `mcp.*`, `jwt.*`, `nats.*` bindings per [reference-cel-variables.md](reference-cel-variables.md).
 
 Expected allow output includes `"decision": "allow"`, `"rules_fired": ["allow-create-issue"]`, populated `spicedb.checks`, `rate_limit.acquired: true`, and `audit_extra` keys from `audit.emit` **(proposed JSON shape)**. Rate-limited replays return `"decision": "deny"` with `jsonrpc_error.code: -32105`.
 

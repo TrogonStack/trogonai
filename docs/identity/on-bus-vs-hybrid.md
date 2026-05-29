@@ -1,6 +1,6 @@
 # On-bus vs. hybrid MCP gateway deployment
 
-**Status:** Accepted decision (Block A, paper, 2026-05-28). Resolves the open item in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block A — *on-bus vs. hybrid deployment shape*.
+**Status:** Accepted decision (Block A, paper, 2026-05-28). Resolves the open item — *on-bus vs. hybrid deployment shape*.
 
 **Diátaxis:** [Explanation](#explanation) (why the fork exists and what each mode means) + [Decision](#decision) (recommendation, implications, migration).
 

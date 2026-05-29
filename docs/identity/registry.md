@@ -2,7 +2,6 @@
 
 **Status:** DRAFT — for human review. Blocks implementation until Block 0 ADRs land.
 
-Companion: `MCP_GATEWAY_PLAN.md` § NATS Subject Topology.
 
 ---
 
@@ -347,7 +346,7 @@ STS rate limiting during registry outage: circuit-break after N consecutive look
 
 ## Related documents
 
-`docs/adr/0005-token-ttl-and-audience.md` · `MCP_GATEWAY_PLAN.md:537` · `docs/a2a/explanation/auth-callout-design.md` · `docs/identity/registry-operations.md` (operator runbook)
+`docs/adr/0005-token-ttl-and-audience.md` · `docs/a2a/explanation/auth-callout-design.md` · `docs/identity/registry-operations.md` (operator runbook)
 
 ---
 

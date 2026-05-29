@@ -1,6 +1,6 @@
 # MCP gateway integration touch-points
 
-**Status:** Operator reference (Diátaxis reference). Satisfies [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C “Integration touch-points”.
+**Status:** Operator reference (Diátaxis reference).
 
 **Related:** [overview.md](overview.md), [agent-traffic.md](agent-traffic.md), [adaptive-access.md](adaptive-access.md), [sts-exchange.md](sts-exchange.md), [registry.md](registry.md), [act-chain.md](act-chain.md), [jwt-claim-schema.md](jwt-claim-schema.md).
 
