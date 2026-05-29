@@ -8,6 +8,7 @@ pub mod audit;
 pub mod authz;
 pub mod bundle;
 pub mod cel_builtins;
+pub mod chain_resolver;
 pub mod egress;
 pub mod gateway;
 pub mod ingress;
