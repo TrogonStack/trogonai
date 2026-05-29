@@ -666,6 +666,27 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             })
             .collect()
     }
+
+    /// Build the compactor_model select option for this session.
+    /// Shows "Default (same as session model)" plus all configured xAI models.
+    /// Using available_models enforces same-provider naturally — all options are xAI models.
+    fn compactor_model_config_option(
+        current: Option<&str>,
+        available_models: &[ModelInfo],
+    ) -> SessionConfigOption {
+        let mut opts = vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
+        opts.extend(
+            available_models
+                .iter()
+                .map(|m| SessionConfigSelectOption::new(m.model_id.0.to_string(), m.model_id.0.as_ref())),
+        );
+        SessionConfigOption::select(
+            "compactor_model".to_string(),
+            "Compaction Model".to_string(),
+            current.unwrap_or("").to_string(),
+            opts,
+        )
+    }
 }
 
 #[async_trait(?Send)]
@@ -859,10 +880,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         drop(sessions);
 
         info!(session_id, agent_id = ?self.agent_id, "xai: new session");
+        let mut config_opts = Self::all_tool_config_options(&[]);
+        config_opts.push(Self::compactor_model_config_option(None, &self.available_models));
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
             .models(self.session_model_state(None))
-            .config_options(Self::all_tool_config_options(&[])))
+            .config_options(config_opts))
     }
 
     async fn load_session(
@@ -875,10 +898,12 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         {
             let sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get(&session_id) {
+                let mut cfg = Self::all_tool_config_options(&s.enabled_tools);
+                cfg.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
                 return Ok(LoadSessionResponse::new()
                     .modes(self.session_mode_state())
                     .models(self.session_model_state(s.model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -944,12 +969,15 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     },
                 );
                 info!(session_id, "xai: load_session restored from KV snapshot");
+                let compactor_model_kv = sessions.get(&session_id).and_then(|s| s.compactor_model.clone());
+                let mut cfg = Self::all_tool_config_options(&enabled_tools);
+                cfg.push(Self::compactor_model_config_option(compactor_model_kv.as_deref(), &self.available_models));
                 return Ok(LoadSessionResponse::new()
                     .modes(self.session_mode_state())
                     .models(self.session_model_state(
                         sessions.get(&session_id).and_then(|s| s.model.as_deref()),
                     ))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -1036,10 +1064,16 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
         drop(sessions);
 
+        let inherited_compactor = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&new_session_id).and_then(|s| s.compactor_model.clone())
+        };
+        let mut cfg = Self::all_tool_config_options(&inherited_tools);
+        cfg.push(Self::compactor_model_config_option(inherited_compactor.as_deref(), &self.available_models));
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
             .models(self.session_model_state(inherited_model.as_deref()))
-            .config_options(Self::all_tool_config_options(&inherited_tools)))
+            .config_options(cfg))
     }
 
     async fn close_session(
@@ -1214,7 +1248,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
             }
             // ACP spec: response must include the full set of config options and their current values.
-            Self::all_tool_config_options(&s.enabled_tools)
+            let mut opts = Self::all_tool_config_options(&s.enabled_tools);
+            opts.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
+            opts
         };
 
         Ok(SetSessionConfigOptionResponse::new(config_options))
@@ -3409,10 +3445,11 @@ mod tests {
             ))
             .await
             .unwrap();
+        // AVAILABLE_TOOLS toggles + compactor_model
         assert_eq!(
             resp.config_options.len(),
-            AVAILABLE_TOOLS.len(),
-            "response must include all known config options even for unknown option ids"
+            AVAILABLE_TOOLS.len() + 1,
+            "response must include all known config options (tools + compactor_model) even for unknown option ids"
         );
     }
 
