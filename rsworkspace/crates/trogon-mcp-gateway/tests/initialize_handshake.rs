@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/identity/reference-initialize.md` (edge handshake, KV keys, lazy forward)
 //! - `docs/identity/mcp-session-model.md` (session lifecycle, `mcp-session-id`)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 5 (gateway-terminated by default)
+//! - `reference-initialize.md` (gateway-terminated by default)
 //!
 //! Implementation targets (not yet present): `trogon_mcp_gateway::gateway::session`,
 //! `trogon_mcp_gateway::gateway::initialize`.

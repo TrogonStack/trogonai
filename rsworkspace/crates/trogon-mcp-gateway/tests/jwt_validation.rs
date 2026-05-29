@@ -9,7 +9,7 @@
 //! - `docs/identity/reference-nats-headers.md` — ingress hardening, header authority
 //! - `docs/identity/reference-error-codes.md` — `-32106 auth_expired`, `-32109 audience_mismatch`
 //! - `docs/adr/0002-identity-layers.md` — identity layer ordering (JWT before policy)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 1 (JWT on NATS message headers)
+//! - `reference-nats-headers.md` (JWT on NATS message headers)
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings` with `JwtValidator` in `Require` mode, gateway ingress request/reply
@@ -226,7 +226,7 @@ mod transport {
     async fn nats_authorization_header_is_jwt_source_of_truth() {
         // Arrange: valid JWT only on NATS Authorization header (Pin 1), not in JSON-RPC params.
         // Assert: gateway resolves identity from header; backend egress mcp-caller-sub from JWT sub.
-        unimplemented!("MCP_GATEWAY_PLAN.md Wire-Format Pin 1");
+        unimplemented!("reference-nats-headers.md");
     }
 
     #[tokio::test]

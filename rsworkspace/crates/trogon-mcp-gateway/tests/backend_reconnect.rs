@@ -8,8 +8,8 @@
 //! `tools/list` without disturbing other servers' cache entries.
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block C item 3 (schema cache invalidation on reconnect)
-//! - `MCP_GATEWAY_PLAN.md` Block E (server reconnect handling, version bump, debounce)
+//! - schema cache invalidation on reconnect
+//! - server reconnect handling, version bump, debounce
 //! - `docs/identity/reference-error-codes.md` (`-32103` `backend_unreachable`)
 //! - `docs/identity/integration-touchpoints.md` (per-server egress mesh-token cache)
 //!
@@ -28,7 +28,7 @@ mod disconnect_inflight {
     use super::rpc_codes;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn inflight_tools_call_returns_backend_unreachable_on_disconnect() {
         // Arrange: gateway running; backend stub subscribed for `server-a`; warm path with one
         //          in-flight `tools/call` before tearing down backend NATS subscription.
@@ -41,7 +41,7 @@ mod disconnect_inflight {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn inflight_tools_list_returns_backend_unreachable_on_disconnect() {
         // Arrange: gateway + backend for `server-a`; client request in flight on tools/list lane.
         // Act: backend disconnect before reply.
@@ -50,7 +50,7 @@ mod disconnect_inflight {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn multiple_inflight_requests_all_fail_with_backend_unreachable() {
         // Arrange: N concurrent ingress requests targeting same `server_id` during disconnect.
         // Act: backend goes away with all N in flight.
@@ -59,7 +59,7 @@ mod disconnect_inflight {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn backend_unreachable_includes_server_id_in_error_data() {
         // Arrange: disconnect `server-a` with one pending request.
         // Act: await error envelope.
@@ -72,7 +72,7 @@ mod reconnect_cache_evict {
     //! Reconnect bumps `server.version` and evicts that server's schema cache entries.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_bumps_server_version() {
         // Arrange: record `server.version` for `server-a` after initial connection.
         // Act: simulate backend disconnect + stable reconnect.
@@ -81,7 +81,7 @@ mod reconnect_cache_evict {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_evicts_schema_cache_for_that_server() {
         // Arrange: warm schema cache for `server-a` via `tools/list`.
         // Act: reconnect `server-a` (version bump).
@@ -90,7 +90,7 @@ mod reconnect_cache_evict {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_does_not_serve_stale_cached_schemas() {
         // Arrange: warm cache, force reconnect without immediate `tools/list`.
         // Act: `tools/call` targeting `server-a`.
@@ -103,7 +103,7 @@ mod tools_list_refetch {
     //! After reconnect, the next `tools/call` triggers a fresh `tools/list` to repopulate schemas.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn tools_call_after_reconnect_triggers_fresh_tools_list() {
         // Arrange: warm cache, reconnect `server-a`, instrument backend `tools.list` subject.
         // Act: first `tools/call` post-reconnect.
@@ -112,7 +112,7 @@ mod tools_list_refetch {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn tools_list_refetch_repopulates_schema_cache() {
         // Arrange: cold cache after reconnect; backend stub returns updated tool schemas.
         // Act: `tools/call` (implicit refetch).
@@ -121,7 +121,7 @@ mod tools_list_refetch {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn tools_call_after_refetch_hits_repopulated_cache() {
         // Arrange: complete one post-reconnect `tools/call` (refetch + populate).
         // Act: second `tools/call` for same tool.
@@ -134,7 +134,7 @@ mod isolation {
     //! Server A reconnect must not invalidate server B schema cache or version state.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn server_a_reconnect_preserves_server_b_schema_cache() {
         // Arrange: warm schema cache for `server-a` and `server-b`.
         // Act: reconnect only `server-a`.
@@ -143,7 +143,7 @@ mod isolation {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn server_a_version_bump_does_not_touch_server_b_version() {
         // Arrange: record versions for `server-a` and `server-b`.
         // Act: reconnect `server-a`.
@@ -152,7 +152,7 @@ mod isolation {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn server_b_tools_call_still_hits_cache_after_server_a_reconnect() {
         // Arrange: warm both servers; reconnect `server-a` only.
         // Act: `tools/call` for `server-b`.
@@ -165,7 +165,7 @@ mod debounce {
     //! Rapid backend flaps debounce to one version bump per stable connection.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn rapid_backend_flap_produces_single_version_bump() {
         // Arrange: record initial `server.version`; flap backend disconnect/reconnect rapidly (< debounce window).
         // Act: settle on stable connection.
@@ -174,7 +174,7 @@ mod debounce {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn debounce_waits_for_stable_connection_before_bump() {
         // Arrange: oscillating backend presence within debounce interval.
         // Act: observe version and cache state during flapping.
@@ -183,7 +183,7 @@ mod debounce {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn debounced_reconnect_does_not_evict_cache_on_transient_disconnect() {
         // Arrange: warm cache; brief disconnect shorter than debounce threshold.
         // Act: backend returns before debounce fires.
@@ -196,7 +196,7 @@ mod telemetry {
     //! Reconnect emits `mcp.backend.reconnect` with server identity and version transition.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_emits_mcp_backend_reconnect_event() {
         // Arrange: telemetry sink / OTel span exporter wired to gateway.
         // Act: stable reconnect for `server-a`.
@@ -205,7 +205,7 @@ mod telemetry {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_telemetry_includes_server_id_and_versions() {
         // Arrange: record pre-reconnect version; reconnect `server-a`.
         // Act: capture telemetry payload.
@@ -214,7 +214,7 @@ mod telemetry {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_telemetry_fires_once_per_debounced_bump() {
         // Arrange: reconnect storm with debounce; telemetry collector counting events.
         // Act: flap then stable reconnect.
@@ -227,7 +227,7 @@ mod token_invalidate {
     //! Per-server STS-minted egress token cache is invalidated on reconnect (token-versioning).
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn reconnect_invalidates_sts_minted_token_cache_for_server() {
         // Arrange: warm egress mesh-token cache for `server-a` via successful `tools/call`.
         // Act: reconnect `server-a` (version bump).
@@ -236,7 +236,7 @@ mod token_invalidate {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn tools_call_after_reconnect_mints_fresh_mesh_token() {
         // Arrange: stub STS exchange counting mint requests; warm token cache, then reconnect.
         // Act: first `tools/call` post-reconnect.
@@ -245,7 +245,7 @@ mod token_invalidate {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when backend reconnect + version bump per MCP_GATEWAY_PLAN.md Block E lands"]
+    #[ignore = "scaffold; implement when backend reconnect + version bump lands"]
     async fn token_cache_invalidated_only_for_reconnected_server() {
         // Arrange: warm egress token cache for `server-a` and `server-b`.
         // Act: reconnect only `server-a`.
