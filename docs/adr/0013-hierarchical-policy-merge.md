@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block E item 6 — hierarchical policy merge across subject-pattern specificity |
-| **Related** | [Hierarchical policy merge spec](../identity/hierarchical-policy-merge.md) · [Policy DSL choice (CEL)](../identity/policy-dsl-choice.md) · [CEL variable namespace](../identity/reference-cel-variables.md) · [MCP gateway plan Block E](../../MCP_GATEWAY_PLAN.md) |
+| **Blocks** | Hierarchical policy merge across subject-pattern specificity |
+| **Related** | [Hierarchical policy merge spec](../identity/hierarchical-policy-merge.md) · [Policy DSL choice (CEL)](../identity/policy-dsl-choice.md) · [CEL variable namespace](../identity/reference-cel-variables.md) |
 
 ## Context
 

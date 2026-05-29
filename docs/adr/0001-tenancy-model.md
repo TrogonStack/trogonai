@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-27) |
 | **Date** | 2026-05-27 |
 | **Deciders** | *(author / platform security — TBD)* |
-| **Blocks** | Block A item 3 (`MCP_GATEWAY_PLAN.md`) |
-| **Related** | `MCP_GATEWAY_PLAN.md` § NATS Subject Topology → Tenancy; A2A operator docs (account-per-tenant already landed for A2A) |
+| **Blocks** | Tenancy model decision for MCP gateway deployment topology |
+| **Related** | NATS subject topology and tenancy boundary; A2A operator docs (account-per-tenant already landed for A2A) |
 
 ## Context
 

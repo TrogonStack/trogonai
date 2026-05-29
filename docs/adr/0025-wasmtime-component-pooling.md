@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 2 (Wasmtime integration with component pooling per bundle version); unblocks Block F item 3 (tracing across WASM boundary), Block F item 5 (bundle loader warm path), Block F item 6 (first-party `mcp-pack` WASM components), and CEL `wasm.call(...)` **(proposed)** wiring in Block E |
+| **Blocks** | Wasmtime integration with component pooling per bundle version; unblocks tracing across WASM boundary, bundle loader warm path, first-party `mcp-pack` WASM components, and CEL `wasm.call(...)` **(proposed)** wiring |
 | **Related** | [ADR 0010](0010-bundle-format.md), [ADR 0011](0011-nats-auth-callout.md), [ADR 0024](0024-failure-mode-matrix.md), [ADR 0026](0026-bundle-hot-swap.md) **(proposed)**, [reference-host-abi.md](../identity/reference-host-abi.md), [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md), [reference-error-codes.md](../identity/reference-error-codes.md), [wasm-bundle-format.md](../identity/wasm-bundle-format.md), `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`, `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs` |
 
 ## Context

@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 5 (bundle loader from NATS KV with hot-swap and rollback); unblocks Wasmtime pool activation wiring (Block F item 2), first-party `mcp-pack` promotion (Block F item 6), and acceptance tests in `bundle_load_hot_reload.rs` |
+| **Blocks** | Bundle loader from NATS KV with hot-swap and rollback; unblocks Wasmtime pool activation wiring, first-party `mcp-pack` promotion, and acceptance tests in `bundle_load_hot_reload.rs` |
 | **Related** | [ADR 0010](0010-bundle-format.md), [ADR 0021](0021-bootstrap-day-zero.md), [ADR 0024](0024-failure-mode-matrix.md), ADR 0025 *(wasmtime component pooling — sibling Block F item 2 ADR, this wave)*, [ADR 0011](0011-nats-auth-callout.md), [wasm-bundle-format.md](../identity/wasm-bundle-format.md), [howto-write-bundle.md](../identity/howto-write-bundle.md), [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md), [bootstrap-day-zero.md](../identity/bootstrap-day-zero.md), `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`, `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`, `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`, `rsworkspace/crates/trogon-mcp-gateway/tests/config_hot_reload.rs` |
 
 ## Context

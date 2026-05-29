@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block B item 1 (DSL choice); unblocks Block E (CEL builtins), Block F (WASM policy bundles), hierarchical merge, and `tools/list` filtering |
-| **Related** | `docs/identity/policy-dsl-choice.md`, `docs/identity/reference-cel-variables.md`, `docs/identity/reference-host-abi.md`, `docs/identity/mcp-policy-wit-sketch.md`, `MCP_GATEWAY_PLAN.md` Block B item 1 and Wire-Format Pin 8 |
+| **Blocks** | Policy DSL choice; unblocks CEL builtins, WASM policy bundles, hierarchical merge, and `tools/list` filtering |
+| **Related** | `docs/identity/policy-dsl-choice.md`, `docs/identity/reference-cel-variables.md`, `docs/identity/reference-host-abi.md`, `docs/identity/mcp-policy-wit-sketch.md`, `docs/identity/reference-cel-variables.md` (CEL variable namespace) |
 
 ## Context
 

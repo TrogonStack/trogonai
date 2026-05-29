@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 5 (Rate-limit state placement); unblocks Block E "Rate limiting wired with chosen state-placement decision" |
-| **Related** | [rate-limiting.md](../identity/rate-limiting.md), [reference-rate-defaults.md](../identity/reference-rate-defaults.md), [reference-error-codes.md](../identity/reference-error-codes.md), [reference-host-abi.md](../identity/reference-host-abi.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C item 5 + Wire-Format Pin 9 |
+| **Blocks** | Rate-limit state placement; unblocks rate-limit wiring with the chosen state placement |
+| **Related** | [rate-limiting.md](../identity/rate-limiting.md), [reference-rate-defaults.md](../identity/reference-rate-defaults.md), [reference-error-codes.md](../identity/reference-error-codes.md), [reference-host-abi.md](../identity/reference-host-abi.md), [reference-rate-defaults.md](../identity/reference-rate-defaults.md) |
 
 ## Context
 

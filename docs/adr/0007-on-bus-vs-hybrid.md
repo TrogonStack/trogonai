@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block A item 2 (on-bus vs hybrid deployment shape); unblocks Block H operator docs and third-party integration how-to |
+| **Blocks** | On-bus vs hybrid deployment shape; unblocks operator docs and third-party integration how-to |
 | **Related** | [On-bus vs hybrid spec](../identity/on-bus-vs-hybrid.md); [How to integrate third-party MCP](../identity/howto-integrate-third-party-mcp.md); [Reference subject grammar](../identity/reference-subject-grammar.md); [MCP gateway operator overview](../identity/mcp-gateway-operator-overview.md); [ADR 0001](0001-tenancy-model.md); [ADR 0003](0003-bootstrap-vs-mesh-tokens.md); [ADR 0004](0004-sts-form-factor.md); [ADR 0006](0006-mesh-token-signing-keys.md) |
 
 ## Context

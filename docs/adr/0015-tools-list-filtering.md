@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block E item 2 (`tools/list` filtering via CEL re-evaluation); downstream Block E catalog shaping for `prompts/list` and `resources/list` |
-| **Related** | `docs/identity/tools-list-filtering.md` (design spec); `docs/identity/bulk-check-permission.md`; `docs/identity/reference-cel-variables.md`; `docs/identity/hierarchical-policy-merge.md`; ADR 0014 (ZedToken / BulkCheckPermission cache); `MCP_GATEWAY_PLAN.md` Block E item 2, § MCP Authorization |
+| **Blocks** | `tools/list` filtering via CEL re-evaluation; downstream catalog shaping for `prompts/list` and `resources/list` |
+| **Related** | `docs/identity/tools-list-filtering.md` (design spec); `docs/identity/bulk-check-permission.md`; `docs/identity/reference-cel-variables.md`; `docs/identity/hierarchical-policy-merge.md`; ADR 0014 (ZedToken / BulkCheckPermission cache) |
 
 ## Context
 

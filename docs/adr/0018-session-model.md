@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 2 (Session model — where session state lives across queue-group members for `initialize` → operate → close under HA) |
-| **Related** | [mcp-session-model.md](../identity/mcp-session-model.md) (design context); [overview.md](../identity/overview.md); [act-chain.md](../identity/act-chain.md); [jwt-claim-schema.md](../identity/jwt-claim-schema.md); [agent-traffic.md](../identity/agent-traffic.md); [sts-exchange.md](../identity/sts-exchange.md); [ADR 0009](0009-reply-correlation.md) (reply correlation); [ADR 0016](0016-multi-region-topology.md) (multi-region topology); `MCP_GATEWAY_PLAN.md` § Session correlation, § Wire-Format Pins, §5 (lazy backend `initialize`) |
+| **Blocks** | Session model — where session state lives across queue-group members for `initialize` → operate → close under HA |
+| **Related** | [mcp-session-model.md](../identity/mcp-session-model.md) (design context); [overview.md](../identity/overview.md); [act-chain.md](../identity/act-chain.md); [jwt-claim-schema.md](../identity/jwt-claim-schema.md); [agent-traffic.md](../identity/agent-traffic.md); [sts-exchange.md](../identity/sts-exchange.md); [ADR 0009](0009-reply-correlation.md) (reply correlation); [ADR 0016](0016-multi-region-topology.md) (multi-region topology) |
 
 ## Context
 

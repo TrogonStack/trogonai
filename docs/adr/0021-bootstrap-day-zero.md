@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 8 (Bootstrap / day-zero behavior with empty bundle); unblocks Block D readiness evaluator, mixed method classifier, and Block G `/readyz` bootstrap fields |
+| **Blocks** | Bootstrap / day-zero behavior with empty bundle; unblocks readiness evaluator, mixed method classifier, and `/readyz` bootstrap fields |
 | **Related** | [bootstrap-day-zero.md](../identity/bootstrap-day-zero.md), [failure-mode-matrix.md](../identity/failure-mode-matrix.md), [overview.md](../identity/overview.md), [registry-operations.md](../identity/registry-operations.md), [sts-exchange.md](../identity/sts-exchange.md), [ADR 0001](0001-tenancy-model.md), [ADR 0003](0003-bootstrap-vs-mesh-tokens.md), [ADR 0010](0010-bundle-format.md), [ADR 0013](0013-hierarchical-policy-merge.md), `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs` |
 
 ## Context

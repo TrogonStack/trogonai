@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 8 (engine extraction); unblocks multi-protocol reuse (ACP / A2A), standalone policy-SKU packaging ([ADR 0017](0017-product-positioning.md)), and OSS boundary for `trogon-policy-*` without blocking Block E delivery |
+| **Blocks** | Engine extraction; unblocks multi-protocol reuse (ACP / A2A), standalone policy-SKU packaging ([ADR 0017](0017-product-positioning.md)), and OSS boundary for `trogon-policy-*` without blocking Phase 2 gateway delivery |
 | **Related** | [ADR 0008](0008-policy-dsl.md) (CEL DSL); [ADR 0013](0013-hierarchical-policy-merge.md) (merge → single program); [ADR 0015](0015-tools-list-filtering.md); [ADR 0017](0017-product-positioning.md); [policy-dsl-choice.md](../identity/policy-dsl-choice.md); [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md); [reference-host-abi.md](../identity/reference-host-abi.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); `rsworkspace/crates/trogon-mcp-gateway/tests/policy_eval.rs`, `cel_authz_gate.rs`, `redaction_rules.rs`, `hierarchical_policy_merge.rs`, `tools_list_filter.rs` |
 
 ## Context

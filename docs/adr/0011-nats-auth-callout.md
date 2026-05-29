@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 6 (OAuth 2.0 MCP integration); Block F item 7 (NATS-callout plugin tier — perimeter auth-callout, distinct from Tier 2.5 `mcp.plugin.*` policy callouts); Phase 0 auth callout + subject ACL |
+| **Blocks** | OAuth 2.0 MCP integration; NATS-callout plugin tier — perimeter auth-callout, distinct from Tier 2.5 `mcp.plugin.*` policy callouts; Phase 0 auth callout + subject ACL |
 | **Related** | `docs/identity/nats-callout-plugin.md`; `docs/identity/oauth-mcp-integration.md`; `docs/identity/sts-exchange.md`; `docs/adr/0001-tenancy-model.md`; `docs/adr/0002-identity-layers.md`; `docs/adr/0003-bootstrap-vs-mesh-tokens.md`; `docs/a2a/explanation/auth-callout-design.md` |
 
 ## Context

@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 6 (first-party `mcp-pack` bundle); unblocks Block F bundle loader acceptance tests, Block E day-zero policy for tuple derivation and list shaping, and operator onboarding without custom bundle authoring |
+| **Blocks** | First-party `mcp-pack` bundle; unblocks bundle loader acceptance tests, day-zero policy for tuple derivation and list shaping, and operator onboarding without custom bundle authoring |
 | **Related** | [ADR 0010](0010-bundle-format.md), [ADR 0013](0013-hierarchical-policy-merge.md), [ADR 0015](0015-tools-list-filtering.md), [ADR 0023](0023-schema-cache-invalidation.md), ADR 0025 *(component pooling — sibling wave)*, ADR 0027 *(redaction pipeline — sibling wave)*, [howto-write-bundle.md](../identity/howto-write-bundle.md), [wasm-bundle-format.md](../identity/wasm-bundle-format.md), [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md), [reference-audit-envelope.md](../identity/reference-audit-envelope.md), [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md); `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`, `tools_list_filter.rs`, `schema_cache_invalidation.rs`, `audit_envelope_shape.rs`, `wasm_host_abi.rs`, `policy_eval.rs`, `hierarchical_policy_merge.rs` |
 
 ## Context

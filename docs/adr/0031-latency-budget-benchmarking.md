@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block G item 1 (latency baseline: P50/P99 added by the gateway vs direct `mcp-nats`); unblocks Phase 2+ operator SLO dashboards, CI regression gates, and numeric tightening of hot-path budgets in [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) §6.1 |
+| **Blocks** | Latency baseline (P50/P99 added by the gateway vs direct `mcp-nats`); unblocks Phase 2+ operator SLO dashboards, CI regression gates, and numeric tightening of hot-path budgets in [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) §6.1 |
 | **Related** | [ADR 0014](0014-bulk-check-zedtoken-cache.md) (ZedToken cache — warm/cold PDP paths); [ADR 0015](0015-tools-list-filtering.md) (`list-shape` workload); [ADR 0023](0023-schema-cache-invalidation.md) (schema cache — warm/cold on `tools/call`); [ADR 0016](0016-multi-region-topology.md) (multi-region WAN latency **out of scope** for this ADR); [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) §6; [otel-wiring.md](../identity/otel-wiring.md) §8 (metric cardinality); `rsworkspace/crates/trogon-mcp-gateway/tests/e2e_nats_forward.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/metric_labels.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/bulk_check_zedtoken_cache.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/schema_cache_invalidation.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/tools_list_filter.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/redaction_rules.rs`; `rsworkspace/crates/trogon-mcp-gateway/benches/latency_baseline.rs` |
 
 ## Context

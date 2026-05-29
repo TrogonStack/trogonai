@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block G item 5 (multi-region story: leaf-node deployment patterns, audit-stream replication, SpiceDB topology) |
+| **Blocks** | Multi-region story: leaf-node deployment patterns, audit-stream replication, SpiceDB topology |
 | **Related** | [multi-region.md](../identity/multi-region.md) (design context); [k8s-controller.md](../identity/k8s-controller.md); [failure-mode-matrix.md](../identity/failure-mode-matrix.md); [integration-touchpoints.md](../identity/integration-touchpoints.md); [ADR 0001](0001-tenancy-model.md); [ADR 0003](0003-bootstrap-vs-mesh-tokens.md); [ADR 0004](0004-sts-form-factor.md); [ADR 0006](0006-mesh-token-signing-keys.md) |
 
 ## Context
