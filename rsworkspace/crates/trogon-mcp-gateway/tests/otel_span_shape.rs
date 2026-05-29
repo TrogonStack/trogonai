@@ -284,3 +284,14 @@ mod exporter {
         unimplemented!("trace_id correlation between OTLP export and audit envelope");
     }
 }
+
+mod wasm_evaluate_span {
+    //! Tier-3 WASM evaluate span shape (ADR 0032). OTLP/NATS harness cases remain ignored above.
+
+    use trogon_mcp_gateway::wasm::WASM_EVALUATE_SPAN_NAME;
+
+    #[test]
+    fn wasm_evaluate_span_name_matches_otel_wiring() {
+        assert_eq!(WASM_EVALUATE_SPAN_NAME, "mcp.gateway.wasm.evaluate");
+    }
+}
