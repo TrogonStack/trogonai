@@ -295,7 +295,7 @@ You have the audit stream (`MCP_GATEWAY_PLAN.md:269`, `:784`). Missing: the agen
   - Index by: `originator_sub`, `agent_id`, `chain_root`, `session_id`, `trace_id`.
 - [ ] **Build the timeline view.**
   - One row per hop, with: timestamp, caller `agent_id`, callee `agent_id`/backend, tool name, decision (allow/deny/redact), latency, `purpose`.
-- [ ] **Build the chain explorer.**
+- [x] **Build the chain explorer.**
   - Given a `trace_id`, render the full delegation tree.
 - [ ] **Top-N dashboards.**
   - Most-active agents, most-denied agents, deepest chains, longest chains by tenant.
