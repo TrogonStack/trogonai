@@ -1,0 +1,7 @@
+// mcp-pack/list-tools — tools_list_filter (ADR 0028, ADR 0015)
+// Drops catalogue entries whose tool name matches first-party deny patterns.
+// Pure predicate: no host.spicedb-check, audit.emit, or rate.acquire.
+
+!mcp.tool.name.matches('^internal_.*')
+&& !mcp.tool.name.matches('.*__debug$')
+&& !mcp.tool.name.matches('^mcp_pack_deny_.*')
