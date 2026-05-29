@@ -514,6 +514,27 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             .collect()
     }
 
+    /// Build the compactor_model select option for this session.
+    /// Shows "Default (same as session model)" plus all configured OpenRouter models.
+    /// Using available_models enforces same-provider naturally — all options route via OpenRouter.
+    fn compactor_model_config_option(
+        current: Option<&str>,
+        available_models: &[ModelInfo],
+    ) -> SessionConfigOption {
+        let mut opts = vec![SessionConfigSelectOption::new("", "Default (same as session model)")];
+        opts.extend(
+            available_models
+                .iter()
+                .map(|m| SessionConfigSelectOption::new(m.model_id.0.to_string(), m.model_id.0.as_ref())),
+        );
+        SessionConfigOption::select(
+            "compactor_model".to_string(),
+            "Compaction Model".to_string(),
+            current.unwrap_or("").to_string(),
+            opts,
+        )
+    }
+
     fn build_snapshot(&self, session_id: &str, session: &OpenRouterSession) -> SessionSnapshot {
         let name = session
             .history
@@ -807,10 +828,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         drop(sessions);
 
         info!(session_id, agent_id = ?self.agent_id, "openrouter: new session");
+        let mut cfg = Self::all_tool_config_options(&enabled_tools);
+        cfg.push(Self::compactor_model_config_option(None, &self.available_models));
         Ok(NewSessionResponse::new(SessionId::from(session_id))
             .modes(self.session_mode_state())
             .models(self.session_model_state(None))
-            .config_options(Self::all_tool_config_options(&enabled_tools)))
+            .config_options(cfg))
     }
 
     async fn load_session(
@@ -823,10 +846,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         {
             let sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get(&session_id) {
+                let mut cfg = Self::all_tool_config_options(&s.enabled_tools);
+                cfg.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
                     .modes(self.session_mode_state())
                     .models(self.session_model_state(s.model.as_deref()))
-                    .config_options(Self::all_tool_config_options(&s.enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -891,12 +916,15 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
+                let compactor_model_kv = sessions.get(&session_id).and_then(|s| s.compactor_model.clone());
+                let mut cfg = Self::all_tool_config_options(&enabled_tools);
+                cfg.push(Self::compactor_model_config_option(compactor_model_kv.as_deref(), &self.available_models));
                 return Ok(agent_client_protocol::LoadSessionResponse::new()
                     .modes(self.session_mode_state())
                     .models(self.session_model_state(
                         sessions.get(&session_id).and_then(|s| s.model.as_deref()),
                     ))
-                    .config_options(Self::all_tool_config_options(&enabled_tools)));
+                    .config_options(cfg));
             }
         }
 
@@ -912,8 +940,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let s = sessions
             .get(&session_id)
             .ok_or_else(|| not_found(format!("session {session_id} not found")))?;
+        let mut cfg = Self::all_tool_config_options(&s.enabled_tools);
+        cfg.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
         Ok(ResumeSessionResponse::new()
-            .config_options(Self::all_tool_config_options(&s.enabled_tools)))
+            .config_options(cfg))
     }
 
     async fn fork_session(
@@ -983,10 +1013,16 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
         drop(sessions);
 
+        let inherited_compactor = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&new_session_id).and_then(|s| s.compactor_model.clone())
+        };
+        let mut cfg = Self::all_tool_config_options(&inherited_tools);
+        cfg.push(Self::compactor_model_config_option(inherited_compactor.as_deref(), &self.available_models));
         Ok(ForkSessionResponse::new(new_session_id)
             .modes(self.session_mode_state())
             .models(self.session_model_state(inherited_model.as_deref()))
-            .config_options(Self::all_tool_config_options(&inherited_tools)))
+            .config_options(cfg))
     }
 
     async fn close_session(
@@ -1149,7 +1185,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(config_id = %config_id, "openrouter: set_session_config_option unknown option — ignored");
         }
 
-        let config_options = Self::all_tool_config_options(&s.enabled_tools);
+        let mut config_options = Self::all_tool_config_options(&s.enabled_tools);
+        config_options.push(Self::compactor_model_config_option(s.compactor_model.as_deref(), &self.available_models));
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
 
@@ -2866,7 +2903,8 @@ mod tests {
             let resp = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap();
             let config_options = resp.config_options.unwrap_or_default();
             let all_defs = trogon_tools::all_tool_defs();
-            assert_eq!(config_options.len(), all_defs.len(), "config_options must have one entry per trogon-tool");
+            // tool toggles + compactor_model
+            assert_eq!(config_options.len(), all_defs.len() + 1, "config_options must have one entry per trogon-tool plus compactor_model");
             for def in &all_defs {
                 assert!(
                     config_options.iter().any(|opt| opt.id.to_string() == def.name),
@@ -2875,6 +2913,10 @@ mod tests {
                 );
             }
             for opt in &config_options {
+                if opt.id.to_string() == "compactor_model" {
+                    // compactor_model defaults to "" (same as session model) — not "enabled"
+                    continue;
+                }
                 let current = match &opt.kind {
                     agent_client_protocol::SessionConfigKind::Select(s) => s.current_value.to_string(),
                     _ => String::new(),

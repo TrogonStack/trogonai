@@ -641,6 +641,28 @@ where
             // config_options — the notification is the authoritative update path.
             return Ok(SetSessionConfigOptionResponse::new(vec![]));
         }
+
+        // Forward "compactor_model" to the active external runner so the runner's
+        // own in-memory session is updated. The shared KV (written by inner below)
+        // only reaches the embedded acp-runner; xai-runner and openrouter-runner
+        // keep compactor_model in their own in-memory session state keyed by runner_sid.
+        // Best-effort: if the bridge call fails, compaction falls back to the session model.
+        if args.config_id.0.as_ref() == "compactor_model" {
+            let acp_sid = args.session_id.0.to_string();
+            if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
+                if prefix != self.embedded_prefix {
+                    if let Some(bridge) = self.get_or_create_bridge(&prefix) {
+                        let mut ext_args = args.clone();
+                        ext_args.session_id = runner_sid.into();
+                        let _ = bridge.set_session_config_option(ext_args).await;
+                    }
+                    // Return the external runner's response (contains its config_options).
+                    // Do NOT fall through to inner — the external runner owns this session.
+                    return self.inner.set_session_config_option(args).await;
+                }
+            }
+        }
+
         self.inner.set_session_config_option(args).await
     }
 
