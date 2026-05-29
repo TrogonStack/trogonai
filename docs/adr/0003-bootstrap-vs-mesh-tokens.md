@@ -16,7 +16,7 @@ Once connected, the caller uses this JWT for **every** gateway interaction. The 
 
 This model proves **perimeter authentication and gateway enforcement**. It does **not** implement Uber's agent-delegation identity plane:
 
-| Capability | Today | Uber target (`PENDING_TODO.md`) |
+| Capability | Today | Uber target |
 |---|---|---|
 | Connect-time credential | Auth-callout User JWT | Bootstrap credential only |
 | Token scope | Broad NATS subject ACL + gateway policy | Narrow `aud` per hop, short TTL |
@@ -24,7 +24,7 @@ This model proves **perimeter authentication and gateway enforcement**. It does 
 | Delegation lineage | None | `act_chain` appended at each exchange |
 | Gateway egress | Propagate verified headers | Mint downstream STS token; drop inbound |
 
-`PENDING_TODO.md` Block 0 states this decision is **the single most consequential choice** in the agent-identity gap analysis. It determines whether Block 2 (STS, `act_chain`, gateway egress minting) is **additive enrichment** of the current JWT or a **replacement** of the connect-time JWT as the mesh credential.
+This decision is **the single most consequential choice** in the agent-identity gap analysis. It determines whether the STS / `act_chain` / gateway egress minting work is **additive enrichment** of the current JWT or a **replacement** of the connect-time JWT as the mesh credential.
 
 Reference: [Uber — Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/).
 
@@ -62,7 +62,7 @@ The connect-time User JWT remains authoritative for NATS subject ACL **and** gat
 
 **Pros:** Zero new latency on the hot path; smallest implementation cost; no STS dependency; trivial migration from current branch.
 
-**Cons:** Leaked JWT grants full gateway publish scope until expiry; no per-hop audience narrowing; audit cannot distinguish "token minted for hop A" vs. "token reused at hop C"; cross-agent delegation is policy-simulated, not cryptographically bound; misaligned with Uber reference and `PENDING_TODO.md` Block 2.4 target.
+**Cons:** Leaked JWT grants full gateway publish scope until expiry; no per-hop audience narrowing; audit cannot distinguish "token minted for hop A" vs. "token reused at hop C"; cross-agent delegation is policy-simulated, not cryptographically bound; misaligned with the Uber reference and gateway egress-mint target.
 
 ### (b) Auth-callout JWT is a bootstrap; STS issues mesh tokens per hop
 
@@ -72,7 +72,7 @@ Connect-time JWT proves **who connected to NATS** and authorizes **edge-zone sub
 |---|---|
 | NATS ACL | Bootstrap JWT retains edge ACL; mesh JWT may carry tighter claims only (no broader NATS permissions than bootstrap) |
 | Gateway ingress | Validate **mesh token** where enforce mode applies; bootstrap alone insufficient for gated RPCs |
-| Gateway egress | Gateway calls STS with `(subject_token=bootstrap or prior mesh, audience=backend_id)`; attaches mesh token; **drops inbound token** (`PENDING_TODO.md` Block 2.4) |
+| Gateway egress | Gateway calls STS with `(subject_token=bootstrap or prior mesh, audience=backend_id)`; attaches mesh token; **drops inbound token** |
 | Cross-agent calls | A2A SDK: `lookup → exchange(aud=target) → send` |
 | Block 2 work | **Replacement** — STS, registry, workload attestation, `act_chain` are on the critical path |
 
@@ -106,10 +106,10 @@ Bootstrap JWT suffices for **low-risk, idempotent** operations (`tools/list`, `r
 | **Implementation cost** | Medium | (a) > (c) > (b) |
 | **Audit clarity / agent-centric lineage** | High | (b) > (c) > (a) |
 | **Migration cost from current branch** | Medium | (a) > (c) > (b) |
-| **Alignment with Uber / `PENDING_TODO` target** | High | (b) > (c) >> (a) |
+| **Alignment with Uber target** | High | (b) > (c) >> (a) |
 | **Operational resilience** (STS outage) | Medium | (a) > (c) > (b) — all fail-closed except dangerous degraded-mode escape hatches |
 
-**Latency note:** MCP gateway egress exchange is cacheable by `(caller_sub, target_aud, session_id, scope)` up to TTL/2 (`PENDING_TODO.md` Block 2.4). Bootstrap-only option (a) avoids STS entirely but externalizes risk to gateway policy and broad NATS ACL.
+**Latency note:** MCP gateway egress exchange is cacheable by `(caller_sub, target_aud, session_id, scope)` up to TTL/2. Bootstrap-only option (a) avoids STS entirely but externalizes risk to gateway policy and broad NATS ACL.
 
 **Audit note:** Option (a) can log `act_chain`-shaped data from headers, but it is not cryptographically bound to the credential the backend trusts. Options (b) and (c) embed lineage in the signed mesh JWT.
 
@@ -123,7 +123,7 @@ Bootstrap JWT suffices for **low-risk, idempotent** operations (`tools/list`, `r
 
 1. **Security matches the threat model.** A connect-time JWT with `{prefix}.gateway.>` publish permission is a high-value bearer. Uber's model treats it as bootstrap precisely because perimeter proof ≠ per-hop authorization. Leaked bootstrap still matters, but mesh tokens limit damage to one audience and one TTL window.
 
-2. **Block 2 is designed as replacement, not decoration.** `PENDING_TODO.md` Block 2.4 explicitly requires gateway egress to **mint, not propagate**. That only makes sense if the inbound credential is not the same artifact the backend should trust. Option (a) would leave Block 2 as optional telemetry; most of the Uber gap would remain.
+2. **Block 2 is designed as replacement, not decoration.** Gateway egress is explicitly required to **mint, not propagate**. That only makes sense if the inbound credential is not the same artifact the backend should trust. Option (a) would leave Block 2 as optional telemetry; most of the Uber gap would remain.
 
 3. **Audit and adaptive access depend on signed chains.** Block 4 (agent-traffic view) and Block 5 (step-up, human-in-the-loop) require a verifiable `act_chain` in the credential backends and SIEM consume—not reconstruct from gateway logs.
 
@@ -160,7 +160,7 @@ egress:  STS.exchange(subject=validated_token, aud=target_backend, purpose=…)
 audit:   envelope records act_chain, aud, iss=sts, bootstrap_sub (reference only)
 ```
 
-Ingress hardening extends to strip client-supplied `act_chain`, `agent_id`, `wkl` (`PENDING_TODO.md` Block 1.3) in addition to existing pinned headers.
+Ingress hardening extends to strip client-supplied `act_chain`, `agent_id`, `wkl` in addition to existing pinned headers.
 
 ### Bootstrap JWT role (unchanged but narrowed semantics)
 
@@ -188,11 +188,11 @@ Ingress hardening extends to strip client-supplied `act_chain`, `agent_id`, `wkl
 
 ## Migration path
 
-Phasing mirrors `MCP_GATEWAY_AGENT_IDENTITY` and existing `MCP_GATEWAY_JWT_*` modes (`PENDING_TODO.md` Block 6).
+Phasing mirrors `MCP_GATEWAY_AGENT_IDENTITY` and existing `MCP_GATEWAY_JWT_*` modes.
 
 ### Phase 0 — Today (unchanged)
 
-Auth-callout bootstrap + gateway JWT ingress + header propagation. Document bootstrap as **provisional** per `PENDING_TODO.md` verified snapshot.
+Auth-callout bootstrap + gateway JWT ingress + header propagation. Document bootstrap as **provisional**.
 
 ### Phase 1 — Shadow (`MCP_GATEWAY_AGENT_IDENTITY=shadow`)
 
@@ -234,7 +234,7 @@ Flip `MCP_GATEWAY_AGENT_IDENTITY` to `shadow` or `off`; bootstrap path remains w
 
 1. **Bootstrap on NATS reconnect:** Does a reconnect re-bootstrap and invalidate in-flight mesh tokens tied to the prior session, or are mesh tokens session-independent?
 2. **Mesh token on the NATS wire:** Separate JWT header vs. re-minted User JWT with unchanged subject ACL but enriched claims—which minimizes NATS server and gateway changes?
-3. **Gateway's own hop:** Does the gateway append itself to `act_chain` as an actor (privileged workload SPIFFE) or only as infrastructure (`iss` metadata)? Related: does the gateway have an `agent_id` (`PENDING_TODO.md` open questions)?
+3. **Gateway's own hop:** Does the gateway append itself to `act_chain` as an actor (privileged workload SPIFFE) or only as infrastructure (`iss` metadata)? Related: does the gateway have an `agent_id`?
 4. **Callback direction:** Server → client callbacks (`mcp.gateway.callback.*`)—exchange with `aud=client_id` before egress is likely required; confirm symmetric enforce rules.
 5. **Bridge reminting:** `a2a-bridge` already mints per-request caller JWTs—is that a second bootstrap or an ad-hoc STS? Align with ADR 0004.
 6. **Hybrid sunset date:** If (c) is used during migration, what metric triggers retiring bootstrap-only list paths?
@@ -245,7 +245,6 @@ Flip `MCP_GATEWAY_AGENT_IDENTITY` to `shadow` or `off`; bootstrap path remains w
 
 ## References
 
-- `PENDING_TODO.md` — Block 0 (bootstrap decision), Block 2.1 (STS), Block 2.4 (gateway egress), Block 6 (migration)
 - `MCP_GATEWAY_PLAN.md` — § Wire-Format Pins (headers, ingress hardening), § Audit envelope, § CEL namespace
 - `docs/a2a/explanation/auth-callout-design.md` — current bootstrap JWT layout
 - [Uber — Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/)

@@ -77,7 +77,7 @@ All raised exceptions are subclasses of `SdkError` with a stable `code` discrimi
 
 ## Roadmap
 
-Intentionally stubbed in this skeleton; tracked under `PENDING_TODO.md` line 156:
+Intentionally stubbed in this skeleton:
 
 - Real NATS transport (`MessageTransport` over `nats-py`), subscriber wiring, queue groups.
 - JWKS fetch over HTTP / NATS KV, with caching and rotation.
