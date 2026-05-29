@@ -2,7 +2,7 @@
 
 **Status:** Design spec (2026-05-28). Block C paper item — no implementation yet.
 
-**Related:** [overview.md](overview.md), [act-chain.md](act-chain.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C and § Session correlation.
+**Related:** [overview.md](overview.md), [act-chain.md](act-chain.md).
 
 ---
 
@@ -99,7 +99,7 @@ Progress tokens are **valid for the lifetime of the associated request** (and, f
 
 ## Trogon transport mapping
 
-Clients reach the gateway on edge-zone subjects (`mcp.gateway.request.{server_id}.{method_path}`). The gateway queue group (`mcp-gateway`) load-balances across replicas. Reply correlation for a **single** request uses per-instance inboxes (`_INBOX.gateway.{instance_id}.{nuid}`) held in **process memory** — intentionally not replicated ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes).
+Clients reach the gateway on edge-zone subjects (`mcp.gateway.request.{server_id}.{method_path}`). The gateway queue group (`mcp-gateway`) load-balances across replicas. Reply correlation for a **single** request uses per-instance inboxes (`_INBOX.gateway.{instance_id}.{nuid}`) held in **process memory** — intentionally not replicated.
 
 Session state is **orthogonal** to inbox correlation:
 
@@ -109,7 +109,7 @@ Session state is **orthogonal** to inbox correlation:
 | Session record (`session_id` → init context) | Many requests | **Must survive** replica crash and client reconnect to a different replica |
 | Progress / cancel routing | One long request | Must reach the replica awaiting the backend reply, or be recoverable |
 
-The gateway **terminates** `initialize` by default ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §5): the client sees `trogon-mcp-gateway` as the MCP server. Backend servers receive a lazy `initialize` on first use per session. Session KV therefore holds both **client-facing** init context and **per-backend** init snapshots.
+The gateway **terminates** `initialize` by default: the client sees `trogon-mcp-gateway` as the MCP server. Backend servers receive a lazy `initialize` on first use per session. Session KV therefore holds both **client-facing** init context and **per-backend** init snapshots.
 
 ```mermaid
 sequenceDiagram
@@ -143,7 +143,7 @@ A queue-group subscriber has three properties that conflict with naive session h
 
 1. **Any worker may consume any message.** NATS selects a queue member per message. Two consecutive messages from the same client NATS connection may still land on different gateway pods if the connection reconnects, if the client library opens a new connection, or if load balancing spreads concurrent publishes.
 
-2. **No replica owns "the session."** Unlike sticky HTTP sessions or ACP's `{prefix}.{session_id}.agent.*` subject embedding (`acp-nats`), the default gateway edge grammar keeps `session_id` **out of the subject** ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Session correlation — current default: session in KV, not subject).
+2. **No replica owns "the session."** Unlike sticky HTTP sessions or ACP's `{prefix}.{session_id}.agent.*` subject embedding (`acp-nats`), the default gateway edge grammar keeps `session_id` **out of the subject**.
 
 3. **Process-local memory is invisible to peers.** The Phase 1 gateway correctly stores in-flight inbox maps in memory. Session data placed in the same map would vanish on crash and would be unreachable from sibling replicas handling the next message.
 
@@ -333,7 +333,6 @@ Field-by-field semantics:
 | `bindings.{server_id}` | object | per backend | Lazy backend init state for that target |
 | `bindings.*.backend_init` | object \| null | no | Cached backend `InitializeResult` after lazy forward |
 | `bindings.*.backend_init_pending` | bool | no | Lock flag: avoid duplicate concurrent lazy inits |
-| `bindings.*.zedtoken` | string | no | SpiceDB consistency token scoped to session ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) SpiceDB section) |
 | `bindings.*.schema_generation` | int | no | Bumped on `notifications/tools/list_changed`; invalidates schema cache |
 | `mesh.egress_cache_generation` | int | no | Invalidates in-process mesh token cache across replicas when incremented |
 | `inflight_count` | int | yes | Number of outstanding gateway→backend requests; used for close guard |
@@ -470,7 +469,7 @@ Session lifecycle events use the standard gateway audit subject tree — no new 
 | KV store fault | `mcp.audit.error.request.initialize` | `error.tier: session_kv` |
 | In-flight cancel routed | `mcp.audit.allow.request.notification` | `method: notifications/cancelled`, `request_id` |
 
-All envelopes use schema `trogon.mcp.audit/v1` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §7). The [agent-traffic view](agent-traffic.md) indexes `session_id` for timeline queries ("show all tools for session X").
+All envelopes use schema `trogon.mcp.audit/v1`. The [agent-traffic view](agent-traffic.md) indexes `session_id` for timeline queries ("show all tools for session X").
 
 STS exchanges during the session continue on `mcp.audit.sts.{outcome}` with the same `session_id` claim when mesh tokens are minted ([act-chain.md](act-chain.md) audit embedding).
 
@@ -487,7 +486,7 @@ Follow the precedent of `mcp.metrics.sts.latency` ([sts-exchange.md](sts-exchang
 
 ### Trace spans
 
-Span names follow OpenTelemetry messaging conventions already used in `trogon-nats` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G):
+Span names follow OpenTelemetry messaging conventions already used in `trogon-nats`:
 
 | Span name | Parent | Attributes |
 |---|---|---|
@@ -498,7 +497,7 @@ Span names follow OpenTelemetry messaging conventions already used in `trogon-na
 | `mcp.session.inflight.cancel` | Notification consumer span | `request.id`, `cancel.route` (`local`/`control_fanout`) |
 | `mcp.session.close` | Admin or client-initiated | `inflight_count`, `outcome` |
 
-Propagate `traceparent` from client through session operations ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins). Link backend lazy-init spans as children of the first `tools/call` that triggered them.
+Propagate `traceparent` from client through session operations. Link backend lazy-init spans as children of the first `tools/call` that triggered them.
 
 ### Control-plane signals (existing + proposed)
 
@@ -528,7 +527,7 @@ These are guidance for the Block C → Phase 2 implementer; not wire pins.
 
 1. **Read-through cache:** Each gateway replica may keep a 5–15 s LRU of session records keyed `{tenant}.{session_id}` to cut KV reads on chatty loops. Invalidate on CAS conflict or `mcp.control.cache.invalidate.*` broadcast.
 
-2. **Do not store in-flight inbox maps in KV** except the optional inflight sub-keys for cancel/progress routing. Full reply correlation stays in memory ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) explicit default).
+2. **Do not store in-flight inbox maps in KV** except the optional inflight sub-keys for cancel/progress routing. Full reply correlation stays in memory.
 
 3. **Mesh egress cache:** Today [`MeshEgressCache`](../../rsworkspace/crates/trogon-mcp-gateway/src/egress/cache.rs) is process-local. Phase 2 should either tie cache lifetime to session KV generation counter (reload on mismatch) or accept one redundant STS exchange after replica switch — document in egress module when implemented.
 
@@ -564,6 +563,5 @@ These are guidance for the Block C → Phase 2 implementer; not wire pins.
 | [MCP Transports — Session Management](https://modelcontextprotocol.io/specification/latest/basic/transports) | `MCP-Session-Id`, termination |
 | [MCP Progress](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress) | `notifications/progress` |
 | [MCP Schema — cancelled](https://modelcontextprotocol.io/specification/2025-06-18/schema) | `notifications/cancelled` |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C, § Session correlation, § Wire-Format Pins | Subject grammar, headers, queue groups |
 | [overview.md](overview.md) | Identity layers, `session_id` claim |
 | [act-chain.md](act-chain.md) | Delegation vs session correlation |

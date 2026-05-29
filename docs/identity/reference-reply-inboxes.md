@@ -14,7 +14,7 @@ This page is the single lookup for NATS reply-inbox tokens used by the MCP gatew
 
 ## 1. The two inbox shapes
 
-Wire-Format Pin 2 ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins, §2 Reply inbox naming):
+Wire-Format Pin 2:
 
 ```
 _INBOX.gateway.{instance_id}.{nuid}        # gateway → backend reply correlation
@@ -26,7 +26,7 @@ _INBOX.client.{nuid}                       # client → gateway reply correlatio
 | `_INBOX.client.{nuid}` | Client → gateway (ingress reply) | Client NATS connection | **No** — gateway publishes only |
 | `_INBOX.gateway.{instance_id}.{nuid}` | Gateway → backend (egress reply) | Gateway process that minted `{nuid}` | **Yes** — direct subscribe on owning instance only |
 
-NATS sets the ingress reply token on `Message.reply` when the client uses request/reply publish APIs. The gateway **terminates** correlation: it does not forward the client inbox to the backend; it mints a gateway-side inbox and holds the mapping in process memory ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation).
+NATS sets the ingress reply token on `Message.reply` when the client uses request/reply publish APIs. The gateway **terminates** correlation: it does not forward the client inbox to the backend; it mints a gateway-side inbox and holds the mapping in process memory.
 
 ---
 
@@ -34,10 +34,6 @@ NATS sets the ingress reply token on `Message.reply` when the client uses reques
 
 | Property | Value | Source |
 |---|---|---|
-| Generation | NUID at gateway-process boot | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 2 |
-| Exposure | Published on `mcp.control.gateway.heartbeat.{instance_id}` | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Control plane subjects |
-| Egress header | `mcp-instance-id` on gateway → backend messages | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1 |
-| Ingress hardening | Client-supplied `mcp-instance-id` **dropped** on edge ingress | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1 |
 
 ### 2.1 Lifecycle
 
@@ -48,7 +44,7 @@ NATS sets the ingress reply token on `Message.reply` when the client uses reques
 
 ### 2.2 Collision on restart
 
-If `{instance_id}` collides after restart (extremely unlikely for NUID), prior in-flight requests are **already lost** because the process died. No recovery or cross-instance handoff is attempted ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 2).
+If `{instance_id}` collides after restart (extremely unlikely for NUID), prior in-flight requests are **already lost** because the process died. No recovery or cross-instance handoff is attempted.
 
 Operators correlate replica loss via heartbeat cessation ([failure-mode-matrix.md](failure-mode-matrix.md) row 11, [mcp-session-model.md](mcp-session-model.md)).
 
@@ -69,7 +65,7 @@ _INBOX.gateway.{my_instance_id}.>
 | Wildcard | `>` matches all `{nuid}` tokens under this `{instance_id}` |
 | Cross-instance | **Forbidden** — instance A must never subscribe to `_INBOX.gateway.{instance_B}.>` |
 
-Ingress and callback fan-in still use queue groups ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 3):
+Ingress and callback fan-in still use queue groups:
 
 | Subscription | Queue group |
 |---|---|
@@ -96,13 +92,13 @@ _INBOX.client.{nuid}
 | Gateway action | Publish JSON-RPC result or error to the `Message.reply` token captured at ingress |
 | Preservation | Original client `reply-to` stored in correlation map under gateway-side `{nuid}` key |
 
-Bidirectional flows (server → client callback, client → gateway callback response) repeat the same termination pattern: gateway mints `_INBOX.gateway.{instance_id}.{nuid}` for the downstream leg and maps back to the upstream caller inbox ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Translation table).
+Bidirectional flows (server → client callback, client → gateway callback response) repeat the same termination pattern: gateway mints `_INBOX.gateway.{instance_id}.{nuid}` for the downstream leg and maps back to the upstream caller inbox.
 
 ---
 
 ## 5. Correlation map
 
-The gateway holds in-flight reply routing state **in memory per instance**. It is not replicated to JetStream KV ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation, [reply-correlation.md](reply-correlation.md) §1.3).
+The gateway holds in-flight reply routing state **in memory per instance**. It is not replicated to JetStream KV ([reply-correlation.md](reply-correlation.md) §1.3).
 
 ### 5.1 Map shape
 
@@ -116,7 +112,7 @@ HashMap<GatewayInboxNuid, ClientReplyTo>
 | Map key | `GatewayInboxNuid` — `{nuid}` segment of `_INBOX.gateway.{instance_id}.{nuid}` | Lookup when backend reply arrives |
 | Map value | `ClientReplyTo` | Original client reply subject + request context |
 
-`ClientReplyTo` record ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation step 3):
+`ClientReplyTo` record:
 
 | Member | Purpose |
 |---|---|
@@ -135,7 +131,7 @@ Remove occurs on:
 
 ### 5.2 Bounded size
 
-Map entry count is bounded by the same inflight semaphores that gate backend fan-out ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 9):
+Map entry count is bounded by the same inflight semaphores that gate backend fan-out:
 
 | Scope | Default cap | On exceed |
 |---|---|---|
@@ -172,7 +168,7 @@ This is observability-only; orphan handling must not block the hot path.
 
 ## 6. Deadline propagation
 
-Header: `mcp-deadline-unix-ms` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1).
+Header: `mcp-deadline-unix-ms`.
 
 | Hop | Action |
 |---|---|
@@ -221,7 +217,7 @@ Phase 1 **(today)** uses `Config::operation_timeout()` from `mcp-nats` when the 
    _INBOX.client.{nuid_c}.
 ```
 
-Sequence applies symmetrically to callback legs ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Translation table).
+Sequence applies symmetrically to callback legs.
 
 ---
 
@@ -244,7 +240,7 @@ What the **client** observes for each failure class. Gateway audit and operator 
 
 ## 9. Why not queue-group the gateway inbox
 
-Queue-grouping `_INBOX.gateway.{instance_id}.>` would deliver a backend reply to a **random** gateway worker in the group. Correlation state (`HashMap<GatewayInboxNuid, ClientReplyTo>`) lives in **process memory on the instance that minted `{nuid}`** and accepted the ingress message. A peer replica receiving the backend reply would find no map entry, could not recover the client's `original_reply_to`, and could not safely guess which client inbox to publish to. Replicating the full in-flight map to KV would add latency and complexity explicitly rejected for the hot path ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation). Therefore the gateway inbox subscription is **direct per `{instance_id}`** while ingress remains queue-grouped for throughput and failover on **new** messages only ([mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) §4).
+Queue-grouping `_INBOX.gateway.{instance_id}.>` would deliver a backend reply to a **random** gateway worker in the group. Correlation state (`HashMap<GatewayInboxNuid, ClientReplyTo>`) lives in **process memory on the instance that minted `{nuid}`** and accepted the ingress message. A peer replica receiving the backend reply would find no map entry, could not recover the client's `original_reply_to`, and could not safely guess which client inbox to publish to. Replicating the full in-flight map to KV would add latency and complexity explicitly rejected for the hot path. Therefore the gateway inbox subscription is **direct per `{instance_id}`** while ingress remains queue-grouped for throughput and failover on **new** messages only ([mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) §4).
 
 ---
 
@@ -294,10 +290,6 @@ Join operator traces to client logs via JSON-RPC `id`, `mcp-correlation-id`, and
 |---|---|
 | [reference-subject-grammar.md](reference-subject-grammar.md) | Ingress/egress subjects; control-plane heartbeat subject |
 | [reply-correlation.md](reply-correlation.md) | Queue-group failure modes, dedup strategy, Phase 1 vs target |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 2 | Authoritative inbox pin |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inboxes and correlation | Termination flow and translation table |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 3 | Queue group vs direct subscribe |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 6 | `-32102` `backend_timeout` |
 | [reference-audit-envelope.md](reference-audit-envelope.md) | Audit subject grammar and proposed `decision_reason` values |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Rows 8, 11 — backend timeout and NATS partition |
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) §4 | Operator summary of per-instance inbox model |

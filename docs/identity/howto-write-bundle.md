@@ -55,7 +55,7 @@ Confirm the following before Step 1. If any item is missing, complete [Bootstrap
 
    The `agctl mcp` subcommand tree exists today (`health`, `servers`, `policies`, `audit`). Bundle-specific subcommands (`bundle validate`, `bundle dry-run`, `bundle status`, `bundle rollback`) are **proposed** in Block G and documented below as the target CLI surface.
 
-5. **Signing NKey.** Generate or reuse an operator NKey pair trusted by the gateway (`mcp-gateway-config/trusted_signers` **proposed**; see [MCP_GATEWAY_PLAN.md § Bundles](../../MCP_GATEWAY_PLAN.md)). Store the seed securely; you need the seed at publish time.
+5. **Signing NKey.** Generate or reuse an operator NKey pair trusted by the gateway. Store the seed securely; you need the seed at publish time.
 
 6. **Environment defaults for the worked example:**
 
@@ -152,7 +152,6 @@ priority = 100
 | `target_wit` | yes | Host ABI pin (`trogon:mcp-policy@0.1.0`). See [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md). |
 | `min_gateway_version` | yes | Refuse load if running gateway is older. |
 | `capabilities.imports` | yes when builtins used | Declares `host.spicedb-check`, `host.audit-emit`, `host.rate-acquire`, etc. |
-| `signing.nkey_pub` | yes | Public half of signing NKey ([MCP_GATEWAY_PLAN.md § Bundles](../../MCP_GATEWAY_PLAN.md)). |
 | `programs[]` | yes | Ordered list of CEL files with `id`, `path`, `class`, `effect`. |
 
 Cross-reference [wasm-bundle-format.md §3.1](wasm-bundle-format.md#31-bundletoml--manifest) for the Phase 3 superset (`bundle_id`, cosign layers, `policy.wasm`). When both CEL and WASM ship together, one manifest covers all tiers.
@@ -172,7 +171,7 @@ Argument order for `spicedb.check` follows **`cel_builtins/`** (`resource`, `per
 
 // ── Request-phase match condition ───────────────────────────────────────────
 // Only evaluate this rule for the one tool we intend to gate.
-// mcp.method and mcp.tool.name are pinned wire roots ([MCP_GATEWAY_PLAN §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace)).
+// mcp.method and mcp.tool.name are pinned wire roots.
 (
   mcp.method == "tools/call"
   && mcp.tool.name == "create_issue"
@@ -217,7 +216,6 @@ Argument order for `spicedb.check` follows **`cel_builtins/`** (`resource`, `per
 |---|---|
 | Match scope | Rule fires only on `tools/call` + `create_issue` + `github` ingress subject. Other tools/methods fall through to other rules or default deny. |
 | SpiceDB tuple | Object type `trogon/mcp_tool`, id `github\|create_issue`, permission `call`, subject `trogon/principal:{jwt.sub}`. Mismatch with schema is a common pitfall (see § Common pitfalls). |
-| Rate limit | `rate.acquire` returns `false` when limited; the `&&` chain denies the call. Clients see `-32105 rate_limited` ([wire pins §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)). |
 | Audit emit | Runs only when all prior clauses are true (allow path). Denied calls do not emit this extra block. |
 
 For variable details (`jwt.sub`, `jwt.tenant`, `mcp.tool.name`, …), see [reference-cel-variables.md](reference-cel-variables.md) **(Block H reference — forthcoming)** and the plan table cited above.
@@ -323,7 +321,7 @@ Verify locally before publish:
 nkey verify --in manifest.toml --sig signatures/manifest.sig --pub "${NKEY_PUB}"
 ```
 
-Phase 3 OCI bundles add cosign layers for `bundle.toml` and `policy.wasm` ([wasm-bundle-format.md §5](wasm-bundle-format.md#5-signing)). CEL-only packs use NKey-over-manifest as the Phase 2 path ([MCP_GATEWAY_PLAN.md § Bundles](../../MCP_GATEWAY_PLAN.md)).
+Phase 3 OCI bundles add cosign layers for `bundle.toml` and `policy.wasm` ([wasm-bundle-format.md §5](wasm-bundle-format.md#5-signing)). CEL-only packs use NKey-over-manifest as the Phase 2 path.
 
 ### 6.2 Publish to OCI registry (production default)
 
@@ -476,8 +474,6 @@ Never mutate a published artifact in place; publish a fixed semver and roll forw
 | [rate-limiting.md](rate-limiting.md) | Token-bucket semantics for `rate.acquire` |
 | [hierarchical-policy-merge.md](hierarchical-policy-merge.md) | Where server/tenant/org bundles merge |
 | [tools-list-filtering.md](tools-list-filtering.md) | Pure predicates for `tools/list` companion programs |
-| [MCP_GATEWAY_PLAN.md Block H](../../MCP_GATEWAY_PLAN.md) | Docs backlog — "How-to: write a bundle pack" |
-| [MCP_GATEWAY_PLAN.md § Wire-format pins](../../MCP_GATEWAY_PLAN.md#wire-format-pins-for-phase-1) | JSON-RPC error codes, CEL namespace, audit schema |
 
 ---
 
