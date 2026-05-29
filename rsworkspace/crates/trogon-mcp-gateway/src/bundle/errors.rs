@@ -46,6 +46,15 @@ pub enum BundleLoadError {
     DeprecatedManifestFilename {
         used: String,
     },
+    KvEmpty {
+        key: String,
+    },
+    KvFetch(String),
+    KvWatch(String),
+    RevisionNotFound {
+        revision: u64,
+    },
+    BundleNotLoaded,
 }
 
 impl fmt::Display for BundleLoadError {
@@ -104,6 +113,13 @@ impl fmt::Display for BundleLoadError {
                 f,
                 "deprecated manifest filename `{used}`; use manifest.toml"
             ),
+            Self::KvEmpty { key } => write!(f, "KV key `{key}` is empty or deleted"),
+            Self::KvFetch(detail) => write!(f, "KV fetch failed: {detail}"),
+            Self::KvWatch(detail) => write!(f, "KV watch failed: {detail}"),
+            Self::RevisionNotFound { revision } => {
+                write!(f, "no validated bundle revision `{revision}` in rollback ring")
+            }
+            Self::BundleNotLoaded => f.write_str("no active bundle loaded"),
         }
     }
 }

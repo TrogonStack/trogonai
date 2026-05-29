@@ -1,7 +1,9 @@
 //! MCP policy bundle loader per ADR 0010 (`manifest.toml`, CEL/WASM members, NKey signature gate).
 
 mod archive;
+mod bundle_audit;
 mod errors;
+mod kv_loader;
 mod manifest;
 mod manifest_toml;
 mod signature;
@@ -14,12 +16,21 @@ pub use manifest::{
     SchemaEntry, Signing, GATEWAY_VERSION, HOST_TARGET_WIT, MANIFEST_DEPRECATED_FILENAME,
     MANIFEST_FILENAME, SIGNATURE_PATH,
 };
-pub use signature::{manifest_digest_bytes, parse_signature_bytes, TrustedKeys};
+pub use bundle_audit::{
+    BundleAuditFields, BundleAuditPublisher, RecordedBundleAudit, EVENT_HOT_SWAPPED,
+    EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK,
+};
+pub use kv_loader::{
+    BundleHandle, BundleKvLoader, BundleKvLoaderOpts, BundleKvSource, BundleStatus, KvEntry,
+    NatsKvSource,
+};
+pub use signature::{manifest_digest_bytes, parse_signature_bytes, signature_path, TrustedKeys};
+pub use kv_loader::fake_kv;
 pub use validate::{
     hash_member, validate_members, LoadedComponent, LoadedProgram, LoadedSchema, ValidatedMembers,
 };
 
-use signature::{signature_path, verify_manifest_signature};
+use signature::verify_manifest_signature;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedBundle {
@@ -94,10 +105,12 @@ fn verify_and_materialize(
 
 #[cfg(test)]
 mod tests {
+    use nkeys::KeyPair;
+
     use super::*;
     use crate::bundle::manifest::HOST_TARGET_WIT;
 
-    fn fixture_manifest_toml(program_hash: &str) -> String {
+    fn fixture_manifest_toml(nkey_pub: &str, program_hash: &str) -> String {
         format!(
             r#"
 name = "acme/demo"
@@ -109,7 +122,7 @@ created_at = "2026-05-28T00:00:00Z"
 description = "demo"
 
 [signing]
-nkey_pub = "UABTRUSTED"
+nkey_pub = "{nkey_pub}"
 
 [[programs]]
 id = "rule"
@@ -122,54 +135,54 @@ priority = 1
         )
     }
 
-    fn fixture_archive(program_body: &[u8]) -> Vec<u8> {
+    fn signed_fixture_archive(kp: &KeyPair, program_body: &[u8]) -> Vec<u8> {
         let hash = hash_member(program_body);
-        let manifest = fixture_manifest_toml(&hash);
+        let manifest = fixture_manifest_toml(&kp.public_key(), &hash);
+        let manifest_bytes = manifest.into_bytes();
+        let sig = kp.sign(&manifest_digest_bytes(&manifest_bytes)).expect("sign");
         let mut archive = BundleArchive::default();
-        archive.insert(MANIFEST_FILENAME, manifest.into_bytes());
+        archive.insert(MANIFEST_FILENAME, manifest_bytes);
         archive.insert("policies/rule.cel", program_body.to_vec());
-        archive.insert(signature_path(), vec![0u8; 64]);
+        archive.insert(signature_path(), sig);
         build_tar(&archive)
     }
 
     #[test]
     fn load_bundle_rejects_missing_signature() {
         let hash = hash_member(b"true");
-        let manifest = fixture_manifest_toml(&hash);
+        let kp = KeyPair::new_user();
+        let manifest = fixture_manifest_toml(&kp.public_key(), &hash);
         let mut archive = BundleArchive::default();
         archive.insert(MANIFEST_FILENAME, manifest.into_bytes());
         archive.insert("policies/rule.cel", b"true".to_vec());
         let tar = build_tar(&archive);
-        let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
+        let trusted = TrustedKeys::from_allowlist([kp.public_key()]);
         let error = load_bundle(&tar, &trusted).expect_err("missing sig");
         assert!(matches!(error, BundleLoadError::SignatureMissing));
     }
 
     #[test]
-    fn load_bundle_reports_signature_dependency_gap_when_structure_valid() {
-        let tar = fixture_archive(b"true");
-        let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
-        let error = load_bundle(&tar, &trusted).expect_err("nkeys unavailable");
-        assert!(matches!(
-            error,
-            BundleLoadError::SignatureVerificationUnavailable { .. }
-        ));
+    fn load_bundle_accepts_valid_nkey_signature() {
+        let kp = KeyPair::new_user();
+        let tar = signed_fixture_archive(&kp, b"true");
+        let trusted = TrustedKeys::from_allowlist([kp.public_key()]);
+        let bundle = load_bundle(&tar, &trusted).expect("valid signed bundle");
+        assert_eq!(bundle.manifest.version, "1.0.0");
     }
 
     #[test]
     fn deprecated_manifest_filename_is_accepted() {
+        let kp = KeyPair::new_user();
         let hash = hash_member(b"true");
-        let manifest = fixture_manifest_toml(&hash);
+        let manifest = fixture_manifest_toml(&kp.public_key(), &hash);
+        let manifest_bytes = manifest.into_bytes();
+        let sig = kp.sign(&manifest_digest_bytes(&manifest_bytes)).expect("sign");
         let mut archive = BundleArchive::default();
-        archive.insert(MANIFEST_DEPRECATED_FILENAME, manifest.into_bytes());
+        archive.insert(MANIFEST_DEPRECATED_FILENAME, manifest_bytes);
         archive.insert("policies/rule.cel", b"true".to_vec());
-        archive.insert(signature_path(), vec![0u8; 64]);
+        archive.insert(signature_path(), sig);
         let tar = build_tar(&archive);
-        let trusted = TrustedKeys::from_allowlist(["UABTRUSTED"]);
-        let error = load_bundle(&tar, &trusted).expect_err("nkeys unavailable");
-        assert!(matches!(
-            error,
-            BundleLoadError::SignatureVerificationUnavailable { .. }
-        ));
+        let trusted = TrustedKeys::from_allowlist([kp.public_key()]);
+        load_bundle(&tar, &trusted).expect("deprecated filename accepted");
     }
 }
