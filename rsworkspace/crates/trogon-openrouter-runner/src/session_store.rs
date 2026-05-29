@@ -30,6 +30,9 @@ pub struct SessionSnapshot {
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// Per-session HTTP MCP servers captured at session creation; restored on reload.
+    #[serde(default)]
+    pub mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -326,6 +329,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v.get("model").is_none());
@@ -350,6 +354,7 @@ mod tests {
             agent_id: Some("agent-1".to_string()),
             parent_session_id: Some("parent-id".to_string()),
             branched_at_index: Some(3),
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert_eq!(v["model"], "gpt-4");
@@ -375,6 +380,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v["tools"].is_array(), "tools must always be serialized");
@@ -405,6 +411,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         let msgs = v["messages"].as_array().unwrap();

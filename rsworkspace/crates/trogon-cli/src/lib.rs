@@ -12,6 +12,7 @@ pub mod runtime;
 pub mod session;
 pub mod session_store;
 pub mod stdio_mcp_bridge;
+pub mod stream_input;
 pub mod tool_update;
 pub mod terminal;
 pub mod tui_client;
@@ -131,6 +132,7 @@ pub async fn connect_or_start_nats(
     // race does not produce "address already in use" noise on the terminal.
     let child = match Command::new("nats-server")
         .args(["-p", port, "-js"])
+        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
     {

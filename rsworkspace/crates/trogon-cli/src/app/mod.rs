@@ -1,13 +1,14 @@
 //! CLI presentation layer.
 //!
-//! Default behavior stays in `repl.rs`. Stream rendering and permission styling
-//! live here so feature work on `programming-gaps` only needs a new `StreamEvent`
-//! match arm when you tell us about a commit.
+//! Stream rendering, the permission prompt, and display helpers live here so the
+//! REPL loop in `repl.rs` stays focused on control flow. Behavior mirrors the
+//! REPL's original inline rendering; add a `StreamEvent` match arm in
+//! `turn_renderer.rs` when a new event variant lands.
 
 mod display;
 mod permission_prompt;
 mod turn_renderer;
 
-pub use display::{print_startup_banner, print_user_line, runner_label};
-pub use permission_prompt::{PermissionDisplay, permission_from_request, print_permission_prompt};
+pub use display::{print_startup_banner, print_user_line};
+pub use permission_prompt::{permission_summary, print_permission_prompt};
 pub use turn_renderer::{CwdSync, TurnMetrics, TurnRenderer, TurnStop};

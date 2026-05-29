@@ -4,6 +4,7 @@
 //!
 //! Run with:
 //!   cargo test -p trogon-openrouter-runner --test agent_nats_integration
+#![allow(clippy::await_holding_lock)]
 
 use std::sync::{Arc, Mutex};
 

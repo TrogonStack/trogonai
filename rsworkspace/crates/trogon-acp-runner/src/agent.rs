@@ -16,7 +16,7 @@ use agent_client_protocol::{
     SessionInfo, SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
     SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
     SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse, StopReason, McpServer,
+    SetSessionModelResponse, StopReason,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -33,7 +33,7 @@ use crate::prompt_converter::PromptEventConverter;
 use crate::session_notifier::{PromptEventClient, SessionNotifier};
 use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
 use trogon_runner_tools::build_mode_permission_checker;
-use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, StoredMcpServer, append_audit_entries, now_iso8601};
+use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
 use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
 
@@ -117,87 +117,8 @@ fn user_message_from_request(req: &PromptRequest) -> Message {
     }
 }
 
-/// Connect to per-session MCP servers, initialize them, and return tool defs + dispatch table.
-#[cfg_attr(coverage, coverage(off))]
-async fn build_session_mcp(
-    http: &reqwest::Client,
-    servers: &[StoredMcpServer],
-    policy: &EgressPolicy,
-) -> (
-    Vec<ToolDef>,
-    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
-) {
-    let mut tool_defs = Vec::new();
-    let mut dispatch = Vec::new();
-
-    for server in servers {
-        if !policy.is_allowed(&server.url) {
-            warn!(name = %server.name, url = %server.url, "MCP server URL denied by egress policy — skipping");
-            continue;
-        }
-
-        let client = Arc::new(trogon_mcp::McpClient::new(http.clone(), &server.url));
-
-        if let Err(e) = client.initialize().await {
-            warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
-            continue;
-        }
-
-        match client.list_tools().await {
-            Ok(tools) => {
-                for tool in tools {
-                    if tool.name == "AskUserQuestion" {
-                        continue;
-                    }
-                    let prefixed = format!("{}__{}", server.name, tool.name);
-                    tool_defs.push(ToolDef {
-                        name: prefixed.clone(),
-                        description: tool.description,
-                        input_schema: tool.input_schema,
-                        cache_control: None,
-                    });
-                    dispatch.push((prefixed, tool.name, client.clone() as Arc<dyn trogon_mcp::McpCallTool>));
-                }
-                info!(name = %server.name, tools = tool_defs.len(), "MCP server connected");
-            }
-            Err(e) => {
-                warn!(name = %server.name, error = %e, "Failed to list MCP tools — skipping");
-            }
-        }
-    }
-
-    (tool_defs, dispatch)
-}
-
 fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
-}
-
-fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
-    servers
-        .iter()
-        .filter_map(|s| match s {
-            McpServer::Http(h) => Some(StoredMcpServer {
-                name: h.name.clone(),
-                url: h.url.clone(),
-                headers: h
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
-            }),
-            McpServer::Sse(s) => Some(StoredMcpServer {
-                name: s.name.clone(),
-                url: s.url.clone(),
-                headers: s
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
-            }),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Estimates the token count of a message list using the heuristic `bytes / 4`.
@@ -545,7 +466,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(EgressPolicy::default_safe);
-                    let (mcp_defs, mcp_dispatch) = build_session_mcp(&self.http, &state.mcp_servers, &policy).await;
+                    let (mcp_defs, mcp_dispatch) = trogon_runner_tools::build_session_mcp(&self.http, &state.mcp_servers, &policy).await;
                     a.add_mcp_tools(mcp_defs, mcp_dispatch);
                 }
                 if let (Some(reg), Some(nats)) = (&self.registry, &self.execution_nats)
@@ -613,10 +534,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         // Load TROGON.md files (global → repo root → cwd) and prepend to system_prompt.
         let trogon_md = self.md_loader.load(&state.cwd).await;
+        let identity = format!(
+            "You are Trogon, an AI coding assistant.\n\n{}",
+            trogon_runner_tools::URL_FETCH_GUIDANCE
+        );
         let system_prompt = match (trogon_md, state.system_prompt.clone()) {
-            (Some(tmd), Some(sp)) => Some(format!("{tmd}\n\n{sp}")),
-            (Some(tmd), None) => Some(tmd),
-            (None, sp) => sp,
+            (Some(tmd), Some(sp)) => Some(format!("{identity}\n\n{tmd}\n\n{sp}")),
+            (Some(tmd), None) => Some(format!("{identity}\n\n{tmd}")),
+            (None, Some(sp)) => Some(format!("{identity}\n\n{sp}")),
+            (None, None) => Some(identity.to_string()),
         };
 
         let system_prompt = if !state.additional_roots.is_empty() {
@@ -922,7 +848,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .to_string();
 
         let now = now_iso8601();
-        let mcp_servers = convert_mcp_servers(&req.mcp_servers);
+        let mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
         let state = trogon_runner_tools::session_store::SessionState {
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
@@ -966,7 +892,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             needs_save = true;
         }
         if !req.mcp_servers.is_empty() {
-            state.mcp_servers = convert_mcp_servers(&req.mcp_servers);
+            state.mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
             state.updated_at = now_iso8601();
             needs_save = true;
         }

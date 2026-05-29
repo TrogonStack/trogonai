@@ -259,8 +259,14 @@ impl FinishReason {
 /// An event emitted by the Responses API streaming endpoint.
 #[derive(Debug, Clone)]
 pub enum XaiEvent {
-    /// A text chunk from the model.
+    /// A text chunk from the model (incremental, via `message.delta` /
+    /// `response.output_text.delta`).
     TextDelta { text: String },
+    /// The complete assistant text delivered non-incrementally via
+    /// `response.output_item.done`. The agent uses this only when no
+    /// `TextDelta` events preceded it in the same turn — it is a fallback for
+    /// reasoning models (e.g. grok-4) that skip streaming deltas entirely.
+    TextComplete { text: String },
     /// The model requested a function call.
     ///
     /// In the Responses API, function calls are delivered as a complete chunk
@@ -561,6 +567,9 @@ fn parse_sse(
 ///   grok-3-mini) is logged at debug level and discarded — the ACP protocol
 ///   has no dedicated reasoning block type.
 /// - `response.reasoning_summary_text.delta` → logged at debug level, discarded
+/// - `response.output_item.done` → `TextDelta` when item type is `message`
+///   (non-streaming delivery path used by reasoning models like grok-4 that do
+///   not emit `response.output_text.delta` events)
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
 /// - `response.web_search_call.completed` / `response.x_search_call.completed`
 ///   → `ServerToolCompleted` (tool finished; agent advances tool to Completed)
@@ -710,13 +719,36 @@ fn process_sse_line(
             // actual call_id and name from pending_fc which was keyed by item_id.
             let item_id = val["item_id"].as_str().unwrap_or("");
             let final_args = val["arguments"].as_str().unwrap_or("").to_string();
-            if let Some((call_id, name, _)) = pending_fc.remove(item_id) {
-                if !call_id.is_empty() || !name.is_empty() {
-                    pending.push_back(XaiEvent::FunctionCall {
-                        call_id,
-                        name,
-                        arguments: final_args,
-                    });
+            if let Some((call_id, name, _)) = pending_fc.remove(item_id)
+                && (!call_id.is_empty() || !name.is_empty())
+            {
+                pending.push_back(XaiEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments: final_args,
+                });
+            }
+        }
+        // ── Non-streaming text delivery via output_item.done ─────────────────
+        // Reasoning models (e.g. grok-4) may skip `response.output_text.delta`
+        // entirely and deliver the assistant text non-incrementally via this
+        // event. Extract text from each `output_text` content block and emit
+        // `TextComplete` (not `TextDelta`) so the agent can skip it when
+        // streaming deltas were already received for this turn.
+        "response.output_item.done" => {
+            if val["item"]["type"].as_str() == Some("message") {
+                if let Some(content) = val["item"]["content"].as_array() {
+                    for block in content {
+                        if block["type"].as_str() == Some("output_text") {
+                            if let Some(text) = block["text"].as_str() {
+                                if !text.is_empty() {
+                                    pending.push_back(XaiEvent::TextComplete {
+                                        text: text.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1562,6 +1594,48 @@ mod tests {
         assert!(
             matches!(finished, Some(FinishReason::Other(s)) if s == "in_progress"),
             "unknown status must map to FinishReason::Other(status), got: {finished:?}"
+        );
+    }
+
+    // ── response.output_item.done: non-streaming text delivery ───────────────
+
+    #[test]
+    fn output_item_done_message_emits_text_complete() {
+        // grok-4 delivers assistant text non-incrementally via output_item.done
+        // when it does not emit response.output_text.delta events.
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","status":"completed","content":[{"type":"output_text","text":"Hello, how can I help?"}]}}"#;
+        let event = parse_line(line).expect("must produce TextComplete");
+        assert!(
+            matches!(event, XaiEvent::TextComplete { ref text } if text == "Hello, how can I help?"),
+            "output_item.done with output_text content must produce TextComplete: {event:?}"
+        );
+    }
+
+    #[test]
+    fn output_item_done_multiple_content_blocks() {
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second"}]}}"#;
+        let events = parse_line_all(line);
+        assert_eq!(events.len(), 2, "must produce one TextComplete per content block");
+        assert!(matches!(&events[0], XaiEvent::TextComplete { text } if text == "first"));
+        assert!(matches!(&events[1], XaiEvent::TextComplete { text } if text == "second"));
+    }
+
+    #[test]
+    fn output_item_done_non_message_type_ignored() {
+        // function_call output_item.done should not emit a TextComplete
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.done with type != message must produce no event"
+        );
+    }
+
+    #[test]
+    fn output_item_done_empty_text_ignored() {
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":""}]}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.done with empty text must produce no event"
         );
     }
 

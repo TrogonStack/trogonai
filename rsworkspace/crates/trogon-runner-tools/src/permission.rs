@@ -51,6 +51,25 @@ fn extract_input_summary(tool_name: &str, tool_input: &Value) -> String {
         let prefix: String = cmd.chars().take(60).collect();
         return prefix;
     }
+    if tool_name == "gh" {
+        let cmd = tool_input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| {
+                tool_input
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+            })
+            .unwrap_or_default();
+        return format!("gh {}", cmd.chars().take(60).collect::<String>());
+    }
     tool_name.to_string()
 }
 
@@ -131,9 +150,11 @@ impl PermissionChecker for ChannelPermissionChecker {
                 push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::DeniedByUser);
                 return false;
             }
-            // Now the user is actually being prompted — apply the response timeout.
-            match tokio::time::timeout(std::time::Duration::from_secs(60), resp_rx).await {
-                Ok(Ok(true)) => {
+            // Now the user is actually being prompted. The prompt blocks on the human,
+            // so there is no response timeout — wait until the user answers (the bridge
+            // resolves `resp_rx`) or the bridge drops the channel (treated as deny).
+            match resp_rx.await {
+                Ok(true) => {
                     push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::ApprovedByUser);
                     true
                 }
@@ -266,6 +287,7 @@ const PLAN_DENIED_TOOLS: &[&str] = &[
     "todo_write",
     "git_commit",
     "fetch_url",
+    "gh",
 ];
 
 fn is_read_only_tool(tool_name: &str) -> bool {
@@ -324,16 +346,32 @@ fn is_plan_denied_tool(tool_name: &str) -> bool {
 
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
 ///
+/// An explicit `Deny` (TROGON.md rule or tool-policy) is a hard boundary and wins
+/// over every mode auto-allow below (including `dontAsk`). `bypassPermissions` is
+/// the only escape — it installs no checker at all.
+///
 /// | Mode | Behavior |
 /// |------|----------|
-/// | `default` | Auto-allow read-only tools; TROGON.md rules + prompt for bash, edits, MCP |
-/// | `acceptEdits` | Auto-allow file edits; prompt bash, MCP, and other tools |
-/// | `dontAsk` | Auto-allow all (audit only) |
-/// | `plan` | Deny write/bash tools |
-/// | `bypassPermissions` | Not installed — caller skips checker entirely |
+/// | `default` | Auto-allow read-only tools + read-only bash; TROGON.md rules + prompt for write-bash, edits, MCP |
+/// | `acceptEdits` | Auto-allow read-only tools + read-only bash + file edits; prompt write-bash, MCP, other tools |
+/// | `dontAsk` | Auto-allow all except explicit Deny rules/policies (audit) |
+/// | `plan` | Auto-allow read-only tools + read-only bash; deny write tools + write-bash |
+/// | `bypassPermissions` | Not installed — caller skips checker entirely (ignores Deny rules too) |
 pub struct ModePermissionChecker {
     pub mode: String,
     pub inner: RulesPermissionChecker,
+}
+
+impl ModePermissionChecker {
+    /// An explicit `Deny` from TROGON.md rules or tool-policies is a hard boundary
+    /// that must win over any mode auto-allow (including `dontAsk`).
+    fn explicitly_denied(&self, tool_name: &str, tool_input: &Value) -> bool {
+        matches!(self.inner.rules.check(tool_name, tool_input), RuleDecision::Deny)
+            || matches!(
+                eval_tool_policies(&self.inner.tool_policies, tool_name, tool_input),
+                Some(PolicyAction::Deny)
+            )
+    }
 }
 
 impl PermissionChecker for ModePermissionChecker {
@@ -344,16 +382,27 @@ impl PermissionChecker for ModePermissionChecker {
         tool_input: &'a Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
         let audit_buf = self.inner.inner.audit_buf.clone();
+
+        // Deny always wins, regardless of mode. Checked before any mode auto-allow
+        // fast path so an explicit Deny rule/policy can't be bypassed by `dontAsk`,
+        // `acceptEdits` (edits), or the read-only auto-allows.
+        if self.explicitly_denied(tool_name, tool_input) {
+            push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+            return Box::pin(async move { false });
+        }
+
         match self.mode.as_str() {
             "dontAsk" => {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
-            "default" if is_read_only_tool(tool_name) => {
+            // Read-only tools auto-allow in every non-bypass mode that isn't a pure
+            // deny: `default`, `acceptEdits`, and `plan` (read-only exploration).
+            "default" | "acceptEdits" | "plan" if is_read_only_tool(tool_name) => {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
-            "default"
+            "default" | "acceptEdits" | "plan"
                 if normalize_tool_name(tool_name) == "bash" && is_read_only_bash_command(tool_input) =>
             {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -363,6 +412,7 @@ impl PermissionChecker for ModePermissionChecker {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
+            // Write/side-effect tools (and write-bash) are denied in plan mode.
             "plan" if is_plan_denied_tool(tool_name) => {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
                 Box::pin(async move { false })
@@ -673,7 +723,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mode_checker_accept_edits_prompts_bash_via_channel() {
+    async fn mode_checker_accept_edits_prompts_write_bash_via_channel() {
+        // A write/side-effect bash command (not read-only) still prompts.
         let (tx, mut rx) = mpsc::channel(1);
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
@@ -686,30 +737,40 @@ mod tests {
         });
         assert!(
             checker
-                .check("tc-ab", "bash", &serde_json::json!({"command": "pwd"}))
+                .check("tc-ab", "bash", &serde_json::json!({"command": "touch out.txt"}))
                 .await
         );
     }
 
     #[tokio::test]
-    async fn mode_checker_accept_edits_prompts_read_without_rules() {
-        let (tx, mut rx) = mpsc::channel(1);
+    async fn mode_checker_accept_edits_auto_allows_read() {
+        // acceptEdits inherits default's read-only auto-allow. Dropping the
+        // receiver means any attempt to prompt would close the channel and deny,
+        // so a `true` result proves read_file was auto-allowed without prompting.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
         };
-        tokio::spawn(async move {
-            if let Some(req) = rx.recv().await {
-                let _ = req.response_tx.send(true);
-            }
-        });
         assert!(
             checker
-                .check(
-                    "tc-ar",
-                    "read_file",
-                    &serde_json::json!({"path": "src/main.rs"}),
-                )
+                .check("tc-ar", "read_file", &serde_json::json!({"path": "src/main.rs"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_auto_allows_read_only_bash() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-arb", "bash", &serde_json::json!({"command": "ls"}))
                 .await
         );
     }
@@ -724,6 +785,101 @@ mod tests {
         assert!(
             !checker
                 .check("tc-pl", "write_file", &serde_json::json!({"path": "/tmp/x"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_denies_gh() {
+        let (tx, _rx) = mpsc::channel(1);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-gh", "gh", &serde_json::json!({"command": "pr create"}))
+                .await,
+            "gh must be denied in plan mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_auto_allows_read() {
+        // plan is read-only exploration: reads must not prompt. Dropped receiver
+        // means a `true` result proves auto-allow (a prompt would close → deny).
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-pr", "read_file", &serde_json::json!({"path": "src/main.rs"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_auto_allows_read_only_bash() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-prb", "bash", &serde_json::json!({"command": "ls"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_plan_denies_write_bash() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "plan".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-pwb", "bash", &serde_json::json!({"command": "rm file"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_dont_ask_respects_deny_rule() {
+        // Deny always wins, even in dontAsk.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "dontAsk".to_string(),
+            inner: make_rules_checker("deny_commands: rm -rf", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-dad", "bash", &serde_json::json!({"command": "rm -rf /"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_respects_deny_rule() {
+        // An edit on a Deny-listed path is rejected even though acceptEdits would
+        // otherwise auto-allow edits.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("deny_paths: secrets/**", tx),
+        };
+        assert!(
+            !checker
+                .check("tc-aed", "write_file", &serde_json::json!({"path": "secrets/x.env"}))
                 .await
         );
     }

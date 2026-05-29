@@ -168,6 +168,9 @@ struct OpenRouterSession {
     /// Per-session tool policies (allow/deny/require-approval by tool+path pattern).
     #[serde(default)]
     tool_policies: Vec<ToolPolicy>,
+    /// Per-session HTTP MCP servers captured from the `new_session` request.
+    #[serde(default)]
+    mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
 }
 
 /// ACP Agent implementation backed by OpenRouter's OpenAI-compatible chat completions API.
@@ -198,6 +201,7 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     tool_http_client: reqwest::Client,
     permission_tx: Option<PermissionTx>,
     permission_store: AllowedToolsSessionStore,
+    elicitation_tx: Option<trogon_runner_tools::ElicitationTx>,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -241,12 +245,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
                             id.trim().to_string(),
                             label.trim().to_string(),
                         )),
+                        // No label given — use the bare model id for both id and
+                        // label. This matches how the registry parses OPENROUTER_MODELS
+                        // (id before ':' or the whole entry), so set_model and the
+                        // registered model list stay in sync.
                         None => {
-                            warn!(
-                                entry,
-                                "OPENROUTER_MODELS: skipping malformed entry (expected 'id:label')"
-                            );
-                            None
+                            let id = entry.trim();
+                            (!id.is_empty()).then(|| ModelInfo::new(id.to_string(), id.to_string()))
                         }
                     })
                     .collect()
@@ -317,6 +322,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
+            elicitation_tx: None,
         }
     }
 }
@@ -350,6 +356,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
+            elicitation_tx: self.elicitation_tx,
         }
     }
 
@@ -360,6 +367,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     ) -> Self {
         self.permission_tx = Some(perm_tx);
         self.permission_store = store;
+        self
+    }
+
+    /// Wire the elicitation bridge so the `ask_user` tool can round-trip a
+    /// free-text question to the ACP client. Mirrors `with_permission_gate`.
+    pub fn with_elicitation(mut self, elic_tx: trogon_runner_tools::ElicitationTx) -> Self {
+        self.elicitation_tx = Some(elic_tx);
         self
     }
 
@@ -482,6 +496,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             agent_id: self.agent_id.clone(),
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
+            mcp_servers: session.mcp_servers.clone(),
         }
     }
 
@@ -580,7 +595,7 @@ fn openrouter_history_to_wire(history: &[Message]) -> Vec<WireMessage> {
 
 fn openrouter_history_from_wire(wire: Vec<WireMessage>) -> Vec<Message> {
     wire.into_iter()
-        .flat_map(|m| openrouter_wire_message_to_local(m))
+        .flat_map(openrouter_wire_message_to_local)
         .collect()
 }
 
@@ -658,12 +673,9 @@ async fn compact_or_trim_openrouter_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = openrouter_history_to_wire(history);
-        match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
-            Ok(Some(compacted)) => {
-                *history = openrouter_history_from_wire(compacted);
-                return;
-            }
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            *history = openrouter_history_from_wire(compacted);
+            return;
         }
     }
     trim_openrouter_history(history, max);
@@ -802,6 +814,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
         let created_at_iso = now_iso();
+        let mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
         let evicted_id = {
             let mut sessions = self.sessions.lock().await;
             Self::maybe_evict_oldest(&mut sessions)
@@ -826,6 +839,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers,
             },
         );
 
@@ -868,8 +882,8 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
 
         // Not in memory — try KV snapshot.
-        if let Some(store) = &self.session_store {
-            if let Some(snap) = store.load(&self.tenant_id, &session_id).await {
+        if let Some(store) = &self.session_store
+            && let Some(snap) = store.load(&self.tenant_id, &session_id).await {
                 let enabled_tools = if snap.tools.is_empty() {
                     trogon_tools::all_tool_defs().iter().map(|t| t.name.clone()).collect()
                 } else {
@@ -891,6 +905,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 let created_at_iso = snap.created_at.clone();
                 let parent_session_id = snap.parent_session_id.clone();
                 let branched_at_index = snap.branched_at_index;
+                let mcp_servers = snap.mcp_servers.clone();
                 let api_key = self.global_api_key.clone();
                 let system_prompt = self.system_prompt.clone();
 
@@ -918,6 +933,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         branched_at_index,
                         mode: default_session_mode(),
                         tool_policies: Vec::new(),
+                        mcp_servers,
                     },
                 );
                 info!(session_id, "openrouter: load_session restored from KV snapshot");
@@ -933,7 +949,6 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     ))
                     .config_options(Self::all_tool_config_options(&enabled_tools)));
             }
-        }
 
         Err(not_found(format!("session {session_id} not found")))
     }
@@ -967,7 +982,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_system_prompt, inherited_tools, inherited_mode) = {
+        let (inherited_model, inherited_key, mut history, inherited_system_prompt, inherited_tools, inherited_mode, inherited_mcp_servers) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -979,6 +994,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.system_prompt.clone(),
                 s.enabled_tools.clone(),
                 s.mode.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -1017,6 +1033,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 branched_at_index: branch_at,
                 mode: inherited_mode.clone(),
                 tool_policies: Vec::new(),
+                mcp_servers: inherited_mcp_servers,
             },
         );
 
@@ -1188,7 +1205,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             warn!(session_id, "openrouter: prompt contains no text or resource blocks");
         }
 
-        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode, session_tool_policies) = {
+        let (model, api_key, mut messages, session_system_prompt, enabled_tools, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1204,6 +1221,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 s.cwd.clone(),
                 s.mode.clone(),
                 s.tool_policies.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -1212,8 +1230,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
+            let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
             let header = format!(
-                "Current working directory: {cwd}\nPermission mode: {session_mode}"
+                "Current working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -1272,6 +1291,40 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         }
                     },
                     "required": ["command"]
+                }),
+            });
+        }
+
+        // Build per-session MCP tools and a dispatch table consulted in the tool
+        // loop. A bad/unreachable server is logged and skipped, never fatal.
+        let (mcp_defs, mcp_dispatch) = trogon_runner_tools::build_session_mcp(
+            &self.tool_http_client,
+            &session_mcp_servers,
+            &trogon_runner_tools::egress::EgressPolicy::default_safe(),
+        )
+        .await;
+        for d in mcp_defs {
+            tool_defs.push(ToolDef {
+                name: d.name,
+                description: d.description,
+                parameters: d.input_schema,
+            });
+        }
+
+        // Advertise the `ask_user` elicitation tool when the bridge is wired.
+        if self.elicitation_tx.is_some() {
+            tool_defs.push(ToolDef {
+                name: "ask_user".to_string(),
+                description: "Ask the user a free-text question and wait for their answer. Use when you need clarification or a decision.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
                 }),
             });
         }
@@ -1431,7 +1484,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
             if tool_rounds >= MAX_TOOL_ROUNDS {
                 warn!(session_id, "openrouter: max tool rounds reached");
-                break StopReason::Cancelled;
+                break StopReason::MaxTurnRequests;
             }
 
             let tool_calls_msg = Message::assistant_tool_calls(&assembled_calls);
@@ -1472,7 +1525,12 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         .unwrap_or_else(default_session_mode)
                 };
 
-                let allowed = {
+                // `ask_user` is a benign elicitation that bypasses the permission
+                // gate entirely (no approval needed); handle it first.
+                let is_ask_user = call.name == "ask_user";
+                let allowed = if is_ask_user {
+                    true
+                } else {
                     let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
                         PermissionRules::parse(&tmd)
                     } else {
@@ -1494,7 +1552,20 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     .await
                 };
 
-                let result = if !allowed {
+                let result = if is_ask_user {
+                    let question = tool_input
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if let Some(tx) = &self.elicitation_tx {
+                        match trogon_runner_tools::elicit_via_channel(tx, &session_id, question).await {
+                            Some(a) => a,
+                            None => "The user declined to answer.".to_string(),
+                        }
+                    } else {
+                        "ask_user is not available in this session.".to_string()
+                    }
+                } else if !allowed {
                     format!("Permission denied: user refused to run tool `{}`", call.name)
                 } else if call.name == "change_directory" {
                     let path = tool_input
@@ -1537,6 +1608,13 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         format!("fetch_url: URL blocked by egress policy: {url}")
                     } else {
                         trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
+                    }
+                } else if let Some((_, original_name, mcp_client)) =
+                    mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &call.name)
+                {
+                    match mcp_client.call_tool(original_name, &tool_input).await {
+                        Ok(text) => text,
+                        Err(e) => format!("MCP tool error: {e}"),
                     }
                 } else {
                     trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
@@ -1793,6 +1871,17 @@ async fn execute_bash_via_nats(
 #[cfg(any(test, feature = "test-helpers"))]
 impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::session_notifier::MockSessionNotifier> {
     pub async fn test_insert_session_with_history(&self, id: &str, history: Vec<Message>) {
+        self.test_insert_session_with_mcp(id, history, Vec::new()).await;
+    }
+
+    /// Like [`test_insert_session_with_history`] but also seeds the session's
+    /// per-session MCP servers so MCP dispatch can be exercised in tests.
+    pub async fn test_insert_session_with_mcp(
+        &self,
+        id: &str,
+        history: Vec<Message>,
+        mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
+    ) {
         self.sessions.lock().await.insert(id.to_string(), OpenRouterSession {
             cwd: "/tmp".to_string(),
             model: None,
@@ -1807,6 +1896,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             branched_at_index: None,
             mode: default_session_mode(),
             tool_policies: Vec::new(),
+            mcp_servers,
         });
     }
 
@@ -1816,6 +1906,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -2014,6 +2105,7 @@ mod tests {
             branched_at_index: None,
             mode: default_session_mode(),
             tool_policies: Vec::new(),
+            mcp_servers: Vec::new(),
         }
     }
 
@@ -2325,6 +2417,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let agent = make_agent()
             .with_session_store(Arc::new(StubSessionStore { snapshot: Some(snap) }));
@@ -2862,7 +2955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn max_tool_rounds_returns_cancelled() {
+    async fn max_tool_rounds_returns_max_turn_requests() {
         let agent = make_agent_with_key("k");
         for _ in 0..=10 {
             agent.client.push_response(vec![
@@ -2879,8 +2972,8 @@ mod tests {
             let sid = agent.new_session(NewSessionRequest::new(PathBuf::from("/"))).await.unwrap().session_id;
             let resp = agent.prompt(PromptRequest::new(sid, vec![ContentBlock::from("q".to_string())])).await.unwrap();
             assert!(
-                matches!(resp.stop_reason, agent_client_protocol::StopReason::Cancelled),
-                "must return Cancelled after max tool rounds"
+                matches!(resp.stop_reason, agent_client_protocol::StopReason::MaxTurnRequests),
+                "must return MaxTurnRequests after max tool rounds"
             );
         }).await;
     }
@@ -3437,27 +3530,28 @@ mod tests {
     }
 
     #[test]
-    fn available_models_malformed_entry_is_skipped_valid_ones_kept() {
+    fn available_models_bare_id_entries_kept_as_id_and_label() {
         let _guard = env_lock();
-        unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,no-colon-entry,also/good:Also Good"); }
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,bare/id,also/good:Also Good"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
         let ids: Vec<&str> = agent.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
-        assert!(ids.contains(&"good/model"), "valid entry must be included");
-        assert!(ids.contains(&"also/good"), "valid entry must be included");
-        assert!(!ids.contains(&"no-colon-entry"), "malformed entry must be skipped");
+        assert!(ids.contains(&"good/model"), "id:label entry must be included");
+        assert!(ids.contains(&"also/good"), "id:label entry must be included");
+        // A colon-less entry is a bare model id (label = id), matching how the
+        // registry parses OPENROUTER_MODELS — so set_model stays in sync.
+        assert!(ids.contains(&"bare/id"), "bare id entry must be kept");
     }
 
     #[test]
-    fn available_models_all_malformed_falls_back_to_hardcoded_defaults() {
+    fn available_models_all_bare_ids_are_kept() {
         let _guard = env_lock();
-        unsafe { std::env::set_var("OPENROUTER_MODELS", "no-colon,also-no-colon"); }
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "vendor/one,vendor/two"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
-        assert!(
-            agent.available_models.iter().any(|m| m.model_id.0.as_ref().contains("claude")),
-            "all-malformed list must fall back to hardcoded defaults"
-        );
+        let ids: Vec<&str> = agent.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
+        assert!(ids.contains(&"vendor/one"), "bare id must be kept");
+        assert!(ids.contains(&"vendor/two"), "bare id must be kept");
     }
 
     #[test]
@@ -4745,6 +4839,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         }
     }
 

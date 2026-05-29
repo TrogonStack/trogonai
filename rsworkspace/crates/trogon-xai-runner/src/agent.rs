@@ -31,6 +31,9 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::{FsTrogonMdLoader, TrogonMdLoading};
+use trogon_runner_tools::{
+    build_session_mcp, convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
+};
 use trogon_runner_tools::check_tool_permission;
 use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
 use trogon_runner_tools::permission_rules::PermissionRules;
@@ -142,6 +145,10 @@ struct XaiSession {
     /// Per-session tool policies (allow/deny/require-approval by tool+path pattern).
     #[serde(default)]
     tool_policies: Vec<ToolPolicy>,
+    /// MCP servers captured from the `new_session` request. Connected per-prompt
+    /// (via `build_session_mcp`) so their tools are advertised to the model.
+    #[serde(default)]
+    mcp_servers: Vec<StoredMcpServer>,
 }
 
 fn parse_bash_cd(command: &str) -> Option<&str> {
@@ -230,6 +237,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     permission_tx: Option<PermissionTx>,
     /// In-memory store for `allow_always` tool persistence.
     permission_store: AllowedToolsSessionStore,
+    /// Elicitation channel — forwards `ask_user` requests to the ACP client via NATS.
+    elicitation_tx: Option<ElicitationTx>,
 }
 
 impl XaiAgent<XaiClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -359,6 +368,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
+            elicitation_tx: None,
         }
     }
 
@@ -402,6 +412,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
+            elicitation_tx: self.elicitation_tx,
         }
     }
 
@@ -413,6 +424,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
     ) -> Self {
         self.permission_tx = Some(perm_tx);
         self.permission_store = store;
+        self
+    }
+
+    /// Wire the elicitation channel for the `ask_user` tool (call from `main.rs`
+    /// inside a `LocalSet`). When set, an `ask_user` tool is advertised to the
+    /// model and its calls round-trip through `elic_tx` to the ACP client.
+    pub fn with_elicitation(mut self, elic_tx: ElicitationTx) -> Self {
+        self.elicitation_tx = Some(elic_tx);
         self
     }
 
@@ -507,6 +526,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: snap.branched_at_index,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: snap.mcp_servers.clone(),
             },
         );
         info!(session_id, "xai: session restored from KV snapshot");
@@ -573,6 +593,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             agent_id: self.agent_id.clone(),
             parent_session_id: session.parent_session_id.clone(),
             branched_at_index: session.branched_at_index,
+            mcp_servers: session.mcp_servers.clone(),
         }
     }
 
@@ -777,6 +798,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             .map(|s| s.to_string());
         let system_prompt = meta_system_prompt.or(session_system_prompt);
 
+        // Capture the client's MCP servers; they are connected per-prompt.
+        let mcp_servers = convert_mcp_servers(&req.mcp_servers);
+
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
         let evicted_id = Self::maybe_evict_oldest(&mut sessions);
@@ -805,6 +829,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers,
             },
         );
 
@@ -889,7 +914,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode) = {
+        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode, inherited_mcp_servers) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
@@ -901,6 +926,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.enabled_tools.clone(),
                 s.system_prompt.clone(),
                 s.mode.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -942,6 +968,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 branched_at_index: branch_at,
                 mode: inherited_mode.clone(),
                 tool_policies: Vec::new(),
+                mcp_servers: inherited_mcp_servers,
             },
         );
 
@@ -1145,7 +1172,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !self.sessions.lock().await.contains_key(&session_id) {
             self.try_restore_from_kv(&session_id, String::new()).await;
         }
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies) = {
+        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1163,6 +1190,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.cwd.clone(),
                 s.mode.clone(),
                 s.tool_policies.clone(),
+                s.mcp_servers.clone(),
             )
         };
 
@@ -1182,8 +1210,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         let trogon_md = self.md_loader.load(&cwd).await;
         let session_system_prompt = {
+            let url_guidance = trogon_runner_tools::URL_FETCH_GUIDANCE;
             let header = format!(
-                "Current working directory: {cwd}\nPermission mode: {session_mode}"
+                "You are Trogon, an AI coding assistant. Identify yourself as Trogon regardless of any prior conversation history mentioning other AI models.\nCurrent working directory: {cwd}\nPermission mode: {session_mode}\n\n{url_guidance}"
             );
             match (trogon_md, session_system_prompt) {
                 (Some(md), Some(sp)) => Some(format!("{header}\n\n{md}\n\n{sp}")),
@@ -1307,8 +1336,48 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             }
         }
 
+        // Connect to this session's MCP servers and advertise their tools.
+        // `mcp_dispatch` maps a prefixed tool name back to (original_name, client)
+        // and stays in scope for the tool-dispatch loop below.
+        let (mcp_defs, mcp_dispatch) = build_session_mcp(
+            &self.tool_http_client,
+            &session_mcp_servers,
+            &trogon_runner_tools::egress::EgressPolicy::default_safe(),
+        )
+        .await;
+        for d in mcp_defs {
+            call_tools.push(ToolSpec::Function {
+                name: d.name,
+                description: d.description,
+                parameters: d.input_schema,
+            });
+        }
+
+        // Advertise the `ask_user` elicitation tool when the channel is wired.
+        if self.elicitation_tx.is_some() {
+            call_tools.push(ToolSpec::Function {
+                name: "ask_user".to_string(),
+                description: "Ask the user a free-text question and wait for their answer. \
+                    Use when you need clarification or a decision."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user."
+                        }
+                    },
+                    "required": ["question"]
+                }),
+            });
+        }
+
         let client = Arc::clone(&self.client);
         let mut assistant_text = String::new();
+        // Set to true when at least one TextDelta was received this turn so that
+        // TextComplete events (output_item.done fallback) can be skipped.
+        let mut received_text_delta = false;
         let mut current_turn_usage: Option<(u64, u64)> = None;
         let mut canceled = false;
         let mut timed_out = false;
@@ -1380,6 +1449,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
                 match event {
                     XaiEvent::TextDelta { text } => {
+                        received_text_delta = true;
                         assistant_text.push_str(&text);
                         let notif = SessionNotification::new(
                             session_id.clone(),
@@ -1388,6 +1458,21 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             )),
                         );
                         self.notifier.notify(notif).await;
+                    }
+                    XaiEvent::TextComplete { text } => {
+                        // Non-streaming text from output_item.done. Only use it
+                        // when no streaming deltas arrived — prevents duplicate
+                        // output when the model sends both (streaming-capable models).
+                        if !received_text_delta {
+                            assistant_text.push_str(&text);
+                            let notif = SessionNotification::new(
+                                session_id.clone(),
+                                SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                    ContentBlock::from(text),
+                                )),
+                            );
+                            self.notifier.notify(notif).await;
+                        }
                     }
                     XaiEvent::ResponseId { id } => {
                         current_response_id = Some(id);
@@ -1508,6 +1593,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             stale_retry_done = true;
                             // Clear any text accumulated before the error.
                             assistant_text.clear();
+                            received_text_delta = false;
                             // Clear usage captured before the error.
                             current_turn_usage = None;
                             // Clear any pending tool calls from the failed attempt.
@@ -1571,7 +1657,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             if !pending_tool_calls.is_empty() {
                 if tool_rounds >= MAX_TOOL_ROUNDS {
                     warn!(session_id, MAX_TOOL_ROUNDS, "xai: max tool rounds reached");
-                    break 'outer StopReason::Cancelled;
+                    break 'outer StopReason::MaxTurnRequests;
                 }
                 let Some(resp_id) = current_response_id.clone() else {
                     warn!(
@@ -1612,7 +1698,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             .unwrap_or_else(default_session_mode)
                     };
 
-                    let allowed = {
+                    // `ask_user` is a benign interactive tool — it bypasses the
+                    // permission gate entirely (asking the user IS the consent).
+                    let allowed = if name == "ask_user" {
+                        true
+                    } else {
                         let rules = if let Some(tmd) = self.md_loader.load(&cwd).await {
                             PermissionRules::parse(&tmd)
                         } else {
@@ -1638,6 +1728,20 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         format!("Permission denied: user refused to run tool `{name}`")
                     } else {
                     match name.as_str() {
+                        "ask_user" => {
+                            let question = tool_input
+                                .get("question")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if let Some(tx) = &self.elicitation_tx {
+                                match elicit_via_channel(tx, &session_id, question).await {
+                                    Some(answer) => answer,
+                                    None => "The user declined to answer.".to_string(),
+                                }
+                            } else {
+                                "ask_user is not available in this session.".to_string()
+                            }
+                        }
                         "change_directory" => {
                             let path = tool_input
                                 .get("path")
@@ -1678,7 +1782,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                             }
                         }
                         _ => {
-                            if name == "fetch_url" {
+                            // MCP tools are advertised under a `{server}__{tool}`
+                            // prefix. Dispatch them through their server client
+                            // before falling through to the built-in tools.
+                            if let Some((_, original_name, mcp_client)) =
+                                mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
+                            {
+                                match mcp_client.call_tool(original_name, &tool_input).await {
+                                    Ok(text) => text,
+                                    Err(e) => format!("MCP tool error: {e}"),
+                                }
+                            } else if name == "fetch_url" {
                                 let url = tool_input.get("url").and_then(|v| v.as_str()).unwrap_or("");
                                 if !trogon_runner_tools::egress::EgressPolicy::default_safe().is_allowed(url) {
                                     format!("fetch_url: URL blocked by egress policy: {url}")
@@ -1989,12 +2103,9 @@ async fn compact_or_trim_xai_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
-        match maybe_compact(nats, &wire, token_budget, threshold_pct).await {
-            Ok(Some(compacted)) => {
-                *history = xai_history_from_wire(compacted);
-                return;
-            }
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            *history = xai_history_from_wire(compacted);
+            return;
         }
     }
     trim_history(history, max);
@@ -2153,6 +2264,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2175,6 +2287,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2242,6 +2355,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2264,6 +2378,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2286,6 +2401,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 branched_at_index: None,
                 mode: default_session_mode(),
                 tool_policies: Vec::new(),
+                mcp_servers: Vec::new(),
             },
         );
     }
@@ -2524,6 +2640,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         let resp = agent
@@ -2570,6 +2687,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         assert_eq!(agent.test_session_count().await, 0, "session must not be in memory before load");
@@ -2627,6 +2745,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         agent
@@ -2690,6 +2809,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         agent
@@ -2731,6 +2851,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00.000Z".to_string(),
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: vec![],
         });
 
         let resp = agent
@@ -4014,7 +4135,10 @@ mod tests {
             input[0].role().unwrap(), "system",
             "first input item must be the system prompt"
         );
-        assert_eq!(input[0].content().unwrap(), "You are a helpful assistant.");
+        assert!(
+            input[0].content().unwrap().contains("You are a helpful assistant."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
     }
 
     // ── prompt: stream error returns Ok ──────────────────────────────────────────
@@ -4114,8 +4238,8 @@ mod tests {
         assert_eq!(call.previous_response_id, None);
         assert_eq!(
             call.input.len(),
-            3,
-            "full history + new message sent when no previous_response_id"
+            4,
+            "system header + full history + new message sent when no previous_response_id"
         );
     }
 
@@ -4345,9 +4469,18 @@ mod tests {
         let calls = mock_http.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         let input = &calls[0].input;
+        assert_eq!(
+            input[0].role(), Some("system"),
+            "Trogon identity header is always prepended as system prompt"
+        );
+        let sys_content = input[0].content().unwrap();
         assert!(
-            input[0].role() != Some("system"),
-            "empty XAI_SYSTEM_PROMPT must not prepend a system input item"
+            sys_content.starts_with("You are Trogon"),
+            "system prompt must start with Trogon identity"
+        );
+        assert!(
+            sys_content.ends_with(trogon_runner_tools::URL_FETCH_GUIDANCE),
+            "empty XAI_SYSTEM_PROMPT must not append session content after the header's URL guidance"
         );
     }
 
@@ -4588,7 +4721,10 @@ mod tests {
             "system + user + assistant + new_user = 4 items"
         );
         assert_eq!(input[0].role().unwrap(), "system", "item[0] must be the system prompt");
-        assert_eq!(input[0].content().unwrap(), "You are concise.");
+        assert!(
+            input[0].content().unwrap().contains("You are concise."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
         assert_eq!(
             input[1].role().unwrap(), "user",
             "item[1] must be history user message"
@@ -4680,12 +4816,12 @@ mod tests {
             .unwrap();
 
         let calls = agent.client.calls.lock().unwrap();
-        // input: [history-item (role=user), new user item] — no system prompt set
+        // input: [system header, history-item (role=user), new user item]
         assert_eq!(
-            calls[0].input[0].role().unwrap(), "user",
+            calls[0].input[1].role().unwrap(), "user",
             "non-assistant role must be mapped to 'user'"
         );
-        assert_eq!(calls[0].input[0].content().unwrap(), "injected");
+        assert_eq!(calls[0].input[1].content().unwrap(), "injected");
     }
 
     // ── with_deps: empty api_key sets global_api_key to None ─────────────────
@@ -4732,7 +4868,10 @@ mod tests {
             "system prompt + user item only (no history)"
         );
         assert_eq!(input[0].role().unwrap(), "system");
-        assert_eq!(input[0].content().unwrap(), "Be concise.");
+        assert!(
+            input[0].content().unwrap().contains("Be concise."),
+            "system prompt must include XAI_SYSTEM_PROMPT value"
+        );
         assert_eq!(input[1].role().unwrap(), "user");
     }
 
@@ -6419,7 +6558,12 @@ mod tests {
         let calls = mock_http.calls.lock().unwrap();
         let input = &calls.last().unwrap().input;
         let has_system = input.iter().any(|item| item.role() == Some("system"));
-        assert!(!has_system, "no system item expected when no TROGON.md and no session prompt");
+        assert!(has_system, "Trogon identity header must be present as system prompt even without TROGON.md");
+        let sys_item = input.iter().find(|item| item.role() == Some("system")).unwrap();
+        assert!(
+            sys_item.content().unwrap().starts_with("You are Trogon"),
+            "system prompt must start with Trogon identity"
+        );
     }
 
     #[tokio::test]

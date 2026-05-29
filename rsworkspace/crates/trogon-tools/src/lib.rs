@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod editor;
 pub mod fs;
 pub mod git;
+pub mod github;
 pub mod search;
 pub mod todo;
 pub mod types;
@@ -173,6 +174,32 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
             }),
         ),
         tool_def(
+            "git_create_branch",
+            "Create a new git branch. Checks it out by default.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "branch":       { "type": "string",  "description": "Name of the new branch (required)" },
+                    "checkout":     { "type": "boolean", "description": "Switch to the new branch after creating it (default: true)" },
+                    "base":         { "type": "string",  "description": "Starting point for the branch (commit, tag, or branch name; defaults to HEAD)" }
+                },
+                "required": ["branch"]
+            }),
+        ),
+        tool_def(
+            "git_push",
+            "Push commits to a remote repository.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "remote":       { "type": "string",  "description": "Remote name (default: 'origin')" },
+                    "branch":       { "type": "string",  "description": "Branch to push (default: current branch)" },
+                    "set_upstream": { "type": "boolean", "description": "Set upstream tracking with -u (default: false)" }
+                },
+                "required": []
+            }),
+        ),
+        tool_def(
             "fetch_url",
             "Fetch the content of a URL. HTML is converted to plain text by default. Response is truncated at 8KB.",
             json!({
@@ -233,6 +260,18 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
                 "required": []
             }),
         ),
+        tool_def(
+            "gh",
+            "Run the GitHub CLI (`gh`) in the current repository — use this for ALL GitHub tasks: pull requests, issues, reviews, checks, releases, and `gh api`. The repository is auto-detected from the git remote and authentication uses the local `gh` login (or GH_TOKEN/GITHUB_TOKEN), so do NOT pass owner/repo unless you intend to target a different repository (e.g. `--repo owner/name`). Examples: `pr create --title \"Fix bug\" --body \"...\"`, `pr diff 42`, `pr view 42 --comments`, `pr review 42 --approve --body \"LGTM\"`, `issue list --state open`, `api repos/{owner}/{repo}/pulls/42/files`.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The gh arguments as one string, e.g. 'pr create --title \"Fix\" --body \"...\"'. Parsed with shell quoting; a leading 'gh' is optional." },
+                    "args":    { "type": "array", "items": { "type": "string" }, "description": "Alternative to `command`: gh arguments as an array (no shell parsing), e.g. [\"pr\", \"view\", \"42\"]." }
+                },
+                "required": []
+            }),
+        ),
     ];
 
     if let Some(last) = defs.last_mut() {
@@ -254,6 +293,9 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "git_diff"         => git::diff(ctx, input).await,
         "git_log"          => git::log(ctx, input).await,
         "git_commit"       => git::commit(ctx, input).await,
+        "git_create_branch" => git::create_branch(ctx, input).await,
+        "git_push"         => git::push(ctx, input).await,
+        "gh"               => github::gh(ctx, input).await,
         "fetch_url"        => web::fetch_url(ctx, input).await,
         "notebook_edit"    => fs::notebook_edit(ctx, input).await,
         "search_files"     => search::search_files(ctx, input).await,
@@ -438,6 +480,17 @@ mod tests {
         };
         let result = dispatch_tool(&ctx, "fetch_url", &json!({"url": server.url("/hi"), "raw": true})).await;
         assert!(result.contains("dispatched"), "got: {result}");
+    }
+
+    #[tokio::test]
+    async fn dispatch_routes_gh_to_github() {
+        // Empty input short-circuits in parse_argv before any `gh` exec, so this
+        // asserts only that the name routes to the github module — not "Unknown
+        // tool". Argv parsing is covered by github.rs's own tests.
+        let ctx = test_ctx();
+        let result = dispatch_tool(&ctx, "gh", &json!({})).await;
+        assert!(!result.contains("Unknown tool"), "gh not routed: {result}");
+        assert!(result.starts_with("Error:"), "expected parse error, got: {result}");
     }
 
     #[tokio::test]

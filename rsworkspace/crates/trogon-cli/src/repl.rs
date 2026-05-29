@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::client_supervisor::AcpClientSupervisor;
+use crate::stream_input::{StreamInputEvent, StreamInputReader};
 use crate::terminal::reset_display;
 use crate::tui_client::PermissionCoordinator;
+use std::collections::VecDeque;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_tools::fs::{resolve_directory_target, resolve_path};
 
@@ -53,10 +55,11 @@ impl Completer for FileAtHelper {
         if partial.contains(' ') {
             return Ok((pos, vec![]));
         }
-        let (dir, prefix) = if let Some(slash) = partial.rfind('/') {
-            (self.cwd.join(&partial[..=slash]), &partial[slash + 1..])
+        let (dir, prefix, dir_prefix) = if let Some(slash) = partial.rfind('/') {
+            let (dir_part, file_part) = partial.split_at(slash + 1);
+            (self.cwd.join(dir_part), file_part, dir_part)
         } else {
-            (self.cwd.clone(), partial)
+            (self.cwd.clone(), partial, "")
         };
         let mut pairs: Vec<Pair> = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -64,8 +67,8 @@ impl Completer for FileAtHelper {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name.starts_with(prefix) {
                     let suffix = if entry.path().is_dir() { "/" } else { "" };
-                    let replacement = format!("{name}{suffix}");
-                    pairs.push(Pair { display: replacement.clone(), replacement });
+                    let replacement = format!("{dir_prefix}{name}{suffix}");
+                    pairs.push(Pair { display: format!("{name}{suffix}"), replacement });
                 }
             }
         }
@@ -186,8 +189,9 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     registry: Registry<RS>,
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
-    _stream: bool,
+    stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
+    skip_permissions: bool,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
@@ -216,6 +220,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     } else {
         start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
     };
+    if skip_permissions
+        && let Err(e) = session.set_mode("bypassPermissions").await
+    {
+        eprintln!("warning: could not set bypassPermissions: {e}");
+    }
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
         if resumed
@@ -236,30 +245,54 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     let mut session_used_tokens: u64 = 0;
     let mut session_context_size: u64 = 0;
-    let mut session_mode =
-        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
-    print_startup_banner(
-        session.session_id(),
-        &prefix,
-        &session_mode,
-    );
+    let mut session_mode = if skip_permissions {
+        "bypassPermissions".to_string()
+    } else {
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
+    };
+    print_startup_banner(session.session_id());
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
         helper.cwd = cwd.clone();
     }
 
+    // Claude-style interrupt UX: when Ctrl+C cancels an in-flight response, the
+    // prompt the user submitted is stashed here and pre-filled into the next
+    // readline so they can edit and resend it instead of retyping it.
+    let mut pending_input: Option<String> = None;
+    // Messages typed while a response was streaming. Auto-submitted in order
+    // (one per turn) once the current turn finishes.
+    let mut queued_prompts: VecDeque<String> = VecDeque::new();
+
     loop {
         permission_coordinator.cancel_pending();
-        match rl.readline("> ") {
+        // A queued message (typed during the previous turn) is submitted before
+        // reading new input. `from_queue` skips the readline-echo erase below,
+        // since there's no readline echo line to overwrite.
+        let (read, from_queue): (rustyline::Result<String>, bool) =
+            match queued_prompts.pop_front() {
+                Some(q) => (Ok(q), true),
+                None => {
+                    let r = match pending_input.take() {
+                        Some(text) => rl.readline_with_initial("> ", (&text, "")),
+                        None => rl.readline("> "),
+                    };
+                    (r, false)
+                }
+            };
+        match read {
             Ok(raw_line) => {
                 let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
                     continue;
                 }
 
-                // Erase the readline echo line and replace with a styled user block
-                eprint!("\x1b[1A\r\x1b[2K");
+                if !from_queue {
+                    // Erase the readline echo line before printing the styled block.
+                    eprint!("\x1b[1A\r\x1b[2K");
+                }
+                // No readline echo to erase for queued lines — just print the block.
                 print_user_line(&line);
 
                 if line == "cd" || line.starts_with("cd ") {
@@ -309,8 +342,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 session = s;
                                 session_used_tokens = 0;
                                 session_context_size = 0;
-                                session_mode = std::env::var("TROGON_MODE")
-                                    .unwrap_or_else(|_| "default".into());
+                                if skip_permissions {
+                                    if let Err(e) = session.set_mode("bypassPermissions").await {
+                                        eprintln!("warning: could not set bypassPermissions: {e}");
+                                    }
+                                    session_mode = "bypassPermissions".to_string();
+                                } else {
+                                    session_mode = std::env::var("TROGON_MODE")
+                                        .unwrap_or_else(|_| "default".into());
+                                }
                                 // (falls through to persist + print below)
                                 if let Some(ref sup) = client_supervisor {
                                     sup.set_session(session.session_id());
@@ -496,8 +536,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // MED-5: the new runner starts a session with mode
                                     // initialized from TROGON_MODE; keep the REPL's tracked
                                     // mode in sync so /status and permission prompts match.
-                                    session_mode = std::env::var("TROGON_MODE")
-                                        .unwrap_or_else(|_| "default".into());
+                                    if skip_permissions {
+                                        if let Err(e) = session.set_mode("bypassPermissions").await {
+                                            eprintln!("warning: could not set bypassPermissions: {e}");
+                                        }
+                                        session_mode = "bypassPermissions".to_string();
+                                    } else {
+                                        session_mode = std::env::var("TROGON_MODE")
+                                            .unwrap_or_else(|_| "default".into());
+                                    }
                                     if let Some(ref sup) = client_supervisor
                                         && let Err(e) = sup
                                             .rebind(&outcome.new_prefix, session.session_id())
@@ -683,11 +730,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     Ok(mut rx) => {
                         let ctrl_c = tokio::signal::ctrl_c();
                         tokio::pin!(ctrl_c);
-                        let mut renderer = TurnRenderer::new();
+                        let mut renderer = TurnRenderer::new(stream);
                         let mut metrics = TurnMetrics {
                             used_tokens: session_used_tokens,
                             context_size: session_context_size,
                         };
+
+                        // Capture input typed during this turn: plain lines are queued
+                        // and auto-submitted when the turn ends; Ctrl+G starts a side
+                        // question answered in a scratch session. The reader restores
+                        // the terminal when it drops at the end of this block.
+                        let (_input_reader, mut input_rx) = match StreamInputReader::start() {
+                            Some((r, rx)) => (Some(r), Some(rx)),
+                            None => (None, None),
+                        };
+                        // Normal queued messages (typed + Enter), submitted in order.
+                        let mut queued: Vec<String> = Vec::new();
+                        // Ctrl+G messages — jump to the front, submitted before `queued`.
+                        let mut front_queued: Vec<String> = Vec::new();
+                        let mut interrupted = false;
 
                         loop {
                             tokio::select! {
@@ -695,21 +756,43 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 _ = &mut ctrl_c => {
                                     session.cancel().await;
                                     renderer.on_ctrl_c();
+                                    // Claude-style: restore the interrupted prompt so the
+                                    // next readline is pre-filled with it, ready to edit/resend.
+                                    pending_input = Some(line.clone());
+                                    interrupted = true;
                                     break;
+                                }
+                                ev = next_stream_input(&mut input_rx) => {
+                                    match ev {
+                                        Some(StreamInputEvent::Queued(msg)) => {
+                                            reset_display();
+                                            eprintln!("\x1b[2m⏳ queued: {msg}\x1b[0m");
+                                            queued.push(msg);
+                                        }
+                                        Some(StreamInputEvent::Priority(q)) => {
+                                            // Ctrl+G: jump to the front of the queue —
+                                            // sent first once the current turn finishes.
+                                            reset_display();
+                                            eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
+                                            front_queued.push(q);
+                                        }
+                                        // Reader stopped — stop polling it to avoid spinning.
+                                        None => { input_rx = None; }
+                                    }
                                 }
                                 event = rx.recv() => {
                                     match event {
                                         None => break,
                                         Some(ev) => {
-                                            if let Some(sync) = renderer.handle(ev, &mut metrics) {
-                                                if sync_cwd_from_tool(
+                                            if let Some(sync) = renderer.handle(ev, &mut metrics)
+                                                && sync_cwd_from_tool(
                                                     &sync.tool_name,
                                                     &sync.output,
                                                     &mut cwd,
-                                                ) && let Some(helper) = rl.helper_mut()
-                                                {
-                                                    helper.cwd = cwd.clone();
-                                                }
+                                                )
+                                                && let Some(helper) = rl.helper_mut()
+                                            {
+                                                helper.cwd = cwd.clone();
                                             }
                                             session_used_tokens = metrics.used_tokens;
                                             session_context_size = metrics.context_size;
@@ -722,22 +805,33 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             }
                         }
 
-                        if let Some(stop) = renderer.take_stop() {
-                            if let TurnStop::Done { reason } = stop {
-                                if reason != "cancelled" && reason != "maxTurnRequests" {
-                                    persist_session_index(
-                                        &fs,
-                                        &project_dir,
-                                        &prefix,
-                                        session.session_id(),
-                                        &session.current_model(),
-                                    );
-                                    sync_repl_cwd_from_session(&session, &mut cwd).await;
-                                    if let Some(helper) = rl.helper_mut() {
-                                        helper.cwd = cwd.clone();
-                                    }
-                                }
+                        // Persist on a clean turn end (matches programming-gaps'
+                        // in-arm persistence — skips cancelled / maxTurnRequests).
+                        if let Some(TurnStop::Done { reason }) = renderer.take_stop()
+                            && reason != "cancelled"
+                            && reason != "maxTurnRequests"
+                        {
+                            persist_session_index(
+                                &fs,
+                                &project_dir,
+                                &prefix,
+                                session.session_id(),
+                                &session.current_model(),
+                            );
+                            sync_repl_cwd_from_session(&session, &mut cwd).await;
+                            if let Some(helper) = rl.helper_mut() {
+                                helper.cwd = cwd.clone();
                             }
+                        }
+
+                        // Auto-submit messages queued during this turn: Ctrl+G
+                        // (front_queued) messages go first, then the rest in order.
+                        // If the user interrupted (Ctrl+C), discard the queue since
+                        // they're likely changing direction. `_input_reader` drops at
+                        // the end of this block, restoring the terminal before readline.
+                        if !interrupted {
+                            queued_prompts.extend(front_queued);
+                            queued_prompts.extend(queued);
                         }
                     }
                 }
@@ -768,6 +862,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     let _ = rl.save_history(&history_path);
     Ok(())
+}
+
+/// Await the next input event from the streaming-time reader. If the reader
+/// isn't running (not a real terminal), this never resolves, so the `select!`
+/// branch using it simply stays dormant.
+async fn next_stream_input(
+    rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<StreamInputEvent>>,
+) -> Option<StreamInputEvent> {
+    match rx {
+        Some(r) => r.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 async fn start_session<SF: SessionFactory>(
@@ -972,6 +1078,11 @@ pub fn resolve_model_alias(input: &str) -> String {
         "grok-mini" => "grok-3-mini".into(),
         "openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
             .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        // Short aliases for the OpenRouter models. These must match the IDs the
+        // openrouter runner registers (OPENROUTER_MODELS); update both together.
+        "op-claude" => "anthropic/claude-sonnet-4".into(),
+        "op-gpt" => "openai/gpt-4o".into(),
+        "op-gemini" => "google/gemini-2.5-pro".into(),
         "codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
         "o3" => "o3".into(),
         "gpt-4o" => "gpt-4o".into(),
@@ -1211,6 +1322,9 @@ pub(crate) async fn format_model_catalog<RS: RegistryStore>(
                 "o4-mini" => Some("o4-mini"),
                 "o3" => Some("o3"),
                 "gpt-4o" => Some("gpt-4o"),
+                "anthropic/claude-sonnet-4" => Some("op-claude"),
+                "openai/gpt-4o" => Some("op-gpt"),
+                "google/gemini-2.5-pro" => Some("op-gemini"),
                 _ => None,
             };
             if let Some(a) = alias {
@@ -1472,7 +1586,7 @@ fn estimate_cost(tokens: u64, model: &str) -> String {
 
 // ── token formatting ──────────────────────────────────────────────────────────
 
-fn fmt_tokens(n: u64) -> String {
+pub(crate) fn fmt_tokens(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().rev().enumerate() {
