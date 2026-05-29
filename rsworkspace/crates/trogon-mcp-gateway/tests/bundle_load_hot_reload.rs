@@ -3,19 +3,139 @@
 //! Phase 2 loads WASM policy bundles from disk or KV per ADR 0010: cold start readiness,
 //! parse-error retention of the last good bundle, fs-watcher hot swap with in-flight drain,
 //! `/readyz` bundle digest, atomic pointer flip, operator rollback, NKey signature gate,
-//! and load-time CEL compilation. Bodies stay skeletal until Block C item 5 lands.
+//! and load-time CEL compilation.
 //!
 //! Cross-refs:
 //! - `docs/adr/0010-bundle-format.md`
 //! - `docs/identity/howto-write-bundle.md`
-//! - `MCP_GATEWAY_PLAN.md` Block C item 5
+//! - `MCP_GATEWAY_PLAN.md` Block F item 5 (gateway runtime wiring)
 //!
-//! Once implemented, each test will stand up a gateway with a temp bundle path (or KV stub),
-//! drive HTTP `/readyz` and policy requests, and assert readiness, metrics, and request
-//! routing against the active bundle digest.
-//!
-//! Harness pattern (see `e2e_nats_forward.rs`): `mcp_nats::Config`, `McpPrefix`,
-//! `trogon_nats::NatsAuth`, `GatewaySettings`, `AllowAllPermissionChecker`, `TraceStore`.
+//! The `loader_api` module exercises `trogon_mcp_gateway::bundle::load_bundle` directly.
+//! Gateway integration cases remain `#[ignore]` until Block F item 5 lands.
+
+mod loader_api {
+    //! ADR 0010 bundle loader API (no gateway runtime).
+
+    use trogon_mcp_gateway::bundle::{
+        build_tar, extract_archive, hash_member, load_bundle, resolve_manifest, validate_members,
+        BundleArchive, BundleLoadError, BundleManifest, TrustedKeys, HOST_TARGET_WIT,
+        MANIFEST_FILENAME, SIGNATURE_PATH,
+    };
+
+    fn trusted_keys() -> TrustedKeys {
+        TrustedKeys::from_allowlist(["UABTRUSTED"])
+    }
+
+    fn manifest_toml(cel_hash: &str) -> String {
+        format!(
+            r#"
+name = "acme/github-create-issue-gate"
+version = "1.0.0"
+target_wit = "{HOST_TARGET_WIT}"
+min_gateway_version = "0.0.1"
+author = "platform-identity"
+created_at = "2026-05-28T14:00:00Z"
+description = "demo bundle"
+
+[capabilities]
+imports = ["host.spicedb-check"]
+
+[signing]
+nkey_pub = "UABTRUSTED"
+
+[[programs]]
+id = "allow-create-issue"
+path = "policies/allow-create-issue.cel"
+sha256 = "{cel_hash}"
+class = "ingress_gate"
+effect = "allow"
+priority = 100
+"#
+        )
+    }
+
+    fn signed_tar(cel_body: &[u8]) -> Vec<u8> {
+        let hash = hash_member(cel_body);
+        let mut archive = BundleArchive::default();
+        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert("policies/allow-create-issue.cel", cel_body.to_vec());
+        archive.insert(SIGNATURE_PATH, vec![0u8; 64]);
+        build_tar(&archive)
+    }
+
+    #[test]
+    fn manifest_parse_round_trip_via_loader_fixture() {
+        let tar = signed_tar(b"true");
+        let archive = extract_archive(&tar).expect("extract");
+        let (_, manifest_bytes) = resolve_manifest(&archive).expect("manifest");
+        let parsed = BundleManifest::parse(manifest_bytes).expect("parse");
+        let emitted = parsed.to_toml().expect("emit");
+        let reparsed = BundleManifest::parse(emitted.as_bytes()).expect("reparse");
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn content_hash_mismatch_rejected() {
+        let mut archive = BundleArchive::default();
+        archive.insert(
+            MANIFEST_FILENAME,
+            manifest_toml("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+                .into_bytes(),
+        );
+        archive.insert("policies/allow-create-issue.cel", b"tampered".to_vec());
+        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
+            .expect("parse");
+        let error = validate_members(&manifest, &archive).expect_err("hash mismatch");
+        assert!(matches!(
+            error,
+            BundleLoadError::ContentHashMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_member_rejected() {
+        let cel = b"true";
+        let hash = hash_member(cel);
+        let mut archive = BundleArchive::default();
+        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert("policies/allow-create-issue.cel", cel.to_vec());
+        archive.insert("policies/unlisted.cel", b"false".to_vec());
+        let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
+            .expect("parse");
+        let error = validate_members(&manifest, &archive).expect_err("unknown member");
+        assert!(matches!(error, BundleLoadError::UnknownMember { .. }));
+    }
+
+    #[test]
+    fn signature_verification_reports_nkeys_dependency_gap() {
+        let tar = signed_tar(b"true");
+        let error = load_bundle(&tar, &trusted_keys()).expect_err("nkeys gap");
+        assert!(matches!(
+            error,
+            BundleLoadError::SignatureVerificationUnavailable { reason } if reason.contains("nkeys")
+        ));
+    }
+
+    #[test]
+    fn untrusted_signer_rejected() {
+        let tar = signed_tar(b"true");
+        let trusted = TrustedKeys::from_allowlist(["UABOTHER"]);
+        let error = load_bundle(&tar, &trusted).expect_err("untrusted");
+        assert!(matches!(error, BundleLoadError::UntrustedSigner { .. }));
+    }
+
+    #[test]
+    fn unsigned_bundle_rejected_when_signature_missing() {
+        let cel = b"true";
+        let hash = hash_member(cel);
+        let mut archive = BundleArchive::default();
+        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert("policies/allow-create-issue.cel", cel.to_vec());
+        let tar = build_tar(&archive);
+        let error = load_bundle(&tar, &trusted_keys()).expect_err("unsigned");
+        assert!(matches!(error, BundleLoadError::SignatureMissing));
+    }
+}
 
 mod cold_start {
     //! Boot without a bundle file; readiness flips after a valid bundle appears.
