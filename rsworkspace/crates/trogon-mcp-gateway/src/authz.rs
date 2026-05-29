@@ -39,9 +39,19 @@ pub struct AuthzContext<'a> {
     pub caller_sub: Option<&'a str>,
     pub identity_source: IdentitySource,
     pub server_id: &'a str,
+    pub session_id: Option<&'a str>,
     pub jsonrpc_method: &'a str,
     pub tool_name: Option<&'a str>,
     pub resource_uri: Option<&'a str>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ToolsListFilterContext<'a> {
+    pub tenant: Option<&'a str>,
+    pub caller_sub: Option<&'a str>,
+    pub identity_source: IdentitySource,
+    pub server_id: &'a str,
+    pub session_id: &'a str,
 }
 
 #[derive(Debug)]
@@ -58,6 +68,18 @@ impl std::error::Error for AuthzError {}
 #[async_trait]
 pub trait PermissionChecker: Send + Sync {
     async fn authorize_mcp_request(&self, ctx: AuthzContext<'_>) -> Result<bool, AuthzError>;
+
+    async fn filter_tools_list(
+        &self,
+        _ctx: ToolsListFilterContext<'_>,
+        tool_names: &[String],
+    ) -> Result<Vec<String>, AuthzError> {
+        Ok(tool_names.to_vec())
+    }
+
+    async fn invalidate_tools_list_cache_for_server(&self, _server_id: &str) {}
+
+    async fn invalidate_session_authz_cache(&self, _session_id: &str) {}
 }
 
 #[derive(Clone, Copy, Debug, Default)]
