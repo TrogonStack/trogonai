@@ -301,8 +301,8 @@ You have the audit stream (`MCP_GATEWAY_PLAN.md:269`, `:784`). Missing: the agen
   - Most-active agents, most-denied agents, deepest chains, longest chains by tenant.
 - [x] **SIEM export.**
   - Decide format (CEF, OCSF, raw JSON). JetStream durable consumer feeds it.
-- [ ] **Decide UI substrate.**
-  - Reuse `trogon-gateway` UI? Standalone? CLI-first (`agctl traffic --agent oncall`)?
+- [x] **Decide UI substrate.**
+  - CLI-first via `agctl traffic` (ADR 0033). Web console explicitly deferred; OCSF export remains the SIEM hand-off.
 
 **Acceptance:** A security engineer can answer "what did agent X do on behalf of user Y in the last hour, and what was blocked" in < 30 seconds.
 
