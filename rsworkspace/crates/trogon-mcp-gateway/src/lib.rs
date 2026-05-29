@@ -24,5 +24,6 @@ pub mod spicedb;
 pub mod subject;
 pub mod trace;
 pub mod wasm;
+pub mod stepup;
 
 pub use gateway::{GatewayError, run};
