@@ -52,12 +52,12 @@ Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gat
 ### Block F — Phase 3 (WASM components + bundles + multi-protocol) — CODE PENDING
 
 - [x] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3 — sketch: `docs/identity/mcp-policy-wit-sketch.md`.
-- [ ] Wasmtime integration with component pooling per bundle version → **ADR 0025**.
+- [x] Wasmtime integration with component pooling per bundle version → **ADR 0025**.
 - [ ] Tracing across the WASM boundary; span context as part of `request-ctx` → **ADR 0032**.
 - [x] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010**; contract: `tests/bundle_load_hot_reload.rs`.
-- [ ] Bundle loader from NATS KV with hot-swap and rollback → **ADR 0026**.
+- [x] Bundle loader from NATS KV with hot-swap and rollback → **ADR 0026**.
 - [ ] First-party `mcp-pack` bundle (resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope) → **ADR 0028**.
-- [ ] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011**.
+- [x] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011**.
 - [ ] Engine extraction: `trogon-policy-core` + `trogon-policy-cel` as separate crates → **ADR 0029 (deferred until forcing function)**.
 
 ### Block G — Operational tooling — CODE PENDING
