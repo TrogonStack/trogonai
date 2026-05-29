@@ -1,3 +1,4 @@
+use crate::app::{TurnMetrics, TurnRenderer, TurnStop, print_startup_banner, print_user_line};
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::client_supervisor::AcpClientSupervisor;
-use crate::terminal::{print_tool_output, reset_display};
+use crate::terminal::reset_display;
 use crate::tui_client::PermissionCoordinator;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_tools::fs::{resolve_directory_target, resolve_path};
@@ -185,7 +186,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     registry: Registry<RS>,
     client_supervisor: Option<Rc<AcpClientSupervisor>>,
     permission_coordinator: std::sync::Arc<PermissionCoordinator>,
-    stream: bool,
+    _stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
@@ -233,17 +234,20 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     rl.set_helper(Some(FileAtHelper { cwd: cwd.clone() }));
     let _ = rl.load_history(&history_path);
 
-    eprintln!("trogon — session {} (Ctrl+D to quit)", session.session_id());
+    let mut session_used_tokens: u64 = 0;
+    let mut session_context_size: u64 = 0;
+    let mut session_mode =
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
+    print_startup_banner(
+        session.session_id(),
+        &prefix,
+        &session_mode,
+    );
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
         helper.cwd = cwd.clone();
     }
-
-    let mut session_used_tokens: u64 = 0;
-    let mut session_context_size: u64 = 0;
-    let mut session_mode =
-        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into());
 
     loop {
         permission_coordinator.cancel_pending();
@@ -255,7 +259,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 }
 
                 // Erase the readline echo line and replace with a styled user block
-                eprint!("\x1b[1A\r\x1b[2K\x1b[1;35m┃\x1b[0m {line}\n");
+                eprint!("\x1b[1A\r\x1b[2K");
+                print_user_line(&line);
 
                 if line == "cd" || line.starts_with("cd ") {
                     let arg = line.strip_prefix("cd").unwrap_or("").trim();
@@ -676,148 +681,60 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 match prompt_result {
                     Err(e) => eprintln!("error: {e}"),
                     Ok(mut rx) => {
-                        let mut stdout = std::io::stdout();
                         let ctrl_c = tokio::signal::ctrl_c();
                         tokio::pin!(ctrl_c);
-                        let mut response_buf = String::new();
-                        // true while a ┆ tool line is live on stderr (no trailing newline)
-                        let mut tool_line_active = false;
-                        // true after the first text token — reset_display called only once per response
-                        let mut text_started = false;
+                        let mut renderer = TurnRenderer::new();
+                        let mut metrics = TurnMetrics {
+                            used_tokens: session_used_tokens,
+                            context_size: session_context_size,
+                        };
 
                         loop {
                             tokio::select! {
                                 biased;
                                 _ = &mut ctrl_c => {
                                     session.cancel().await;
-                                    if tool_line_active { eprint!("\r\x1b[2K\n"); let _ = std::io::stderr().flush(); }
-                                    eprintln!("\n[cancelled]");
+                                    renderer.on_ctrl_c();
                                     break;
                                 }
                                 event = rx.recv() => {
                                     match event {
                                         None => break,
-                                        Some(StreamEvent::Text(text)) => {
-                                            if tool_line_active {
-                                                // clear tool line before text starts
-                                                eprint!("\r\x1b[2K\n");
-                                                let _ = std::io::stderr().flush();
-                                                tool_line_active = false;
-                                                text_started = false;
-                                            }
-                                            if !text_started {
-                                                reset_display();
-                                                text_started = true;
-                                            }
-                                            if stream {
-                                                print!("{text}");
-                                                let _ = stdout.flush();
-                                            } else {
-                                                response_buf.push_str(&text);
-                                            }
-                                        }
-                                        Some(StreamEvent::Thinking) => {}
-                                        Some(StreamEvent::ToolCall(name)) => {
-                                            if !stream && !response_buf.is_empty() {
-                                                reset_display();
-                                                print!("{}", crate::markdown::render(&response_buf));
-                                                let _ = stdout.flush();
-                                                response_buf.clear();
-                                            }
-                                            if tool_line_active {
-                                                // overwrite the previous tool line in place
-                                                eprint!("\r\x1b[2K\x1b[2m┆ {name}\x1b[0m");
-                                            } else {
-                                                eprint!("\n\x1b[2m┆ {name}\x1b[0m");
-                                                tool_line_active = true;
-                                            }
-                                            let _ = std::io::stderr().flush();
-                                        }
-                                        Some(StreamEvent::Diff(diff)) => {
-                                            reset_display();
-                                            eprintln!("{diff}");
-                                        }
-                                        Some(StreamEvent::ToolFinished {
-                                            name,
-                                            output,
-                                            exit_code,
-                                            status,
-                                        }) => {
-                                            if tool_line_active {
-                                                eprint!("\r\x1b[2K\n");
-                                                let _ = std::io::stderr().flush();
-                                                tool_line_active = false;
-                                            }
-                                            let failed = matches!(status, agent_client_protocol::ToolCallStatus::Failed);
-                                            let code_suffix = exit_code
-                                                .map(|c| format!(" (exit {c})"))
-                                                .unwrap_or_default();
-                                            let badge = if failed { " [failed]" } else { "" };
-                                            eprintln!(
-                                                "\x1b[2m┆ {name}{code_suffix}{badge}\x1b[0m"
-                                            );
-                                            if !output.is_empty() {
-                                                print_tool_output(&output);
-                                                if sync_cwd_from_tool(&name, &output, &mut cwd)
-                                                    && let Some(helper) = rl.helper_mut()
+                                        Some(ev) => {
+                                            if let Some(sync) = renderer.handle(ev, &mut metrics) {
+                                                if sync_cwd_from_tool(
+                                                    &sync.tool_name,
+                                                    &sync.output,
+                                                    &mut cwd,
+                                                ) && let Some(helper) = rl.helper_mut()
                                                 {
                                                     helper.cwd = cwd.clone();
                                                 }
                                             }
-                                        }
-                                        Some(StreamEvent::Usage { used_tokens, context_size }) => {
-                                            session_used_tokens = used_tokens;
-                                            session_context_size = context_size;
-                                        }
-                                        Some(StreamEvent::Error(msg)) => {
-                                            if tool_line_active { eprint!("\r\x1b[2K\n"); let _ = std::io::stderr().flush(); }
-                                            if !stream && !response_buf.is_empty() {
-                                                reset_display();
-                                                print!("{}", crate::markdown::render(&response_buf));
-                                                response_buf.clear();
+                                            session_used_tokens = metrics.used_tokens;
+                                            session_context_size = metrics.context_size;
+                                            if renderer.is_stopped() {
+                                                break;
                                             }
-                                            eprintln!("\n\x1b[31merror: {msg}\x1b[0m");
-                                            let _ = stdout.flush();
-                                            break;
                                         }
-                                        Some(StreamEvent::Done(reason)) => {
-                                            if tool_line_active { eprint!("\r\x1b[2K\n"); let _ = std::io::stderr().flush(); }
-                                            if !stream && !response_buf.is_empty() {
-                                                reset_display();
-                                                print!("{}", crate::markdown::render(&response_buf));
-                                                response_buf.clear();
-                                            }
-                                            if reason == "cancelled" {
-                                                eprintln!("\n[cancelled]");
-                                            } else if reason == "maxTurnRequests" {
-                                                eprintln!("\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m");
-                                            } else {
-                                                println!();
-                                                if session_context_size > 0 {
-                                                    let pct = session_used_tokens * 100 / session_context_size;
-                                                    eprintln!(
-                                                        "\x1b[90m[tokens: {}/{} ({}%)]\x1b[0m",
-                                                        fmt_tokens(session_used_tokens),
-                                                        fmt_tokens(session_context_size),
-                                                        pct,
-                                                    );
-                                                }
-                                                eprintln!();
-                                                persist_session_index(
-                                                    &fs,
-                                                    &project_dir,
-                                                    &prefix,
-                                                    session.session_id(),
-                                                    &session.current_model(),
-                                                );
-                                                sync_repl_cwd_from_session(&session, &mut cwd).await;
-                                                if let Some(helper) = rl.helper_mut() {
-                                                    helper.cwd = cwd.clone();
-                                                }
-                                            }
-                                            let _ = stdout.flush();
-                                            break;
-                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(stop) = renderer.take_stop() {
+                            if let TurnStop::Done { reason } = stop {
+                                if reason != "cancelled" && reason != "maxTurnRequests" {
+                                    persist_session_index(
+                                        &fs,
+                                        &project_dir,
+                                        &prefix,
+                                        session.session_id(),
+                                        &session.current_model(),
+                                    );
+                                    sync_repl_cwd_from_session(&session, &mut cwd).await;
+                                    if let Some(helper) = rl.helper_mut() {
+                                        helper.cwd = cwd.clone();
                                     }
                                 }
                             }
