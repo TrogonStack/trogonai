@@ -12,6 +12,7 @@ pub mod egress;
 pub mod gateway;
 pub mod ingress;
 pub mod jwt;
+pub mod multi_region;
 pub mod plugin;
 pub mod policy;
 pub mod redaction;
