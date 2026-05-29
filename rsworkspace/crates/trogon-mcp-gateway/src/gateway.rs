@@ -28,6 +28,7 @@ use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
 };
 use crate::subject::gateway_to_server_subject;
+use crate::throttle::{RateLimitDeny, RateLimiter};
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
@@ -38,6 +39,9 @@ const HEADER_JWT_ISSUER: &str = "trogon-mcp-jwt-issuer";
 const MCP_CLIENT_ID_HEADER: &str = "mcp-client-id";
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const AUTHZ_BEARER_PREFIX: &str = "bearer ";
+const HEADER_RETRY_AFTER_MS: &str = "retry-after-ms";
+const HEADER_RATE_LIMIT_SCOPE: &str = "mcp-rate-limit-scope";
+const TRACEPARENT_HEADER: &str = "traceparent";
 
 #[derive(Debug)]
 pub struct GatewayError(pub String);
@@ -59,6 +63,15 @@ pub struct GatewaySettings {
     pub jwt: Arc<JwtValidator>,
     pub egress: Option<Arc<EgressMinter>>,
     pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
+    /// When `None`, Pin 9 defaults apply via in-process limiter (Tier 2 KV sync TODO per ADR 0012).
+    pub rate_limit: Option<Arc<RateLimiter>>,
+}
+
+fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
+    settings
+        .rate_limit
+        .clone()
+        .unwrap_or_else(|| Arc::new(RateLimiter::default()))
 }
 
 pub async fn run<S>(
@@ -291,6 +304,35 @@ async fn handle_ingress_inner(
         runtime.record_client_server(client_id.as_str(), &server_id_typed);
     }
 
+    let tenant_for_rate = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant_hdr.as_deref())
+        .unwrap_or("unknown");
+    let caller_sub_for_rate = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
+
+    let limiter = rate_limiter(settings);
+    if let Some(deny) = limiter.check_caller(tenant_for_rate, caller_sub_for_rate) {
+        finish_ingress_rate_limited(
+            FinishIngressRateLimitedParams {
+                client,
+                jetstream,
+                mcp: &settings.mcp,
+                msg: &msg,
+                backend_subject: &backend_subject,
+                jsonrpc_method: &jsonrpc_method,
+                gateway_identity: gateway_identity.clone(),
+                request_id: request_id.clone(),
+                requires_spicedb,
+                spicedb_allowed: None,
+                traces,
+                deny,
+            },
+        )
+        .await;
+        return Ok(());
+    }
+
     let mut spicedb_allowed: Option<bool> = None;
     if requires_spicedb {
         match checker
@@ -450,6 +492,28 @@ async fn handle_ingress_inner(
     }
 
     inject_trace_context(&mut outbound_headers);
+
+    let _inflight_guard = match limiter.try_acquire_inflight(server_id, tenant_for_rate) {
+        Ok(guard) => guard,
+        Err(deny) => {
+            finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+                client,
+                jetstream,
+                mcp: &settings.mcp,
+                msg: &msg,
+                backend_subject: &backend_subject,
+                jsonrpc_method: &jsonrpc_method,
+                gateway_identity: gateway_identity.clone(),
+                request_id: request_id.clone(),
+                requires_spicedb,
+                spicedb_allowed,
+                traces,
+                deny,
+            })
+            .await;
+            return Ok(());
+        }
+    };
 
     if msg.reply.is_none() {
         client
@@ -657,6 +721,69 @@ struct FinishIngressBlockedParams<'a> {
     audit_outcome: &'static str,
     jsonrpc_code: i32,
     jsonrpc_message: String,
+}
+
+async fn finish_ingress_rate_limited(params: FinishIngressRateLimitedParams<'_>) {
+    let prefix = params.mcp.prefix_str();
+    let trace_id = trace_id_from_headers(params.msg.headers.as_ref());
+    if params.msg.reply.is_some() {
+        reply_with_rate_limited_error(
+            params.client,
+            params.msg,
+            params.request_id.clone(),
+            &trace_id,
+            &params.deny,
+        )
+        .await;
+    }
+    let mut envelope = AuditEnvelope::new(
+        params.msg.subject.to_string(),
+        params.backend_subject.to_string(),
+        "rate_limited",
+        "request",
+        params.jsonrpc_method.to_string(),
+        params.gateway_identity.tenant.clone(),
+        params.gateway_identity.caller_sub.clone(),
+        params.gateway_identity.issuer.clone(),
+        params.gateway_identity.source,
+        params.request_id.clone(),
+        None,
+    );
+    envelope.apply_rate_limit_fields(params.deny.scope.as_str(), params.deny.retry_after_ms);
+    let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
+    let subject = audit::audit_publish_subject(prefix, "rate_limited", "request", &method_root);
+    audit::publish_audit(params.jetstream, subject, &envelope, std::time::Duration::from_secs(5)).await;
+
+    if let Some(id) = params.request_id {
+        params.traces.insert(
+            id.to_string(),
+            DecisionTrace {
+                subject_in: params.msg.subject.to_string(),
+                subject_out: params.backend_subject.to_string(),
+                jsonrpc_method: params.jsonrpc_method.to_string(),
+                cel_requires_spicedb: params.requires_spicedb,
+                spicedb_allowed: params.spicedb_allowed,
+                tenant: params.gateway_identity.tenant,
+                caller_sub: params.gateway_identity.caller_sub,
+                identity_source: params.gateway_identity.source,
+            },
+        );
+    }
+}
+
+struct FinishIngressRateLimitedParams<'a> {
+    client: &'a async_nats::Client,
+    jetstream: &'a jetstream::Context,
+    mcp: &'a Config,
+    msg: &'a Message,
+    backend_subject: &'a str,
+    jsonrpc_method: &'a str,
+    gateway_identity: GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+    requires_spicedb: bool,
+    spicedb_allowed: Option<bool>,
+    traces: &'a TraceStore,
+    deny: RateLimitDeny,
 }
 
 async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
@@ -899,6 +1026,71 @@ async fn respond_with_jsonrpc_error(
     Ok(())
 }
 
+async fn reply_with_rate_limited_error(
+    client: &async_nats::Client,
+    ingress: &Message,
+    id: Option<serde_json::Value>,
+    trace_id: &str,
+    deny: &RateLimitDeny,
+) {
+    let body = rate_limited_error_bytes(id, trace_id, deny);
+    let Some(reply) = ingress.reply.clone() else {
+        warn!("cannot send JSON-RPC rate_limited: ingress message has no reply subject");
+        return;
+    };
+    let mut headers = async_nats::HeaderMap::new();
+    let retry_ms = deny.retry_after_ms.to_string();
+    headers.insert(HEADER_RETRY_AFTER_MS, retry_ms.as_str());
+    headers.insert(HEADER_RATE_LIMIT_SCOPE, deny.scope.as_str());
+    if let Err(e) = client
+        .publish_with_headers(reply.to_string(), headers, body)
+        .await
+    {
+        warn!(error = %e, "failed to publish rate_limited JSON-RPC to reply subject");
+    }
+    if let Err(e) = client.flush().await {
+        warn!(error = %e, "flush after rate_limited JSON-RPC failed");
+    }
+}
+
+fn rate_limited_error_bytes(id: Option<serde_json::Value>, trace_id: &str, deny: &RateLimitDeny) -> Bytes {
+    let value = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": rpc_codes::RATE_LIMITED,
+            "message": "rate_limited",
+            "data": {
+                "trace_id": trace_id,
+                "scope": deny.scope.as_str(),
+                "retry_after_ms": deny.retry_after_ms,
+            }
+        }
+    });
+    Bytes::from(value.to_string())
+}
+
+fn trace_id_from_headers(headers: Option<&async_nats::HeaderMap>) -> String {
+    if let Some(h) = headers {
+        if let Some(tp) = h
+            .get_last(TRACEPARENT_HEADER)
+            .or_else(|| h.get(TRACEPARENT_HEADER))
+        {
+            let parts: Vec<&str> = tp.as_str().split('-').collect();
+            if parts.len() >= 3 && parts[1].len() == 32 {
+                return parts[1].to_string();
+            }
+        }
+    }
+    format!(
+        "{:032x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u128
+    )
+}
+
 async fn reply_with_jsonrpc_error(
     client: &async_nats::Client,
     ingress: &Message,
@@ -982,5 +1174,33 @@ mod tests {
             bearer_from_authorization_header_value("Bearer abc.def").as_deref(),
             Some("abc.def")
         );
+    }
+
+    #[test]
+    fn trace_id_from_traceparent_header() {
+        let mut h = async_nats::HeaderMap::new();
+        h.insert(
+            TRACEPARENT_HEADER,
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        );
+        assert_eq!(
+            trace_id_from_headers(Some(&h)),
+            "4bf92f3577b34da6a3ce929d0e0e4736"
+        );
+    }
+
+    #[test]
+    fn rate_limited_error_bytes_include_scope_and_retry_after_ms() {
+        let deny = crate::throttle::RateLimitDeny {
+            scope: crate::throttle::RateLimitScope::Caller,
+            retry_after_ms: 750,
+        };
+        let body = rate_limited_error_bytes(Some(serde_json::json!(1)), "abc123", &deny);
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(value["error"]["code"], rpc_codes::RATE_LIMITED);
+        assert_eq!(value["error"]["message"], "rate_limited");
+        assert_eq!(value["error"]["data"]["scope"], "caller");
+        assert_eq!(value["error"]["data"]["retry_after_ms"], 750);
+        assert_eq!(value["error"]["data"]["trace_id"], "abc123");
     }
 }

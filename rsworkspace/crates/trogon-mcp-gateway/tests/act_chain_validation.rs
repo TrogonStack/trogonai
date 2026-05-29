@@ -60,6 +60,7 @@ impl ActChainValidationHarness {
             jwt: trogon_mcp_gateway::jwt::JwtValidator::disabled().expect("jwt ingress off"),
             egress: None,
             chain_resolver: None,
+            rate_limit: None,
         };
         Self {
             nats_conf,
