@@ -12,7 +12,7 @@
 
 Phase 3 ships signed policy bundles as the unit operators load, verify, and hot-swap ([ADR 0010](0010-bundle-format.md)). Day-zero gateways that enforce policy without a tenant-authored pack currently hit `-32108 no_policy` ([ADR 0013](0013-hierarchical-policy-merge.md)) or retain Phase 1 hardcoded SpiceDB tuple logic in `policy.rs` that does not compose with hierarchical merge, list filtering ([ADR 0015](0015-tools-list-filtering.md)), or schema-cache sniff hooks ([ADR 0023](0023-schema-cache-invalidation.md)).
 
-`MCP_GATEWAY_PLAN.md` Block F item 6 requires a **first-party `mcp-pack`** so operators receive useful defaults: SpiceDB resource-tuple derivation for gated MCP methods, catalogue shaping aligned with call-time authorization, a schema-learner WASM component, and a default audit envelope template aligned with Wire-Format Pin 7 (`MCP_GATEWAY_PLAN.md` §7). The plan also states tenants **extend/override** the pack — not fork the gateway — and that `mcp-pack` must remain **deletable** when a fleet supplies its own bundle ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Bundles).
+A **first-party `mcp-pack`** gives operators useful defaults: SpiceDB resource-tuple derivation for gated MCP methods, catalogue shaping aligned with call-time authorization, a schema-learner WASM component, and a default audit envelope template aligned with the audit envelope schema ([reference-audit-envelope.md](../identity/reference-audit-envelope.md)). Tenants **extend/override** the pack — not fork the gateway — and `mcp-pack` must remain **deletable** when a fleet supplies its own bundle.
 
 **Author workflow alignment.** [howto-write-bundle.md](../identity/howto-write-bundle.md) documents tenant bundle layout (`manifest.toml`, `policies/*.cel`, optional `components/*.wasm`, NKey signing). `mcp-pack` is the reference implementation of that layout at org scope: same manifest schema, same signing gate, same hierarchical merge slot — with **no customer-specific JWT claims, tenant slugs, or server ids** baked into rules. Tenant overlays carry customer fields per [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md).
 
@@ -30,7 +30,7 @@ Phase 3 ships signed policy bundles as the unit operators load, verify, and hot-
 
 - No `bundles/mcp-pack/` tree on disk yet; bundle loader and Wasmtime pool are scaffolds (`tests/bundle_load_hot_reload.rs`, `tests/wasm_host_abi.rs`).
 - Phase 1 tuple shapes live in [trogon-mcp-gateway README](../../rsworkspace/crates/trogon-mcp-gateway/README.md) and `config.rs` constants (`DEFAULT_SPICEDB_TOOL_RESOURCE_TYPE`, `DEFAULT_SPICEDB_RESOURCE_TYPE`).
-- Pin 7 audit sample lives in `MCP_GATEWAY_PLAN.md` §7; gateway `AuditEnvelope` is a subset today (`tests/audit_envelope_shape.rs`).
+- Audit envelope sample lives in [reference-audit-envelope.md](../identity/reference-audit-envelope.md); gateway `AuditEnvelope` is a subset today (`tests/audit_envelope_shape.rs`).
 
 ---
 
@@ -49,7 +49,7 @@ Ship **`mcp-pack` v0.1.0** as a signed first-party policy bundle named **`_globa
 | Merge level | Organisation (`policy/org/mcp-pack` pointer **(proposed)** or embedded default when first-party pack enabled) |
 | Tiers in v0.1.0 | Tier 2 CEL + Tier 3 WASM only (no Tier 1 YAML) |
 
-**Layering inside the pack** (evaluation order unchanged from [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Policy tiers: CEL → NATS-callout → WASM):
+**Layering inside the pack** (evaluation order: CEL → NATS-callout → WASM):
 
 ```
 manifest.toml
@@ -75,7 +75,7 @@ Normative programs derive SpiceDB `(resource_type, resource_id, permission, subj
 Derivation rules:
 
 - `server_id` from ingress subject (`nats.subject` segment after `gateway.request.`).
-- Virtual MCP names: split on **first** `::` only ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Pin 4); native tool name is the suffix; `server_id` is the prefix segment.
+- Virtual MCP names: split on **first** `::` only (see [reference-virtual-mcp.md](../identity/reference-virtual-mcp.md)); native tool name is the suffix; `server_id` is the prefix segment.
 - Tuple programs expose derived strings via CEL locals consumed by downstream `spicedb.check(resource, permission, subject)` calls ([howto-write-bundle.md](../identity/howto-write-bundle.md) argument order).
 - Programs are **allow guards** that invoke `spicedb.check` with derived tuples; they do not embed tenant-specific allow lists.
 
@@ -91,7 +91,7 @@ mcp.method == "tools/call"
    )
 ```
 
-`server.id` binding **(proposed)** — host injects parsed `server_id` alongside existing `mcp.*` roots ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §8).
+`server.id` binding **(proposed)** — host injects parsed `server_id` alongside existing `mcp.*` roots (see [reference-cel-variables.md](../identity/reference-cel-variables.md)).
 
 #### 2. Catalogue shaping defaults ([ADR 0015](0015-tools-list-filtering.md))
 
@@ -124,7 +124,7 @@ Pooling: one Wasmtime pool entry per `(bundle_digest, component_id)` per ADR 002
 |---------------------|---------|-------|
 | `mcp-pack/audit-default` | `audit_enrich` **(proposed class)** | request + response |
 
-On allow paths, `audit.emit` merges stable `extra` keys aligned with Pin 7 sample (`MCP_GATEWAY_PLAN.md` §7):
+On allow paths, `audit.emit` merges stable `extra` keys aligned with the audit envelope sample ([reference-audit-envelope.md](../identity/reference-audit-envelope.md)):
 
 | Key | Source |
 |-----|--------|
@@ -140,8 +140,8 @@ The program does **not** replace gateway mandatory fields (`schema`, `trace_id`,
 
 | Item | Rationale |
 |------|-----------|
-| Tier 3 redactor WASM | Block E ships native JSONPath redaction first ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E item 5); redactor component lands with ADR 0027 |
-| Default rate-limit CEL | Operator/env defaults suffice ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §9); avoids surprising `-32105` on day zero |
+| Tier 3 redactor WASM | Native JSONPath redaction ships first; redactor component lands with ADR 0027 |
+| Default rate-limit CEL | Operator/env defaults suffice (see [reference-rate-defaults.md](../identity/reference-rate-defaults.md)); avoids surprising `-32105` on day zero |
 | NATS-callout plugins | Block F item 7 — separate from first-party pack |
 | Customer-specific claims (`jwt.<custom>` matchers) | Belongs in tenant overlay only |
 | `prompts/get` SpiceDB schema | Object type `trogon/mcp_prompt` **(proposed)** — seed tuples and schema doc in follow-on identity work |
@@ -339,4 +339,4 @@ Rollback never mutates published artifacts in place — forward fix is new semve
 
 ---
 
-*Contract sources: [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F item 6, § Bundles, §7 Pin 7, §8 CEL namespace; [ADR 0010](0010-bundle-format.md); [ADR 0013](0013-hierarchical-policy-merge.md); [ADR 0015](0015-tools-list-filtering.md); [ADR 0023](0023-schema-cache-invalidation.md); [howto-write-bundle.md](../identity/howto-write-bundle.md); [wasm-bundle-format.md](../identity/wasm-bundle-format.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); [reference-audit-envelope.md](../identity/reference-audit-envelope.md); [trogon-mcp-gateway README](../../rsworkspace/crates/trogon-mcp-gateway/README.md); `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`, `tools_list_filter.rs`, `schema_cache_invalidation.rs`, `audit_envelope_shape.rs`, `wasm_host_abi.rs`.*
+*Contract sources: [ADR 0010](0010-bundle-format.md); [ADR 0013](0013-hierarchical-policy-merge.md); [ADR 0015](0015-tools-list-filtering.md); [ADR 0023](0023-schema-cache-invalidation.md); [howto-write-bundle.md](../identity/howto-write-bundle.md); [wasm-bundle-format.md](../identity/wasm-bundle-format.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); [reference-audit-envelope.md](../identity/reference-audit-envelope.md); [trogon-mcp-gateway README](../../rsworkspace/crates/trogon-mcp-gateway/README.md); `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`, `tools_list_filter.rs`, `schema_cache_invalidation.rs`, `audit_envelope_shape.rs`, `wasm_host_abi.rs`.*

@@ -49,7 +49,7 @@ Until ADR 0001 is accepted, treat tenancy as **provisional**: implement tenant c
 | **Subject ACLs** | Hard tenancy: ACL templates repeat per account; soft tenancy: all tenants share subject space — isolation is **only** JWT + policy. |
 | **KV namespaces** | `mcp-gateway-config`, `mcp-sessions`, trust bundles, schema cache — per-account buckets vs single bucket with `{tenant}/` key prefix. |
 
-**Explicit non-goal:** Adding `{tenant}` to MCP/A2A subject paths. That remains out of scope per `MCP_GATEWAY_PLAN.md`.
+**Explicit non-goal:** Adding `{tenant}` to MCP/A2A subject paths.
 
 ## Considered options
 
@@ -95,7 +95,7 @@ Single NATS Account (or few shared accounts) for many tenants. Tenant id is a va
 | Pros | Cons |
 |------|------|
 | Production isolation without forcing developers through NSC for every laptop. | Two code paths to test; bugs may appear only in one mode (e.g. missing `nats.account` in CEL). |
-| Matches `MCP_GATEWAY_PLAN.md` default recommendation. | Operators must document which mode each environment uses; drift causes "works in dev, leaks in prod" incidents. |
+| Matches the default recommendation for production. | Operators must document which mode each environment uses; drift causes "works in dev, leaks in prod" incidents. |
 | JWT tenant claim stays valuable for SIEM and SpiceDB even under hard tenancy. | |
 
 **Irreversible consequences:** The **abstraction boundary** (always thread `TenantContext { account, claim }` through gateway, STS, audit) must be designed once; retrofitting later is expensive. Choosing hybrid commits to dual-mode tests in CI, not to "soft only."
@@ -149,7 +149,7 @@ Implementation bias for downstream specs:
 7. **`MCP_PREFIX` vs account:** When should operators use prefix override instead of a new Account — internal envs only, or a supported multi-tenant lite offering?
 8. **A2A + MCP unification:** Confirm single Account hosts both `a2a.*` and `mcp.*` for one customer — any exception for regulated split?
 9. **Migration:** Existing single-account pilots — documented cutover to per-account (streams, KV, connections) before enforce-mode agent identity?
-10. **Rate limits:** Per-tenant inflight (`MCP_GATEWAY_PLAN.md` defaults) — cluster-wide KV in soft mode vs per-account semaphores only in hard mode?
+10. **Rate limits:** Per-tenant inflight (see [reference-rate-defaults.md](../identity/reference-rate-defaults.md)) — cluster-wide KV in soft mode vs per-account semaphores only in hard mode?
 
 ---
 

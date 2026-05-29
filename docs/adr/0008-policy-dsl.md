@@ -121,7 +121,7 @@ Host extensions (SpiceDB, cache, rate limits, audit, jsonpath) are **blessed bui
 
 ### `cel-rust` fork (`cel-fork`, `celx`, Trogon-specific)
 
-**Rejected for Phase 1+:** [`MCP_GATEWAY_PLAN.md`](../../MCP_GATEWAY_PLAN.md) notes proxy forks extended CEL with proxy-specific builtins. Trogon adds host functions **externally** via `cel_builtins/` and WIT imports — no fork required. Fork only reconsidered if upstream blocks Block E with no timely fix.
+**Rejected for Phase 1+:** Proxy forks (e.g. agentgateway) extended CEL with proxy-specific builtins. Trogon adds host functions **externally** via `cel_builtins/` and WIT imports — no fork required. Fork only reconsidered if upstream blocks Phase 2 policy work with no timely fix.
 
 ## Implementation notes
 
@@ -155,7 +155,7 @@ WIT mapping for Phase 3: each CEL builtin maps to a kebab-case import (`spicedb-
 
 ### Variable namespace (Wire-Format Pin 8)
 
-CEL evaluation bindings follow [`reference-cel-variables.md`](../identity/reference-cel-variables.md) and [`MCP_GATEWAY_PLAN.md` Wire-Format Pin 8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace):
+CEL evaluation bindings follow [`reference-cel-variables.md`](../identity/reference-cel-variables.md):
 
 | Root | Purpose |
 |------|---------|
@@ -237,7 +237,6 @@ programs:
 | Block E — wire all builtins | **Pending** — unblocked by this ADR |
 | Block F — WASM bundle loader + Wasmtime | **Pending** — depends on host ABI + this DSL choice |
 | `trogon-gateway-ctl bundle validate` | **Pending** — proposed dry-run against pinned `cel_version` |
-| `MCP_GATEWAY_PLAN.md` Block B checkbox | **Pending editorial** — reference this ADR and mark DSL choice done |
 
 ### Migration if CEL is ever replaced
 

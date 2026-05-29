@@ -12,7 +12,7 @@ TrogonStack's MCP and A2A gateways today authenticate callers at the NATS perime
 - Custom claims: `caller_id`, `data` (SpiceDB-ready principal payload)
 - NATS subject permissions: publish on `{prefix}.gateway.>`, subscribe on `_INBOX.{caller_id}.>` and push/callback subtrees
 
-Once connected, the caller uses this JWT for **every** gateway interaction. The **`trogon-mcp-gateway`** validates the JWT at ingress (`MCP_GATEWAY_JWT_*` phased `off` / `validate` / `require`), derives identity for SpiceDB and CEL, and **propagates verified context** to backends via gateway-set headers (`mcp-caller-sub`, `mcp-tenant`, etc.). Per `MCP_GATEWAY_PLAN.md` § Wire-Format Pins, the gateway **strips** any client-supplied identity headers on ingress—clients cannot forge `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, or `mcp-schema`.
+Once connected, the caller uses this JWT for **every** gateway interaction. The **`trogon-mcp-gateway`** validates the JWT at ingress (`MCP_GATEWAY_JWT_*` phased `off` / `validate` / `require`), derives identity for SpiceDB and CEL, and **propagates verified context** to backends via gateway-set headers (`mcp-caller-sub`, `mcp-tenant`, etc.). Per [reference-nats-headers.md](../identity/reference-nats-headers.md), the gateway **strips** any client-supplied identity headers on ingress—clients cannot forge `mcp-caller-sub`, `mcp-tenant`, `mcp-instance-id`, or `mcp-schema`.
 
 This model proves **perimeter authentication and gateway enforcement**. It does **not** implement Uber's agent-delegation identity plane:
 
@@ -147,7 +147,7 @@ Bootstrap JWT suffices for **low-risk, idempotent** operations (`tools/list`, `r
 
 ### Gateway egress behavior
 
-Today (`MCP_GATEWAY_PLAN.md` § Wire-Format Pins): gateway sets `mcp-caller-sub`, `mcp-tenant` from validated JWT and strips client forgeries.
+Today (see [reference-nats-headers.md](../identity/reference-nats-headers.md)): gateway sets `mcp-caller-sub`, `mcp-tenant` from validated JWT and strips client forgeries.
 
 After this ADR:
 
@@ -238,14 +238,13 @@ Flip `MCP_GATEWAY_AGENT_IDENTITY` to `shadow` or `off`; bootstrap path remains w
 4. **Callback direction:** Server → client callbacks (`mcp.gateway.callback.*`)—exchange with `aud=client_id` before egress is likely required; confirm symmetric enforce rules.
 5. **Bridge reminting:** `a2a-bridge` already mints per-request caller JWTs—is that a second bootstrap or an ad-hoc STS? Align with ADR 0004.
 6. **Hybrid sunset date:** If (c) is used during migration, what metric triggers retiring bootstrap-only list paths?
-7. **OAuth-MCP composition:** Does the OAuth access token map to bootstrap only, with STS downstream (`MCP_GATEWAY_PLAN.md` Block C open item)?
+7. **OAuth-MCP composition:** Does the OAuth access token map to bootstrap only, with STS downstream (see [ADR 0019](0019-oauth-mcp-integration.md))?
 8. **Offline dev:** File-based SVID + local STS mock sufficient for CI, or require SPIRE in integration tests?
 
 ---
 
 ## References
 
-- `MCP_GATEWAY_PLAN.md` — § Wire-Format Pins (headers, ingress hardening), § Audit envelope, § CEL namespace
 - `docs/a2a/explanation/auth-callout-design.md` — current bootstrap JWT layout
 - [Uber — Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/)
 - RFC 8693 — OAuth 2.0 Token Exchange (STS contract baseline)
