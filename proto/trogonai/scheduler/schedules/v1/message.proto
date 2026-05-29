@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+import "trogon/content/v1alpha1/content.proto";
+
+// Message is the static payload and headers used when no sampling source is configured.
+message Message {
+  // Opaque payload published to the target subject.
+  trogon.content.v1alpha1.Content content = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Additional headers; scheduler-owned Nats-Schedule-* and Content-Type headers are reserved.
+  repeated Header headers = 2;
+}
+
+message Header {
+  // Header names cannot contain whitespace, controls, or ':'.
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Header values cannot contain CR, LF, or NUL.
+  string value = 2 [features.field_presence = LEGACY_REQUIRED];
+}

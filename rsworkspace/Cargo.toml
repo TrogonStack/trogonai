@@ -28,6 +28,7 @@ mcp-nats = { path = "crates/mcp-nats" }
 mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 trogon-nats = { path = "crates/trogon-nats" }
+trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 trogon-actor = { path = "crates/trogon-actor" }
@@ -48,6 +49,8 @@ async-trait = "=0.1.89"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.11.1"
+buffa = { version = "=0.6.0", features = ["json"] }
+buffa-types = { version = "=0.6.0", features = ["json"] }
 futures = "=0.3.32"
 futures-util = "=0.3.32"
 tokio = "=1.52.1"

@@ -11,6 +11,7 @@ node_modules
 .next
 .turbo
 dist
+docs/.vitepress/cache
 *.tsbuildinfo
 
 # pnpm
@@ -50,7 +51,8 @@ coverage-*.xml
 
 # Misc
 tmp
-.claude/\n.claire/
-
 .claude/
 .claire/
+
+# Python
+__pycache__

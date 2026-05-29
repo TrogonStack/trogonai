@@ -11,6 +11,8 @@ mod source;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source_integration_id;
 #[cfg_attr(coverage, allow(dead_code))]
+mod source_plugin;
+#[cfg_attr(coverage, allow(dead_code))]
 mod source_status;
 #[cfg_attr(coverage, allow(dead_code))]
 mod streams;
@@ -166,6 +168,30 @@ async fn serve(resolved: config::ResolvedConfig) -> Result<(), Box<dyn std::erro
             });
             info!(source = "discord", "gateway runner spawned");
         }
+    }
+
+    for integration in resolved
+        .slack
+        .iter()
+        .filter(|integration| integration.config.socket_mode().is_some())
+    {
+        let p = publisher.clone();
+        let integration_id = integration.id.clone();
+        let slack_cfg = integration.config.clone();
+        join_set.spawn(async move {
+            let result = tokio::select! {
+                _ = trogon_std::signal::shutdown_signal() => Ok(()),
+                result = crate::source::slack::socket_mode::run(p, &slack_cfg) => {
+                    result.map_err(|error| error.to_string())
+                }
+            };
+            ("slack-socket-mode", result)
+        });
+        info!(
+            source = "slack",
+            integration = %integration_id,
+            "socket mode runner spawned"
+        );
     }
 
     let app = trogon_std::telemetry::http::instrument_router(http::mount_sources(resolved, publisher));

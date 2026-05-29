@@ -1,0 +1,34 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+import "google/protobuf/duration.proto";
+
+// Delivery describes where a scheduled job publishes when it fires.
+message Delivery {
+  oneof kind {
+    NatsMessage nats_message = 1;
+  }
+
+  // NatsMessage publishes to the configured NATS subject.
+  message NatsMessage {
+    // Concrete subject where scheduled messages are published.
+    string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    // Optional message TTL. Zero is invalid when explicitly provided.
+    google.protobuf.Duration ttl = 2;
+    // Optional native NATS schedule source used to sample the latest payload at fire time.
+    Source source = 3;
+
+    message Source {
+      oneof kind {
+        LatestFromSubject latest_from_subject = 1;
+      }
+    }
+
+    // LatestFromSubject asks NATS to use the latest message from a subject as the payload.
+    message LatestFromSubject {
+      // Concrete subject used as the native NATS schedule source.
+      string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    }
+  }
+}
