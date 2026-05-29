@@ -316,6 +316,6 @@ Deliberately unspecified in v1 (resolve in implementation PRs):
 
 ## References
 
-- Audit envelope optional fields: `trogon-mcp-gateway` `audit.rs`, `MCP_GATEWAY_PLAN.md` § Audit.
+- Audit envelope optional fields: `trogon-mcp-gateway` `audit.rs`.
 - `act_chain` semantics: `docs/identity/act-chain.md`.
 - STS audit shape: `docs/identity/sts-exchange.md` § Audit emission.

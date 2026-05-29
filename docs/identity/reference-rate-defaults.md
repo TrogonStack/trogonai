@@ -4,7 +4,7 @@
 
 **Status banner:** Phase 1 contract. Defaults are pinned; per-rule overrides are configurable in the bundle / KV config.
 
-**Canonical source:** [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 9 (§ "Per-target inflight cap and rate-limit defaults"). This document quotes and extends that pin; it does not contradict it.
+**Canonical source:** Wire-Format Pin 9 — "Per-target inflight cap and rate-limit defaults". This document is the normative source.
 
 **Related:**
 
@@ -99,7 +99,7 @@ Idiomatic deny: `!rate.acquire("tool:" + jwt.sub + ":" + mcp.tool.name, 10, 1.0)
 
 ## 3. `retry_after_ms` computation
 
-[MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes) pins stable `data` fields for `-32105`: `{ trace_id, scope, retry_after_ms }`. Block E standardizes **milliseconds** in JSON-RPC `data` for all rate-limit paths ([rate-limiting.md §8](rate-limiting.md#8-observability)); adaptive-access risk throttle still emits `retry_after_s` **(today)** — convergence tracked in Block E.
+[reference-error-codes.md](reference-error-codes.md) pins stable `data` fields for `-32105`: `{ trace_id, scope, retry_after_ms }`. Block E standardizes **milliseconds** in JSON-RPC `data` for all rate-limit paths ([rate-limiting.md §8](rate-limiting.md#8-observability)); adaptive-access risk throttle still emits `retry_after_s` **(today)** — convergence tracked in Block E.
 
 | `data.scope` | How `retry_after_ms` is derived | Grounding |
 |---|---|---|

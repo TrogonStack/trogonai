@@ -196,7 +196,7 @@ Directory holds Sigstore cosign signature material for mandatory layers.
 
 Signature format: cosign **simple signing** JSON (`application/vnd.dev.cosign.simplesigning.v1+json`) or OCI cosign attachment manifest — loader MUST support at least detached `.sig` files co-located in the artifact tree for air-gapped import.
 
-**Relationship to plan NKey manifest signing:** [MCP_GATEWAY_PLAN.md § Bundles](../../MCP_GATEWAY_PLAN.md) describes NKey signature over manifest digest. For OCI bundles, **cosign at the OCI layer is authoritative**; an optional `signatures/nkey.toml` **(proposed)** MAY duplicate NKey material for operators migrating from legacy KV bundles — gateway accepts either cosign OR NKey when both present, requiring **both** to verify **(proposed)**.
+**Relationship to NKey manifest signing:** earlier KV-only bundles used NKey signature over manifest digest. For OCI bundles, **cosign at the OCI layer is authoritative**; an optional `signatures/nkey.toml` **(proposed)** MAY duplicate NKey material for operators migrating from legacy KV bundles — gateway accepts either cosign OR NKey when both present, requiring **both** to verify **(proposed)**.
 
 ### 3.4 `metadata/` — arbitrary key/value
 
@@ -425,7 +425,7 @@ Import flow:
 3. Operator updates `mcp-gateway-config` active pointer to digest.
 4. Gateway loads from KV, **re-verifies signatures** (same as OCI path).
 
-**JetStream Object Store:** [MCP_GATEWAY_PLAN.md § Config Distribution](../../MCP_GATEWAY_PLAN.md) mentions Object Store for WASM binaries. Object Store MAY hold the same bytes keyed by digest **(proposed)** with KV holding only the active pointer — equivalent to Path B if loader treats Object Store as blob backend.
+**JetStream Object Store:** Object Store MAY hold the same bytes keyed by digest **(proposed)** with KV holding only the active pointer — equivalent to Path B if loader treats Object Store as blob backend.
 
 ### 6.3 Path selection
 
@@ -440,7 +440,7 @@ Gateway config **(proposed):** `MCP_GATEWAY_POLICY_SOURCE=oci|kv|file` with `oci
 
 ### 6.4 Multi-source layering
 
-Aligns with [MCP_GATEWAY_PLAN.md § Bundles](../../MCP_GATEWAY_PLAN.md): org-wide base + tenant override.
+Aligns with the org-wide base + tenant override model.
 
 | Layer | Source **(proposed)** | Precedence |
 |---|---|---|

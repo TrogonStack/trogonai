@@ -215,7 +215,7 @@ The replica that handles `initialize` creates a dedicated subscription (or JetSt
 
 Justification:
 
-1. **Already the plan default.** [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Session correlation names bucket `mcp-sessions` and lists the fields to store. Block C explicitly calls for this decision paper; the KV approach is the only strategy that satisfies HA without changing edge subject grammar or client ACLs.
+1. **Already the working default.** Session correlation uses bucket `mcp-sessions` and lists the fields to store. The KV approach is the only strategy that satisfies HA without changing edge subject grammar or client ACLs.
 
 2. **Failover matches operator expectations.** Clients reconnecting to NATS after a gateway roll do not know which replica served `initialize`. KV is the shared memory of the fleet.
 
@@ -551,7 +551,7 @@ These are guidance for the Block C → Phase 2 implementer; not wire pins.
 - [ ] Gateway implementer can code `initialize` / `initialized` / post-init RPC against the JSON schema without guessing fields.
 - [ ] Failure-mode table maps to JSON-RPC codes and audit subjects already in the plan (plus proposed extensions labeled).
 - [ ] Decision matrix records why KV beats sticky subject and ephemeral consumer for v1 HA.
-- [ ] Cross-references resolve to [overview.md](overview.md), [act-chain.md](act-chain.md), and [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C.
+- [ ] Cross-references resolve to [overview.md](overview.md) and [act-chain.md](act-chain.md).
 
 ---
 

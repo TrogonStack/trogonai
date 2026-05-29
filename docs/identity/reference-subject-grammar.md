@@ -613,4 +613,4 @@ Changing any stable subject or bucket name is a **major** breaking change requir
 
 ---
 
-*Generated for MCP_GATEWAY_PLAN Block H. Verify against cited sources when upgrading crates.*
+*Verify against cited sources when upgrading crates.*

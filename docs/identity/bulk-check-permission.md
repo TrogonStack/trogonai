@@ -163,7 +163,7 @@ The gateway does not mint ZedTokens; it only stores tokens returned by SpiceDB.
 
 ### 3.4 Session scoping (planned)
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E and [mcp-session-model.md](mcp-session-model.md) bind session-scoped ZedToken to JetStream KV `mcp-sessions/{session_id}`. This design’s **result cache** is complementary: KV holds the session’s “latest known fresh token” for consistency headers; the result cache holds **(tuple, token) → allowed** for latency.
+[mcp-session-model.md](mcp-session-model.md) binds session-scoped ZedToken to JetStream KV `mcp-sessions/{session_id}`. This design’s **result cache** is complementary: KV holds the session’s “latest known fresh token” for consistency headers; the result cache holds **(tuple, token) → allowed** for latency.
 
 ---
 
@@ -298,7 +298,7 @@ hit ⇔ key.zed_token == session.latest_zed_token
 Subscribe to SpiceDB **`Watch`** API filtered by resource types or subjects of interest. On `RELATIONSHIP_UPDATE` touching cached subjects, invalidate matching entries.
 
 - **Pros:** Lowest staleness after writes.
-- **Cons:** Long-lived gRPC per gateway replica, fan-out on busy graphs, operational cost — [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E marks this “if cheap enough.”
+- **Cons:** Long-lived gRPC per gateway replica, fan-out on busy graphs, operational cost — only worthwhile “if cheap enough.”
 
 **Recommendation:** **Token-based primary**; TTL as safety net; Watch as **optional** Phase 3 enhancement for high-security tenants (`spicedb.watch_invalidation: true` in bundle).
 

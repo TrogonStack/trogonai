@@ -8,7 +8,7 @@
 
 **Implementation target:** `trogon-mcp-gateway` virtual-server federation layer (policy transform before backend fan-out). Backends remain unaware of prefixing.
 
-**Authority:** Wire-Format Pin 4 in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § "Wire-Format Pins for Phase 1" is normative for Phase 1. This document quotes and extends that pin; it does not contradict it. Older plan prose that uses underscore (`_`) separators describes pre-pin agentgateway interop; new bundles MUST use `::` unless explicitly overridden.
+**Authority:** Wire-Format Pin 4 is normative for Phase 1. This document is the normative source. Older prose that uses underscore (`_`) separators describes pre-pin agentgateway interop; new bundles MUST use `::` unless explicitly overridden.
 
 ---
 
@@ -287,7 +287,7 @@ Federation affects JSON-RPC params and list merge; NATS subjects encode **which 
 
 The virtual id appears only on ingress. Egress NEVER uses `virtual-*` as `server_id` after federation resolution.
 
-Cross-reference: [reference-subject-grammar.md §2.2–2.3](reference-subject-grammar.md#22-gateway-ingress), [MCP_GATEWAY_PLAN.md § Virtual MCP (federation) in subjects](../../MCP_GATEWAY_PLAN.md).
+Cross-reference: [reference-subject-grammar.md §2.2–2.3](reference-subject-grammar.md#22-gateway-ingress).
 
 ### 8.2 Worked trace: `tools/call`
 
@@ -373,4 +373,4 @@ Default `::`, first-separator split, per-virtual-server configurability, and the
 
 ---
 
-*Generated for MCP_GATEWAY_PLAN Block H — Wire-Format Pin 4 reference. Verify against gateway federation implementation when landed.*
+*Wire-Format Pin 4 reference. Verify against gateway federation implementation when landed.*

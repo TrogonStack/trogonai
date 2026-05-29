@@ -165,7 +165,7 @@ Each alternative was evaluated against §1. **Chosen:** CEL. Others are rejected
 
 ### 2.6 Expr (Google) — noted, not primary
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Open Questions mention **Expr** (Go-native, Synadia Protect). Expr is syntactically similar to CEL.
+Earlier design notes mention **Expr** (Go-native, Synadia Protect). Expr is syntactically similar to CEL.
 
 | Aspect | Decision |
 |---|---|
@@ -309,7 +309,7 @@ Available without Trogon namespaces: boolean logic, comparisons, `size`, `starts
 
 ### 4.5 Plan namespace vs implementation
 
-[MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) documents `mcp.*`, `jwt.*`, `chain.*`, `nats.*`, `spicedb.check(subject, perm, resource)` ordering. Implementation builtins use `(resource, permission, subject)` in `spicedb.rs` — authors should follow **this document and `cel_builtins/`**; plan table update is editorial.
+[reference-cel-variables.md](reference-cel-variables.md) documents `mcp.*`, `jwt.*`, `chain.*`, `nats.*`, `spicedb.check(subject, perm, resource)` ordering. Implementation builtins use `(resource, permission, subject)` in `spicedb.rs` — authors should follow **this document and `cel_builtins/`**.
 
 `chain.contains`, `chain.depth`, `chain.originator` are registered on the `chain` value in [`policy.rs`](../../rsworkspace/crates/trogon-mcp-gateway/src/policy.rs) (not separate roots).
 
@@ -496,7 +496,7 @@ A successor (Rego, Cedar, …) would add a parallel evaluator crate while keepin
 
 ### 8.2 Block B closure
 
-When this document merges, [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B item **DSL choice** should reference `docs/identity/policy-dsl-choice.md` as the signed decision. Eval library item resolves to **`cel-interpreter` pinned 0.10.x**, not an Expr fork, unless a future ADR amends.
+This document is the signed **DSL choice** decision. Eval library resolves to **`cel-interpreter` pinned 0.10.x**, not an Expr fork, unless a future ADR amends.
 
 ### 8.3 Program classes and examples (reference)
 

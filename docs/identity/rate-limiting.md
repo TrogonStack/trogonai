@@ -1,6 +1,6 @@
 # Rate limiting — placement, dimensions, and backing store
 
-**Status:** Normative design spec (Block C paper; Block E implementation gate). Satisfies [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C “Rate-limit state placement” and unblocks Block E “Rate limiting wired with chosen state-placement decision”.
+**Status:** Normative design spec (Block C paper; Block E implementation gate). Closes the “Rate-limit state placement” decision and unblocks “Rate limiting wired with chosen state-placement decision”.
 
 **Diátaxis:** Explanation (sections 1–5, narrative in 6–10) + reference (tables, contracts, operator knobs).
 
@@ -98,7 +98,7 @@ Rate limits can attach at three distinct points on the gateway worker path. Each
 
 1. **Ingress** rejects ~99% of raw flood traffic at &lt;50 µs per message (no JWT verify). At 10k rps attack, saving JWT verify alone preserves ~5–10% CPU on a 4-core gateway pod (internal estimate; validate in Block G benchmarks).
 
-2. **Post-auth** aligns with [MCP_GATEWAY_PLAN.md §9](../../MCP_GATEWAY_PLAN.md) defaults (`100 req / 10s` per caller, `4096` tenant inflight). Enforcement here prevents authenticated abuse without waiting for CEL evaluation on every method.
+2. **Post-auth** aligns with [reference-rate-defaults.md](reference-rate-defaults.md) (`100 req / 10s` per caller, `4096` tenant inflight). Enforcement here prevents authenticated abuse without waiting for CEL evaluation on every method.
 
 3. **Per-tool** limits are **opt-in** via CEL because tool cost variance is tenant-specific. A cluster-wide KV check adds ~1–3 ms p99 (NATS RTT + KV compare-and-swap); acceptable only for tools where backend cost &gt;&gt; 3 ms (LLM, provisioning, bulk SpiceDB).
 
@@ -280,7 +280,7 @@ mcp.method == "tools/call"
   ? deny("originator rate limited")
 ```
 
-**Note on stale docs:** [MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md) lists a four-argument `rate.acquire(scope, key, budget, window)` shape. The wired host ABI in `cel_builtins/rate.rs` uses the three-argument token-bucket form above. Block E implementation and this spec follow **`rate.rs`**; plan table update is a separate editorial change.
+**Note on stale prior sketches:** an earlier draft listed a four-argument `rate.acquire(scope, key, budget, window)` shape. The wired host ABI in `cel_builtins/rate.rs` uses the three-argument token-bucket form above. Implementation and this spec follow **`rate.rs`**.
 
 ### Contexts where `rate.acquire` may be called
 

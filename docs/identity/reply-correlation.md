@@ -122,7 +122,7 @@ E2E harness (`tests/e2e_nats_forward.rs:46-54`, `96-103`): client `request_with_
 
 ### 1.3 Target architecture (plan — not yet in code)
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inbox naming and [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) §4 describe the **intended** Phase 2 shape:
+[reference-reply-inboxes.md](reference-reply-inboxes.md) and [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) §4 describe the **intended** Phase 2 shape:
 
 ```
 _INBOX.client.{nuid}                       # client → gateway (client NATS library sets Message.reply)

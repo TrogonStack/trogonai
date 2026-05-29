@@ -150,7 +150,7 @@ if jsonrpc_method == "tools/list" && cache.hit(server_id, schema_hash, policy_ve
 - **Type:** boolean expression.
 - **Evaluation model:** called once per tool candidate in `result.tools` (after upstream fetch or when iterating cache entries).
 - **Decision:** `true` → keep (then redaction, section 5); `false` → omit from `tools` array.
-- **Composition:** multiple rules in policy YAML use **OR** semantics (any matching rule keeps the tool), consistent with agentgateway `mcpAuthorization` and [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) § MCP Authorization.
+- **Composition:** multiple rules in policy YAML use **OR** semantics (any matching rule keeps the tool), consistent with agentgateway `mcpAuthorization`.
 
 ### 3.2 Activation context (`eval_ctx`)
 

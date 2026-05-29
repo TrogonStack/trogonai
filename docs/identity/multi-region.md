@@ -1,6 +1,6 @@
 # Multi-region MCP gateway deployment
 
-**Status:** Design decision (Block G, paper). Satisfies [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G item *Multi-region story*.
+**Status:** Design decision (Block G, paper). Closes the *Multi-region story* design item.
 
 **Diátaxis:** **Explanation** (why regional NATS, what replicates globally) plus **decision** (topology, consistency, residency enforcement). Implementation is out of scope until Block G operational work and the K8s controller (v2) land.
 

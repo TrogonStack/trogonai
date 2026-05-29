@@ -1,6 +1,6 @@
 # OpenTelemetry wiring — MCP gateway observability spec
 
-**Status:** Normative design spec (Block G paper). Satisfies [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G “OpenTelemetry trace export from each phase + JetStream consumer for audit→SIEM”.
+**Status:** Normative design spec (Block G paper). Closes the “OpenTelemetry trace export from each phase + JetStream consumer for audit→SIEM” work item.
 
 **Diátaxis:** Reference (span/metric catalogs, env tables, propagation matrix) + explanation (sections 1, 7, 8, 9 — why traces differ from audit, cardinality trade-offs, rollout phases).
 
@@ -136,7 +136,7 @@ JSON-RPC `_meta` extraction parses the W3C string and builds `SpanContext` witho
 
 ### 2.6 `trace_id` in JSON-RPC errors
 
-[Pinned contract](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes): every Trogon application error includes `data.trace_id` matching the active span's trace id (32 hex chars). This is the **client-visible correlator** when the client lacks OTel export. Implementation MUST derive `trace_id` from the active OTel span, not a separate UUID.
+[Pinned contract](reference-error-codes.md): every Trogon application error includes `data.trace_id` matching the active span's trace id (32 hex chars). This is the **client-visible correlator** when the client lacks OTel export. Implementation MUST derive `trace_id` from the active OTel span, not a separate UUID.
 
 ---
 
@@ -525,7 +525,7 @@ Audit envelopes publish **independently** of trace sampling. A dropped trace MUS
 | **Payload richness** | Identity, outcome, subjects, decision context | Timing, dependency structure, error class |
 | **Failure mode** | Best-effort publish; alert on failure | Best-effort export; drop under load |
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md): “OpenTelemetry traces emit alongside but the audit stream is the legal record.”
+Operator stance: “OpenTelemetry traces emit alongside but the audit stream is the legal record.”
 
 ### 7.2 Correlation without duplication
 
@@ -678,7 +678,7 @@ With `parentbased_traceidratio` at 0.1 and 1k RPS ingress, expect ~100 traces/s 
 
 ### 9.5 Wire-format pins (trace-related)
 
-From [MCP_GATEWAY_PLAN.md § Wire-Format Pins](../../MCP_GATEWAY_PLAN.md#1-nats-message-headers):
+From [reference-nats-headers.md](reference-nats-headers.md):
 
 | Header | OTel interaction |
 |---|---|
@@ -761,7 +761,7 @@ Operator searches traces by `trace_id`; SIEM searches audit by the same id when 
 - [ ] Implementer can code spans/metrics without inventing new names outside §3–§4.
 - [ ] Cardinality budget §8 is enforceable in code review (closed label sets).
 - [ ] Audit/trace separation §7 is explicit — no PII duplication path.
-- [ ] Cross-references resolve to [integration-touchpoints.md](integration-touchpoints.md), [reference-audit-envelope.md](reference-audit-envelope.md), redaction module, and [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G.
+- [ ] Cross-references resolve to [integration-touchpoints.md](integration-touchpoints.md), [reference-audit-envelope.md](reference-audit-envelope.md), and the redaction module.
 
 ---
 

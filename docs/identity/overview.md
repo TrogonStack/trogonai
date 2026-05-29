@@ -126,5 +126,5 @@ First-deploy gate: every onboarded caller passes shadow-mode without `aud_mismat
 | [0003 Bootstrap vs mesh](../adr/0003-bootstrap-vs-mesh-tokens.md) | [STS exchange](sts-exchange.md) |
 | [0004 STS form factor](../adr/0004-sts-form-factor.md) | [Agent registry](registry.md) |
 | [0005 TTL and audience](../adr/0005-token-ttl-and-audience.md) | [A2A SDK contract](sdk.md) |
-| [0006 Signing keys](../adr/0006-mesh-token-signing-keys.md) | [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) |
+| [0006 Signing keys](../adr/0006-mesh-token-signing-keys.md) | — |
 | | [Adaptive access](adaptive-access.md) |

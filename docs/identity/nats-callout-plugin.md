@@ -12,7 +12,7 @@
 
 ## Purpose
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F lists the **NATS server auth-callout plugin** as outstanding. NATS Authorization Callout delegates CONNECT-time authentication to an external service that returns a signed **User JWT** with publish/subscribe permissions. Trogon's MCP gateway is the natural external service: the OAuth identity (or SPIFFE SVID, or bootstrap mTLS certificate) becomes the connection's NATS JWT, scoped to MCP edge subjects.
+The **NATS server auth-callout plugin** remains outstanding work. NATS Authorization Callout delegates CONNECT-time authentication to an external service that returns a signed **User JWT** with publish/subscribe permissions. Trogon's MCP gateway is the natural external service: the OAuth identity (or SPIFFE SVID, or bootstrap mTLS certificate) becomes the connection's NATS JWT, scoped to MCP edge subjects.
 
 This document closes that design gap before code lands. It explains **why** the gateway owns callout, **how** NATS wire envelopes map to Trogon identity primitives, and **what** operators must configure on `nats-server` and the gateway fleet.
 
@@ -354,7 +354,7 @@ Explicit **deny** (defense in depth when NATS supports deny in template):
 
 ### 4.4 Template — `agent`
 
-Default for OAuth users and SPIFFE workloads. Matches [MCP_GATEWAY_PLAN.md § Subject ACL — Client / edge bridge](../../MCP_GATEWAY_PLAN.md).
+Default for OAuth users and SPIFFE workloads.
 
 | Permission | Allow patterns |
 |---|---|
@@ -400,7 +400,7 @@ Callout does **not** mint these; NSC provisions long-lived service Users:
 | **Gateway service** | `{prefix}.server.>`, `{prefix}.gateway.callback.>`, `{prefix}.audit.>`, `{prefix}.plugin.>`, `{prefix}.control.>`, `_INBOX.gateway.>` | `{prefix}.gateway.request.>`, `{prefix}.client.>`, `{prefix}.control.>`, `_INBOX.gateway.>` |
 | **Backend MCP server** | `{prefix}.client.>`, `_INBOX.>` | `{prefix}.server.{my_server_id}.>` |
 
-Source: [MCP_GATEWAY_PLAN.md § Subject ACL per principal](../../MCP_GATEWAY_PLAN.md).
+Source: subject ACL per principal.
 
 Agent-role mints include `aud=ACME_MCP`, `caller_id`, `tenant`, `roles`, and `nats.pub`/`nats.sub` blocks matching §4.4. Full claim examples: [jwt-claim-schema.md](jwt-claim-schema.md), [auth-callout-design.md §3](../a2a/explanation/auth-callout-design.md).
 

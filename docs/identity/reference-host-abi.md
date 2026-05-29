@@ -4,7 +4,7 @@
 
 **Document type:** Diataxis **reference** (signatures, side-effect classes, error behavior, WIT preview).
 
-**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md), [reference-cel-variables.md](reference-cel-variables.md), [wasm-bundle-format.md](wasm-bundle-format.md), [policy-dsl-choice.md](policy-dsl-choice.md), [MCP gateway plan Block B Host ABI surface](../../MCP_GATEWAY_PLAN.md) and [Wire-Format Pins for Phase 1](../../MCP_GATEWAY_PLAN.md#wire-format-pins-for-phase-1).
+**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md), [reference-cel-variables.md](reference-cel-variables.md), [wasm-bundle-format.md](wasm-bundle-format.md), [policy-dsl-choice.md](policy-dsl-choice.md).
 
 **Implementation target:** `rsworkspace/crates/trogon-mcp-gateway/src/cel_builtins/` (Block E); WIT linker in Phase 3 per [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md).
 
@@ -28,7 +28,7 @@ spicedb.check("user:alice", "invoke", "tool:github|create_issue")
 
 WASM guests call the kebab-case WIT imports (`spicedb-check`, `cache-get`, ...) declared in the bundle manifest. CEL and WASM share semantics; only marshalling differs (CEL JSON values vs WIT strings / byte lists).
 
-**Out of scope:** CEL variable roots (`mcp.*`, `jwt.*`, `nats.*`, `request.*`, `response.*`, `chain.*`) -- see [reference-cel-variables.md](reference-cel-variables.md) and [MCP_GATEWAY_PLAN.md SS8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace).
+**Out of scope:** CEL variable roots (`mcp.*`, `jwt.*`, `nats.*`, `request.*`, `response.*`, `chain.*`) -- see [reference-cel-variables.md](reference-cel-variables.md).
 
 ---
 
@@ -404,7 +404,7 @@ Host wall clock for time-bounded rules. Values are UTC unless noted.
 
 **Side-effect class:** `pure` for classification; **non-deterministic across audit replay** when decisions branch on these values. List-filter programs MUST NOT call `time.*` ([tools-list-filtering.md](tools-list-filtering.md)).
 
-**Plan alignment:** [MCP_GATEWAY_PLAN.md SS8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) lists `time.now`, `time.hour_utc`, `time.weekday` as host-evaluated bindings; this reference exposes them as functions for uniform namespace syntax with other host roots.
+**CEL variable alignment:** [reference-cel-variables.md](reference-cel-variables.md) lists `time.now`, `time.hour_utc`, `time.weekday` as host-evaluated bindings; this reference exposes them as functions for uniform namespace syntax with other host roots.
 
 **WIT:** `time-now-ms` exists in v0.1.0 sketch; `time-hour-utc` and `time-weekday` ship in **0.2.0** minor (proposed).
 

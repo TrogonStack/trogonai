@@ -254,7 +254,7 @@ If investigation proved infra failure (SpiceDB, NATS, STS), roll back **operatio
 
 - [reference-audit-envelope.md](reference-audit-envelope.md) (Pin 7) · [reference-error-codes.md](reference-error-codes.md) (Pin 6) · [failure-mode-matrix.md](failure-mode-matrix.md) (ADR 0024)
 - ADRs [0012](../adr/0012-rate-limit-state.md), [0013](../adr/0013-hierarchical-policy-merge.md), [0019](../adr/0019-oauth-mcp-integration.md), [0020](../adr/0020-bidirectional-enforcement.md), [0030](../adr/0030-gateway-ctl-cli-surface.md)
-- [otel-wiring.md](otel-wiring.md) · [howto-write-bundle.md](howto-write-bundle.md) · [howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md) · [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) · [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md)
+- [otel-wiring.md](otel-wiring.md) · [howto-write-bundle.md](howto-write-bundle.md) · [howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md) · [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md)
 - Tests: `trogon-mcp-gateway/tests/audit_delivery.rs`, `audit_envelope_shape.rs`, `rate_limit_caps.rs`
 
 ---
