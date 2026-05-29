@@ -153,7 +153,7 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 - [x] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
 - [x] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
 - [x] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
-- [ ] A2A SDK TypeScript + Python tracks.
+- [x] A2A SDK TypeScript + Python tracks.
 
 ---
 
@@ -281,7 +281,7 @@ Uber's "Standardized A2A Client" is the thing that makes the secure path the onl
 - [x] **Lint implementation.** `scripts/ci/check-direct-nats-publishes.sh` (wired into `.github/workflows/ci-rust.yml`) fails the build on non-SDK publishes to `mcp.gateway.request.*`.
 - [x] **Docs implementation.** Quickstart, "add a new agent" recipe, and "verify chain in a handler" recipe live in `crates/trogon-a2a-sdk/README.md`; `docs/identity/sdk.md` carries the default-purpose and telemetry-attributes sections.
 - [x] **TypeScript SDK.** Next once Rust contract is exercised by real callers.
-- [ ] **Python SDK.** After TypeScript.
+- [x] **Python SDK.** After TypeScript.
 
 **Acceptance:** A new agent can be written in ≤ 50 lines and gets correct identity propagation for free. `examples/echo_agent.rs` is 33 lines today against mocked deps.
 
