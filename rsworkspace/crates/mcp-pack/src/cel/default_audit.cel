@@ -1,0 +1,15 @@
+// mcp-pack/audit-default — audit_enrich (ADR 0028, Pin 7)
+// Merges stable first-party keys into the audit envelope `extra` map on allow paths.
+
+audit.emit(
+  "policy.mcp_pack.default",
+  {
+    "policy_bundle_name": "global/mcp-pack",
+    "policy_bundle_version": "0.1.0",
+    "pack_layer": "first_party",
+    "method": mcp.method,
+    "method_root": mcp.method.split("/")[0],
+    "tool": mcp.tool.name,
+    "resource_uri": jsonpath.get(mcp.params, "$.uri"),
+  }
+)
