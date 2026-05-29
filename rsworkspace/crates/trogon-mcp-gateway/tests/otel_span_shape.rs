@@ -288,10 +288,19 @@ mod exporter {
 mod wasm_evaluate_span {
     //! Tier-3 WASM evaluate span shape (ADR 0032). OTLP/NATS harness cases remain ignored above.
 
+    use trogon_mcp_gateway::observability::gateway_span_allowlist;
     use trogon_mcp_gateway::wasm::WASM_EVALUATE_SPAN_NAME;
 
     #[test]
     fn wasm_evaluate_span_name_matches_otel_wiring() {
         assert_eq!(WASM_EVALUATE_SPAN_NAME, "mcp.gateway.wasm.evaluate");
+    }
+
+    #[test]
+    fn emitted_span_allowlist_includes_wasm_evaluate_and_handle_ingress() {
+        let allowlist = gateway_span_allowlist();
+        assert!(allowlist.contains(&WASM_EVALUATE_SPAN_NAME));
+        assert!(allowlist.contains(&"mcp_gateway.handle_ingress"));
+        assert!(allowlist.contains(&"mcp.gateway.plugin.call"));
     }
 }
