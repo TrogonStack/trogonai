@@ -277,6 +277,104 @@ mod bundle_lag {
     }
 }
 
+mod router_failover {
+    //! `RegionRouter` acceptance (ADR 0016 deterministic failover + session pin).
+    //! Full gateway/NATS harness cases below remain scaffolded until `gateway.rs` wiring lands.
+
+    use trogon_mcp_gateway::multi_region::{
+        MultiRegionConfig, MultiRegionConfigError, NoopRegionAuditSink, RegionHealth,
+        RegionHealthConfig, RegionRouter, RegionRouteErrorKind, RequestContext, RouteReason,
+        TopologyBuildError,
+    };
+
+    fn router_from_json(json: &str) -> RegionRouter<NoopRegionAuditSink> {
+        let topo = MultiRegionConfig::from_json_str(json)
+            .expect("config")
+            .into_topology()
+            .expect("topology");
+        let health = RegionHealth::new(&topo, RegionHealthConfig::default());
+        RegionRouter::new(topo, health, NoopRegionAuditSink)
+    }
+
+    const TWO_REGION_JSON: &str = r#"{
+        "home_region": "us-east",
+        "failover": ["us-west"],
+        "regions": {
+            "us-east": { "nats_url": "nats://east:4222" },
+            "us-west": { "nats_url": "nats://west:4222" }
+        }
+    }"#;
+
+    #[test]
+    fn home_region_happy_path() {
+        let router = router_from_json(TWO_REGION_JSON);
+        let decision = router
+            .route(None, &RequestContext::default())
+            .expect("route");
+        assert_eq!(decision.region.as_str(), "us-east");
+        assert_eq!(decision.reason, RouteReason::HomeRegion);
+    }
+
+    #[test]
+    fn single_region_failover() {
+        let router = router_from_json(TWO_REGION_JSON);
+        let home = router.topology().home_region().clone();
+        router.health().force_unreachable(&home);
+        let decision = router
+            .route(None, &RequestContext::default())
+            .expect("route");
+        assert_eq!(decision.region.as_str(), "us-west");
+        assert!(matches!(decision.reason, RouteReason::Failover { .. }));
+    }
+
+    #[test]
+    fn all_regions_down_error_mapping() {
+        let router = router_from_json(TWO_REGION_JSON);
+        for region in router.topology().route_candidates() {
+            router.health().force_unreachable(&region);
+        }
+        let err = router
+            .route(None, &RequestContext::default())
+            .expect_err("route");
+        assert_eq!(err.kind, RegionRouteErrorKind::AllRegionsUnreachable);
+        assert_eq!(err.attempted.len(), 2);
+        assert_eq!(err.attempted[0].as_str(), "us-east");
+        assert_eq!(err.attempted[1].as_str(), "us-west");
+    }
+
+    #[test]
+    fn session_stickiness_across_n_calls() {
+        let router = router_from_json(TWO_REGION_JSON);
+        let ctx = RequestContext {
+            session_id: Some("integration-sess".into()),
+        };
+        let first = router.route(None, &ctx).expect("first");
+        assert_eq!(first.reason, RouteReason::HomeRegion);
+        for _ in 0..8 {
+            let next = router.route(None, &ctx).expect("next");
+            assert_eq!(next.region, first.region);
+            assert_eq!(next.reason, RouteReason::SessionPin);
+        }
+    }
+
+    #[test]
+    fn topology_rejects_failover_including_home() {
+        let raw = r#"{
+            "home_region": "us-east",
+            "failover": ["us-east"],
+            "regions": { "us-east": { "nats_url": "nats://east:4222" } }
+        }"#;
+        let err = MultiRegionConfig::from_json_str(raw)
+            .expect("config")
+            .into_topology()
+            .expect_err("topology");
+        assert_eq!(
+            err,
+            MultiRegionConfigError::Topology(TopologyBuildError::FailoverIncludesHome)
+        );
+    }
+}
+
 mod zedtoken {
     //! ZedToken minted in one region accepted in another within staleness window.
     //!
