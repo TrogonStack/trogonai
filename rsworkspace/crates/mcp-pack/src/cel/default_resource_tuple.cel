@@ -1,0 +1,34 @@
+// mcp-pack/tuple-tools-call — ingress_gate (ADR 0028)
+// Derives SpiceDB tuples from mcp.method + JSONPath into params, then checks authorization.
+// spicedb.check argument order: (resource, permission, subject).
+
+(
+  mcp.method == "tools/call"
+  && spicedb.check(
+       "trogon/mcp_tool:"
+         + jsonpath.get(mcp.params, "$._mcp.server_id")
+         + "|"
+         + mcp.tool.name,
+       "call",
+       "trogon/principal:" + jwt.sub
+     )
+)
+|| (
+  mcp.method == "resources/read"
+  && spicedb.check(
+       "trogon/mcp_resource:" + jsonpath.get(mcp.params, "$.uri"),
+       "read",
+       "trogon/principal:" + jwt.sub
+     )
+)
+|| (
+  mcp.method == "prompts/get"
+  && spicedb.check(
+       "trogon/mcp_prompt:"
+         + jsonpath.get(mcp.params, "$._mcp.server_id")
+         + "|"
+         + jsonpath.get(mcp.params, "$.name"),
+       "get",
+       "trogon/principal:" + jwt.sub
+     )
+)

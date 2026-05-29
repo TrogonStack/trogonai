@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/*",
+    "crates/mcp-pack",
     "crates/a2a-pack/skills/tier3-skill-abi",
     "crates/a2a-pack/skills/pii-regex-redactor",
     "crates/a2a-pack/skills/secrets-redactor",

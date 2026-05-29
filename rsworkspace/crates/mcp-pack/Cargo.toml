@@ -1,0 +1,27 @@
+[package]
+name = "mcp-pack"
+version = "0.1.0"
+edition = "2024"
+description = "First-party MCP policy bundle builder (_global/mcp-pack defaults)"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true }
+nkeys = { workspace = true }
+trogon-mcp-gateway = { path = "../trogon-mcp-gateway" }
+
+[[bin]]
+name = "mcp-pack"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = []
+
+[dev-dependencies]
+nkeys = { workspace = true }
+trogon-mcp-gateway = { path = "../trogon-mcp-gateway" }
