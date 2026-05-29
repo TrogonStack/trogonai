@@ -1,0 +1,45 @@
+[package]
+name = "trogon-gateway-xds"
+version = "0.1.0"
+edition = "2024"
+description = "xDS interop bridge projecting Trogon gateway KV config to Envoy v3 resources"
+license = "MIT"
+repository = "https://github.com/TrogonStack/trogonai"
+
+[[bin]]
+name = "trogon-gateway-xds"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+arc-swap = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = "2.0.18"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio-stream = { version = "=0.1.18", features = ["net"] }
+tonic = { workspace = true, features = ["transport", "router"] }
+tonic-prost = "=0.14.6"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+tonic-prost-build = "=0.14.6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+trogon-gateway-xds = { path = ".", features = ["test-support"] }
