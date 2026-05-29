@@ -4,7 +4,7 @@
 
 **Status:** Phase 1 contract. Reply inbox shapes are pinned.
 
-**Related:** [Reference subject grammar](reference-subject-grammar.md), [Reply correlation](reply-correlation.md), [Reference audit envelope](reference-audit-envelope.md), [Failure-mode matrix](failure-mode-matrix.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 2 and Reply inboxes and correlation.
+**Related:** [Reference subject grammar](reference-subject-grammar.md), [Reply correlation](reply-correlation.md), [Reference audit envelope](reference-audit-envelope.md), [Failure-mode matrix](failure-mode-matrix.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md).
 
 This page is the single lookup for NATS reply-inbox tokens used by the MCP gateway to terminate request/reply correlation between clients, gateway workers, and backend MCP servers. Wire examples use default prefix `mcp`; substitute `{prefix}` when `MCP_PREFIX` is overridden.
 

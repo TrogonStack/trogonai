@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — for human review before wire-format pin in `MCP_GATEWAY_PLAN.md`.
 
-**Related:** `docs/identity/jwt-claim-schema.md`; `MCP_GATEWAY_PLAN.md` § Wire-Format Pins (headers, audit, CEL).
+**Related:** `docs/identity/jwt-claim-schema.md`.
 
 ---
 
@@ -257,8 +257,6 @@ Host implementations MUST expose helpers under a `chain.*` import bound to `jwt.
 ## Header projection
 
 Backends that do not parse JWTs receive the chain on egress headers. Same rules as `mcp-caller-sub`: **gateway-set, ingress-stripped**.
-
-### Row for `MCP_GATEWAY_PLAN.md` header table (after `mcp-instance-id`)
 
 | Header | Direction | Type | Source | Purpose |
 |---|---|---|---|---|

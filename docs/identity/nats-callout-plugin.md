@@ -2,7 +2,7 @@
 
 **Status:** Design spec (paper, Block F). Operator reference target after implementation review.
 
-**Related:** [OAuth 2.0 + MCP integration](oauth-mcp-integration.md) · [Integration touch-points](integration-touchpoints.md) · [STS exchange](sts-exchange.md) · [JWT claim schema](jwt-claim-schema.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block F · [A2A auth callout design](../a2a/explanation/auth-callout-design.md)
+**Related:** [OAuth 2.0 + MCP integration](oauth-mcp-integration.md) · [Integration touch-points](integration-touchpoints.md) · [STS exchange](sts-exchange.md) · [JWT claim schema](jwt-claim-schema.md) · [A2A auth callout design](../a2a/explanation/auth-callout-design.md)
 
 **Audience:** platform security, NATS operators, gateway implementers.
 
@@ -143,7 +143,7 @@ Minimum MCP-relevant fields:
 
 ### 2.1 Explanation — gateway as callout authority
 
-The MCP gateway fleet terminates **external identity** at the NATS perimeter and mints bootstrap User JWTs whose ACLs confine callers to the **edge zone** (`mcp.gateway.request.>`, own callback subtree, own inbox). Backend zone subjects (`mcp.server.>`, `mcp.client.>`) remain gateway-private per [MCP_GATEWAY_PLAN.md § Subject ACL](../../MCP_GATEWAY_PLAN.md).
+The MCP gateway fleet terminates **external identity** at the NATS perimeter and mints bootstrap User JWTs whose ACLs confine callers to the **edge zone** (`mcp.gateway.request.>`, own callback subtree, own inbox). Backend zone subjects (`mcp.server.>`, `mcp.client.>`) remain gateway-private.
 
 ```
 External credential (OAuth / SVID / mTLS)

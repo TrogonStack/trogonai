@@ -2,7 +2,7 @@
 
 **Status:** Diátaxis explanation (2026-05-28). Audience: platform / SRE engineers who know NATS and Trogon identity, but may not have used MCP before.
 
-**Related:** [Agent identity overview](overview.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) (Block H) · `trogon-mcp-gateway` crate README · [Registry runbook](registry-operations.md)
+**Related:** [Agent identity overview](overview.md) · `trogon-mcp-gateway` crate README · [Registry runbook](registry-operations.md)
 
 ---
 
@@ -100,7 +100,7 @@ Server-initiated MCP traffic (`sampling/createMessage`, `elicitation/create`, et
 - Gateway subscribes on `{prefix}.gateway.callback.>` / `{prefix}.client.>` (separate queue group `mcp-gateway-callbacks` in the full design).
 - Gateway applies the same policy engine with a separate rule set, mints mesh tokens for callback egress, and delivers to `{prefix}.gateway.callback.{client_id}.{method}` where the client subscribed.
 
-Callback direction is specified in [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) § NATS Subject Topology; ingress wiring for bidirectional enforcement is tracked in Block C of that plan.
+Callback direction is specified; ingress wiring for bidirectional enforcement is tracked in Block C of that plan.
 
 ### 3.3 Subject zones and ACL intent
 
@@ -356,7 +356,7 @@ Use this as a periodic review (weekly in production, after every identity or pol
 
 ### 9.5 Forthcoming docs (Block H placeholders)
 
-Track these in [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block H as they land:
+Track these:
 
 | Doc | Purpose |
 |---|---|

@@ -201,7 +201,7 @@ Example schema: `devops/docker/compose/services/spicedb/schema.zed`.
 | `mcp-jwks` | `mesh/current` | watcher-driven | **proposed** ingress verify via `MCP_GATEWAY_JWT_JWKS_URI` or KV per [ADR 0006](../adr/0006-mesh-token-signing-keys.md) |
 | `mcp-trust-bundles` | `<trust-domain>` | watcher-driven | STS only (see §7) |
 
-**proposed** Phase 2+ control plane: `mcp-gateway-config` KV per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md).
+**proposed** Phase 2+ control plane: `mcp-gateway-config` KV.
 
 ---
 

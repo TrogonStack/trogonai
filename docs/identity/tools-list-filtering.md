@@ -4,7 +4,7 @@
 
 **Diátaxis:** Explanation (sections 1–2, 7) + reference (sections 3–6, 8–9).
 
-**Related:** [Agent identity overview](overview.md) · [Adaptive access](adaptive-access.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) (Block E) · `rsworkspace/crates/trogon-mcp-gateway/`
+**Related:** [Agent identity overview](overview.md) · [Adaptive access](adaptive-access.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md) · `rsworkspace/crates/trogon-mcp-gateway/`
 
 ---
 
@@ -507,7 +507,7 @@ When one gateway worker serves upstream `tools/list` and another holds filtered 
 2. Is invalidation **local** (moka) + **KV broadcast** (recommended) on `{prefix}.control.catalog.invalidate.{server_id}`?
 3. Race: worker A serves stale filtered list while worker B processes `list_changed` — acceptable if TTL short?
 
-Needs a control-plane subject in [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) subject grammar (Block C).
+Needs a control-plane subject subject grammar (Block C).
 
 ### 9.3 Downstream synthesis cutover criteria
 
