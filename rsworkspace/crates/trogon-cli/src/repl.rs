@@ -572,10 +572,24 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         }
                     } else if cmd == "/mode" {
                         if arg.is_empty() {
-                            println!(
-                                "current mode: {session_mode}\nchange with: \x1b[35m/mode\x1b[0m \
-                                 <default|acceptEdits|plan|dontAsk|bypassPermissions>"
+                            let m = "\x1b[35m";
+                            let r = "\x1b[0m";
+                            let dim = "\x1b[2m";
+                            let modes = [
+                                ("default", "auto-allow reads; prompt for edits, bash, MCP"),
+                                ("acceptEdits", "default, plus auto-allow file edits"),
+                                ("plan", "read-only exploration; deny writes & bash"),
+                                ("dontAsk", "auto-allow everything (still audited)"),
+                                ("bypassPermissions", "no permission checks at all"),
+                            ];
+                            let mut out = format!(
+                                "current mode: {m}{session_mode}{r}\n\nchange with {m}/mode <name>{r}:\n"
                             );
+                            for (name, desc) in modes {
+                                let marker = if name == session_mode { "▸" } else { " " };
+                                out.push_str(&format!("  {marker} {name:<18}{dim}{desc}{r}\n"));
+                            }
+                            print!("{out}");
                         } else {
                             let mode = arg.trim();
                             match session.set_mode(mode).await {
