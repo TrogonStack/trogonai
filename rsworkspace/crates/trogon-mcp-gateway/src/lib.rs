@@ -6,6 +6,7 @@ pub mod anomaly;
 pub mod approvals;
 pub mod audit;
 pub mod authz;
+pub mod bundle;
 pub mod cel_builtins;
 pub mod egress;
 pub mod gateway;
