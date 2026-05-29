@@ -746,7 +746,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             Some((r, rx)) => (Some(r), Some(rx)),
                             None => (None, None),
                         };
+                        // Normal queued messages (typed + Enter), submitted in order.
                         let mut queued: Vec<String> = Vec::new();
+                        // Ctrl+G messages — jump to the front, submitted before `queued`.
+                        let mut front_queued: Vec<String> = Vec::new();
                         let mut interrupted = false;
 
                         loop {
@@ -769,10 +772,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                             eprintln!("\x1b[2m⏳ queued: {msg}\x1b[0m");
                                             queued.push(msg);
                                         }
-                                        Some(StreamInputEvent::SideQuestion(q)) => {
-                                            let model = session.current_model();
-                                            let qcwd = cwd.clone();
-                                            run_side_question(&factory, &prefix, &model, &qcwd, &q).await;
+                                        Some(StreamInputEvent::Priority(q)) => {
+                                            // Ctrl+G: jump to the front of the queue —
+                                            // sent first once the current turn finishes.
+                                            reset_display();
+                                            eprintln!("\x1b[2m⏳ queued (next): {q}\x1b[0m");
+                                            front_queued.push(q);
                                         }
                                         // Reader stopped — stop polling it to avoid spinning.
                                         None => { input_rx = None; }
@@ -906,11 +911,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 }
                             }
                         }
-                        // Auto-submit messages queued during this turn, in order.
+                        // Auto-submit messages queued during this turn: Ctrl+G
+                        // (front_queued) messages go first, then the rest in order.
                         // If the user interrupted (Ctrl+C), discard the queue since
                         // they're likely changing direction. `_input_reader` drops at
                         // the end of this block, restoring the terminal before readline.
                         if !interrupted {
+                            queued_prompts.extend(front_queued);
                             queued_prompts.extend(queued);
                         }
                     }
@@ -954,53 +961,6 @@ async fn next_stream_input(
         Some(r) => r.recv().await,
         None => std::future::pending().await,
     }
-}
-
-/// Answer a side question in a throwaway session on the same runner/model, so the
-/// main conversation is untouched. The main turn keeps running on the backend
-/// while this is handled (its output is just paused until we return).
-async fn run_side_question<SF: SessionFactory>(
-    factory: &SF,
-    prefix: &str,
-    model: &str,
-    cwd: &Path,
-    question: &str,
-) {
-    reset_display();
-    eprintln!("\x1b[2m┆ side question — scratch session (main task untouched)\x1b[0m");
-    let eph = match factory.create_session(prefix, cwd.to_path_buf(), vec![]).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("\x1b[31mside question failed: {e}\x1b[0m");
-            return;
-        }
-    };
-    let _ = eph.set_model(model).await;
-    let mut answer = String::new();
-    match eph.prompt(question).await {
-        Err(e) => eprintln!("\x1b[31mside question failed: {e}\x1b[0m"),
-        Ok(mut rx) => {
-            while let Some(ev) = rx.recv().await {
-                match ev {
-                    StreamEvent::Text(t) => answer.push_str(&t),
-                    StreamEvent::Error(m) => {
-                        eprintln!("\x1b[31m{m}\x1b[0m");
-                        break;
-                    }
-                    StreamEvent::Done(_) => break,
-                    _ => {}
-                }
-            }
-        }
-    }
-    if !answer.is_empty() {
-        reset_display();
-        print!("{}", crate::markdown::render(&answer));
-        let _ = std::io::stdout().flush();
-        println!();
-    }
-    eph.close().await;
-    eprintln!("\x1b[2m┆ resuming main response…\x1b[0m");
 }
 
 async fn start_session<SF: SessionFactory>(

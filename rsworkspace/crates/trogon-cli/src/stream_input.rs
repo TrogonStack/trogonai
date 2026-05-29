@@ -3,9 +3,10 @@
 //! The REPL's normal line editing (rustyline) is inactive during streaming, so
 //! this module runs a small raw-mode reader on `/dev/tty` for the duration of a
 //! turn. It lets the user:
-//!   - type a message + Enter → queued, auto-submitted when the turn ends, and
-//!   - press Ctrl+G then a line + Enter → a "side question" answered in a
-//!     throwaway session, leaving the main conversation untouched.
+//!   - type a message + Enter → queued, auto-submitted in order when the turn
+//!     ends, and
+//!   - press Ctrl+G then a line + Enter → the message jumps to the FRONT of the
+//!     queue, so it's the first one sent once the current turn finishes.
 //!
 //! Terminal mode: we disable canonical mode and echo (so we see each byte and
 //! control our own echo) but KEEP `ISIG`, so Ctrl+C still raises SIGINT and the
@@ -18,27 +19,27 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Ctrl+G — starts a side question (the next submitted line is the question).
-const SIDE_QUESTION_KEY: u8 = 0x07;
+/// Ctrl+G — the next submitted line jumps to the front of the queue.
+const PRIORITY_KEY: u8 = 0x07;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamInputEvent {
-    /// A normal line submitted during streaming — queue and auto-submit later.
+    /// A normal line submitted during streaming — queued, auto-submitted in order.
     Queued(String),
-    /// A line submitted after Ctrl+G — answer in a throwaway session.
-    SideQuestion(String),
+    /// A line submitted after Ctrl+G — jumps to the front of the queue.
+    Priority(String),
 }
 
 /// Pure line-editor: feed it one byte at a time, get an event on Enter.
 /// Kept free of I/O so it can be unit-tested.
 pub(crate) struct LineEditor {
     buf: Vec<u8>,
-    side_mode: bool,
+    priority_mode: bool,
 }
 
 impl LineEditor {
     pub(crate) fn new() -> Self {
-        Self { buf: Vec::new(), side_mode: false }
+        Self { buf: Vec::new(), priority_mode: false }
     }
 
     /// Returns `true` if `byte` is a printable character that was appended (so
@@ -49,20 +50,20 @@ impl LineEditor {
 
     pub(crate) fn feed(&mut self, byte: u8) -> Option<StreamInputEvent> {
         match byte {
-            SIDE_QUESTION_KEY => {
-                self.side_mode = true;
+            PRIORITY_KEY => {
+                self.priority_mode = true;
                 None
             }
             b'\r' | b'\n' => {
                 let text = String::from_utf8_lossy(&self.buf).trim().to_string();
-                let side = self.side_mode;
+                let side = self.priority_mode;
                 self.buf.clear();
-                self.side_mode = false;
+                self.priority_mode = false;
                 if text.is_empty() {
                     return None;
                 }
                 Some(if side {
-                    StreamInputEvent::SideQuestion(text)
+                    StreamInputEvent::Priority(text)
                 } else {
                     StreamInputEvent::Queued(text)
                 })
@@ -80,8 +81,8 @@ impl LineEditor {
     }
 
     #[cfg(test)]
-    pub(crate) fn in_side_mode(&self) -> bool {
-        self.side_mode
+    pub(crate) fn in_priority_mode(&self) -> bool {
+        self.priority_mode
     }
 }
 
@@ -159,8 +160,8 @@ impl StreamInputReader {
                 } else if byte == 0x7f || byte == 0x08 {
                     let _ = tty_out.write_all(b"\x08 \x08");
                     let _ = tty_out.flush();
-                } else if byte == SIDE_QUESTION_KEY {
-                    let _ = tty_out.write_all(b"\r\n\x1b[2m side q> \x1b[0m");
+                } else if byte == PRIORITY_KEY {
+                    let _ = tty_out.write_all(b"\r\n\x1b[2m next> \x1b[0m");
                     let _ = tty_out.flush();
                 }
                 if let Some(ev) = editor.feed(byte) {
@@ -259,16 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_g_marks_side_question() {
+    fn ctrl_g_marks_priority() {
         let mut ed = LineEditor::new();
-        assert_eq!(ed.feed(SIDE_QUESTION_KEY), None);
-        assert!(ed.in_side_mode());
+        assert_eq!(ed.feed(PRIORITY_KEY), None);
+        assert!(ed.in_priority_mode());
         assert_eq!(
             feed_str(&mut ed, "what is big-O of this?\r"),
-            Some(StreamInputEvent::SideQuestion("what is big-O of this?".into()))
+            Some(StreamInputEvent::Priority("what is big-O of this?".into()))
         );
         // side mode resets after submit
-        assert!(!ed.in_side_mode());
+        assert!(!ed.in_priority_mode());
         assert_eq!(
             feed_str(&mut ed, "next one\r"),
             Some(StreamInputEvent::Queued("next one".into()))
