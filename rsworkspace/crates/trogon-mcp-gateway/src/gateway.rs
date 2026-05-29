@@ -23,6 +23,7 @@ use crate::egress::{
 use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
+use crate::policy::hierarchical::{self, MergeRequestContext};
 use crate::rpc_codes;
 use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
@@ -85,6 +86,9 @@ where
     S: Future<Output = ()> + Send,
 {
     let policy = SpicedbGatePolicy::phase1_hardcoded().map_err(|e| GatewayError(e.to_string()))?;
+    if hierarchical::maybe_install_from_env(&trogon_std::env::SystemEnv).is_some() {
+        info!("hierarchical policy merge enforce mode enabled");
+    }
     let subject = format!("{}.gateway.request.>", settings.mcp.prefix_str());
     let mut subscription = client
         .queue_subscribe(subject.clone(), settings.queue_group.clone())
@@ -332,6 +336,47 @@ async fn handle_ingress_inner(
         .await;
         return Ok(());
     }
+
+    let act_chain_entries = jwt_claims.act_chain.as_deref().unwrap_or_default();
+    if let Some(deny) = evaluate_hierarchical_policy(
+        &gateway_identity,
+        &jwt_claims,
+        act_chain_entries,
+        tenant_for_rate,
+        &server_id,
+        &jsonrpc_method,
+        tool_call.as_deref(),
+    ) {
+        finish_ingress_blocked(FinishIngressBlockedParams {
+            client,
+            jetstream,
+            mcp: &settings.mcp,
+            msg: &msg,
+            backend_subject: &backend_subject,
+            jsonrpc_method: &jsonrpc_method,
+            gateway_identity: gateway_identity.clone(),
+            request_id: request_id.clone(),
+            requires_spicedb,
+            spicedb_allowed: None,
+            traces,
+            audit_outcome: "deny",
+            jsonrpc_code: deny.code,
+            jsonrpc_message: deny.message,
+        })
+        .await;
+        return Ok(());
+    }
+
+    let requires_spicedb = merged_requires_spicedb(
+        policy,
+        settings,
+        tenant_for_rate,
+        &server_id,
+        &jsonrpc_method,
+        tool_call.as_deref(),
+    )
+    .map_err(|e| GatewayError(e.to_string()))?;
+    tracing::Span::current().record("gateway.spicedb.required", tracing::field::display(requires_spicedb));
 
     let mut spicedb_allowed: Option<bool> = None;
     if requires_spicedb {
@@ -645,6 +690,79 @@ fn anonymous_audit_identity() -> GatewayIdentity {
         jti: None,
         source: IdentitySource::Anonymous,
     }
+}
+
+struct HierarchicalPolicyDeny {
+    code: i32,
+    message: String,
+}
+
+fn merge_request_context(
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+) -> MergeRequestContext {
+    MergeRequestContext {
+        tenant: tenant.to_string(),
+        server_group: None,
+        server_id: server_id.to_string(),
+        jsonrpc_method: jsonrpc_method.to_string(),
+        tool_name: tool_name.map(str::to_string),
+    }
+}
+
+fn evaluate_hierarchical_policy(
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    act_chain: &[crate::act_chain::ActChainEntry],
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+) -> Option<HierarchicalPolicyDeny> {
+    let engine = hierarchical::shared()?;
+    let merge_ctx = merge_request_context(tenant, server_id, jsonrpc_method, tool_name);
+    let cel_ctx = crate::policy::new_policy_cel_context_for_request(
+        gateway_identity,
+        jwt_claims,
+        act_chain,
+        jsonrpc_method,
+        tool_name,
+    )
+    .ok()?;
+    let decision = engine.evaluate(&merge_ctx, &cel_ctx).ok()?;
+    match decision {
+        hierarchical::HierarchicalDecision::Allow { .. } => None,
+        hierarchical::HierarchicalDecision::Deny {
+            reason,
+            policy_id,
+            code,
+            ..
+        } => {
+            let message = policy_id.map_or(reason.clone(), |id| format!("{reason}:{id}"));
+            Some(HierarchicalPolicyDeny { code, message })
+        }
+    }
+}
+
+fn merged_requires_spicedb(
+    fallback: &SpicedbGatePolicy,
+    _settings: &GatewaySettings,
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+) -> Result<bool, crate::policy::PolicyError> {
+    let Some(engine) = hierarchical::shared() else {
+        return fallback.requires_spicedb_for_method(jsonrpc_method);
+    };
+    let merge_ctx = merge_request_context(tenant, server_id, jsonrpc_method, tool_name);
+    let effective = engine
+        .effective_policy(&merge_ctx)
+        .map_err(|e| crate::policy::PolicyError(e.to_string()))?;
+    let gate = SpicedbGatePolicy::from_effective_config(&effective.config)?;
+    gate.requires_spicedb_for_method(jsonrpc_method)
 }
 
 async fn publish_allow_audit_and_maybe_trace_no_reply(
