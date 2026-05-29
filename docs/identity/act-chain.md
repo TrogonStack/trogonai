@@ -101,6 +101,30 @@ Agent C holds a mesh token with `aud=backend-github` and calls the MCP gateway. 
 
 **Note (gateway egress):** When the gateway mints a downstream token (Block 2.4), it appends **one more** entry for itself before egress to the backend. That path is out of scope for the four-hop acceptance test above but uses the same append-only rules.
 
+### Example: batch / non-interactive originator
+
+Non-interactive callers (cron jobs, scheduled workflows, replay tools) have no human at index 0. Per [ADR 0002](../adr/0002-identity-layers.md), the originator hop uses `wkl: "sentinel:batch"` with `auth_method: "service-account"` on the bootstrap JWT, and the `sub` follows the documented batch-principal convention `job:{job-id}` (or the runner's service-account `sub` when one exists). `agent_id` stays absent at index 0 — a scheduler is not a registered agent.
+
+```json
+{
+  "act_chain": [
+    {
+      "sub": "job:nightly-reconcile-2026-05-29",
+      "wkl": "sentinel:batch",
+      "iat": 1748390400
+    },
+    {
+      "sub": "agent:acme/reconcile-runner",
+      "agent_id": "acme/reconcile-runner",
+      "wkl": "spiffe://acme.local/ns/prod/sa/reconcile-runner",
+      "iat": 1748390401
+    }
+  ]
+}
+```
+
+The bootstrap JWT for this originator carries `auth_method: "service-account"` and is minted by a documented batch principal in the tenant's originator allow-list (cron service registry, workflow engine signer). STS treats the originator entry the same as a human-OIDC entry for chain-resolution purposes: no registry lookup at index 0, sentinel `wkl` must be in the documented allow-list, no `agent_id` field expected.
+
 ---
 
 ## Signing model
@@ -313,16 +337,12 @@ In **`shadow`** mode, the same conditions emit audit/`extra` warnings with `woul
 
 ## Open questions
 
-1. **Gateway identity in the chain.** Should the MCP gateway append an entry with its own `agent_id`, or only `wkl` + privileged role? (`PENDING_TODO.md` Open questions.)
-2. **Batch / non-interactive originators.** Canonical `sub` and `wkl` for cron jobs with no human (`job:{id}` + `wkl: "batch"`?).
-3. **Per-entry signatures.** Defer to v2 unless cross-org witnessing is required before GA.
-4. **Depth limit 8.** Sufficient for planned orchestration patterns? Tenant-specific overrides need a cap policy.
-5. **Human re-entry.** Can the same `user:…` appear at index &gt; 0 (e.g. human-in-the-loop approval mid-chain)?
-6. **Historical registry at `iat`.** Needed for compliance replay (“was this agent allowed **then**?”) — would require registry event stream; not v1.
-7. **Purpose refinement.** When `purpose` changes down-chain, should `act_chain` entries carry a `purpose` snapshot per hop? (Block 2.3 dependency.)
-8. **STS exposure to user clients.** If UI exchanges tokens directly, who appends the originator entry — IdP, first agent, or STS from bootstrap?
-9. **OAuth-MCP composition.** How `act_chain` interacts with third-party MCP OAuth tokens (`MCP_GATEWAY_PLAN.md` OAuth-MCP work).
-10. **CEL on missing `agent_id`.** Should `chain.contains()` match on `sub` when `agent_id` is absent?
+The list below is the surviving v2-and-beyond set; the questions removed are resolved in `PENDING_TODO.md` "Decisions log" (depth, batch originator, purpose refinement, STS user exposure, OAuth-MCP) or tracked under `PENDING_TODO.md` "Open work" (gateway-as-registered-agent).
+
+1. **Per-entry signatures.** Defer to v2 unless cross-org witnessing is required before GA.
+2. **Human re-entry.** Can the same `user:…` appear at index &gt; 0 (e.g. human-in-the-loop approval mid-chain)?
+3. **Historical registry at `iat`.** Needed for compliance replay ("was this agent allowed **then**?") — would require registry event stream; not v1.
+4. **CEL on missing `agent_id`.** Should `chain.contains()` match on `sub` when `agent_id` is absent?
 
 ---
 
