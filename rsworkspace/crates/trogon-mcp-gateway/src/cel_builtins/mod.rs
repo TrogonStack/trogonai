@@ -389,6 +389,18 @@ pub fn register(ctx: &mut Context<'_>) -> Result<(), CelBuiltinsError> {
     register_all(ctx)
 }
 
+/// Classify list-filter CEL execution errors that originated from host builtins.
+#[must_use]
+pub fn classify_list_filter_host_error(message: &str) -> Option<HostFailure> {
+    if message.contains("authz_unreachable") {
+        Some(HostFailure::Transient)
+    } else if message.contains("policy_fault") {
+        Some(HostFailure::Permanent)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{register_all, with_host_eval, HostEvalContext};
