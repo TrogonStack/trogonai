@@ -50,7 +50,7 @@ impl std::error::Error for OptimisticConcurrencyConflictError {}
 
 #[derive(Debug)]
 /// Error raised by [`JetStreamStore`] read, append, and snapshot operations.
-pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible> {
+pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible, SnapshotTypeError = Infallible> {
     /// Subject resolution failed before JetStream storage was accessed.
     ResolveSubject(Error),
     /// Reading stream events from JetStream failed.
@@ -58,17 +58,19 @@ pub enum JetStreamStoreError<Error, SnapshotPayloadError = Infallible> {
     /// Appending stream events to JetStream failed.
     AppendStream(StreamStoreError),
     /// Reading or writing snapshots failed.
-    Snapshot(SnapshotStoreError<SnapshotPayloadError>),
+    Snapshot(SnapshotStoreError<SnapshotPayloadError, SnapshotTypeError>),
     /// Encoding or decoding a runtime payload failed.
     Codec(Error),
     /// The write precondition did not match the current stream state.
     OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError),
 }
 
-impl<Error, SnapshotPayloadError> fmt::Display for JetStreamStoreError<Error, SnapshotPayloadError>
+impl<Error, SnapshotPayloadError, SnapshotTypeError> fmt::Display
+    for JetStreamStoreError<Error, SnapshotPayloadError, SnapshotTypeError>
 where
     Error: std::error::Error + Send + Sync + 'static,
     SnapshotPayloadError: std::fmt::Display,
+    SnapshotTypeError: std::fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -84,10 +86,12 @@ where
     }
 }
 
-impl<Error, SnapshotPayloadError> std::error::Error for JetStreamStoreError<Error, SnapshotPayloadError>
+impl<Error, SnapshotPayloadError, SnapshotTypeError> std::error::Error
+    for JetStreamStoreError<Error, SnapshotPayloadError, SnapshotTypeError>
 where
     Error: std::error::Error + Send + Sync + 'static,
     SnapshotPayloadError: std::error::Error + 'static,
+    SnapshotTypeError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -285,16 +289,21 @@ impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamS
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
-    type Error = JetStreamStoreError<Resolver::Error, Payload::Error>;
+    type Error = JetStreamStoreError<
+        Resolver::Error,
+        <Payload as SnapshotPayloadDecode>::Error,
+        <Payload as SnapshotType>::Error,
+    >;
 
     async fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, StreamId>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), request.stream_id.as_ref())
+        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref())
             .await
             .map(|snapshot| ReadSnapshotResponse { snapshot })
             .map_err(JetStreamStoreError::Snapshot)
@@ -306,16 +315,21 @@ impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStream
 where
     StreamId: AsRef<str> + Send + Sync + ?Sized,
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
     Resolver: StreamSubjectResolver<StreamId>,
 {
-    type Error = JetStreamStoreError<Resolver::Error, Payload::Error>;
+    type Error = JetStreamStoreError<
+        Resolver::Error,
+        <Payload as SnapshotPayloadEncode>::Error,
+        <Payload as SnapshotType>::Error,
+    >;
 
     async fn write_snapshot(
         &self,
         request: WriteSnapshotRequest<'_, Payload, StreamId>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
-        crate::snapshot_store::write_snapshot(self.snapshot_bucket(), request.stream_id.as_ref(), request.snapshot)
+        crate::snapshot_store::write_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref(), request.snapshot)
             .await
             .map(|()| WriteSnapshotResponse)
             .map_err(JetStreamStoreError::Snapshot)

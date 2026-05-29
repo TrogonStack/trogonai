@@ -1,11 +1,12 @@
 use buffa::Message as _;
 use trogon_decider_runtime::{
     EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventPayloadError, EventType,
-    SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    SnapshotTypeName,
 };
 
 use super::{ScheduleEventCase, state_v1, v1};
-use crate::codec::{decode_event_case, event_type};
+use crate::codec::{decode_event_case, event_type, snapshot_type as proto_snapshot_type};
 
 #[derive(Debug)]
 pub struct StateSnapshotPayloadError(buffa::DecodeError);
@@ -90,7 +91,11 @@ fn schedule_event_case_type(event: &ScheduleEventCase) -> &'static str {
 }
 
 impl SnapshotType for state_v1::State {
-    const SNAPSHOT_STREAM_PREFIX: &'static str = "scheduler.schedules.snapshots.v1.";
+    type Error = InvalidSnapshotTypeName;
+
+    fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+        proto_snapshot_type::<Self>()
+    }
 }
 
 impl SnapshotPayloadEncode for state_v1::State {
@@ -369,10 +374,10 @@ mod tests {
     }
 
     #[test]
-    fn state_snapshot_prefix_matches_scheduler_schedules_namespace() {
+    fn state_snapshot_type_uses_generated_full_name() {
         assert_eq!(
-            <state_v1::State as SnapshotType>::SNAPSHOT_STREAM_PREFIX,
-            "scheduler.schedules.snapshots.v1."
+            <state_v1::State as SnapshotType>::snapshot_type().unwrap().as_str(),
+            <state_v1::State as buffa::MessageName>::FULL_NAME
         );
     }
 
