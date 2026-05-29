@@ -314,7 +314,7 @@ CEL + SpiceDB are the substrate; this block delivers the policies and flows on t
 
 - [x] **Step-up auth implementation.** Signal source: tool-level annotation `sensitive: true` + CEL rule. Step-up channel: re-auth via OIDC for human originators; service workloads escalate via approval flow below.
 - [x] **Human-in-the-loop approvals implementation.** JSON-RPC error `-32107 approval_required` with `approval_url` / `approval_subject`. Approval responses land on `mcp.approvals.{request_id}`; gateway resumes the request. TTL on pending approvals; default-deny on expiry.
-- [ ] **Context-aware throttling implementation.** Rate limits keyed by `(agent_id, purpose, tenant)` instead of just `jwt.sub`.
+- [x] **Context-aware throttling implementation.** Rate limits keyed by `(agent_id, purpose, tenant)` instead of just `jwt.sub`.
 - [x] **Anomaly feature emission.** Emit features (chain depth, novel `(agent_id, purpose, target)` tuples, exchange-rate spikes) to a side stream for downstream anomaly scoring. Scoring service itself is out of scope here.
 
 **Acceptance:** A tool can be flagged `sensitive`; calls to it require explicit human approval; the approval is audited with the same `act_chain`.
