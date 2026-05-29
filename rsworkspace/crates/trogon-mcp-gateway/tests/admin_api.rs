@@ -360,3 +360,232 @@ mod mtls {
         unimplemented!("mTLS optional when admin_require_mtls=false");
     }
 }
+
+mod ctl_cli {
+    //! `trogon-gateway-ctl` operator CLI (Block G item 2) — offline verbs and config introspection.
+
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use nkeys::KeyPair;
+    use trogon_mcp_gateway::bundle::{
+        build_tar, hash_member, manifest_digest_bytes, signature_path, BundleArchive, HOST_TARGET_WIT,
+        MANIFEST_FILENAME,
+    };
+
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf()
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("trogon-gateway-ctl-{label}-{nanos}"))
+    }
+
+    fn ctl_binary() -> PathBuf {
+        if let Ok(path) = std::env::var("CARGO_BIN_EXE_trogon-gateway-ctl") {
+            return PathBuf::from(path);
+        }
+        std::env::current_exe()
+            .ok()
+            .and_then(|current| {
+                current
+                    .parent()
+                    .and_then(|deps| deps.parent())
+                    .map(|debug| debug.join("trogon-gateway-ctl"))
+            })
+            .filter(|path| path.exists())
+            .unwrap_or_else(|| workspace_root().join("target/debug/trogon-gateway-ctl"))
+    }
+
+    fn ctl_command() -> Command {
+        let bin = ctl_binary();
+        if bin.exists() {
+            return Command::new(bin);
+        }
+        let mut cmd = Command::new("cargo");
+        cmd.current_dir(workspace_root())
+            .args(["run", "-p", "trogon-gateway-ctl", "--quiet", "--"]);
+        cmd
+    }
+
+    fn signed_tar(kp: &KeyPair, cel_body: &[u8]) -> Vec<u8> {
+        let hash = hash_member(cel_body);
+        let manifest = format!(
+            r#"
+name = "acme/demo"
+version = "1.0.0"
+target_wit = "{HOST_TARGET_WIT}"
+min_gateway_version = "0.0.1"
+author = "platform"
+created_at = "2026-05-28T00:00:00Z"
+description = "demo"
+
+[signing]
+nkey_pub = "{}"
+
+[[programs]]
+id = "rule"
+path = "policies/rule.cel"
+sha256 = "{hash}"
+class = "ingress_gate"
+effect = "allow"
+priority = 1
+"#,
+            kp.public_key()
+        );
+        let manifest_bytes = manifest.into_bytes();
+        let sig = kp.sign(&manifest_digest_bytes(&manifest_bytes)).expect("sign");
+        let mut archive = BundleArchive::default();
+        archive.insert(MANIFEST_FILENAME, manifest_bytes);
+        archive.insert("policies/rule.cel", cel_body.to_vec());
+        archive.insert(signature_path(), sig);
+        build_tar(&archive)
+    }
+
+    #[test]
+    fn bundle_validate_prints_manifest_summary_for_signed_fixture() {
+        let kp = KeyPair::new_user();
+        let tar = signed_tar(&kp, b"true");
+        let bundle_path = temp_path("bundle.tar");
+        fs::write(&bundle_path, tar).expect("write bundle");
+        let keys_path = temp_path("trusted.keys");
+        fs::write(&keys_path, format!("{}\n", kp.public_key())).expect("write keys");
+
+        let output = ctl_command()
+            .args([
+                "bundle",
+                "validate",
+                bundle_path.to_str().expect("path"),
+                "--trusted-keys",
+                keys_path.to_str().expect("keys"),
+            ])
+            .output()
+            .expect("ctl bundle validate");
+
+        let _ = fs::remove_file(bundle_path);
+        let _ = fs::remove_file(keys_path);
+
+        assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("\"result\":\"VALID\""));
+        assert!(stdout.contains("acme/demo"));
+    }
+
+    #[test]
+    fn bundle_validate_exits_nonzero_for_untrusted_signer() {
+        let kp = KeyPair::new_user();
+        let tar = signed_tar(&kp, b"true");
+        let bundle_path = temp_path("bundle-invalid.tar");
+        fs::write(&bundle_path, tar).expect("write bundle");
+        let other = KeyPair::new_user();
+        let keys_path = temp_path("trusted-other.keys");
+        fs::write(&keys_path, format!("{}\n", other.public_key())).expect("write keys");
+
+        let output = ctl_command()
+            .args([
+                "bundle",
+                "validate",
+                bundle_path.to_str().expect("path"),
+                "--trusted-keys",
+                keys_path.to_str().expect("keys"),
+            ])
+            .output()
+            .expect("ctl bundle validate");
+
+        let _ = fs::remove_file(bundle_path);
+        let _ = fs::remove_file(keys_path);
+
+        assert!(!output.status.success());
+        assert_eq!(output.status.code(), Some(1));
+    }
+
+    #[test]
+    fn policy_dry_run_reports_allow_and_deny() {
+        let policy_path = temp_path("policy.cel");
+        fs::write(&policy_path, "jwt.sub == \"alice\"").expect("policy write");
+        let allow_input_path = temp_path("allow.json");
+        fs::write(
+            &allow_input_path,
+            r#"{"identity":{"caller_sub":"alice","source":"jwt"},"jsonrpc_method":"tools/call","tool_name":"deploy"}"#,
+        )
+        .expect("allow input write");
+        let allow = ctl_command()
+            .args([
+                "policy",
+                "dry-run",
+                "--policy",
+                policy_path.to_str().expect("policy"),
+                "--input",
+                allow_input_path.to_str().expect("input"),
+            ])
+            .output()
+            .expect("policy dry-run allow");
+        assert!(allow.status.success());
+        assert!(String::from_utf8_lossy(&allow.stdout).contains("\"decision\":\"allow\""));
+
+        let deny_input_path = temp_path("deny.json");
+        fs::write(
+            &deny_input_path,
+            r#"{"identity":{"caller_sub":"bob","source":"jwt"},"jsonrpc_method":"tools/list"}"#,
+        )
+        .expect("deny input write");
+        let deny = ctl_command()
+            .args([
+                "policy",
+                "dry-run",
+                "--policy",
+                policy_path.to_str().expect("policy"),
+                "--input",
+                deny_input_path.to_str().expect("input"),
+            ])
+            .output()
+            .expect("policy dry-run deny");
+
+        let _ = fs::remove_file(policy_path);
+        let _ = fs::remove_file(allow_input_path);
+        let _ = fs::remove_file(deny_input_path);
+
+        assert!(deny.status.success());
+        assert!(String::from_utf8_lossy(&deny.stdout).contains("\"decision\":\"deny\""));
+    }
+
+    #[test]
+    fn config_show_emits_gateway_settings_json() {
+        let output = ctl_command()
+            .args(["config", "show"])
+            .output()
+            .expect("config show");
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("\"mcp_prefix\""));
+        assert!(stdout.contains("\"audit_stream_name\""));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live NATS broker with MCP audit stream"]
+    async fn trace_request_id_queries_jetstream_audit_stream() {
+        // Arrange: published audit envelope with known request_id on MCP_AUDIT stream.
+        // Act: trogon-gateway-ctl trace req-123
+        // Assert: JSON events[] contains matching envelope chronologically.
+        unimplemented!("trace JetStream integration");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live NATS broker publishing audit events"]
+    async fn audit_tail_streams_audit_subject_events() {
+        // Arrange: gateway publishing to {prefix}.audit.>
+        // Act: trogon-gateway-ctl audit tail --max 1
+        // Assert: stdout JSON lines with subject + envelope.
+        unimplemented!("audit tail integration");
+    }
+}
