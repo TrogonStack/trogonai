@@ -1,4 +1,4 @@
-# @trogon/a2a-sdk
+# @trogonai/a2a-sdk
 
 TypeScript port of the [`trogon-a2a-sdk`](../../../rsworkspace/crates/trogon-a2a-sdk) Rust crate. Same contract: configure **who you are** and **what you want to do**, the SDK owns registry lookup, STS token exchange, mesh-token attachment, and inbound verification.
 
@@ -13,7 +13,7 @@ import {
   AgentId,
   Client,
   Purpose,
-} from "@trogon/a2a-sdk";
+} from "@trogonai/a2a-sdk";
 import {
   InMemoryRegistry,
   InMemorySts,
@@ -21,7 +21,7 @@ import {
   RecordingTransport,
   StaticSubjectTokenSource,
   StaticSvidSource,
-} from "@trogon/a2a-sdk/src/test-doubles.js";
+} from "@trogonai/a2a-sdk/src/test-doubles.js";
 
 const self = AgentId.parse("acme/oncall");
 const planner = AgentId.parse("acme/planner");
@@ -58,8 +58,8 @@ const reply = await client.call(planner, { q: "hello" }, new Purpose("handoff"))
 After `server.dispatch()` decodes the mesh token, the handler receives a typed `Caller`:
 
 ```ts
-import type { Caller, Handler } from "@trogon/a2a-sdk";
-import { callerChainDepth, Forbidden } from "@trogon/a2a-sdk";
+import type { Caller, Handler } from "@trogonai/a2a-sdk";
+import { callerChainDepth, Forbidden } from "@trogonai/a2a-sdk";
 
 class StrictHandler implements Handler {
   async handle(caller: Caller, payload: Uint8Array): Promise<Uint8Array> {
@@ -107,6 +107,6 @@ From `tsworkspace/`:
 
 ```bash
 mise exec -- pnpm install
-mise exec -- pnpm --filter @trogon/a2a-sdk test
-mise exec -- pnpm --filter @trogon/a2a-sdk typecheck
+mise exec -- pnpm --filter @trogonai/a2a-sdk test
+mise exec -- pnpm --filter @trogonai/a2a-sdk typecheck
 ```
