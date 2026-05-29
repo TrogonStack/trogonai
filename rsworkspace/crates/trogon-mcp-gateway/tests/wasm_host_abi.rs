@@ -25,6 +25,44 @@
 /// Wire-format Pin 6 policy evaluation fault (not yet exported from `rpc_codes`).
 const POLICY_FAULT: i32 = -32_101;
 
+mod host_engine {
+    //! Host import callthrough at the Wasmtime linker layer (no full gateway).
+
+    use std::sync::Arc;
+
+    use trogon_mcp_gateway::cel_builtins::{HostEvalContext, SpicedbHostBackend};
+    use trogon_mcp_gateway::wasm::{PoolConfig, WasmStoreState};
+
+    struct AllowBackend;
+
+    impl SpicedbHostBackend for AllowBackend {
+        fn check(
+            &self,
+            _subject: &str,
+            _permission: &str,
+            _resource: &str,
+        ) -> Result<bool, trogon_mcp_gateway::cel_builtins::HostFailure> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn host_spicedb_check_callthrough_mock_host_eval_context() {
+        let host = HostEvalContext::for_tests().with_spicedb(Arc::new(AllowBackend));
+        let mut state = WasmStoreState::new(
+            host,
+            PoolConfig::for_tests(),
+            Arc::from("demo"),
+            1,
+        );
+        let allowed = state
+            .with_host(|ctx| ctx.spicedb_check("user:alice", "view", "tool:demo"))
+            .expect("host")
+            .expect("spicedb");
+        assert!(allowed);
+    }
+}
+
 mod host_log {
     //! `host.log(level, msg)` forwards structured log lines to gateway telemetry.
 
@@ -182,13 +220,76 @@ mod host_deadline {
 mod abi_versioning {
     //! ABI version negotiation: module declares `host_abi=1`; gateway accepts compatible versions.
 
+    use trogon_mcp_gateway::wasm::{contract_identity, PoolConfig, WasmEngine, WIT_PACKAGE, WIT_VERSION};
+
     #[tokio::test]
-    #[ignore = "scaffold; implement when WASM host ABI per docs/identity/reference-host-abi.md lands"]
     async fn wasm_module_host_abi_v1_accepted_by_gateway() {
-        // Arrange: bundle manifest declares host_abi=1, target_wit trogon:mcp-policy@0.1.0
-        // Act: gateway loads and links component
-        // Assert: instance pooled; evaluate callable
-        unimplemented!("host_abi=1 accepted when gateway host_abi>=1");
+        let engine = WasmEngine::new(PoolConfig::for_tests()).expect("engine");
+        let identity = contract_identity();
+        assert_eq!(identity.package, WIT_PACKAGE);
+        assert_eq!(identity.version, WIT_VERSION);
+        let (package, version) = engine.contract_pins();
+        assert_eq!(package, WIT_PACKAGE);
+        assert_eq!(version, WIT_VERSION);
+    }
+
+    #[tokio::test]
+    async fn wasm_gateway_rejects_unknown_target_wit_at_load() {
+        use trogon_mcp_gateway::bundle::{
+            BundleManifest, BundleScope, ComponentEntry, LoadedBundle, LoadedComponent,
+            ManifestDigest, Signing, MANIFEST_FILENAME,
+        };
+        use trogon_mcp_gateway::wasm::{WasmEngine, PoolConfig, WasmEngineError};
+
+        let engine = WasmEngine::new(PoolConfig::for_tests()).expect("engine");
+        let bundle = LoadedBundle {
+            manifest: BundleManifest {
+                name: "acme/demo".into(),
+                version: "1.0.0".into(),
+                target_wit: "trogon:mcp-policy@9.9.9".into(),
+                min_gateway_version: "0.0.1".into(),
+                cel_version: None,
+                author: "platform".into(),
+                created_at: "2026-05-28T00:00:00Z".into(),
+                description: "demo".into(),
+                capabilities: Default::default(),
+                signing: Signing {
+                    nkey_pub: "UABTRUSTED".into(),
+                },
+                programs: vec![],
+                components: vec![ComponentEntry {
+                    id: "policy".into(),
+                    path: "components/policy.wasm".into(),
+                    sha256: "00".into(),
+                    mode: None,
+                }],
+                schemas: vec![],
+            },
+            manifest_filename: MANIFEST_FILENAME.into(),
+            manifest_bytes: vec![],
+            manifest_digest: ManifestDigest::from_bytes(b"x"),
+            scope: BundleScope {
+                tenant: "acme".into(),
+                slug: "demo".into(),
+            },
+            signer_nkey: "UABTRUSTED".into(),
+            programs: vec![],
+            components: vec![LoadedComponent {
+                entry: ComponentEntry {
+                    id: "policy".into(),
+                    path: "components/policy.wasm".into(),
+                    sha256: "00".into(),
+                    mode: None,
+                },
+                bytes: vec![0, 97, 115, 109, 1, 0, 0, 0],
+            }],
+            schemas: vec![],
+        };
+        let err = match engine.load(&bundle).await {
+            Err(err) => err,
+            Ok(_) => panic!("expected target_wit mismatch"),
+        };
+        assert!(matches!(err, WasmEngineError::TargetWit { .. }));
     }
 
     #[tokio::test]
