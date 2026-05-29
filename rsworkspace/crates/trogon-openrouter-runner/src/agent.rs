@@ -245,12 +245,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
                             id.trim().to_string(),
                             label.trim().to_string(),
                         )),
+                        // No label given — use the bare model id for both id and
+                        // label. This matches how the registry parses OPENROUTER_MODELS
+                        // (id before ':' or the whole entry), so set_model and the
+                        // registered model list stay in sync.
                         None => {
-                            warn!(
-                                entry,
-                                "OPENROUTER_MODELS: skipping malformed entry (expected 'id:label')"
-                            );
-                            None
+                            let id = entry.trim();
+                            (!id.is_empty()).then(|| ModelInfo::new(id.to_string(), id.to_string()))
                         }
                     })
                     .collect()
@@ -3529,27 +3530,28 @@ mod tests {
     }
 
     #[test]
-    fn available_models_malformed_entry_is_skipped_valid_ones_kept() {
+    fn available_models_bare_id_entries_kept_as_id_and_label() {
         let _guard = env_lock();
-        unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,no-colon-entry,also/good:Also Good"); }
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "good/model:Good Model,bare/id,also/good:Also Good"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
         let ids: Vec<&str> = agent.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
-        assert!(ids.contains(&"good/model"), "valid entry must be included");
-        assert!(ids.contains(&"also/good"), "valid entry must be included");
-        assert!(!ids.contains(&"no-colon-entry"), "malformed entry must be skipped");
+        assert!(ids.contains(&"good/model"), "id:label entry must be included");
+        assert!(ids.contains(&"also/good"), "id:label entry must be included");
+        // A colon-less entry is a bare model id (label = id), matching how the
+        // registry parses OPENROUTER_MODELS — so set_model stays in sync.
+        assert!(ids.contains(&"bare/id"), "bare id entry must be kept");
     }
 
     #[test]
-    fn available_models_all_malformed_falls_back_to_hardcoded_defaults() {
+    fn available_models_all_bare_ids_are_kept() {
         let _guard = env_lock();
-        unsafe { std::env::set_var("OPENROUTER_MODELS", "no-colon,also-no-colon"); }
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "vendor/one,vendor/two"); }
         let agent = make_agent();
         unsafe { std::env::remove_var("OPENROUTER_MODELS"); }
-        assert!(
-            agent.available_models.iter().any(|m| m.model_id.0.as_ref().contains("claude")),
-            "all-malformed list must fall back to hardcoded defaults"
-        );
+        let ids: Vec<&str> = agent.available_models.iter().map(|m| m.model_id.0.as_ref()).collect();
+        assert!(ids.contains(&"vendor/one"), "bare id must be kept");
+        assert!(ids.contains(&"vendor/two"), "bare id must be kept");
     }
 
     #[test]
