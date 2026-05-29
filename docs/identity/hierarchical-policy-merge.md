@@ -1,6 +1,6 @@
 # Hierarchical policy merge
 
-**Status:** Normative reference (Block E, paper). Resolves the open item in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E — *Hierarchical policy merge across subject-pattern specificity*.
+**Status:** Normative reference (Block E, paper). Resolves the open item — *Hierarchical policy merge across subject-pattern specificity*.
 
 **Diátaxis:** [Explanation](#explanation) (why merge order matters and how hybrid semantics protect tenants) + [Reference](#reference) (levels, merge rules, CEL composition, storage keys, audit fields, failure modes).
 

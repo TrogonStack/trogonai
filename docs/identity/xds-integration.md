@@ -180,7 +180,7 @@ Evaluation criteria: **implementation complexity**, **operator surface area**, *
 
 ### 4.1 Why NATS KV replaces xDS for Trogon
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § "Config Distribution" states the deliberate swap: agentgateway's `K8s CRD → controller → xDS → proxy` collapses to **`KV write → gateway watcher fires`**. That is not a temporary shortcut — it is the product wedge:
+The config distribution model is a deliberate swap: agentgateway's `K8s CRD → controller → xDS → proxy` collapses to **`KV write → gateway watcher fires`**. That is not a temporary shortcut — it is the product wedge:
 
 | agentgateway / Envoy stack | Trogon MCP gateway |
 |---|---|
@@ -381,7 +381,7 @@ If xDS is ever implemented, these constraints apply regardless of shape:
 
 ## Appendix B — agentgateway `xds` crate (informative)
 
-[MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) notes agentgateway's `xds` crate for interop. Trogon explicitly maps that crate to **none** — NATS KV watcher replaces it for config distribution. Reintroducing xDS would be a **business-driven exception**, not parity for parity's sake.
+Agentgateway's `xds` crate is for interop only. Trogon explicitly maps that crate to **none** — NATS KV watcher replaces it for config distribution. Reintroducing xDS would be a **business-driven exception**, not parity for parity's sake.
 
 ## Appendix C — Worked example: why RDS does not map
 

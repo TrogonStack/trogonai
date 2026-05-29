@@ -4,7 +4,7 @@
 
 **Phase 1 contract.** Codes and `data` shapes are stable; message text is not.
 
-**Authority:** [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 6 (§6 Gateway-emitted JSON-RPC error codes). This page quotes and extends that pin; it does not contradict it.
+**Authority:** Wire-Format Pin 6 (Gateway-emitted JSON-RPC error codes). This page is the normative source.
 
 **Related:** [failure-mode-matrix.md](failure-mode-matrix.md), [reference-audit-envelope.md](reference-audit-envelope.md), [rate-limiting.md](rate-limiting.md), [otel-wiring.md](otel-wiring.md) (trace correlation).
 
@@ -217,7 +217,7 @@ Ingress may arrive over NATS queue groups, not HTTP. JSON-RPC shape is identical
 
 ## 9. Implementation extensions (outside Pin 6)
 
-The following constants exist in `rpc_codes.rs` on the implementation branch but are **not** part of Wire-Format Pin 6. SDKs MAY handle them defensively; do not treat them as Phase 1 contract until promoted into [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes).
+The following constants exist in `rpc_codes.rs` on the implementation branch but are **not** part of Wire-Format Pin 6. SDKs MAY handle them defensively; do not treat them as Phase 1 contract until promoted into this reference.
 
 | Code | Constant | Typical meaning |
 |---|---|---|
