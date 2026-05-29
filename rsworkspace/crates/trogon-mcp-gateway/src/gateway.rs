@@ -20,10 +20,13 @@ use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
     strip_inbound_credentials,
 };
-use crate::ingress::IngressChainResolve;
+use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::rpc_codes;
+use crate::schema_cache::{
+    SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
+};
 use crate::subject::gateway_to_server_subject;
 use crate::trace::{DecisionTrace, TraceStore};
 
@@ -32,6 +35,8 @@ const HEADER_VERIFIED_SUB: &str = "trogon-mcp-verified-sub";
 const HEADER_VERIFIED_TENANT: &str = "trogon-mcp-verified-tenant";
 const HEADER_IDENTITY_SOURCE: &str = "trogon-mcp-identity-source";
 const HEADER_JWT_ISSUER: &str = "trogon-mcp-jwt-issuer";
+const MCP_CLIENT_ID_HEADER: &str = "mcp-client-id";
+const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const AUTHZ_BEARER_PREFIX: &str = "bearer ";
 
 #[derive(Debug)]
@@ -84,6 +89,12 @@ where
         && let Err(e) = audit::ensure_audit_stream(&js, &settings.audit_stream_name, settings.mcp.prefix_str()).await
     {
         warn!(error = %e, stream = %settings.audit_stream_name, "failed to ensure audit JetStream (continuing without stream guarantee)");
+    }
+
+    if let Some(runtime) = SchemaCacheRuntime::shared()
+        && let Err(err) = spawn_schema_cache_invalidation(client.clone(), settings.mcp.prefix_str(), runtime).await
+    {
+        warn!(error = %err, "schema cache invalidation subscribers failed to start");
     }
 
     tokio::pin!(shutdown);
@@ -274,6 +285,11 @@ async fn handle_ingress_inner(
 
     let server_id = parse_server_id(prefix, msg.subject.as_str()).map_err(|e| GatewayError(e.to_string()))?;
     let session_id = session_id_from_headers(msg.headers.as_ref(), &jwt_claims);
+    let server_id_typed = ServerId::new(server_id);
+    let client_id = client_id_from_headers(msg.headers.as_ref());
+    if let Some(runtime) = SchemaCacheRuntime::shared() {
+        runtime.record_client_server(client_id.as_str(), &server_id_typed);
+    }
 
     let mut spicedb_allowed: Option<bool> = None;
     if requires_spicedb {
@@ -337,6 +353,24 @@ async fn handle_ingress_inner(
 
     if requires_spicedb && let Some(allowed) = spicedb_allowed {
         tracing::Span::current().record("gateway.spicedb.allowed", tracing::field::display(allowed));
+    }
+
+    if jsonrpc_method == "tools/call"
+        && let (Some(runtime), Some(tool)) = (SchemaCacheRuntime::shared(), tool_call.as_deref())
+    {
+        let _ = ensure_tool_schema(
+            &runtime,
+            client,
+            prefix,
+            &server_id_typed,
+            tool,
+            settings.mcp.operation_timeout(),
+        )
+        .await
+        .map_err(|err| GatewayError(err.to_string()))?;
+        let _ = lookup_tool_schema(&runtime, &server_id_typed, tool)
+            .await
+            .map_err(|err| GatewayError(err.to_string()))?;
     }
 
     let tenant = gateway_identity
@@ -481,6 +515,20 @@ async fn handle_ingress_inner(
 
     match backend_result {
         Ok(Ok(response)) => {
+            if jsonrpc_method == "tools/list"
+                && let Some(runtime) = SchemaCacheRuntime::shared()
+            {
+                if let Err(err) = sniff_tools_list_reply(
+                    &runtime.cache,
+                    &runtime.config,
+                    &server_id_typed,
+                    &response.payload,
+                )
+                .await
+                {
+                    warn!(error = %err, server_id = %server_id, "tools/list schema sniff failed");
+                }
+            }
             let payload = if jsonrpc_method == "tools/list" {
                 shape_tools_list_response(
                     checker.as_ref(),
@@ -496,6 +544,11 @@ async fn handle_ingress_inner(
             dispatch_backend_response(client, &msg, payload).await?;
         }
         Ok(Err(e)) => {
+            if let Some(runtime) = SchemaCacheRuntime::shared()
+                && let Err(err) = runtime.invalidate_on_reconnect(&server_id_typed).await
+            {
+                warn!(error = %err, server_id = %server_id, "schema cache reconnect invalidation failed");
+            }
             respond_with_jsonrpc_error(
                 client,
                 &msg,
@@ -688,6 +741,25 @@ fn tenant_from_headers(headers: Option<&async_nats::HeaderMap>) -> Option<String
             .as_str()
             .to_string(),
     )
+}
+
+fn client_id_from_headers(headers: Option<&async_nats::HeaderMap>) -> String {
+    let Some(h) = headers else {
+        return "gateway-default".to_string();
+    };
+    if let Some(id) = h
+        .get_last(MCP_CLIENT_ID_HEADER)
+        .or_else(|| h.get(MCP_CLIENT_ID_HEADER))
+        .map(|v| v.as_str().to_string())
+        .filter(|id| !id.is_empty())
+    {
+        return id;
+    }
+    h.get_last(MCP_SESSION_HEADER)
+        .or_else(|| h.get(MCP_SESSION_HEADER))
+        .map(|v| v.as_str().to_string())
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| "gateway-default".to_string())
 }
 
 fn bearer_token_from_headers(headers: Option<&async_nats::HeaderMap>, header_name_normalized: &str) -> Option<String> {
