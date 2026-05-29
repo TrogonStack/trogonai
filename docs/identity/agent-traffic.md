@@ -1,6 +1,6 @@
 # Agent-traffic view (v1 spec)
 
-Companion: `PENDING_TODO.md` Block 4, `MCP_GATEWAY_PLAN.md` § Audit, `docs/identity/act-chain.md`.
+Companion: `MCP_GATEWAY_PLAN.md` § Audit, `docs/identity/act-chain.md`.
 
 Implementation scaffold: `rsworkspace/crates/trogon-traffic-view`.
 
