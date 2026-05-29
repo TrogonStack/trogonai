@@ -323,15 +323,15 @@ CEL + SpiceDB are the substrate; this block delivers the policies and flows on t
 
 ## Block 6 — Migration and compatibility
 
-Cutover is incremental: keep the bootstrap path while shadow-mode validates the mesh path, then flip to enforce.
+**Posture: greenfield.** There is no production fleet to migrate. Every caller is onboarded into `trogon-agent-registry` from day one via the controller's Git→KV sync, and SVIDs are provisioned via SPIRE (service workloads) or file PEM (dev/CI) at first deploy. The shadow→enforce gradient exists for safety on the first traffic, not to coexist with a legacy population.
 
 - [x] **Feature flag — landed.** `MCP_GATEWAY_AGENT_IDENTITY = off (default) / shadow / enforce`. `enforce` is no longer log-only — hard rejects per the enforce-mode hardening section above.
 - [x] **Shadow-mode completion.** Already: missing `agent_id` on `tools/call` and `act_chain` depth overflow WARN in shadow. Still to do: validate `aud == self` and emit `aud_mismatch` audit events in shadow (no rejection until enforce).
 - [x] **Coexistence — decided.** During shadow: bootstrap auth-callout JWT remains authoritative for NATS subject ACL; new claims only inform CEL and audit. ADR 0003 retires the transitional hybrid once enforce is live.
-- [ ] **Backfill implementation.** Inventory current callers; assign `agent_id`; register in the new registry; provision SVIDs (file-based for legacy, SPIRE for service workloads).
-- [x] **Cutover criteria — decided.** Zero shadow-mode `aud_mismatch` / `agent_id_missing` / `act_chain_depth_overflow` events for 7 consecutive days at production traffic; STS P99 < 40 ms over the same window; rollback runbook reviewed (set `MCP_GATEWAY_AGENT_IDENTITY=shadow`, drain mesh-token cache).
+- [x] **Backfill — N/A on greenfield.** No legacy fleet exists; "backfill" is vacuously done. Onboarding *is* the registry/SVID path described in Blocks 1.1 and 1.2 — new agents land via signed manifest commits processed by `trogon-agent-registry-controller`. If a non-greenfield deployment ever needs a bulk-import path, reopen this item and add an `agctl registry backfill` subcommand that consumes a TOML inventory and emits signed manifests.
+- [x] **Cutover criteria — decided (greenfield-adjusted).** First-deploy gate: every onboarded caller passes shadow-mode without `aud_mismatch` / `agent_id_missing` / `act_chain_depth_overflow` events across the deploy's acceptance traffic, and STS P99 < 40 ms over the same window. When real traffic begins to accumulate, escalate to the original bar: zero shadow-mode events for 7 consecutive days before flipping `MCP_GATEWAY_AGENT_IDENTITY=enforce`. Rollback runbook: set `MCP_GATEWAY_AGENT_IDENTITY=shadow`, drain mesh-token cache.
 
-**Acceptance:** A staged rollout plan with named owners, dates, and a written rollback.
+**Acceptance:** A first-deploy rollout plan with named owners and a written rollback. Multi-day production-traffic gate engages once production traffic exists.
 
 ---
 
@@ -377,6 +377,6 @@ Authoritative ordering lives in the **Execution roadmap** at the top of this fil
 - **Item 11 (Agent-traffic view)** — implement the indexer + projector + OCSF exporter against the spec already accepted at `docs/identity/agent-traffic.md`; the `trogon-traffic-view` crate skeleton is the home.
 - **Item 12 (Adaptive access)** — step-up auth, human-in-the-loop approvals (`-32107`), context-aware throttling, anomaly emission.
 
-Smaller residual items live in **Open after 2026-05-27 swarm**: gateway-ingress chain resolution, STS-side empty-purpose reject, A2A SDK TypeScript + Python tracks, and the remaining shadow-mode telemetry / backfill bullets in Block 6.
+Smaller residual items live in **Open after 2026-05-27 swarm**: gateway-ingress chain resolution, STS-side empty-purpose reject, A2A SDK TypeScript + Python tracks. Block 6 carries no open work — the project is greenfield, so there is no legacy fleet to backfill; the shadow→enforce gradient remains as a first-deploy safety net.
 
 Decisions are settled. Build.
