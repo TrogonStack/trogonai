@@ -11,6 +11,7 @@ use agent_client_protocol::{
     WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
+use crate::app::{permission_from_request, print_permission_prompt};
 use crate::terminal::reset_display;
 use std::io::{self, BufRead, Write};
 use std::os::unix::io::AsRawFd;
@@ -437,28 +438,6 @@ fn exit_plan_mode_options(bypass: bool) -> Vec<PermissionOption> {
     options
 }
 
-fn format_tool_summary(req: &RequestPermissionRequest) -> String {
-    let title = req
-        .tool_call
-        .fields
-        .title
-        .as_deref()
-        .unwrap_or("tool");
-    let raw = req
-        .tool_call
-        .fields
-        .raw_input
-        .as_ref()
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    if raw.is_empty() {
-        title.to_string()
-    } else {
-        let snippet: String = raw.chars().take(120).collect();
-        format!("{title}  {snippet}")
-    }
-}
-
 fn selected_outcome(option_id: impl Into<String>) -> agent_client_protocol::Result<RequestPermissionResponse> {
     Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
         SelectedPermissionOutcome::new(option_id.into()),
@@ -543,12 +522,10 @@ async fn handle_tool_permission(
         return cancelled_outcome();
     }
 
-    let summary = format_tool_summary(req);
+    let display = permission_from_request(req);
     reset_display();
     eprint!("\r\x1b[2K");
-    eprintln!();
-    eprintln!("┆ {summary}");
-    eprintln!("[a] allow  [w] always allow  [r] reject");
+    print_permission_prompt(&display);
     flush_stderr();
 
     let key = match tokio::task::spawn_blocking(move || read_permission_key(&coordinator)).await {
