@@ -8,6 +8,7 @@ mod host_impl;
 mod pool;
 mod runtime;
 mod store_state;
+mod tracing;
 mod wasi_stub;
 
 pub use bindings::{
@@ -20,6 +21,11 @@ pub use engine::{WasmBundleHandle, WasmEngine};
 pub use error::{EvaluateOutcome, WasmEngineError, WasmFaultCode};
 pub use pool::{ComponentPool, PoolKey};
 pub use store_state::WasmStoreState;
+pub use tracing::{
+    extract_trace_id, extract_traceparent, parent_from_span_context, populate_request_span,
+    span_context_from_current, traceparent_is_sampled, tracing_level_from_log,
+    ParsedTraceParent, WASM_EVALUATE_SPAN_NAME,
+};
 
 /// Returns an unlinked host stub and validates contract pins at call sites.
 #[must_use]
