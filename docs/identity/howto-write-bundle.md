@@ -4,7 +4,7 @@
 
 **Audience:** platform engineers and identity engineers authoring Trogon MCP gateway policy bundles for Phase 2 (CEL tier). Phase 3 adds WASM components to the same pack layout; this guide covers the CEL-only path that ships today.
 
-**Related:** [WASM bundle format reference](wasm-bundle-format.md) · [Policy DSL choice (CEL)](policy-dsl-choice.md) · [Rate limiting](rate-limiting.md) · [Hierarchical policy merge](hierarchical-policy-merge.md) · [Audit envelope reference](reference-audit-envelope.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md) · [MCP gateway plan Block H](../../MCP_GATEWAY_PLAN.md) · [Wire-format pins §8 CEL namespace](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace)
+**Related:** [WASM bundle format reference](wasm-bundle-format.md) · [Policy DSL choice (CEL)](policy-dsl-choice.md) · [Rate limiting](rate-limiting.md) · [Hierarchical policy merge](hierarchical-policy-merge.md) · [Audit envelope reference](reference-audit-envelope.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md)
 
 This guide walks through authoring, validating, signing, publishing, and hot-swapping a **CEL-only** policy bundle. The worked example gates a single MCP tool call (`create_issue` on server `github`) with SpiceDB authorization, a per-caller rate limit, and an audit enrichment field on success.
 
@@ -160,7 +160,7 @@ Cross-reference [wasm-bundle-format.md §3.1](wasm-bundle-format.md#31-bundletom
 
 ## Step 3 — Write the CEL policy
 
-Create `my-bundle/policies/allow-create-issue.cel`. This program is an **allow** rule evaluated on the request path for gated methods. It uses the pinned CEL variable namespace from [MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) and host builtins from [policy-dsl-choice.md §4.3](policy-dsl-choice.md#43-host-builtins-vendored-cel_builtins).
+Create `my-bundle/policies/allow-create-issue.cel`. This program is an **allow** rule evaluated on the request path for gated methods. It uses the pinned CEL variable namespace and host builtins from [policy-dsl-choice.md §4.3](policy-dsl-choice.md#43-host-builtins-vendored-cel_builtins).
 
 Argument order for `spicedb.check` follows **`cel_builtins/`** (`resource`, `permission`, `subject`), not the plan table's `(subject, perm, resource)` ordering — see [reference-host-abi.md](reference-host-abi.md) when published.
 
@@ -293,7 +293,7 @@ agctl mcp bundle dry-run \
 
 **Status:** **proposed** CLI. Flags mirror future gateway evaluation: inject `mcp.*`, `jwt.*`, `nats.*` bindings per [wire pins §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace).
 
-Expected allow output includes `"decision": "allow"`, `"rules_fired": ["allow-create-issue"]`, populated `spicedb.checks`, `rate_limit.acquired: true`, and `audit_extra` keys from `audit.emit` **(proposed JSON shape)**. Rate-limited replays return `"decision": "deny"` with `jsonrpc_error.code: -32105` per [wire pins §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes).
+Expected allow output includes `"decision": "allow"`, `"rules_fired": ["allow-create-issue"]`, populated `spicedb.checks`, `rate_limit.acquired: true`, and `audit_extra` keys from `audit.emit` **(proposed JSON shape)**. Rate-limited replays return `"decision": "deny"` with `jsonrpc_error.code: -32105`.
 
 ---
 

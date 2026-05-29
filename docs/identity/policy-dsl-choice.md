@@ -4,7 +4,7 @@
 
 **Document type:** Diátaxis **decision** (why CEL, what we rejected, when we would leave) + **reference** (evaluation contract, versioning, builtins, migration hooks).
 
-**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md) · [Hierarchical policy merge](hierarchical-policy-merge.md) · [CEL-based `tools/list` filtering](tools-list-filtering.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block B (DSL choice) · [MCP gateway plan § CEL variable namespace](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) · [Identity overview](overview.md)
+**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md) · [Hierarchical policy merge](hierarchical-policy-merge.md) · [CEL-based `tools/list` filtering](tools-list-filtering.md) · [Identity overview](overview.md)
 
 **Implementation today:** `cel-interpreter = 0.10.0` in `rsworkspace/Cargo.toml`; host builtins in `rsworkspace/crates/trogon-mcp-gateway/src/cel_builtins/`; Phase 1 gate in `policy.rs`.
 
@@ -21,7 +21,7 @@
 | Escape hatch | Blessed host builtins (`spicedb.check`, `jsonpath.*`, …) — not arbitrary Rust in policy |
 | If CEL fails later | Recompile bundles; WIT host ABI shields JSON-RPC callers ([§7](#7-migration-path-if-we-leave-cel)) |
 
-Block B in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) lists **DSL choice** beside **Host ABI surface** and **reply correlation**. This document closes the DSL item; host ABI is [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md).
+Block B lists **DSL choice** beside **Host ABI surface** and **reply correlation**. This document closes the DSL item; host ABI is [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md).
 
 ---
 
@@ -238,7 +238,7 @@ The gateway vendors a **closed** host surface under `rsworkspace/crates/trogon-m
 
 ### 4.1 Evaluation inputs
 
-Bindings are injected into `cel_interpreter::Context` before `Program::execute`. Names below are **normative for bundle authoring**. Implementation may also expose roots from [MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) (`mcp.*`, `jwt.*`, `nats.*`, …) as those land in code.
+Bindings are injected into `cel_interpreter::Context` before `Program::execute`. Names below are **normative for bundle authoring**. Implementation may also expose roots (`mcp.*`, `jwt.*`, `nats.*`, …) as those land in code.
 
 #### Top-level roots (authoring model)
 

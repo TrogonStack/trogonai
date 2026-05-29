@@ -20,7 +20,7 @@ Default prefix examples use `mcp`; substitute `{prefix}` when `MCP_PREFIX` is ov
 
 ## 1. Pinned queue-group table (Wire-Format Pin 3)
 
-Reproduced verbatim from [MCP_GATEWAY_PLAN.md § Wire-Format Pin 3 — Queue group strategy](../../MCP_GATEWAY_PLAN.md#3-queue-group-strategy):
+Reproduced verbatim:
 
 | Subscription | Queue group name | Reason |
 |---|---|---|
@@ -106,7 +106,7 @@ Tier-2.5 NATS-callout policy plugins use a **dedicated queue group per plugin na
 
 Queue groups distribute **work** across replicas; they do not cap **concurrency** per downstream target. Inflight limits are enforced inside the gateway by semaphores, independent of NATS queue depth.
 
-Reproduced from [MCP_GATEWAY_PLAN.md § Wire-Format Pin 3 — Backpressure](../../MCP_GATEWAY_PLAN.md#3-queue-group-strategy) and [rate-limiting.md § Reference — platform default limits](rate-limiting.md#reference--platform-default-limits-from-plan-9):
+Reproduced and [rate-limiting.md § Reference — platform default limits](rate-limiting.md#reference--platform-default-limits-from-plan-9):
 
 | Scope | Default cap | Config surface | On saturation |
 |---|---|---|---|

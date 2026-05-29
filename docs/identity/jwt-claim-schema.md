@@ -4,7 +4,7 @@
 
 **DRAFT** — for human review. Several claims depend on ADRs `0001`–`0006` (not yet finalized). Claims marked **ADR-pending** must not be treated as wire pins until the referenced ADR merges.
 
-Related docs: [`act-chain.md`](act-chain.md), [`MCP_GATEWAY_PLAN.md`](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins.
+Related docs: [`act-chain.md`](act-chain.md).
 
 ## Scope
 
@@ -129,7 +129,7 @@ Order: oldest originator first, current actor last.
 
 ## CEL variable namespace
 
-Pinned roots per `MCP_GATEWAY_PLAN.md:934–941`. Proposed extensions (additive; no root renames):
+Pinned roots. Proposed extensions (additive; no root renames):
 
 | CEL variable | Type | Source claim / context | Notes |
 |---|---|---|---|
@@ -283,6 +283,6 @@ Forgeable identity claims from issuers outside `MCP_GATEWAY_TRUSTED_MINT_ISSUERS
 ## Acceptance criteria (Block 1.3)
 
 - [ ] Human reviewers agree on claim names, types, and enforce vs. optional matrix.
-- [ ] ADR dependencies (`0001`–`0006`) are explicit before wire-format pin in `MCP_GATEWAY_PLAN.md`.
+- [ ] ADR dependencies (`0001`–`0006`) are explicit before wire-format pin.
 - [ ] CEL and ingress-hardening tables in the plan can be updated from this doc without ambiguity.
 - [ ] Shadow mode can emit structured violations for every new claim without rejecting traffic.

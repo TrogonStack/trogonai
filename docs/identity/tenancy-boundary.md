@@ -4,7 +4,7 @@
 
 **Diátaxis:** This page is both a **reference** (normative MUST/MUST NOT tables, key shapes, enforcement surfaces) and an **explanation** (why the hybrid model exists, trade-offs, failure modes). Operators and reviewers use it to answer: *is this leak a bug or expected?*
 
-**Related:** [Agent identity overview](overview.md) · [JWT claim schema](jwt-claim-schema.md) · [OAuth MCP integration](oauth-mcp-integration.md) · [Audit envelope reference](reference-audit-envelope.md) · [NATS subject grammar](reference-subject-grammar.md) · [ADR 0001 Tenancy model](../adr/0001-tenancy-model.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block A
+**Related:** [Agent identity overview](overview.md) · [JWT claim schema](jwt-claim-schema.md) · [OAuth MCP integration](oauth-mcp-integration.md) · [Audit envelope reference](reference-audit-envelope.md) · [NATS subject grammar](reference-subject-grammar.md) · [ADR 0001 Tenancy model](../adr/0001-tenancy-model.md)
 
 **Implementation anchors (branch snapshot):**
 
