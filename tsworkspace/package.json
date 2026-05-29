@@ -1,0 +1,12 @@
+{
+  "name": "trogon-tsworkspace",
+  "private": true,
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
