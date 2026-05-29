@@ -126,7 +126,7 @@ Block E follow-up: `trogon-mcp-gateway policy explain` (or equivalent) accepts s
 
 **Compile time:** Each level's rules compile to `A_L` / `D_L`; merge builds single expression `M`.
 
-**Request path:** Evaluate `M` once for ingress authorization. For **`tools/list`**, **`prompts/list`**, and **`resources/list`**, re-evaluate `M` per catalog item with list-scoped bindings (`response.list_filter_index`, tool name, resource URI) — same merged program, different binding snapshot per item ([MCP_GATEWAY_PLAN.md Block E](../../MCP_GATEWAY_PLAN.md)).
+**Request path:** Evaluate `M` once for ingress authorization. For **`tools/list`**, **`prompts/list`**, and **`resources/list`**, re-evaluate `M` per catalog item with list-scoped bindings (`response.list_filter_index`, tool name, resource URI) — same merged program, different binding snapshot per item.
 
 **Optimization:** Evaluator may short-circuit on first matching deny disjunct for latency once correctness tests prove equivalence to full `M` evaluation.
 
@@ -186,7 +186,6 @@ Policy bundles in NATS KV bucket **`mcp-gateway-config`** under `policy/{level}/
 | [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md) | **Done** — normative merge algorithm, examples, KV layout, failure modes |
 | [policy-dsl-choice.md](../identity/policy-dsl-choice.md) | **Done** — CEL locked; merge compiles to one program |
 | [reference-cel-variables.md](../identity/reference-cel-variables.md) | **Done** — binding namespace for merged evaluation |
-| `MCP_GATEWAY_PLAN.md` Block E item 6 | **Unblocked by this ADR** — implementation still pending |
 | Phase 1 hardcoded CEL gate in `policy.rs` | **Shipped** — placeholder until merge wired |
 | CEL host builtins (`spicedb.check`, `rate.acquire`, …) | **Pending** — stubs return `NotImplemented` |
 | `trogon-policy-core` merge crate | **Pending** |

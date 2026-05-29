@@ -384,7 +384,6 @@ If Mixed default proves too friction-heavy or too permissive in production:
 | Audit `extra.bootstrap_mode` | **Pending** (Block D) | Audit publisher |
 | `bootstrap_mode` config enum | **Pending** (Block D) | Gateway settings |
 | Bundle unload → day-zero tests | **Pending** (Block D) | [bundle_load_hot_reload.rs](../../rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs) |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 8 checkbox | **Pending** | Editorial after ADR acceptance |
 
 ---
 

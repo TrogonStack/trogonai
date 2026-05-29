@@ -210,7 +210,7 @@ Region partition: in-region MCP continues with last-known mirror and JWKS -- **f
 | Gateway residency enforcement (`MCP_GATEWAY_REGION`, `residency_violation` audit) | **Pending** (proposed) |
 | Optional audit JetStream source + `auditExport` policy | **Pending** (opt-in) |
 | Mirror lag monitoring and registry rotation runbooks | **Pending** (proposed alerts) |
-| Block G latency baseline CLI (same-region only) | **Pending** (`MCP_GATEWAY_PLAN.md` Block G) |
+| Latency baseline CLI (same-region only) | **Pending** (see [ADR 0031](0031-latency-budget-benchmarking.md)) |
 | Multi-region code in `trogon-mcp-gateway` / `trogon-sts` | **Not started** (topology is infra + config first) |
 
 ---

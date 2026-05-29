@@ -151,10 +151,9 @@ SDK must not embed minting logic; it calls STS over NATS. CI lint (Block 3) flag
 
 7. **SpiceDB on exchange path.** Block 2.1 mentions circuit breaker on SpiceDB outages — is SpiceDB consulted synchronously during exchange or only via precomputed registry ACLs?
 
-8. **OAuth-MCP composition** (`MCP_GATEWAY_PLAN.md:67`). If MCP OAuth tokens enter via callout, does STS accept them as `subject_token`, or only NATS User JWTs? **Resolved: deferred until first OAuth-fronted MCP client. ADR 0005 §OQ6 pins the semantics (OAuth access token enters STS as `subject_token`); the multi-issuer config is a same-day add when the first caller arrives.**
+8. **OAuth-MCP composition.** If MCP OAuth tokens enter via callout, does STS accept them as `subject_token`, or only NATS User JWTs? **Resolved: deferred until first OAuth-fronted MCP client. ADR 0005 §OQ6 pins the semantics (OAuth access token enters STS as `subject_token`); the multi-issuer config is a same-day add when the first caller arrives.**
 
 ## References
 
-- `MCP_GATEWAY_PLAN.md` — audit envelope, JetStream subjects, `trogon-decider` touch-points
 - [Uber — Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/) — P99 latency target, per-hop token model
 - [RFC 8693 — OAuth 2.0 Token Exchange](https://www.rfc-editor.org/rfc/rfc8693)

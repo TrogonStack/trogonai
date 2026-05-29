@@ -10,7 +10,7 @@
 
 ## Context
 
-Phase 1 shipped without measured P50/P99 baselines. `MCP_GATEWAY_PLAN.md` Block G item 1 defers the numeric baseline until Phase 2+ policy work (CEL shaping, SpiceDB catalog filtering, schema cache, redaction) lands and operators need a shared definition of "good" before tightening fleet SLOs.
+Phase 1 shipped without measured P50/P99 baselines. The numeric baseline is deferred until Phase 2+ policy work (CEL shaping, SpiceDB catalog filtering, schema cache, redaction) lands and operators need a shared definition of "good" before tightening fleet SLOs.
 
 Without a written budget and methodology:
 
@@ -355,4 +355,4 @@ Rollback of this ADR does **not** change gateway runtime latency — only measur
 
 ---
 
-*Contract sources: [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G item 1; [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) §6; [otel-wiring.md](../identity/otel-wiring.md) §4, §8; [ADR 0014](0014-bulk-check-zedtoken-cache.md); [ADR 0015](0015-tools-list-filtering.md); [ADR 0023](0023-schema-cache-invalidation.md); [ADR 0016](0016-multi-region-topology.md); `rsworkspace/crates/trogon-mcp-gateway/tests/e2e_nats_forward.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/metric_labels.rs`; `rsworkspace/crates/trogon-mcp-gateway/benches/latency_baseline.rs`; `rsworkspace/crates/trogon-mcp-gateway/Cargo.toml` (`[[bench]] latency_baseline`, `criterion` dev-dependency).*
+*Contract sources: [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) §6; [otel-wiring.md](../identity/otel-wiring.md) §4, §8; [ADR 0014](0014-bulk-check-zedtoken-cache.md); [ADR 0015](0015-tools-list-filtering.md); [ADR 0023](0023-schema-cache-invalidation.md); [ADR 0016](0016-multi-region-topology.md); `rsworkspace/crates/trogon-mcp-gateway/tests/e2e_nats_forward.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/metric_labels.rs`; `rsworkspace/crates/trogon-mcp-gateway/benches/latency_baseline.rs`; `rsworkspace/crates/trogon-mcp-gateway/Cargo.toml` (`[[bench]] latency_baseline`, `criterion` dev-dependency).*

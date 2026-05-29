@@ -12,7 +12,7 @@
 
 `trogon-mcp-gateway` must rewrite JSON-RPC `params` (inbound) and `result` (outbound) before those payloads cross trust boundaries — toward backend servers, toward edge clients, and into JetStream audit consumers. Generic regex or LLM-shaped guardrails (agentgateway-style) cannot express MCP-native sensitivity: field names, nesting, and array shapes come from each tool's `inputSchema` / `outputSchema`, not from free-text heuristics.
 
-Block E item 5 pins the first implementation as **native Rust**, not WASM, with rules **attached to schemas** (`MCP_GATEWAY_PLAN.md` Block E item 5; § Redaction). ADR 0023 supplies the canonical schema bytes via `SchemaCacheKey { server_id, schema_hash }` populated from `tools/list` sniff and miss-path fetch. ADR 0015 already applies descriptor redaction on kept catalogue entries after CEL filtering; this ADR closes the **`tools/call` / response / notification** contract that the integration scaffold in `tests/redaction_rules.rs` expects.
+The first implementation pins **native Rust**, not WASM, with rules **attached to schemas**. ADR 0023 supplies the canonical schema bytes via `SchemaCacheKey { server_id, schema_hash }` populated from `tools/list` sniff and miss-path fetch. ADR 0015 already applies descriptor redaction on kept catalogue entries after CEL filtering; this ADR closes the **`tools/call` / response / notification** contract that the integration scaffold in `tests/redaction_rules.rs` expects.
 
 **Why this decision is needed now**
 
@@ -162,7 +162,7 @@ Redaction runs **after** authorization succeeds and **before** publish on each e
 13. reply to client inbox
 ```
 
-Matches `MCP_GATEWAY_PLAN.md` lifecycle steps 4–5 (input) and 9–10 (output + audit), with explicit schema resolution inserted before step 7.
+Matches the gateway lifecycle steps 4–5 (input) and 9–10 (output + audit), with explicit schema resolution inserted before step 7.
 
 #### Callback direction (`mcp.client.*` → `mcp.gateway.callback.*`, ADR 0020)
 
@@ -195,7 +195,7 @@ For each **kept** tool after CEL filter: run descriptor redaction (`global` + pe
 
 ### Audit envelope attestation (Pin 7)
 
-Every **allowed** forward that runs redaction includes a `rewrites` array on the audit envelope published to `{prefix}.audit.{outcome}.{direction}.{method_root}` (`MCP_GATEWAY_PLAN.md` § Audit, Wire-Format Pin 7).
+Every **allowed** forward that runs redaction includes a `rewrites` array on the audit envelope published to `{prefix}.audit.{outcome}.{direction}.{method_root}` (see [reference-audit-envelope.md](../identity/reference-audit-envelope.md)).
 
 | Field | Requirement |
 |-------|-------------|
@@ -209,7 +209,7 @@ Every **allowed** forward that runs redaction includes a `rewrites` array on the
 
 Denied `-32104` responses: emit deny audit with `decision_reason: schema_unknown`; `rewrites` empty.
 
-Separate sampling subject `mcp.audit.rewrite.callback.sampling` (`MCP_GATEWAY_PLAN.md` control-plane table) is **optional** for rewrite-only telemetry — default single envelope per message (Open questions).
+Separate sampling subject `mcp.audit.rewrite.callback.sampling` (gateway control-plane subject) is **optional** for rewrite-only telemetry — default single envelope per message (Open questions).
 
 ---
 
@@ -236,7 +236,7 @@ Separate sampling subject `mcp.audit.rewrite.callback.sampling` (`MCP_GATEWAY_PL
 
 ### Neutral
 
-- **WASM Tier 3 deferred:** Block E native Rust matches plan "first pass as native code"; custom classifiers remain Phase 3 (`MCP_GATEWAY_PLAN.md` § Tier 3).
+- **WASM Tier 3 deferred:** Native Rust matches the "first pass as native code" intent; custom classifiers remain Phase 3 (Tier 3).
 - **`Replace` enum variant:** Existing scaffold keeps `Replace(String)`; YAML v1 uses `mask` for literal stars per tests.
 - **outputSchema:** Response redaction accepts missing `outputSchema` with inferred paths **(proposed)** — strict mode may require explicit schema later.
 
@@ -308,7 +308,7 @@ When a rule path is not in schema, omit that rule and continue.
 4. **`-32118 redaction_path_invalid` code allocation** — register in `reference-error-codes.md` and `rpc_codes.rs` or fold into `-32104`.
 5. **Tokenize KV backend** — JetStream KV vs in-memory with replication; cross-replica token resolve on queue-group stickiness.
 6. **Progress notification high-volume redaction** — shed rules under load or sample audit `rewrites` for `notifications/progress` bursts (ADR 0020 latency note).
-7. **WASM redaction component** — when to migrate verbose rule tables to Tier 3 (`MCP_GATEWAY_PLAN.md` Phase 3) without changing verb semantics.
+7. **WASM redaction component** — when to migrate verbose rule tables to Tier 3 (Phase 3) without changing verb semantics.
 8. **Shadow redaction mode** — `reference-error-codes.md` proposes observability-only redaction without schema validation; pin semantics in failure-mode ADR follow-up.
 9. **Multi-tenant `SchemaCacheKey`** — tenant in cache key (ADR 0023 Q3) affects which schema validates redaction paths under soft tenancy.
 
@@ -320,7 +320,7 @@ When a rule path is not in schema, omit that rule and continue.
 |---------|----------|
 | **`redaction_enabled=false` **(proposed)** | Gateway skips steps 6–7 and 10; forwards params/result verbatim; audit omits `rewrites`; CEL/SpiceDB unchanged. |
 | **`schema_cache_enabled=false`** (ADR 0023) | Direct schema fetch on miss; redaction still enforced when rules exist — rollback of cache only, not redaction. |
-| **Bundle pointer rollback** | Hot-swap to prior bundle `policy_version` with known-good `redaction:` section ([MCP_GATEWAY_PLAN.md] § Bundles). |
+| **Bundle pointer rollback** | Hot-swap to prior bundle `policy_version` with known-good `redaction:` section (see [ADR 0026](0026-bundle-hot-swap-rollback.md)). |
 | **Verb-level disable** | **(proposed)** `redaction_disable_verbs: [tokenize]` without disabling hash/mask/drop. |
 | **Emergency passthrough** | Per-tenant `redaction_enforcement: audit` **(proposed)** — compute `rewrites`, audit would-have-redacted, forward plaintext — break-glass with operator ticket; not default. |
 
@@ -379,8 +379,7 @@ Disabling redaction does not remove schema cache or CEL gates. Re-enable starts 
 | Gateway pipeline wiring | **Pending** (Block E) |
 | Audit `rewrites` field | **Pending** |
 | Integration tests | **Scaffold** (`#[ignore]`) |
-| Close `MCP_GATEWAY_PLAN.md` Block E item 5 checkbox | **Pending** (editorial after implementation) |
 
 ---
 
-*Contract sources: `MCP_GATEWAY_PLAN.md` Block E item 5, § Redaction, § Gateway lifecycle, Wire-Format Pin 7, JSON-RPC `-32104`; `rsworkspace/crates/trogon-mcp-gateway/tests/redaction_rules.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/redaction/`; `docs/identity/reference-audit-envelope.md` §11; `docs/identity/tools-list-filtering.md` §5; ADR 0023, ADR 0013, ADR 0015, ADR 0020.*
+*Contract sources: schema-driven redaction design, audit envelope schema ([reference-audit-envelope.md](../identity/reference-audit-envelope.md)), JSON-RPC `-32104`; `rsworkspace/crates/trogon-mcp-gateway/tests/redaction_rules.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/redaction/`; `docs/identity/reference-audit-envelope.md` §11; `docs/identity/tools-list-filtering.md` §5; ADR 0023, ADR 0013, ADR 0015, ADR 0020.*

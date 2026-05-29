@@ -181,7 +181,7 @@ Phasing (Block 6): `MCP_GATEWAY_AGENT_IDENTITY=off|shadow|enforce` — shadow va
 
 ### CEL namespace
 
-Extend pinned `jwt.*` roots (`MCP_GATEWAY_PLAN.md` §8):
+Extend pinned `jwt.*` roots (see [reference-cel-variables.md](../identity/reference-cel-variables.md)):
 
 | Variable | Type | Notes |
 |---|---|---|
@@ -266,7 +266,6 @@ Bootstrap callers without registry entries still operate in shadow mode; enforce
 
 ## References
 
-- `MCP_GATEWAY_PLAN.md` — § Audit, § Wire-Format Pins, § CEL variable namespace
 - `docs/a2a/explanation/auth-callout-design.md` — bootstrap JWT claim layout
 - [Uber: Solving the Agent Identity Crisis](https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/)
 

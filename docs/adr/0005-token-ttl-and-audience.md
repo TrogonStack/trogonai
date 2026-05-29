@@ -8,7 +8,7 @@
 
 Uber's agent-identity model treats long-lived, broad-scope credentials as a bootstrap artifact only. Every hop in a delegation chain receives a **fresh, short-lived JWT** whose `aud` names exactly one downstream recipient and whose `scope`/`sub` permissions are no wider than the hop requires. TrogonStack's current path validates connect-time NATS User JWTs at the gateway perimeter but **propagates** verified context headers to backends rather than minting a downstream token.
 
-This ADR pins the numeric and semantic contracts for mesh tokens so STS, gateway egress, CEL policy, and audit envelopes can be implemented without coordinated migration. Wire-format surfaces affected: `jwt.aud` in the CEL namespace (`MCP_GATEWAY_PLAN.md` § Wire-Format Pins §8), future egress header `Authorization: Bearer <mesh-token>`, and audit fields for token `exp` / `aud` mismatch.
+This ADR pins the numeric and semantic contracts for mesh tokens so STS, gateway egress, CEL policy, and audit envelopes can be implemented without coordinated migration. Wire-format surfaces affected: `jwt.aud` in the CEL namespace (see [reference-cel-variables.md](../identity/reference-cel-variables.md)), future egress header `Authorization: Bearer <mesh-token>`, and audit fields for token `exp` / `aud` mismatch.
 
 References:
 

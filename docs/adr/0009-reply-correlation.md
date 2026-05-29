@@ -12,7 +12,7 @@
 
 The Trogon MCP gateway is a **queue-group worker**: NATS delivers each ingress message on `{prefix}.gateway.request.>` to any healthy replica subscribed under the `mcp-gateway` queue group. MCP clients, however, expect **request/reply semantics** — a JSON-RPC call with an `id` must receive exactly one matching response on the reply subject they attached to the publish.
 
-That asymmetry is an irreversible architectural choice tracked in `MCP_GATEWAY_PLAN.md` Block B. Before changing the reply path, operators and implementers need a durable decision on **how the gateway correlates backend replies back to the client's inbox** when load balancing spreads ingress across replicas.
+Before changing the reply path, operators and implementers need a durable decision on **how the gateway correlates backend replies back to the client's inbox** when load balancing spreads ingress across replicas.
 
 **Phase 1 behaviour (shipped today):** The queue-group member that consumes an ingress message performs policy, calls the backend via inline `request_with_headers`, and publishes the backend payload to the **same** `Message.reply` the client supplied. Reply routing is implicit in the NATS client's pending-request table for the duration of one hop. No explicit correlation map exists in gateway code.
 
@@ -164,7 +164,7 @@ HashMap<GatewayInboxNuid, ClientReplyTo>
 
 ### Bounded map size
 
-Map entry count is bounded by the same inflight semaphores that gate backend fan-out (`MCP_GATEWAY_PLAN.md` Wire-Format Pin 9):
+Map entry count is bounded by the same inflight semaphores that gate backend fan-out (see [reference-rate-defaults.md](../identity/reference-rate-defaults.md)):
 
 | Scope | Default cap | On exceed |
 |-------|-------------|-----------|
@@ -232,6 +232,5 @@ Bidirectional flows (server→client callbacks) repeat the same termination patt
 | Phase 2a: per-instance inbox + in-memory map | **Pending** | Target first implementation slice |
 | Phase 2b: `mcp-reply-dedup` KV + reply envelope headers | **Pending** | Depends on 2a |
 | Phase 3: drain-on-SIGTERM, cancel inflight keys | **Pending** | Operational hardening |
-| `MCP_GATEWAY_PLAN.md` Block B checkbox | **Pending** | Close when ADR merges and plan references this file |
 
 **Sign-off criteria for Block B item 2:** This ADR accepted; `docs/identity/reply-correlation.md` cited as design context; Phase 2a implementation tracked separately in gateway crate work.

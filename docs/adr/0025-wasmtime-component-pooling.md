@@ -10,9 +10,9 @@
 
 ## Context
 
-Phase 3 of `trogon-mcp-gateway` loads **signed policy bundles** ([ADR 0010](0010-bundle-format.md)) containing one or more WebAssembly **Component Model** artifacts under `components/*.wasm`, linked against WIT world `policy-bundle` at `trogon:mcp-policy@0.1.0` pinned to **WASI 0.3** ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md), `MCP_GATEWAY_PLAN.md` Block F item 1).
+Phase 3 of `trogon-mcp-gateway` loads **signed policy bundles** ([ADR 0010](0010-bundle-format.md)) containing one or more WebAssembly **Component Model** artifacts under `components/*.wasm`, linked against WIT world `policy-bundle` at `trogon:mcp-policy@0.1.0` pinned to **WASI 0.3** ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md)).
 
-Every request that reaches Tier 3 policy evaluation — whether via the guest export `evaluate` on the authoritative WASM tier or via the CEL host builtin `wasm.call(component_id, input_json)` **(proposed)** — needs a **linked, initialized component instance**. Wasmtime component **instantiation and `init()`** on the hot path would dominate P50 latency; `MCP_GATEWAY_PLAN.md` § Discipline and Block F item 2 explicitly require **component pooling per bundle version**.
+Every request that reaches Tier 3 policy evaluation — whether via the guest export `evaluate` on the authoritative WASM tier or via the CEL host builtin `wasm.call(component_id, input_json)` **(proposed)** — needs a **linked, initialized component instance**. Wasmtime component **instantiation and `init()`** on the hot path would dominate P50 latency; the gateway hot-path discipline explicitly requires **component pooling per bundle version**.
 
 Without a written pooling strategy, implementation will fork on incompatible axes:
 
@@ -97,7 +97,7 @@ Semver (`manifest.version`) and guest export `version()` are **audit-only** ([mc
 |-------|---------|
 | **Single instance, serialized calls** | **Rejected** — head-of-line blocking across queue-group concurrency |
 | **Sticky instance per worker thread** | **Rejected** — poor utilization; N×memory with uneven load |
-| **Checkout per call (pool)** | **Accepted** — matches agentgateway pooling intent (`MCP_GATEWAY_PLAN.md` § Discipline); one instance serves one evaluation at a time |
+| **Checkout per call (pool)** | **Accepted** — matches agentgateway pooling intent; one instance serves one evaluation at a time |
 
 Host imports (`spicedb-check`, etc.) run on the **same tokio worker** as the checkout holder; blocking PDP calls use the gateway's existing async SpiceDB client with timeout clamped to request deadline ([reference-host-abi.md §2](../identity/reference-host-abi.md)).
 
@@ -366,4 +366,4 @@ Phase 3 implementation adds `wasmtime` (and WASI 0.3 component bindings) to `tro
 
 ---
 
-*Contract sources: [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F item 2, § Discipline, § Tier 3; [ADR 0010](0010-bundle-format.md); [ADR 0024](0024-failure-mode-matrix.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); [wasm-bundle-format.md](../identity/wasm-bundle-format.md) §8; [reference-error-codes.md](../identity/reference-error-codes.md); [reference-host-abi.md](../identity/reference-host-abi.md); `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/rpc_codes.rs`.*
+*Contract sources: [ADR 0010](0010-bundle-format.md); [ADR 0024](0024-failure-mode-matrix.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); [wasm-bundle-format.md](../identity/wasm-bundle-format.md) §8; [reference-error-codes.md](../identity/reference-error-codes.md); [reference-host-abi.md](../identity/reference-host-abi.md); `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/rpc_codes.rs`.*

@@ -10,7 +10,7 @@
 
 ## Context
 
-The Trogon MCP gateway today optimizes for **client to server** traffic: callers publish on `mcp.gateway.request.{server_id}.{method}`, the gateway authenticates, authorizes, redacts, audits, and forwards to `mcp.server.{server_id}.{method}`. NATS subject ACLs guarantee that edge clients cannot reach backend MCP servers without passing through the gateway ([ADR 0011](0011-nats-auth-callout.md), `MCP_GATEWAY_PLAN.md` § Subject ACL per principal).
+The Trogon MCP gateway today optimizes for **client to server** traffic: callers publish on `mcp.gateway.request.{server_id}.{method}`, the gateway authenticates, authorizes, redacts, audits, and forwards to `mcp.server.{server_id}.{method}`. NATS subject ACLs guarantee that edge clients cannot reach backend MCP servers without passing through the gateway ([ADR 0011](0011-nats-auth-callout.md)).
 
 MCP is **bidirectional**. After `initialize`, an MCP **server** may initiate JSON-RPC toward the **client** for capabilities the client advertised — sampling, elicitation, roots discovery, and lifecycle notifications. In `mcp-nats`, backend servers publish these on `mcp.client.{client_id}.{method}`; only the gateway may subscribe. Without an explicit enforcement design on that path, callback traffic becomes a **policy bypass**: a compromised backend that legitimately received client to server traffic can exfiltrate session context via `sampling/createMessage`, phish the user via `elicitation/create`, or fingerprint workspace layout via `roots/list` while the gateway audits only the forward path.
 
@@ -66,7 +66,7 @@ mcp.client.{id}.*   -->  session bind + CEL + SpiceDB + redact  -->  mcp.gateway
      +---- JSON-RPC reply on _INBOX.server.{nuid_s} <---- client reply --+
 ```
 
-Gateway terminates reply correlation on both legs, identical to request-direction flow ([ADR 0009](0009-reply-correlation.md)). Queue group `mcp-gateway-callbacks` on `mcp.client.>` is independent from `mcp-gateway` on `mcp.gateway.request.>` for fairness ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 3).
+Gateway terminates reply correlation on both legs, identical to request-direction flow ([ADR 0009](0009-reply-correlation.md)). Queue group `mcp-gateway-callbacks` on `mcp.client.>` is independent from `mcp-gateway` on `mcp.gateway.request.>` for fairness ([reference-queue-groups.md](../identity/reference-queue-groups.md)).
 
 ### Subject layout (mirror of request direction)
 
@@ -139,7 +139,7 @@ Agent registry `callback_permissions` block shape is deferred to a registry ADR;
 
 ### Default-deny vs default-allow matrix
 
-Fail-closed is the platform posture for high-risk callback capabilities. The gateway plan SpiceDB table ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § SpiceDB Integration Model) covers sampling and elicitation; this ADR extends it with roots and notifications per the paper spec.
+Fail-closed is the platform posture for high-risk callback capabilities. The SpiceDB integration model covers sampling and elicitation; this ADR extends it with roots and notifications per the paper spec.
 
 | MCP method | Default | SpiceDB required | Rationale |
 |---|---|---|---|
@@ -186,7 +186,7 @@ Every callback decision emits one envelope to `mcp.audit.{outcome}.callback.{met
 | `caller.sub` | `mcp_server:{id}` on callback allow |
 | `spicedb.permission` / `spicedb.subject` / `spicedb.resource` | When SpiceDB checked — inverted tuple fields |
 
-Full example and deny envelope shape: [bidirectional-enforcement.md](../identity/bidirectional-enforcement.md) § Audit envelope. Callback audit extends Pin 7 ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 7) without breaking forward-compat (`consumers MUST tolerate unknown fields`).
+Full example and deny envelope shape: [bidirectional-enforcement.md](../identity/bidirectional-enforcement.md) § Audit envelope. Callback audit extends the audit envelope schema ([reference-audit-envelope.md](../identity/reference-audit-envelope.md)) without breaking forward-compat (`consumers MUST tolerate unknown fields`).
 
 Audit subject `{method_root}` mapping:
 
@@ -407,7 +407,7 @@ Operators control callback enforcement without redeploying gateway binaries via 
 | **v1 default** | `audit` | Policy evaluates; denials logged in audit with full Pin 7 envelope; traffic forwarded — observe false positives and volume |
 | **Soak complete** | `enforce` | Flip tenant (or global KV default) to `enforce`; denials return JSON-RPC errors to backend server inbox |
 | **Incident / break-glass** | `off` | Disable callback policy evaluation; rely on NATS ACLs and session binding only — requires explicit operator ack and time-bounded change ticket |
-| **Bundle rollback** | Pointer flip | Hot-swap bundle version to prior known-good `callback:` rules ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Bundles) |
+| **Bundle rollback** | Pointer flip | Hot-swap bundle version to prior known-good `callback:` rules (see [ADR 0026](0026-bundle-hot-swap-rollback.md)) |
 | **Feature gate** | Env override **(proposed)** | `MCP_GATEWAY_CALLBACK_ENFORCEMENT=off\|audit\|enforce` overrides tenant default for canary instances |
 
 Rollback does **not** require NATS subject grammar changes — `mcp.client.*` and `mcp.gateway.callback.*` remain stable. Downgrade from `enforce` to `audit` is immediate (config/KV flip); downgrade to `off` should emit `mcp.control.audit` or operator alert because audit completeness regresses.
@@ -424,7 +424,7 @@ Shadow mode remains available: log `would_deny: true` without blocking, equivale
 | Normative design spec | **Done** | [bidirectional-enforcement.md](../identity/bidirectional-enforcement.md) |
 | Callback audience URI | **Done** | [ADR 0005](0005-token-ttl-and-audience.md), `trogon-mcp-gateway::egress::audience` |
 | Subscription scoping test scaffold | **Scaffold** | `tests/subscription_scoping.rs` (ignored; ADR 0011) |
-| Queue group `mcp-gateway-callbacks` | **Pinned** | `MCP_GATEWAY_PLAN.md` Pin 3 — not wired |
+| Queue group `mcp-gateway-callbacks` | **Pinned** | [reference-queue-groups.md](../identity/reference-queue-groups.md) — not wired |
 | Callback ingress consumer | **Pending** (Phase 4) | `trogon-mcp-gateway` |
 | `callback:` bundle section + CEL variables | **Pending** (Phase 4) | Policy loader |
 | SpiceDB inverted tuple schema | **Partial** — sampling/elicit in plan table; roots/notify proposed | SpiceDB / Zed |
@@ -432,7 +432,6 @@ Shadow mode remains available: log `would_deny: true` without blocking, equivale
 | HITL callback parking | **Pending** (Phase 4) | `approvals/` |
 | Integration tests (deny sampling, allow elicitation, HITL) | **Pending** (Phase 4) | NATS harness |
 | `reverse_direction_enforcement` tenant flag | **Pending** (Phase 4) | KV config |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 7 checkbox | **Pending** | Editorial after ADR acceptance |
 
 ---
 

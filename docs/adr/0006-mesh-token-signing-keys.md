@@ -6,7 +6,7 @@
 
 ## Context
 
-The mesh Security Token Service (STS) will **mint** short-lived, audience-scoped JWTs per hop. Today `trogon-mcp-gateway` only **validates** inbound JWTs via `MCP_GATEWAY_JWT_*`: JWKS URI, static RSA PEM, or HS256 secret, with phased `off` / `validate` / `require` (`MCP_GATEWAY_PLAN.md:80`). Minting introduces a new trust anchor: whoever holds the STS signing key can impersonate any mesh identity within the claims the STS is allowed to emit.
+The mesh Security Token Service (STS) will **mint** short-lived, audience-scoped JWTs per hop. Today `trogon-mcp-gateway` only **validates** inbound JWTs via `MCP_GATEWAY_JWT_*`: JWKS URI, static RSA PEM, or HS256 secret, with phased `off` / `validate` / `require`. Minting introduces a new trust anchor: whoever holds the STS signing key can impersonate any mesh identity within the claims the STS is allowed to emit.
 
 Requirements from Block 0 and Block 2.1:
 
@@ -163,7 +163,7 @@ Distinct `iss` values separate bootstrap (auth-callout) from mesh (STS) keys so 
 - [ ] **Algorithm choice:** RS256 (widest compatibility) vs. ES256 (smaller tokens, already supported by gateway)?
 - [ ] **Vault vs. KMS** when both exist — pick one org-wide standard or support both via `SigningKeySource` config?
 - [ ] **Emergency revocation SLA** — how quickly must `kid` removal propagate via KV watch vs. HTTPS cache TTL?
-- [x] **OAuth-MCP composition** (`MCP_GATEWAY_PLAN.md:67`) — does the external IdP trust mesh JWKS over HTTPS, or only internal KV? **Resolved: deferred until first OAuth-fronted MCP client. Same-day add when the first caller arrives; not standing work.**
+- [x] **OAuth-MCP composition** — does the external IdP trust mesh JWKS over HTTPS, or only internal KV? **Resolved: deferred until first OAuth-fronted MCP client. Same-day add when the first caller arrives; not standing work.**
 - [ ] **Per-tenant signing keys** (ADR 0001) — one KMS key per tenant vs. single mesh key with tenant in claims?
 - [ ] **Auth-callout `vault` source** — implement once and share Vault client/config with STS, or separate paths?
 
@@ -175,7 +175,6 @@ Distinct `iss` values separate bootstrap (auth-callout) from mesh (STS) keys so 
 
 ## References
 
-- `MCP_GATEWAY_PLAN.md:80` — gateway JWT validation modes
 - `docs/a2a/how-to/operators/auth-callout-deployment.md` — rotation overlap pattern
 - `rsworkspace/crates/trogon-mcp-gateway/README.md` — `MCP_GATEWAY_JWT_*` variables
 - `docs/security/threat-model.md` — SR-05 operator key compromise

@@ -17,7 +17,7 @@ Without an agreed session model, Phase 2 features that depend on session-scoped 
 | Concern | Why session placement matters |
 |---|---|
 | Negotiated `protocolVersion` and capabilities | Fixed at `initialize`; every post-init RPC must see the same negotiated view regardless of which replica handles the message |
-| ZedToken cache keyed to session id | SpiceDB consistency token scoped to one MCP session ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) SpiceDB section) |
+| ZedToken cache keyed to session id | SpiceDB consistency token scoped to one MCP session (see [ADR 0014](0014-bulk-check-zedtoken-cache.md)) |
 | Lazy backend `initialize` per `(session, server_id)` | Gateway terminates client `initialize`; backend init snapshot must survive replica switch |
 | Mesh egress token cache | Cache keys include `session_id`; mint on replica A must be valid when replica B serves the next call |
 | Schema cache invalidation | `notifications/tools/list_changed` bumps generation per session binding |
@@ -34,7 +34,7 @@ The tension appears concretely the first time:
 
 **Failover requirement:** survive replica loss **without** requiring client re-`initialize`, except when the session record itself is gone (TTL expiry, explicit close, or KV unavailability beyond SLO).
 
-**Design context:** The full MCP lifecycle mapping, decision matrix, JSON schema, failure-mode table, and observability contract live in [mcp-session-model.md](../identity/mcp-session-model.md). Block C item 2 in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) left the backing-store choice open until this ADR.
+**Design context:** The full MCP lifecycle mapping, decision matrix, JSON schema, failure-mode table, and observability contract live in [mcp-session-model.md](../identity/mcp-session-model.md). The backing-store choice remained open until this ADR.
 
 **What stays undecided if this decision is not pinned:**
 
@@ -58,7 +58,7 @@ The gateway **terminates** client `initialize` by default: the client sees `trog
 
 ## Decision
 
-**Adopt Strategy A: JetStream KV-backed session state** as the v1 session model. Edge subject grammar remains unchanged (`mcp.gateway.request.{server_id}.{method}`). Session identity travels in the NATS header **`mcp-session-id`** (wire pin in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins). Any gateway replica reads and writes the session record in JetStream KV on each session-touching turn.
+**Adopt Strategy A: JetStream KV-backed session state** as the v1 session model. Edge subject grammar remains unchanged (`mcp.gateway.request.{server_id}.{method}`). Session identity travels in the NATS header **`mcp-session-id`** (wire pin in [reference-nats-headers.md](../identity/reference-nats-headers.md)). Any gateway replica reads and writes the session record in JetStream KV on each session-touching turn.
 
 Sticky routing via session-embedded subjects (Strategy B) and per-session ephemeral NATS consumers (Strategy C) are **rejected for v1**; see Alternatives considered. Phase 3 optional read-through LRU or hybrid sticky **hint** headers may layer on top without changing the authoritative KV schema.
 
@@ -209,7 +209,7 @@ Each gateway replica **may** keep a 5–15 s LRU of session records keyed `{tena
 
 - **HA without subject changes.** Any replica serves any post-init message after peer crash or rolling deploy; clients need not know which replica handled `initialize`.
 - **Orthogonal to reply correlation.** Phase 1/2 correctly keeps per-request inbox maps in memory ([ADR 0009](0009-reply-correlation.md)); session KV handles only cross-turn state — the same separation as JWT state vs request/reply elsewhere in NATS deployments.
-- **Already the plan default.** [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Session correlation names bucket `mcp-sessions` and lists stored fields; this ADR makes the schema and lifecycle normative for implementers.
+- **Already the design default.** The session-correlation design (see [mcp-session-model.md](../identity/mcp-session-model.md)) names bucket `mcp-sessions` and lists stored fields; this ADR makes the schema and lifecycle normative for implementers.
 - **No client ACL impact.** Session id stays in headers, not subjects; edge publish patterns remain `mcp.gateway.request.>`.
 - **Incremental perf path.** Optional LRU or Phase 3 sticky hint can reduce KV read RTT without forking the schema; Strategy B alone is insufficient for failover unless KV backs mapping anyway.
 - **Audit-ready.** Session lifecycle maps to existing `mcp.audit.allow/deny/error.request.*` grammar with `session_id` in envelope ([agent-traffic.md](../identity/agent-traffic.md)).
@@ -299,7 +299,7 @@ Introduce a session segment or parallel subject tree, e.g. `mcp.gateway.session.
 |---|---|
 | **Pros** | Lowest steady-state latency when sticky delivery works; session id visible in subject for log filtering. |
 | **Cons** | NATS queue groups do not provide sticky delivery by default; requires custom partition assignment or dedicated subscription per session; failover weak unless KV backs mapping anyway; new subject tree, auth-callout ACL updates, client adapter changes, federation rewrite rules; conflicts with "tenancy is not a subject segment" discipline; hot session pins one replica CPU. |
-| **Verdict** | **Rejected for v1.** Documented as Phase 3 optional perf optimization in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) only when KV remains authoritative. Near-miss: latency profile may justify optional `mcp-session-affinity` response header hint without changing edge grammar. |
+| **Verdict** | **Rejected for v1.** Documented as a Phase 3 optional perf optimization only when KV remains authoritative. Near-miss: latency profile may justify optional `mcp-session-affinity` response header hint without changing edge grammar. |
 
 ### (c) Per-session NATS subject ownership / ephemeral consumer (Strategy C)
 
@@ -378,13 +378,12 @@ On reply: delete inflight sub-key; audit with session_id
 |---|---|---|
 | Block C session model ADR | **Done** (this document) | `docs/adr/0018-session-model.md` |
 | Normative design spec | **Done** | [mcp-session-model.md](../identity/mcp-session-model.md) |
-| Wire pin `mcp-session-id` | **Specified** | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins |
+| Wire pin `mcp-session-id` | **Specified** | [reference-nats-headers.md](../identity/reference-nats-headers.md) |
 | Provision KV bucket `mcp-sessions` | **Pending** (Phase 2) | Terraform/Helm with gateway config |
 | Gateway session load/store/CAS | **Pending** (Phase 2) | `trogon-mcp-gateway` |
 | Inflight sub-keys + cancel fan-out | **Pending** (Phase 2) | `mcp.control.session.cancel.*` |
 | Mesh egress cache generation hook | **Pending** (Phase 2) | `egress/cache.rs` |
 | Metrics + trace spans | **Pending** (Block G) | NATS metrics subjects above |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 2 checkbox | **Pending** | Editorial after ADR acceptance |
 
 ---
 

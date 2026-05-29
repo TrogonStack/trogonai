@@ -12,7 +12,7 @@
 
 Phase 3 introduces Tier-3 WASM policy evaluation inside the gateway hot path. A single `tools/call` request already spans ingress authz (CEL), optional NATS-callout plugins, SpiceDB, egress mint, and audit publish. Without an explicit tracing contract at the Wasmtime boundary, WASM evaluation becomes a **trace hole**: operators see latency in `mcp.gateway.authz` but cannot attribute time to guest logic, host imports, or traps.
 
-`MCP_GATEWAY_PLAN.md` Block F item 3 requires **tracing across the WASM boundary** with span context carried as part of **`request-ctx`**. The Block B sign-off WIT ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md)) supersedes the plan's illustrative `request-ctx` record with **`policy-input`** + **`attributes-json`**, which today carries `trace_id` (32-hex) but not the full W3C carrier. [otel-wiring.md](../identity/otel-wiring.md) defers WASM boundary spans to v2 (Block F) while pinning W3C propagation on NATS headers and parent-based sampling on the host.
+**Tracing across the WASM boundary** carries span context as part of **`request-ctx`**. The WIT sign-off ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md)) supersedes the earlier illustrative `request-ctx` record with **`policy-input`** + **`attributes-json`**, which today carries `trace_id` (32-hex) but not the full W3C carrier. [otel-wiring.md](../identity/otel-wiring.md) defers WASM boundary spans to v2 while pinning W3C propagation on NATS headers and parent-based sampling on the host.
 
 Downstream constraints:
 
@@ -167,7 +167,7 @@ Import-level errors (`spicedb_unavailable`, etc.) set the **import child span** 
 
 ### 7. Pipeline ordering and trace continuity
 
-Per `MCP_GATEWAY_PLAN.md` policy pipeline (CEL → NATS-callout → WASM):
+Per the policy pipeline (CEL → NATS-callout → WASM):
 
 | Phase | Span | Trace parent |
 |-------|------|--------------|
@@ -237,7 +237,7 @@ Keep `traceparent` out of `policy-input`; rely entirely on store user data.
 | | |
 |-|-|
 | **Pros** | Smaller guest input; no duplicate trace id fields. |
-| **Cons** | Breaks `MCP_GATEWAY_PLAN.md` Block F item 3 (`request-ctx` / policy-input visibility); audit replay and bundle dry-run (`agctl`) cannot see carrier without host-only tooling; conflicts with [mcp-policy-wit-sketch.md Appendix B](../identity/mcp-policy-wit-sketch.md) worked example. |
+| **Cons** | Breaks tracing across the WASM boundary (`request-ctx` / policy-input visibility); audit replay and bundle dry-run (`agctl`) cannot see carrier without host-only tooling; conflicts with [mcp-policy-wit-sketch.md Appendix B](../identity/mcp-policy-wit-sketch.md) worked example. |
 | **Verdict** | **Rejected.** Dual channel: snapshot in JSON + authoritative store. |
 
 ### Encode trace context as custom Wasmtime host `get-state` syscall outside WIT
@@ -332,4 +332,4 @@ Rollback does **not** disable global OTel export or ingress propagation ([otel-w
 
 ---
 
-*Contract sources: `MCP_GATEWAY_PLAN.md` Block F items 1–3; `docs/identity/mcp-policy-wit-sketch.md`; `docs/identity/reference-host-abi.md`; `docs/identity/otel-wiring.md`; `docs/identity/reference-nats-headers.md`; `rsworkspace/crates/trogon-mcp-gateway/tests/otel_span_shape.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/traceparent_propagation.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`; `rsworkspace/crates/trogon-nats/src/messaging.rs` (`inject_trace_context`); `rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`*
+*Contract sources: `docs/identity/mcp-policy-wit-sketch.md`; `docs/identity/reference-host-abi.md`; `docs/identity/otel-wiring.md`; `docs/identity/reference-nats-headers.md`; `rsworkspace/crates/trogon-mcp-gateway/tests/otel_span_shape.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/traceparent_propagation.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/wasm_host_abi.rs`; `rsworkspace/crates/trogon-nats/src/messaging.rs` (`inject_trace_context`); `rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`*

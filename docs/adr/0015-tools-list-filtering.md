@@ -25,7 +25,7 @@ Phase 1 of `trogon-mcp-gateway` forwards list responses from the backend **verba
 
 **agentgateway pattern**
 
-agentgateway's `mcpAuthorization` policy is the reference design (`MCP_GATEWAY_PLAN.md` § MCP Authorization). A single `rules:` list of CEL expressions with **OR semantics** gates mutating methods. The same rule set **automatically filters `list_tools` responses**: the engine re-evaluates each rule against every candidate item with `mcp.tool.name` bound to that item, and drops items that do not match. The Trogon gateway adopts this pattern directly rather than a separate `decision: shape` verb or parallel list-only policy language.
+agentgateway's `mcpAuthorization` policy is the reference design. A single `rules:` list of CEL expressions with **OR semantics** gates mutating methods. The same rule set **automatically filters `list_tools` responses**: the engine re-evaluates each rule against every candidate item with `mcp.tool.name` bound to that item, and drops items that do not match. The Trogon gateway adopts this pattern directly rather than a separate `decision: shape` verb or parallel list-only policy language.
 
 **Why per-item CEL re-evaluation**
 
@@ -37,7 +37,7 @@ The algorithm, CEL variable bindings, purity constraints, upstream vs downstream
 
 **What breaks if this stays undecided**
 
-- Block E item 2 cannot land: list and call remain decoupled, violating the agentgateway adoption goal in `MCP_GATEWAY_PLAN.md`.
+- `tools/list` filtering via CEL cannot land: list and call remain decoupled, violating the agentgateway adoption goal.
 - ADR 0014 (BulkCheckPermission + ZedToken cache) lacks a defined consumer for list shaping; without per-item semantics, bulk PDP integration has no target contract.
 - Operator bundles cannot rely on a single rule set for authorization and catalogue visibility; drift between list predicates and call predicates becomes likely.
 - Hierarchical policy merge (`docs/identity/hierarchical-policy-merge.md`) cannot specify how merged rules apply during `*/list` shaping.
@@ -238,7 +238,6 @@ Tracing spans on `mcp_gateway.handle_ingress` should record `gateway.catalog.fil
 | Design spec `docs/identity/tools-list-filtering.md` | **Done** (paper spec) |
 | CEL variable pin `response.list_filter_index` in `docs/identity/reference-cel-variables.md` | **Done** (spec) |
 | BulkCheckPermission + ZedToken cache spec (`docs/identity/bulk-check-permission.md`) | **Done** (paper spec); ADR 0014 acceptance pending sibling task |
-| `MCP_GATEWAY_PLAN.md` Block E item 2 checklist entry | **Pending** implementation |
 | `filter_catalog_list_response` / `filter_tools_list_response` in `gateway.rs` | **Pending** |
 | `PolicyBundle` list filter purity checker | **Pending** |
 | `AuditEnvelope` catalogue_* fields | **Pending** |

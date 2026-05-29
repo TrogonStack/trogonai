@@ -10,7 +10,7 @@
 
 ## Context
 
-`MCP_GATEWAY_PLAN.md` Block A item 1 is the strategic fork that every other gateway decision branches on: whether the MCP gateway is a **feature inside TrogonStack** or a **standalone security and governance product**. Leadership has **not** chosen either path. Engineering has proceeded with reversible technical ADRs (tenancy, on-bus default, bundle format, rate-limit placement) while explicitly treating positioning as open. This ADR records the question, the operational shapes of each option, downstream dependencies, and the evidence leadership needs -- it does **not** select a winner.
+Product positioning is the strategic fork that every other gateway decision branches on: whether the MCP gateway is a **feature inside TrogonStack** or a **standalone security and governance product**. Leadership has **not** chosen either path. Engineering has proceeded with reversible technical ADRs (tenancy, on-bus default, bundle format, rate-limit placement) while explicitly treating positioning as open. This ADR records the question, the operational shapes of each option, downstream dependencies, and the evidence leadership needs -- it does **not** select a winner.
 
 The fork is **product and go-to-market**, not wire-protocol. The same NATS subject grammar, JSON-RPC semantics, CEL + SpiceDB policy model, and JetStream audit envelope can ship under either positioning. What changes is **scope, sequencing, commercial packaging, support boundary, documentation home, and default posture** when two good-faith operators configure the same binary differently.
 
@@ -120,7 +120,7 @@ This ADR is being moved to Accepted by the engineering owner under explicit stan
 
 ### Historical context: prior deferral (now resolved)
 
-The earlier draft of this ADR explicitly deferred the decision and recommended that engineering treat `MCP_GATEWAY_PLAN.md` Take as recommendation only. That deferral is **closed** with this acceptance. Implementers may now cite ADR 0017 (Accepted, Option A) instead of carrying "positioning open; do not ratchet" disclaimers.
+The earlier draft of this ADR explicitly deferred the decision and recommended treating the gateway-program guidance as recommendation only. That deferral is **closed** with this acceptance. Implementers may now cite ADR 0017 (Accepted, Option A) instead of carrying "positioning open; do not ratchet" disclaimers.
 
 ---
 
@@ -296,7 +296,6 @@ This ADR moves from **Proposed** to **Accepted** when **all** of the following a
 | **Support boundary published** | Internal runbook section defines incident ownership for gateway, STS, registry, SpiceDB, NATS under chosen option. |
 | **Documentation home chosen** | Issue or plan entry to either keep `docs/identity/` as sole home (Option A) or create `docs/mcp-gateway/` migration (Option B) with timeline. |
 | **Bundle distribution default** | Written default for new customers: OCI-primary vs KV-primary, consistent with ADR 0010 implementation priority. |
-| **Block A item 1 checkbox** | `MCP_GATEWAY_PLAN.md` Block A item 1 marked complete with link to this ADR version. |
 | **Downstream ADR triggers** | Any ADR that assumed positioning gets amendment or new ADR if verdict contradicts prior implicit bias (tracked in plan Block H). |
 
 **Rejected resolution paths:**
