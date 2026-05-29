@@ -111,8 +111,8 @@ impl Message {
 /// - `ServerSide`: a built-in xAI tool (e.g. `"web_search"`). Serialized as
 ///   `{ "type": "<name>" }`.
 /// - `Function`: a client-side function the runner will execute. Serialized
-///   as `{ "type": "function", "function": { "name": ..., "description": ...,
-///   "parameters": ... } }`.
+///   as `{ "type": "function", "name": ..., "description": ..., "parameters": ... }`
+///   (xAI Responses API shape — flat, not nested under a `function` key).
 #[derive(Clone, Debug)]
 pub enum ToolSpec {
     ServerSide(String),
@@ -143,13 +143,15 @@ impl Serialize for ToolSpec {
                 map.end()
             }
             Self::Function { name, description, parameters } => {
+                // xAI Responses API expects a flat tool object:
+                //   { "type": "function", "name": ..., "description": ..., "parameters": ... }
+                // (not the OpenAI Chat Completions shape where name/description/parameters
+                // are nested under a "function" key.)
                 serde_json::json!({
                     "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": description,
-                        "parameters": parameters,
-                    }
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters,
                 })
                 .serialize(s)
             }
@@ -257,8 +259,14 @@ impl FinishReason {
 /// An event emitted by the Responses API streaming endpoint.
 #[derive(Debug, Clone)]
 pub enum XaiEvent {
-    /// A text chunk from the model.
+    /// A text chunk from the model (incremental, via `message.delta` /
+    /// `response.output_text.delta`).
     TextDelta { text: String },
+    /// The complete assistant text delivered non-incrementally via
+    /// `response.output_item.done`. The agent uses this only when no
+    /// `TextDelta` events preceded it in the same turn — it is a fallback for
+    /// reasoning models (e.g. grok-4) that skip streaming deltas entirely.
+    TextComplete { text: String },
     /// The model requested a function call.
     ///
     /// In the Responses API, function calls are delivered as a complete chunk
@@ -485,8 +493,8 @@ struct SseState {
     /// streaming events (`response.output_item.added` →
     /// `response.function_call_arguments.delta` →
     /// `response.function_call_arguments.done`).
-    /// Keyed by `call_id`; value is `(name, accumulated_arguments)`.
-    pending_fc: HashMap<String, (String, String)>,
+    /// Keyed by `item_id`; value is `(call_id, name, accumulated_arguments)`.
+    pending_fc: HashMap<String, (String, String, String)>,
 }
 
 /// Parse a raw SSE byte stream from the Responses API into `XaiEvent`s.
@@ -559,6 +567,9 @@ fn parse_sse(
 ///   grok-3-mini) is logged at debug level and discarded — the ACP protocol
 ///   has no dedicated reasoning block type.
 /// - `response.reasoning_summary_text.delta` → logged at debug level, discarded
+/// - `response.output_item.done` → `TextDelta` when item type is `message`
+///   (non-streaming delivery path used by reasoning models like grok-4 that do
+///   not emit `response.output_text.delta` events)
 /// - `function_call` → `FunctionCall` (complete, not streamed in fragments)
 /// - `response.web_search_call.completed` / `response.x_search_call.completed`
 ///   → `ServerToolCompleted` (tool finished; agent advances tool to Completed)
@@ -582,7 +593,12 @@ fn process_sse_line(
     line: &str,
     response_id_emitted: &mut bool,
     pending: &mut VecDeque<XaiEvent>,
-    pending_fc: &mut HashMap<String, (String, String)>,
+    // Keyed by item_id (the `id` field on the output item, used in delta/done
+    // events). Value is (call_id, name, accumulated_args). call_id is what
+    // gets sent back in function_call_output — it differs from item_id on
+    // grok-4.3 which uses `item_id` in streaming events but `call_id` in the
+    // output item and expects `call_id` in function_call_output responses.
+    pending_fc: &mut HashMap<String, (String, String, String)>,
 ) {
     let data = match line.strip_prefix("data: ") {
         Some(d) => d,
@@ -671,43 +687,69 @@ fn process_sse_line(
         // to pending_fc, so no double-emit is possible).
         "response.output_item.added" => {
             // Announces a new output item. When item.type == "function_call",
-            // record call_id and name so deltas can be accumulated by call_id.
+            // record call_id and name keyed by item.id so deltas (which carry
+            // item_id, not call_id) can be accumulated correctly.
+            // grok-4.3 sends item.id ("fc_...") in delta/done events but the
+            // actual call_id ("call-...") is in item.call_id and must be used
+            // when returning function_call_output results.
             if val["item"]["type"].as_str() == Some("function_call") {
+                let item_id = val["item"]["id"].as_str().unwrap_or("").to_string();
                 let call_id = val["item"]["call_id"].as_str().unwrap_or("").to_string();
                 let name = val["item"]["name"].as_str().unwrap_or("").to_string();
-                if !call_id.is_empty() {
-                    pending_fc.insert(call_id, (name, String::new()));
+                if !item_id.is_empty() {
+                    pending_fc.insert(item_id, (call_id, name, String::new()));
                 }
             }
         }
         "response.function_call_arguments.delta" => {
             // Partial arguments fragment — append to the in-flight buffer.
-            let call_id = val["call_id"].as_str().unwrap_or("");
+            // grok-4.3 uses item_id (not call_id) to reference the in-flight item.
+            let item_id = val["item_id"].as_str().unwrap_or("");
             let delta = val["delta"].as_str().unwrap_or("");
-            if !call_id.is_empty()
+            if !item_id.is_empty()
                 && !delta.is_empty()
-                && let Some(entry) = pending_fc.get_mut(call_id)
+                && let Some(entry) = pending_fc.get_mut(item_id)
             {
-                entry.1.push_str(delta);
+                entry.2.push_str(delta);
             }
         }
         "response.function_call_arguments.done" => {
             // Complete function call — arguments are authoritative here.
-            // Name falls back to what was recorded in output_item.added.
-            let call_id = val["call_id"].as_str().unwrap_or("").to_string();
-            let arguments = val["arguments"].as_str().unwrap_or("").to_string();
-            let name = val["name"]
-                .as_str()
-                .map(str::to_string)
-                .or_else(|| pending_fc.get(&call_id).map(|(n, _)| n.clone()))
-                .unwrap_or_default();
-            pending_fc.remove(&call_id);
-            if !call_id.is_empty() || !name.is_empty() {
+            // grok-4.3 sends item_id (not call_id) in this event; look up the
+            // actual call_id and name from pending_fc which was keyed by item_id.
+            let item_id = val["item_id"].as_str().unwrap_or("");
+            let final_args = val["arguments"].as_str().unwrap_or("").to_string();
+            if let Some((call_id, name, _)) = pending_fc.remove(item_id)
+                && (!call_id.is_empty() || !name.is_empty())
+            {
                 pending.push_back(XaiEvent::FunctionCall {
                     call_id,
                     name,
-                    arguments,
+                    arguments: final_args,
                 });
+            }
+        }
+        // ── Non-streaming text delivery via output_item.done ─────────────────
+        // Reasoning models (e.g. grok-4) may skip `response.output_text.delta`
+        // entirely and deliver the assistant text non-incrementally via this
+        // event. Extract text from each `output_text` content block and emit
+        // `TextComplete` (not `TextDelta`) so the agent can skip it when
+        // streaming deltas were already received for this turn.
+        "response.output_item.done" => {
+            if val["item"]["type"].as_str() == Some("message") {
+                if let Some(content) = val["item"]["content"].as_array() {
+                    for block in content {
+                        if block["type"].as_str() == Some("output_text") {
+                            if let Some(text) = block["text"].as_str() {
+                                if !text.is_empty() {
+                                    pending.push_back(XaiEvent::TextComplete {
+                                        text: text.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         // ── Server-side tool call lifecycle events ───────────────────────────
@@ -1112,15 +1154,14 @@ mod tests {
 
     #[test]
     fn function_call_arguments_done_emits_function_call() {
-        // response.function_call_arguments.done carries the complete call.
-        let line = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_abc","name":"web_search","arguments":"{\"q\":\"rust\"}"}"#;
-        let event = parse_line(line).unwrap();
-        match event {
-            XaiEvent::FunctionCall {
-                call_id,
-                name,
-                arguments,
-            } => {
+        // response.function_call_arguments.done emits a FunctionCall using
+        // call_id and name from the preceding output_item.added.
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_abc","call_id":"call_abc","name":"web_search"}}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_abc","arguments":"{\"q\":\"rust\"}"}"#;
+        let events = parse_lines(&[added, done]);
+        assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
+        match &events[0] {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
                 assert_eq!(call_id, "call_abc");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"rust"}"#);
@@ -1131,25 +1172,18 @@ mod tests {
 
     #[test]
     fn function_call_streaming_sequence_output_item_added_delta_done() {
-        // Full three-event OpenAI spec sequence: added → delta → done.
-        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"web_search"}}"#;
-        let delta1 = r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\"q\":"}"#;
-        let delta2 = r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"\"test\"}"}"#;
-        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"web_search","arguments":"{\"q\":\"test\"}"}"#;
+        // Full three-event grok-4.3 sequence: added → delta(s) → done.
+        // item_id (not call_id) is used in delta/done to reference the in-flight item.
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"web_search"}}"#;
+        let delta1 = r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"q\":"}"#;
+        let delta2 = r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"test\"}"}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"test\"}"}"#;
 
         let events = parse_lines(&[added, delta1, delta2, done]);
         // Only the done event emits a FunctionCall (added/delta are stateful, no events).
-        assert_eq!(
-            events.len(),
-            1,
-            "expected exactly one FunctionCall: {events:?}"
-        );
+        assert_eq!(events.len(), 1, "expected exactly one FunctionCall: {events:?}");
         match &events[0] {
-            XaiEvent::FunctionCall {
-                call_id,
-                name,
-                arguments,
-            } => {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "web_search");
                 assert_eq!(arguments, r#"{"q":"test"}"#);
@@ -1159,11 +1193,14 @@ mod tests {
     }
 
     #[test]
-    fn function_call_done_without_prior_added_still_emits() {
-        // done without a preceding output_item.added — name comes from done itself.
-        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_2","name":"x_search","arguments":"{}"}"#;
-        let event = parse_line(done).unwrap();
-        assert!(matches!(event, XaiEvent::FunctionCall { name, .. } if name == "x_search"));
+    fn function_call_done_without_prior_added_is_ignored() {
+        // done with an item_id that has no matching output_item.added entry in
+        // pending_fc — the remove() returns None and no FunctionCall is emitted.
+        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_ghost","arguments":"{}"}"#;
+        assert!(
+            parse_line(done).is_none(),
+            "done for unknown item_id must produce no event"
+        );
     }
 
     #[test]
@@ -1474,28 +1511,28 @@ mod tests {
         );
     }
 
-    // ── function_call_arguments.delta for unknown call_id ─────────────────────
+    // ── function_call_arguments.delta for unknown item_id ─────────────────────
 
     #[test]
-    fn function_call_arguments_delta_unknown_call_id_is_ignored() {
+    fn function_call_arguments_delta_unknown_item_id_is_ignored() {
         // A delta that arrives without a preceding output_item.added for its
-        // call_id must not panic or produce any event — the entry is simply absent
+        // item_id must not panic or produce any event — the entry is simply absent
         // from pending_fc so the delta is a no-op.
-        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"ghost_id","delta":"{\"q\":"}"#;
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_ghost","delta":"{\"q\":"}"#;
         assert!(
             parse_line(delta).is_none(),
-            "delta for unknown call_id must produce no event"
+            "delta for unknown item_id must produce no event"
         );
     }
 
     #[test]
-    fn function_call_arguments_delta_empty_call_id_is_ignored() {
-        // `call_id` is empty string — the guard `!call_id.is_empty()` rejects it,
+    fn function_call_arguments_delta_empty_item_id_is_ignored() {
+        // `item_id` is empty string — the guard `!item_id.is_empty()` rejects it,
         // so the delta must be silently discarded without panicking.
-        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"{\"q\":"}"#;
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","item_id":"","delta":"{\"q\":"}"#;
         assert!(
             parse_line(delta).is_none(),
-            "delta with empty call_id must produce no event"
+            "delta with empty item_id must produce no event"
         );
     }
 
@@ -1557,6 +1594,48 @@ mod tests {
         assert!(
             matches!(finished, Some(FinishReason::Other(s)) if s == "in_progress"),
             "unknown status must map to FinishReason::Other(status), got: {finished:?}"
+        );
+    }
+
+    // ── response.output_item.done: non-streaming text delivery ───────────────
+
+    #[test]
+    fn output_item_done_message_emits_text_complete() {
+        // grok-4 delivers assistant text non-incrementally via output_item.done
+        // when it does not emit response.output_text.delta events.
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","status":"completed","content":[{"type":"output_text","text":"Hello, how can I help?"}]}}"#;
+        let event = parse_line(line).expect("must produce TextComplete");
+        assert!(
+            matches!(event, XaiEvent::TextComplete { ref text } if text == "Hello, how can I help?"),
+            "output_item.done with output_text content must produce TextComplete: {event:?}"
+        );
+    }
+
+    #[test]
+    fn output_item_done_multiple_content_blocks() {
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"first"},{"type":"output_text","text":"second"}]}}"#;
+        let events = parse_line_all(line);
+        assert_eq!(events.len(), 2, "must produce one TextComplete per content block");
+        assert!(matches!(&events[0], XaiEvent::TextComplete { text } if text == "first"));
+        assert!(matches!(&events[1], XaiEvent::TextComplete { text } if text == "second"));
+    }
+
+    #[test]
+    fn output_item_done_non_message_type_ignored() {
+        // function_call output_item.done should not emit a TextComplete
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1"}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.done with type != message must produce no event"
+        );
+    }
+
+    #[test]
+    fn output_item_done_empty_text_ignored() {
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":""}]}}"#;
+        assert!(
+            parse_line(line).is_none(),
+            "output_item.done with empty text must produce no event"
         );
     }
 
@@ -1657,15 +1736,17 @@ mod tests {
         //   done(call_1)  → FunctionCall { call_1, search, '{"q":"rust"}' }
         //   delta(call_2, second fragment)
         //   done(call_2)  → FunctionCall { call_2, lookup, '{"id":"42"}' }
+        // grok-4.3 format: output_item.added carries both `id` (item_id) and
+        // `call_id`; delta/done events reference the item by `item_id`.
         let lines = [
-            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_1","name":"search"}}"#,
-            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_2","name":"lookup"}}"#,
-            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"{\"q\":"}"#,
-            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"{\"id\":"}"#,
-            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_1","delta":"\"rust\"}"}"#,
-            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"search","arguments":"{\"q\":\"rust\"}"}"#,
-            r#"data: {"type":"response.function_call_arguments.delta","call_id":"call_2","delta":"\"42\"}"}"#,
-            r#"data: {"type":"response.function_call_arguments.done","call_id":"call_2","name":"lookup","arguments":"{\"id\":\"42\"}"}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"search"}}"#,
+            r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"lookup"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"q\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_2","delta":"{\"id\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"q\":\"rust\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_2","delta":"\"42\"}"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_2","arguments":"{\"id\":\"42\"}"}"#,
         ];
 
         let mut emitted = false;
@@ -1766,43 +1847,36 @@ mod tests {
         // `val["arguments"].as_str().unwrap_or("")` returns "" when the field is
         // absent. The event must still be emitted — not suppressed — so callers
         // can observe a function call with no argument data.
-        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_1","name":"my_tool"}"#;
-        let event = parse_line(done).expect("done without arguments must still emit FunctionCall");
-        match event {
-            XaiEvent::FunctionCall {
-                call_id,
-                name,
-                arguments,
-            } => {
+        // Requires a preceding output_item.added to register the item in pending_fc.
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"my_tool"}}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1"}"#;
+        let events = parse_lines(&[added, done]);
+        assert_eq!(events.len(), 1, "done without arguments must emit exactly one FunctionCall: {events:?}");
+        match &events[0] {
+            XaiEvent::FunctionCall { call_id, name, arguments } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(name, "my_tool");
-                assert_eq!(
-                    arguments, "",
-                    "absent arguments field must produce empty string"
-                );
+                assert_eq!(arguments, "", "absent arguments field must produce empty string");
             }
             other => panic!("expected FunctionCall, got {other:?}"),
         }
     }
 
-    // ── output_item.added: re-announced call_id overwrites name ──────────────
+    // ── output_item.added: re-announced item_id overwrites name ──────────────
 
     #[test]
-    fn output_item_added_reannounce_same_call_id_overwrites_name() {
-        // When the server sends two `output_item.added` events for the same
-        // call_id (re-announcement with a corrected name), the second insert into
-        // `pending_fc` overwrites the first. The `done` event must use the last name.
-        let added1 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"wrong_name"}}"#;
-        let added2 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_r","name":"correct_name"}}"#;
-        let done = r#"data: {"type":"response.function_call_arguments.done","call_id":"call_r","arguments":"{}"}"#;
+    fn output_item_added_reannounce_same_item_id_overwrites_name() {
+        // When the server sends two `output_item.added` events for the same item_id
+        // (re-announcement with a corrected name), the second insert into pending_fc
+        // overwrites the first. The `done` event must use the last name.
+        let added1 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_r","call_id":"call_r","name":"wrong_name"}}"#;
+        let added2 = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_r","call_id":"call_r","name":"correct_name"}}"#;
+        let done = r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_r","arguments":"{}"}"#;
         let events = parse_lines(&[added1, added2, done]);
         assert_eq!(events.len(), 1, "only the done event must emit: {events:?}");
         match &events[0] {
             XaiEvent::FunctionCall { name, .. } => {
-                assert_eq!(
-                    name, "correct_name",
-                    "second output_item.added must overwrite the name"
-                );
+                assert_eq!(name, "correct_name", "second output_item.added must overwrite the name");
             }
             other => panic!("expected FunctionCall, got {other:?}"),
         }
@@ -1846,20 +1920,20 @@ mod tests {
         );
     }
 
-    // ── response.output_item.added: empty call_id rejected ───────────────────
+    // ── response.output_item.added: empty item id rejected ───────────────────
 
     #[test]
-    fn output_item_added_empty_call_id_does_not_register_entry() {
-        // `output_item.added` with an empty call_id must be silently rejected by
-        // `if !call_id.is_empty()` — no entry is inserted into pending_fc.
+    fn output_item_added_empty_item_id_does_not_register_entry() {
+        // `output_item.added` with an empty item id must be silently rejected by
+        // `if !item_id.is_empty()` — no entry is inserted into pending_fc.
         // A subsequent delta for the same empty key finds nothing and is also
-        // a no-op (both guards reject empty call_id).
-        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"","name":""}}"#;
-        let delta = r#"data: {"type":"response.function_call_arguments.delta","call_id":"","delta":"partial"}"#;
+        // a no-op (both guards reject empty item_id).
+        let added = r#"data: {"type":"response.output_item.added","item":{"type":"function_call","id":"","call_id":"call_x","name":"my_tool"}}"#;
+        let delta = r#"data: {"type":"response.function_call_arguments.delta","item_id":"","delta":"partial"}"#;
         let events = parse_lines(&[added, delta]);
         assert!(
             events.is_empty(),
-            "added + delta with empty call_id must produce no events: {events:?}"
+            "added + delta with empty item_id must produce no events: {events:?}"
         );
     }
 
@@ -2258,9 +2332,13 @@ mod tests {
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["type"], "function");
-        assert_eq!(json["function"]["name"], "bash");
-        assert_eq!(json["function"]["description"], "Run a shell command");
-        assert!(json.get("name").is_none(), "top-level 'name' key must not appear in Function spec");
+        assert_eq!(json["name"], "bash");
+        assert_eq!(json["description"], "Run a shell command");
+        assert_eq!(json["parameters"]["type"], "object");
+        assert!(
+            json.get("function").is_none(),
+            "Responses API requires flat function spec — must not nest under 'function'"
+        );
     }
 
     // ── InputItem serialization ───────────────────────────────────────────────

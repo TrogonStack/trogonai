@@ -291,7 +291,7 @@ impl Runtime for MockRuntime {
         ))
     }
 
-    fn handle_request_permission(
+    async fn handle_request_permission(
         &self,
         _req: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {

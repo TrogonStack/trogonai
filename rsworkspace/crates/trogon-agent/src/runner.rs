@@ -117,9 +117,14 @@ pub async fn run(cfg: AgentConfig) -> Result<(), RunnerError> {
 
     let http_client = reqwest::Client::new();
 
+    let cwd = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let tool_ctx: Arc<ToolContext<reqwest::Client>> = make_tool_context(
         http_client.clone(),
         cfg.proxy_url.clone(),
+        cwd,
         cfg.github_token.clone(),
         cfg.linear_token.clone(),
         cfg.slack_token.clone(),

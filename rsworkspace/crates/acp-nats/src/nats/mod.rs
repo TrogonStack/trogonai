@@ -31,6 +31,20 @@ where
     trogon_nats::request_with_timeout(client, &subject.to_string(), request, timeout).await
 }
 
+/// Core NATS request/reply with no timeout — resolves only when a reply arrives.
+/// For requests that block on human input (e.g. permission prompts).
+pub async fn request_no_timeout<N: RequestClient, Req, Res>(
+    client: &N,
+    subject: &impl markers::Requestable,
+    request: &Req,
+) -> Result<Res, NatsError>
+where
+    Req: Serialize,
+    Res: DeserializeOwned,
+{
+    trogon_nats::request_no_timeout(client, &subject.to_string(), request).await
+}
+
 /// Core NATS fire-and-forget publish — accepts any subject that implements `Publishable`.
 pub async fn publish<N: PublishClient + FlushClient, Req>(
     client: &N,

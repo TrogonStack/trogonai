@@ -44,6 +44,40 @@ impl AgentCapability {
         }
     }
 
+    /// Standard capability record for an **Explore** agent.
+    ///
+    /// Explore agents read files and answer questions — they never edit,
+    /// execute shell commands, or perform destructive operations.
+    pub fn explore(nats_subject: impl Into<String>) -> Self {
+        Self::new(
+            "Explore",
+            [
+                "file_search",
+                "code_lookup",
+                "read_only",
+                "question_answering",
+            ],
+            nats_subject,
+        )
+    }
+
+    /// Standard capability record for a **Plan** agent.
+    ///
+    /// Plan agents analyse requirements and produce implementation plans —
+    /// they never execute destructive tools or write production code directly.
+    pub fn plan(nats_subject: impl Into<String>) -> Self {
+        Self::new(
+            "Plan",
+            [
+                "architecture",
+                "implementation_planning",
+                "trade_off_analysis",
+                "read_only",
+            ],
+            nats_subject,
+        )
+    }
+
     /// True if the agent advertises `capability` (case-insensitive).
     pub fn has_capability(&self, capability: &str) -> bool {
         self.capabilities
@@ -101,5 +135,39 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let restored: AgentCapability = serde_json::from_str(&json).unwrap();
         assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn explore_agent_type_and_capabilities() {
+        let a = AgentCapability::explore("agents.explore.>");
+        assert_eq!(a.agent_type, "Explore");
+        assert_eq!(a.nats_subject, "agents.explore.>");
+        assert!(a.has_capability("read_only"));
+        assert!(a.has_capability("file_search"));
+        assert!(a.has_capability("code_lookup"));
+    }
+
+    #[test]
+    fn plan_agent_type_and_capabilities() {
+        let a = AgentCapability::plan("agents.plan.>");
+        assert_eq!(a.agent_type, "Plan");
+        assert_eq!(a.nats_subject, "agents.plan.>");
+        assert!(a.has_capability("read_only"));
+        assert!(a.has_capability("architecture"));
+        assert!(a.has_capability("implementation_planning"));
+    }
+
+    #[test]
+    fn explore_does_not_have_destructive_capabilities() {
+        let a = AgentCapability::explore("agents.explore.>");
+        assert!(!a.has_capability("execute_shell"));
+        assert!(!a.has_capability("write_file"));
+    }
+
+    #[test]
+    fn plan_does_not_have_destructive_capabilities() {
+        let a = AgentCapability::plan("agents.plan.>");
+        assert!(!a.has_capability("execute_shell"));
+        assert!(!a.has_capability("write_file"));
     }
 }

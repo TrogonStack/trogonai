@@ -3,14 +3,14 @@ use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_nats::jetstream::{self, kv};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 const SESSIONS_BUCKET: &str = "SESSIONS";
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub id: String,
     pub tenant_id: String,
@@ -30,9 +30,12 @@ pub struct SessionSnapshot {
     pub parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branched_at_index: Option<usize>,
+    /// Per-session HTTP MCP servers captured at session creation; restored on reload.
+    #[serde(default)]
+    pub mcp_servers: Vec<trogon_runner_tools::StoredMcpServer>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MessageUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -46,7 +49,7 @@ fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SnapshotMessage {
     pub role: String,
     pub content: Vec<TextBlock>,
@@ -54,17 +57,17 @@ pub struct SnapshotMessage {
     pub usage: Option<MessageUsage>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TextBlock {
     #[serde(rename = "type")]
-    pub kind: &'static str,
+    pub kind: String,
     pub text: String,
 }
 
 impl TextBlock {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            kind: "text",
+            kind: "text".to_string(),
             text: text.into(),
         }
     }
@@ -75,6 +78,11 @@ impl TextBlock {
 pub trait SessionStoring: Send + Sync + 'static {
     fn save<'a>(&'a self, snapshot: &'a SessionSnapshot) -> BoxFuture<'a, ()>;
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()>;
+    fn load<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+    ) -> BoxFuture<'a, Option<SessionSnapshot>>;
 }
 
 // ── Real implementation ───────────────────────────────────────────────────────
@@ -118,6 +126,24 @@ impl NatsSessionStore {
             warn!(session_id, error = %e, "failed to delete session from SESSIONS KV");
         }
     }
+
+    async fn load_impl(&self, tenant_id: &str, session_id: &str) -> Option<SessionSnapshot> {
+        let key = format!("{tenant_id}.{session_id}");
+        let entry = match self.sessions_kv.entry(&key).await {
+            Ok(e) => e?,
+            Err(e) => {
+                warn!(session_id, error = %e, "failed to read session from SESSIONS KV");
+                return None;
+            }
+        };
+        match serde_json::from_slice::<SessionSnapshot>(&entry.value) {
+            Ok(snap) => Some(snap),
+            Err(e) => {
+                warn!(session_id, error = %e, "failed to deserialize session snapshot");
+                None
+            }
+        }
+    }
 }
 
 impl SessionStoring for NatsSessionStore {
@@ -127,6 +153,14 @@ impl SessionStoring for NatsSessionStore {
 
     fn remove<'a>(&'a self, tenant_id: &'a str, session_id: &'a str) -> BoxFuture<'a, ()> {
         Box::pin(self.remove_impl(tenant_id, session_id))
+    }
+
+    fn load<'a>(
+        &'a self,
+        tenant_id: &'a str,
+        session_id: &'a str,
+    ) -> BoxFuture<'a, Option<SessionSnapshot>> {
+        Box::pin(self.load_impl(tenant_id, session_id))
     }
 }
 
@@ -295,6 +329,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v.get("model").is_none());
@@ -319,6 +354,7 @@ mod tests {
             agent_id: Some("agent-1".to_string()),
             parent_session_id: Some("parent-id".to_string()),
             branched_at_index: Some(3),
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert_eq!(v["model"], "gpt-4");
@@ -344,6 +380,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         assert!(v["tools"].is_array(), "tools must always be serialized");
@@ -374,6 +411,7 @@ mod tests {
             agent_id: None,
             parent_session_id: None,
             branched_at_index: None,
+            mcp_servers: Vec::new(),
         };
         let v = serde_json::to_value(&snap).unwrap();
         let msgs = v["messages"].as_array().unwrap();

@@ -47,7 +47,7 @@ pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: 
 /// subject list already scopes to session-scoped commands only.
 pub fn commands_observer() -> Config {
     Config {
-        deliver_policy: DeliverPolicy::All,
+        deliver_policy: DeliverPolicy::New,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()
@@ -94,9 +94,9 @@ mod tests {
     }
 
     #[test]
-    fn commands_observer_delivers_all() {
+    fn commands_observer_delivers_new() {
         let config = commands_observer();
-        assert_eq!(config.deliver_policy, DeliverPolicy::All);
+        assert_eq!(config.deliver_policy, DeliverPolicy::New);
         assert_eq!(config.ack_policy, AckPolicy::Explicit);
     }
 

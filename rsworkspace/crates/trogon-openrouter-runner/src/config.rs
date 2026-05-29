@@ -22,8 +22,11 @@ impl RunnerConfig {
         let nats_url = std::env::var("NATS_URL")
             .unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
+        // MED-34: default to a runner-specific prefix so the spawn subscriber does
+        // not share `acp.agent.spawn` with the xai runner (which would round-robin
+        // spawn requests to the wrong backend). The dev script still overrides this.
         let prefix = std::env::var("ACP_PREFIX")
-            .unwrap_or_else(|_| "acp".to_string());
+            .unwrap_or_else(|_| "acp.openrouter".to_string());
 
         let default_model = std::env::var("OPENROUTER_DEFAULT_MODEL")
             .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".to_string());
@@ -78,7 +81,10 @@ impl RunnerConfig {
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static ENV_MUTEX: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.get_or_init(|| std::sync::Mutex::new(())).lock().unwrap()
+    }
 
     fn clear_runner_env() {
         for var in &[
@@ -97,151 +103,151 @@ mod tests {
         }
     }
 
-    /// Acquire the env lock, clear all runner vars, run `f`, then clear again.
-    /// All config tests must go through this to avoid parallel-test races on
-    /// the process-global env.
-    fn with_clean_env<F: FnOnce()>(f: F) {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        clear_runner_env();
-        f();
-        clear_runner_env();
-    }
-
     #[test]
     fn defaults_when_no_env_vars_set() {
-        with_clean_env(|| {
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.nats_url, "nats://localhost:4222");
-            assert_eq!(cfg.prefix, "acp");
-            assert_eq!(cfg.default_model, "anthropic/claude-sonnet-4-6");
-            assert!(cfg.api_key.is_none());
-            assert_eq!(cfg.agent_type, "openrouter");
-            assert_eq!(cfg.max_history_messages, 20);
-            assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
-            assert_eq!(cfg.prompt_timeout_secs, 300);
-            assert!(!cfg.system_prompt_set);
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        let cfg = RunnerConfig::from_env();
+        assert_eq!(cfg.nats_url, "nats://localhost:4222");
+        assert_eq!(cfg.prefix, "acp.openrouter");
+        assert_eq!(cfg.default_model, "anthropic/claude-sonnet-4-6");
+        assert!(cfg.api_key.is_none());
+        assert_eq!(cfg.agent_type, "openrouter");
+        assert_eq!(cfg.max_history_messages, 20);
+        assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
+        assert_eq!(cfg.prompt_timeout_secs, 300);
+        assert!(!cfg.system_prompt_set);
     }
 
     #[test]
     fn custom_string_values_are_read() {
-        with_clean_env(|| {
-            unsafe {
-                std::env::set_var("NATS_URL", "nats://my-server:4222");
-                std::env::set_var("ACP_PREFIX", "prod");
-                std::env::set_var("OPENROUTER_DEFAULT_MODEL", "openai/gpt-4o");
-                std::env::set_var("AGENT_TYPE", "my-agent");
-            }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.nats_url, "nats://my-server:4222");
-            assert_eq!(cfg.prefix, "prod");
-            assert_eq!(cfg.default_model, "openai/gpt-4o");
-            assert_eq!(cfg.agent_type, "my-agent");
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("NATS_URL", "nats://my-server:4222");
+            std::env::set_var("ACP_PREFIX", "prod");
+            std::env::set_var("OPENROUTER_DEFAULT_MODEL", "openai/gpt-4o");
+            std::env::set_var("AGENT_TYPE", "my-agent");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.nats_url, "nats://my-server:4222");
+        assert_eq!(cfg.prefix, "prod");
+        assert_eq!(cfg.default_model, "openai/gpt-4o");
+        assert_eq!(cfg.agent_type, "my-agent");
     }
 
     #[test]
     fn api_key_present_and_non_empty_is_some() {
-        with_clean_env(|| {
-            unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-test-123"); }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.api_key.as_deref(), Some("sk-test-123"));
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", "sk-test-123"); }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.api_key.as_deref(), Some("sk-test-123"));
     }
 
     #[test]
     fn empty_api_key_becomes_none() {
-        with_clean_env(|| {
-            unsafe { std::env::set_var("OPENROUTER_API_KEY", ""); }
-            let cfg = RunnerConfig::from_env();
-            assert!(cfg.api_key.is_none(), "empty API key must be treated as absent");
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", ""); }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert!(cfg.api_key.is_none(), "empty API key must be treated as absent");
     }
 
     #[test]
     fn system_prompt_set_flag_reflects_env() {
-        with_clean_env(|| {
-            assert!(!RunnerConfig::from_env().system_prompt_set);
-            unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", ""); }
-            assert!(RunnerConfig::from_env().system_prompt_set, "flag must be true even for empty value");
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        assert!(!RunnerConfig::from_env().system_prompt_set);
+        unsafe { std::env::set_var("OPENROUTER_SYSTEM_PROMPT", ""); }
+        assert!(RunnerConfig::from_env().system_prompt_set, "flag must be true even for empty value");
+        clear_runner_env();
     }
 
     #[test]
     fn numeric_env_vars_parsed_correctly() {
-        with_clean_env(|| {
-            unsafe {
-                std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "50");
-                std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "3600");
-                std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "120");
-            }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.max_history_messages, 50);
-            assert_eq!(cfg.session_ttl_secs, 3600);
-            assert_eq!(cfg.prompt_timeout_secs, 120);
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "50");
+            std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "3600");
+            std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "120");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.max_history_messages, 50);
+        assert_eq!(cfg.session_ttl_secs, 3600);
+        assert_eq!(cfg.prompt_timeout_secs, 120);
     }
 
     #[test]
     fn zero_numeric_values_fall_back_to_defaults() {
-        with_clean_env(|| {
-            unsafe {
-                std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "0");
-                std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "0");
-                std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "0");
-            }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.max_history_messages, 20, "zero must fall back to default");
-            assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600, "zero must fall back to default");
-            assert_eq!(cfg.prompt_timeout_secs, 300, "zero must fall back to default");
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "0");
+            std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "0");
+            std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "0");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.max_history_messages, 20, "zero must fall back to default");
+        assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600, "zero must fall back to default");
+        assert_eq!(cfg.prompt_timeout_secs, 300, "zero must fall back to default");
     }
 
     #[test]
     fn non_numeric_env_vars_fall_back_to_defaults() {
-        with_clean_env(|| {
-            unsafe {
-                std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "not-a-number");
-                std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "one-week");
-                std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "five-minutes");
-            }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.max_history_messages, 20);
-            assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
-            assert_eq!(cfg.prompt_timeout_secs, 300);
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "not-a-number");
+            std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "one-week");
+            std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "five-minutes");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.max_history_messages, 20);
+        assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
+        assert_eq!(cfg.prompt_timeout_secs, 300);
     }
 
     #[test]
     fn models_str_is_read_verbatim() {
-        with_clean_env(|| {
-            unsafe { std::env::set_var("OPENROUTER_MODELS", "x/y:Label"); }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.models_str, "x/y:Label");
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe { std::env::set_var("OPENROUTER_MODELS", "x/y:Label"); }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.models_str, "x/y:Label");
     }
 
     #[test]
     fn negative_numeric_values_fall_back_to_defaults() {
-        with_clean_env(|| {
-            unsafe {
-                std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "-1");
-                std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "-1");
-                std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "-1");
-            }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.max_history_messages, 20);
-            assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
-            assert_eq!(cfg.prompt_timeout_secs, 300);
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe {
+            std::env::set_var("OPENROUTER_MAX_HISTORY_MESSAGES", "-1");
+            std::env::set_var("OPENROUTER_SESSION_TTL_SECS", "-1");
+            std::env::set_var("OPENROUTER_PROMPT_TIMEOUT_SECS", "-1");
+        }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.max_history_messages, 20);
+        assert_eq!(cfg.session_ttl_secs, 7 * 24 * 3600);
+        assert_eq!(cfg.prompt_timeout_secs, 300);
     }
 
     #[test]
     fn api_key_whitespace_only_is_some() {
-        with_clean_env(|| {
-            unsafe { std::env::set_var("OPENROUTER_API_KEY", "   "); }
-            let cfg = RunnerConfig::from_env();
-            assert_eq!(cfg.api_key.as_deref(), Some("   "));
-        });
+        let _lock = env_lock();
+        clear_runner_env();
+        unsafe { std::env::set_var("OPENROUTER_API_KEY", "   "); }
+        let cfg = RunnerConfig::from_env();
+        clear_runner_env();
+        assert_eq!(cfg.api_key.as_deref(), Some("   "));
     }
 }

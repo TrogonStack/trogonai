@@ -49,8 +49,25 @@ fn internal_error(msg: impl Into<String>) -> Error {
     Error::new(ErrorCode::InternalError.into(), msg.into())
 }
 
+const VALID_MODES: &[&str] = &[
+    "default",
+    "acceptEdits",
+    "plan",
+    "dontAsk",
+    "bypassPermissions",
+];
+
+fn default_session_mode() -> String {
+    "default".to_string()
+}
+
+fn is_valid_mode(mode: &str) -> bool {
+    VALID_MODES.contains(&mode)
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
+#[derive(serde::Serialize)]
 struct CodexSession {
     thread_id: String,
     cwd: String,
@@ -58,6 +75,11 @@ struct CodexSession {
     model: Option<String>,
     /// Session this was branched from. None for root sessions.
     parent_session_id: Option<String>,
+    history: Vec<trogon_runner_tools::portable_session::PortableMessage>,
+    pending_history: Option<Vec<trogon_runner_tools::portable_session::PortableMessage>>,
+    first_turn: bool,
+    #[serde(default = "default_session_mode")]
+    mode: String,
 }
 
 // ── NatsNotifierFactory ───────────────────────────────────────────────────────
@@ -227,11 +249,16 @@ where
         self.notifier_factory.make_notifier(session_id)
     }
 
-    fn session_mode_state(&self) -> SessionModeState {
-        // Codex does not have named permission modes — expose a single "default".
+    fn session_mode_state(&self, current_mode: &str) -> SessionModeState {
         SessionModeState::new(
-            "default".to_string(),
-            vec![SessionMode::new("default", "Default")],
+            current_mode.to_string(),
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("plan", "Plan"),
+                SessionMode::new("dontAsk", "Don't Ask"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions"),
+            ],
         )
     }
 
@@ -326,12 +353,16 @@ where
                 cwd,
                 model: None,
                 parent_session_id: None,
+                history: Vec::new(),
+                pending_history: None,
+                first_turn: true,
+                mode: default_session_mode(),
             },
         );
 
         info!(session_id, "codex: new session");
         Ok(NewSessionResponse::new(SessionId::from(session_id))
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state("default"))
             .models(self.session_model_state(None)))
     }
 
@@ -340,12 +371,15 @@ where
         req: LoadSessionRequest,
     ) -> agent_client_protocol::Result<LoadSessionResponse> {
         let session_id = req.session_id.to_string();
+        let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get(&session_id) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.cwd = cwd;
+            let mode = session.mode.clone();
             let model = session.model.as_deref();
             return Ok(LoadSessionResponse::new()
-                .modes(self.session_mode_state())
+                .modes(self.session_mode_state(&mode))
                 .models(self.session_model_state(model)));
         }
 
@@ -383,12 +417,12 @@ where
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (source_thread_id, inherited_model) = {
+        let (source_thread_id, inherited_model, inherited_mode) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
                 .ok_or_else(|| internal_error(format!("session {source_id} not found")))?;
-            (s.thread_id.clone(), s.model.clone())
+            (s.thread_id.clone(), s.model.clone(), s.mode.clone())
         };
 
         let proc = self.process().await?;
@@ -406,11 +440,15 @@ where
                 cwd,
                 model: inherited_model.clone(),
                 parent_session_id: Some(source_id.clone()),
+                history: Vec::new(),
+                pending_history: None,
+                first_turn: true,
+                mode: inherited_mode.clone(),
             },
         );
 
         Ok(ForkSessionResponse::new(new_session_id)
-            .modes(self.session_mode_state())
+            .modes(self.session_mode_state(&inherited_mode))
             .models(self.session_model_state(inherited_model.as_deref())))
     }
 
@@ -449,10 +487,22 @@ where
 
     async fn set_session_mode(
         &self,
-        _req: SetSessionModeRequest,
+        req: SetSessionModeRequest,
     ) -> agent_client_protocol::Result<SetSessionModeResponse> {
-        // Codex does not have ACP permission modes — silently accept.
-        Ok(SetSessionModeResponse::new())
+        let mode_id = req.mode_id.to_string();
+        let session_id = req.session_id.to_string();
+        if !is_valid_mode(&mode_id) {
+            return Err(internal_error(format!("unknown mode: {mode_id}")));
+        }
+        let mut sessions = self.sessions.lock().await;
+        match sessions.get_mut(&session_id) {
+            Some(s) => {
+                s.mode = mode_id;
+                info!(session_id, mode = %s.mode, "codex: set_session_mode");
+                Ok(SetSessionModeResponse::new())
+            }
+            None => Err(internal_error(format!("session {session_id} not found"))),
+        }
     }
 
     async fn set_session_model(
@@ -511,22 +561,79 @@ where
             );
         }
 
-        let (thread_id, model) = {
-            let sessions = self.sessions.lock().await;
+        let (thread_id, model, pending_history, cwd, prepend_trogon, orig_first_turn) = {
+            let mut sessions = self.sessions.lock().await;
             let s = sessions
-                .get(&session_id)
+                .get_mut(&session_id)
                 .ok_or_else(|| internal_error(format!("session {session_id} not found")))?;
-            (s.thread_id.clone(), s.model.clone())
+            let orig_first_turn = s.first_turn;
+            let prepend_trogon = s.first_turn || s.pending_history.is_some();
+            let ph = s.pending_history.take();
+            s.first_turn = false;
+            s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                role: "user".into(),
+                text: user_input.clone(),
+            });
+            (
+                s.thread_id.clone(),
+                s.model.clone(),
+                ph,
+                s.cwd.clone(),
+                prepend_trogon,
+                orig_first_turn,
+            )
         };
 
-        let proc = self.process().await?;
-        let mut event_rx = proc
-            .turn_start(&thread_id, &user_input, model.as_deref())
-            .await
-            .map_err(|e| internal_error(e.to_string()))?;
+        // Keep a backup so we can restore if the turn never actually starts.
+        let ph_backup = pending_history.clone();
+
+        let mut user_input = if let Some(prior) = pending_history {
+            let formatted = prior
+                .iter()
+                .map(|m| format!("[{}]: {}", m.role, m.text))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("Prior conversation:\n{formatted}\n\n---\n\n{user_input}")
+        } else {
+            user_input
+        };
+
+        if prepend_trogon {
+            if let Some(md) = trogon_runner_tools::trogon_md::load_trogon_md(&cwd).await {
+                user_input = format!("Project instructions (TROGON.md):\n{md}\n\n---\n\n{user_input}");
+            }
+        }
+
+        // HIGH-19: restore session state if the turn never actually starts.
+        let proc = match self.process().await {
+            Ok(p) => p,
+            Err(e) => {
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    s.pending_history = ph_backup;
+                    s.history.pop();
+                    s.first_turn = orig_first_turn;
+                }
+                return Err(e);
+            }
+        };
+        let mut event_rx = match proc.turn_start(&thread_id, &user_input, model.as_deref()).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                drop(proc);
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(&session_id) {
+                    s.pending_history = ph_backup;
+                    s.history.pop();
+                    s.first_turn = orig_first_turn;
+                }
+                return Err(internal_error(e.to_string()));
+            }
+        };
         drop(proc); // release process lock before entering the event loop
 
         // Stream Codex events → ACP SessionNotifications.
+        let mut assistant_text = String::new();
         let stop_reason = loop {
             let event = match tokio::time::timeout(self.prompt_timeout, event_rx.recv()).await {
                 Err(_elapsed) => {
@@ -539,12 +646,19 @@ where
                     continue;
                 }
                 Ok(Err(_)) => {
-                    break StopReason::EndTurn;
+                    warn!(session_id, "codex: process channel closed unexpectedly");
+                    // Remove the user message that never received a response.
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.history.pop();
+                    }
+                    return Err(internal_error("codex process terminated unexpectedly"));
                 }
             };
 
             match event {
                 CodexEvent::TextDelta { text } => {
+                    assistant_text.push_str(&text);
                     let notif = SessionNotification::new(
                         session_id.clone(),
                         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
@@ -587,12 +701,19 @@ where
                 }
 
                 CodexEvent::TurnCompleted => {
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(&session_id) {
+                        s.history.push(trogon_runner_tools::portable_session::PortableMessage {
+                            role: "assistant".into(),
+                            text: std::mem::take(&mut assistant_text),
+                        });
+                    }
                     break StopReason::EndTurn;
                 }
 
                 CodexEvent::Error { message } => {
                     warn!(session_id, error = %message, "codex: turn error");
-                    break StopReason::EndTurn;
+                    return Err(internal_error(format!("codex error: {message}")));
                 }
             }
         };
@@ -644,6 +765,76 @@ where
                 .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/get_state" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let state = sessions.get(session_id).ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "session not found")
+            })?;
+            let raw = serde_json::to_string(state)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let raw = serde_json::value::RawValue::from_string(raw)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        if args.method.as_ref() == "session/export" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str()
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let sessions = self.sessions.lock().await;
+            let s = sessions.get(session_id)
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+            // MED-22: a turn pushes the user message at turn start and the assistant
+            // reply at turn end. If export runs mid-turn (or after a turn errored
+            // before the reply was recorded), history ends with an unpaired "user"
+            // message. Export only complete turns so the snapshot is consistent.
+            let end = if s.history.last().map(|m| m.role == "user").unwrap_or(false) {
+                s.history.len() - 1
+            } else {
+                s.history.len()
+            };
+            let raw = serde_json::to_string(&s.history[..end])
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            return Ok(ExtResponse::new(serde_json::value::RawValue::from_string(raw)
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?.into()));
+        }
+        if args.method.as_ref() == "session/import" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str()
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let messages_json = params["messages"].to_string();
+            let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
+                .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
+            let messages: Vec<trogon_runner_tools::portable_session::PortableMessage> = match parsed {
+                trogon_runner_tools::portable_session::ParsedExport::V1(msgs) => msgs,
+                trogon_runner_tools::portable_session::ParsedExport::V2(exp) => exp
+                    .messages
+                    .iter()
+                    .map(trogon_runner_tools::portable_session::v2_message_to_text)
+                    .collect(),
+            };
+            if messages.is_empty() {
+                return Err(Error::new(
+                    ErrorCode::InvalidParams.into(),
+                    "import requires at least one message",
+                ));
+            }
+            let mut sessions = self.sessions.lock().await;
+            let s = sessions.get_mut(session_id)
+                .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
+            s.history = messages.clone();
+            s.pending_history = Some(messages);
+            s.first_turn = true;
+            let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
@@ -664,6 +855,10 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
                 cwd: cwd.to_string(),
                 model,
                 parent_session_id: None,
+                history: Vec::new(),
+                pending_history: None,
+                first_turn: true,
+                mode: default_session_mode(),
             },
         );
     }
@@ -690,6 +885,29 @@ impl<N: SessionNotifierFactory, P: ProcessSpawner> CodexAgent<N, P> {
 
     fn test_prompt_timeout(&self) -> Duration {
         self.prompt_timeout
+    }
+
+    async fn test_get_history(
+        &self,
+        id: &str,
+    ) -> Vec<trogon_runner_tools::portable_session::PortableMessage> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .map(|s| s.history.clone())
+            .unwrap_or_default()
+    }
+
+    async fn test_get_pending_history(
+        &self,
+        id: &str,
+    ) -> Option<Vec<trogon_runner_tools::portable_session::PortableMessage>> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.pending_history.clone())
     }
 }
 
@@ -871,6 +1089,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.models.unwrap().current_model_id.to_string(), "o3");
+    }
+
+    #[tokio::test]
+    async fn load_session_updates_cwd_for_in_memory_session() {
+        let agent = make_agent().await;
+        agent.test_insert_session("s2", "/home/user", None).await;
+        agent
+            .load_session(LoadSessionRequest::new("s2", "/new/project"))
+            .await
+            .unwrap();
+        let list = agent.list_sessions(ListSessionsRequest::new()).await.unwrap();
+        let info = list
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id.to_string() == "s2")
+            .expect("session must be listed");
+        assert_eq!(info.cwd.to_string_lossy(), "/new/project");
     }
 
     #[tokio::test]
@@ -1347,6 +1582,77 @@ mod tests {
         assert!(children_c.is_empty(), "C must have no children");
     }
 
+    // ── ext_method / session/get_state ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_get_state_returns_session_json() {
+        let agent = make_agent().await;
+        agent.test_insert_session("gs1", "/projects/myapp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "gs1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(state["cwd"].as_str(), Some("/projects/myapp"), "cwd must match inserted session");
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_includes_thread_id() {
+        let agent = make_agent().await;
+        agent.test_insert_session("ti1", "/tmp", None).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ti1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["thread_id"].as_str(),
+            Some("thread-ti1"),
+            "thread_id must be present in get_state (test helper sets thread-{{id}})"
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_returns_model_when_set() {
+        let agent = make_agent().await;
+        agent.test_insert_session("ms1", "/tmp", Some("o4-mini".to_string())).await;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ms1" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap();
+        let state: serde_json::Value = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(
+            state["model"].as_str(),
+            Some("o4-mini"),
+            "model override must appear in get_state (needed by /model command)"
+        );
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_missing_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test]
+    async fn ext_get_state_unknown_session_id_returns_invalid_params() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "nonexistent" }).to_string(),
+        )
+        .unwrap();
+        let err = agent.ext_method(ExtRequest::new("session/get_state", raw_params.into())).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
     // ── cancel ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1361,8 +1667,13 @@ mod tests {
     // ── prompt ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn prompt_with_no_events_returns_end_turn() {
-        let agent = make_agent().await;
+    async fn prompt_with_turn_completed_returns_end_turn() {
+        // A process that emits only TurnCompleted (no text) should yield EndTurn.
+        let agent = CodexAgent::new(
+            MockNotifierFactory::new(),
+            MockProcessSpawner { events: vec![CodexEvent::TurnCompleted] },
+            "o4-mini",
+        );
         agent.test_insert_session("p1", "/tmp", None).await;
         let resp = agent
             .prompt(PromptRequest::new("p1", vec![ContentBlock::from("hello")]))
@@ -1393,5 +1704,362 @@ mod tests {
 
         let notifs = recorded.lock().await;
         assert_eq!(notifs.len(), 1, "expected one text notification");
+    }
+
+    // ── ext_method / session/export ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_export_returns_serialized_history() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let agent = make_agent().await;
+        agent.test_insert_session("e1", "/tmp", None).await;
+        {
+            let mut sessions = agent.sessions.lock().await;
+            let h = &mut sessions.get_mut("e1").unwrap().history;
+            h.push(PortableMessage { role: "user".into(), text: "hello".into() });
+            h.push(PortableMessage { role: "assistant".into(), text: "hi there".into() });
+        }
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "e1" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/export", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].text, "hello");
+        assert_eq!(msgs[1].text, "hi there");
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_excludes_in_progress_user_turn() {
+        // MED-22: a trailing unpaired user message (mid-turn / post-error) must not
+        // appear in the export — only complete turns are exported.
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let agent = make_agent().await;
+        agent.test_insert_session("e2", "/tmp", None).await;
+        {
+            let mut sessions = agent.sessions.lock().await;
+            let h = &mut sessions.get_mut("e2").unwrap().history;
+            h.push(PortableMessage { role: "user".into(), text: "q1".into() });
+            h.push(PortableMessage { role: "assistant".into(), text: "a1".into() });
+            h.push(PortableMessage { role: "user".into(), text: "in-progress".into() });
+        }
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "e2" }).to_string(),
+        )
+        .unwrap();
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", raw_params.into()))
+            .await
+            .unwrap();
+        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+        assert_eq!(msgs.len(), 2, "the trailing in-progress user turn must be excluded");
+        assert_eq!(msgs[1].text, "a1");
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_unknown_session_returns_error() {
+        let agent = make_agent().await;
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "no-such" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/export", raw_params.into());
+        assert!(agent.ext_method(ext_req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn ext_method_export_missing_session_id_returns_error() {
+        let agent = make_agent().await;
+        let raw_params =
+            serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+        let ext_req = ExtRequest::new("session/export", raw_params.into());
+        assert!(agent.ext_method(ext_req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn export_after_real_turn_contains_accumulated_history() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let spawner = MockProcessSpawner {
+            events: vec![
+                CodexEvent::TextDelta {
+                    text: "hello".to_string(),
+                },
+                CodexEvent::TextDelta {
+                    text: " world".to_string(),
+                },
+                CodexEvent::TurnCompleted,
+            ],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("ep1", "/tmp", None).await;
+
+        agent
+            .prompt(PromptRequest::new(
+                "ep1",
+                vec![ContentBlock::from("question".to_string())],
+            ))
+            .await
+            .unwrap();
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "ep1" }).to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/export", raw_params.into());
+        let resp = agent.ext_method(ext_req).await.unwrap();
+        let msgs: Vec<PortableMessage> = serde_json::from_str(resp.0.get()).unwrap();
+
+        assert_eq!(msgs.len(), 2, "expected user + assistant messages");
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].text, "question");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].text, "hello world");
+    }
+
+    // ── ext_method / session/import ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_import_sets_pending_history_and_first_turn() {
+        let agent = make_agent().await;
+        agent.test_insert_session("i1", "/tmp", None).await;
+        // Simulate that first_turn was already consumed.
+        agent
+            .sessions
+            .lock()
+            .await
+            .get_mut("i1")
+            .unwrap()
+            .first_turn = false;
+
+        let raw_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({
+                "sessionId": "i1",
+                "messages": [{ "role": "user", "text": "ctx" }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let ext_req = ExtRequest::new("session/import", raw_params.into());
+        agent.ext_method(ext_req).await.unwrap();
+
+        let pending = agent.test_get_pending_history("i1").await;
+        assert!(pending.is_some(), "pending_history must be set after import");
+        let msgs = pending.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].text, "ctx");
+
+        // import must also write to s.history for export consistency
+        let history = agent.test_get_history("i1").await;
+        assert_eq!(history.len(), 1, "s.history must mirror imported messages");
+        assert_eq!(history[0].text, "ctx");
+
+        // import must reset first_turn to true
+        let first_turn = agent
+            .sessions
+            .lock()
+            .await
+            .get("i1")
+            .unwrap()
+            .first_turn;
+        assert!(first_turn, "import must reset first_turn to true");
+    }
+
+    // ── ext_method / export→import round-trip ────────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_export_import_round_trip() {
+        use trogon_runner_tools::portable_session::PortableMessage;
+        let agent = make_agent().await;
+
+        // Build source session with two history messages.
+        agent.test_insert_session("src", "/tmp", None).await;
+        {
+            let mut sessions = agent.sessions.lock().await;
+            let src = sessions.get_mut("src").unwrap();
+            src.history.push(PortableMessage {
+                role: "user".into(),
+                text: "q".into(),
+            });
+            src.history.push(PortableMessage {
+                role: "assistant".into(),
+                text: "a".into(),
+            });
+        }
+
+        // Export from src.
+        let export_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "src" }).to_string(),
+        )
+        .unwrap();
+        let export_resp = agent
+            .ext_method(ExtRequest::new("session/export", export_params.into()))
+            .await
+            .unwrap();
+        let exported_json = export_resp.0.get().to_string();
+
+        // Import into dst.
+        agent.test_insert_session("dst", "/tmp", None).await;
+        let import_params = serde_json::value::RawValue::from_string(format!(
+            r#"{{"sessionId":"dst","messages":{exported_json}}}"#
+        ))
+        .unwrap();
+        agent
+            .ext_method(ExtRequest::new("session/import", import_params.into()))
+            .await
+            .unwrap();
+
+        // Re-export from dst: must return the imported messages immediately
+        // (before any prompt) — consistent with xai/openrouter/acp behaviour.
+        let export_dst_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({ "sessionId": "dst" }).to_string(),
+        )
+        .unwrap();
+        let export_dst_resp = agent
+            .ext_method(ExtRequest::new("session/export", export_dst_params.into()))
+            .await
+            .unwrap();
+        let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+            serde_json::from_str(export_dst_resp.0.get()).unwrap();
+        assert_eq!(dst_portable.len(), 2, "export after import must return imported messages");
+        assert_eq!(dst_portable[0].role, "user");
+        assert_eq!(dst_portable[0].text, "q");
+        assert_eq!(dst_portable[1].role, "assistant");
+        assert_eq!(dst_portable[1].text, "a");
+
+        // pending_history must also be set (for subprocess injection on first prompt).
+        let pending = agent.test_get_pending_history("dst").await.unwrap();
+        assert_eq!(pending.len(), 2, "pending_history must also be set for subprocess injection");
+    }
+
+    // ── history accumulation ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn history_accumulation_user_message_pushed_before_turn() {
+        let spawner = MockProcessSpawner {
+            events: vec![CodexEvent::TurnCompleted],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("p1", "/tmp", None).await;
+
+        agent
+            .prompt(PromptRequest::new("p1", vec![ContentBlock::from("hello")]))
+            .await
+            .unwrap();
+
+        let history = agent.test_get_history("p1").await;
+        assert!(!history.is_empty(), "history must not be empty after prompt");
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].text, "hello");
+    }
+
+    #[tokio::test]
+    async fn history_accumulation_assistant_message_pushed_on_turn_completed() {
+        let spawner = MockProcessSpawner {
+            events: vec![
+                CodexEvent::TextDelta {
+                    text: "world".to_string(),
+                },
+                CodexEvent::TurnCompleted,
+            ],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("p2", "/tmp", None).await;
+
+        agent
+            .prompt(PromptRequest::new("p2", vec![ContentBlock::from("hello")]))
+            .await
+            .unwrap();
+
+        let history = agent.test_get_history("p2").await;
+        assert_eq!(history.len(), 2, "expected user + assistant messages");
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].text, "hello");
+        assert_eq!(history[1].role, "assistant");
+        assert_eq!(history[1].text, "world");
+    }
+
+    // ── ext_method / session/import — error cases ─────────────────────────────
+
+    #[tokio::test]
+    async fn ext_method_import_unknown_session_returns_error() {
+        let agent = make_agent().await;
+        // no sessions inserted
+        let params = serde_json::value::RawValue::from_string(
+            serde_json::json!({"sessionId":"no-such","messages":[]}).to_string()
+        ).unwrap();
+        let result = agent.ext_method(ExtRequest::new("session/import", params.into())).await;
+        assert!(result.is_err(), "import of unknown session must return Err");
+    }
+
+    // ── history: pending prepend on import then prompt ────────────────────────
+    //
+    // Test 8: After import, the pending_history is prepended to the user input
+    // with "Prior conversation:" formatting before it is sent to the mock process.
+    // Since MockCodexProcess does not capture the input it receives, we verify
+    // the side-effect instead: pending_history is consumed (None) after the prompt
+    // and both user + assistant messages appear correctly in session history.
+    #[tokio::test]
+    async fn history_pending_prepend_on_import_then_prompt() {
+        let spawner = MockProcessSpawner {
+            events: vec![
+                CodexEvent::TextDelta {
+                    text: "response".to_string(),
+                },
+                CodexEvent::TurnCompleted,
+            ],
+        };
+        let agent = CodexAgent::new(MockNotifierFactory::new(), spawner, "o4-mini");
+        agent.test_insert_session("ip1", "/tmp", None).await;
+
+        // Import prior context.
+        let import_params = serde_json::value::RawValue::from_string(
+            serde_json::json!({
+                "sessionId": "ip1",
+                "messages": [{ "role": "user", "text": "prior context" }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        agent
+            .ext_method(ExtRequest::new("session/import", import_params.into()))
+            .await
+            .unwrap();
+
+        // Verify pending_history is set before the prompt.
+        assert!(
+            agent.test_get_pending_history("ip1").await.is_some(),
+            "pending_history must be set before prompt"
+        );
+
+        // Drive a prompt — the agent prepends "Prior conversation:\n..." to the
+        // user input internally before handing it to the process.
+        agent
+            .prompt(PromptRequest::new(
+                "ip1",
+                vec![ContentBlock::from("actual question")],
+            ))
+            .await
+            .unwrap();
+
+        // After the prompt, pending_history must have been consumed.
+        assert!(
+            agent.test_get_pending_history("ip1").await.is_none(),
+            "pending_history must be None after prompt consumed it"
+        );
+
+        // History should contain the imported message + user message + assistant reply.
+        // s.history is written on import so export is consistent; prompt appends
+        // the new user/assistant turn on top of the already-stored imported messages.
+        let history = agent.test_get_history("ip1").await;
+        assert_eq!(history.len(), 3, "expected imported + user + assistant messages");
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].text, "prior context");
+        assert_eq!(history[1].role, "user");
+        assert_eq!(history[1].text, "actual question");
+        assert_eq!(history[2].role, "assistant");
+        assert_eq!(history[2].text, "response");
     }
 }

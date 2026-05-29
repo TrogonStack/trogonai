@@ -26,7 +26,7 @@ async-nats = { workspace = true, features = ["jetstream"] }
 bytes = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde_json = { workspace = true }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+testcontainers-modules = { workspace = true }
 trogon-acp-runner = { path = "../trogon-acp-runner" }
 trogon-agent-core = { path = "../trogon-agent-core" }
 trogon-nats = { workspace = true, features = ["test-support"] }

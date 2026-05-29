@@ -49,21 +49,6 @@ pub async fn get_pr_diff(
     Ok(resp.body)
 }
 
-/// Prefix each line of a unified diff patch with its 1-based position number.
-///
-/// GitHub's pull-review API requires `position` — a 1-based index into the
-/// raw diff hunk — not a source-file line number. By annotating the patch
-/// before handing it to the model the LLM can reference position numbers
-/// directly without arithmetic.
-pub fn annotate_diff(patch: &str) -> String {
-    patch
-        .lines()
-        .enumerate()
-        .map(|(i, line)| format!("{} {line}", i + 1))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// List the files changed in a pull request.
 ///
 /// Returns a JSON array of file objects including `filename`, `status`, and
@@ -437,6 +422,27 @@ pub async fn request_reviewers(
     Ok(format!("Reviewers requested on PR #{number}"))
 }
 
+/// Prefix each line of a unified-diff `patch` field with its 1-based position
+/// number so the LLM can pass those numbers directly to `post_pr_review`.
+///
+/// ```
+/// 1  @@ -10,6 +10,8 @@
+/// 2   fn existing_line() {
+/// 3  +    let x = dangerous_call();
+/// 4   }
+/// ```
+pub fn annotate_diff(patch: &str) -> String {
+    if patch.is_empty() {
+        return String::new();
+    }
+    patch
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{:3}  {line}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Post a comment on a pull request (uses the Issues comments endpoint).
 ///
 /// ## Idempotency
@@ -631,6 +637,55 @@ mod tests {
 
     fn make_ctx() -> crate::tools::ToolContext<crate::tools::mock::MockHttpClient> {
         crate::tools::ToolContext::for_test("http://proxy.test", "tok_github", "", "")
+    }
+
+    // ── annotate_diff ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn annotate_diff_empty_patch_returns_empty_string() {
+        assert_eq!(annotate_diff(""), "");
+    }
+
+    #[test]
+    fn annotate_diff_single_line_prefixed_with_1() {
+        let result = annotate_diff("@@ -10,6 +10,8 @@");
+        assert_eq!(result, "  1  @@ -10,6 +10,8 @@");
+    }
+
+    #[test]
+    fn annotate_diff_multiline_patch_numbered_from_one() {
+        let patch = "@@ -1,3 +1,4 @@\n fn foo() {\n+    let x = 1;\n }";
+        let result = annotate_diff(patch);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].starts_with("  1  @@ -1,3 +1,4 @@"));
+        assert!(lines[1].starts_with("  2   fn foo() {"));
+        assert!(lines[2].starts_with("  3  +    let x = 1;"));
+        assert!(lines[3].starts_with("  4   }"));
+    }
+
+    // ── post_pr_review ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn post_pr_review_returns_review_id_and_state() {
+        let ctx = make_ctx();
+        ctx.http_client.enqueue_ok(
+            200,
+            json!({"id": 42, "state": "COMMENTED"}).to_string(),
+        );
+        let result = post_pr_review(
+            &ctx,
+            &json!({
+                "owner": "o", "repo": "r", "pr_number": 5,
+                "commit_sha": "abc123", "event": "COMMENT",
+                "body": "Looks good overall.",
+                "comments": [{"path": "src/lib.rs", "position": 3, "body": "Risky call"}]
+            }),
+        )
+        .await;
+        assert!(result.is_ok(), "post_pr_review must succeed: {result:?}");
+        let text = result.unwrap();
+        assert!(text.contains("42"), "must include review id");
     }
 
     // ── get_pr_diff ───────────────────────────────────────────────────────────
@@ -1317,10 +1372,10 @@ mod tests {
         let patch = "@@ -1,3 +1,4 @@\n fn foo() {}\n+fn bar() {}\n fn baz() {}";
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
-        assert_eq!(lines[0], "1 @@ -1,3 +1,4 @@");
-        assert_eq!(lines[1], "2  fn foo() {}");
-        assert_eq!(lines[2], "3 +fn bar() {}");
-        assert_eq!(lines[3], "4  fn baz() {}");
+        assert_eq!(lines[0], "  1  @@ -1,3 +1,4 @@");
+        assert_eq!(lines[1], "  2   fn foo() {}");
+        assert_eq!(lines[2], "  3  +fn bar() {}");
+        assert_eq!(lines[3], "  4   fn baz() {}");
     }
 
     #[test]
@@ -1348,11 +1403,11 @@ mod tests {
         let parsed: Value = serde_json::from_str(&result.unwrap()).unwrap();
         let annotated_patch = parsed[0]["patch"].as_str().unwrap();
         assert!(
-            annotated_patch.starts_with("1 "),
+            annotated_patch.starts_with("  1  "),
             "patch must start with position 1: {annotated_patch}"
         );
         assert!(
-            annotated_patch.contains("2  line1"),
+            annotated_patch.contains("  2   line1"),
             "second line must be prefixed with 2: {annotated_patch}"
         );
     }
@@ -1520,11 +1575,11 @@ mod tests {
         let patch = "@@ -1,2 +1,2 @@\n context\n-old\n+new\n@@ -10,2 +10,2 @@\n other\n-foo\n+bar";
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
-        assert_eq!(lines[0], "1 @@ -1,2 +1,2 @@");
-        assert_eq!(lines[3], "4 +new");
+        assert_eq!(lines[0], "  1  @@ -1,2 +1,2 @@");
+        assert_eq!(lines[3], "  4  +new");
         // Second hunk header continues from position 5, not 1.
-        assert_eq!(lines[4], "5 @@ -10,2 +10,2 @@");
-        assert_eq!(lines[7], "8 +bar");
+        assert_eq!(lines[4], "  5  @@ -10,2 +10,2 @@");
+        assert_eq!(lines[7], "  8  +bar");
     }
 
     #[test]
@@ -1533,7 +1588,7 @@ mod tests {
         let annotated = annotate_diff(patch);
         // `str::lines()` strips the trailing newline — result must have 2 lines.
         assert_eq!(annotated.lines().count(), 2);
-        assert_eq!(annotated.lines().last().unwrap(), "2 +line");
+        assert_eq!(annotated.lines().last().unwrap(), "  2  +line");
     }
 
     // ── list_pr_files edge cases ──────────────────────────────────────────────
@@ -1557,14 +1612,14 @@ mod tests {
 
         // a.rs — annotated from position 1
         let patch_a = parsed[0]["patch"].as_str().unwrap();
-        assert!(patch_a.starts_with("1 "), "a.rs patch must start at position 1: {patch_a}");
+        assert!(patch_a.starts_with("  1  "), "a.rs patch must start at position 1: {patch_a}");
 
         // b.png — no patch (binary), field absent
         assert!(parsed[1]["patch"].is_null(), "binary file must have no patch");
 
         // c.rs — annotated independently from position 1 (not continuing from a.rs)
         let patch_c = parsed[2]["patch"].as_str().unwrap();
-        assert!(patch_c.starts_with("1 "), "c.rs patch must start at position 1: {patch_c}");
+        assert!(patch_c.starts_with("  1  "), "c.rs patch must start at position 1: {patch_c}");
     }
 
     #[tokio::test]
@@ -1713,7 +1768,7 @@ mod tests {
         let annotated = annotate_diff(patch);
         let lines: Vec<&str> = annotated.lines().collect();
         assert_eq!(lines.len(), 4);
-        assert_eq!(lines[3], r"4 \ No newline at end of file");
+        assert_eq!(lines[3], r"  4  \ No newline at end of file");
     }
 
     // ── create_pull_request — existing PR found in pre-check ─────────────────

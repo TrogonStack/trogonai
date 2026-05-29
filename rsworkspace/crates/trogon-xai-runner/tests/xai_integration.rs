@@ -23,7 +23,10 @@ use agent_client_protocol::{
     ResourceLink, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModelRequest,
     StopReason, TextContent, TextResourceContents,
 };
-use trogon_xai_runner::{FinishReason, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent};
+use agent_client_protocol::{McpServer, McpServerHttp};
+use trogon_xai_runner::{
+    FinishReason, InputItem, MockSessionNotifier, MockXaiHttpClient, XaiAgent, XaiEvent,
+};
 
 // ── env-var lock ──────────────────────────────────────────────────────────────
 
@@ -3867,21 +3870,21 @@ async fn bash_notification_sequence_pending_inprogress_completed_with_raw_output
     );
 
     // raw_output must contain the bash output string
-    if let Some(n) = completed {
-        if let SessionUpdate::ToolCallUpdate(u) = &n.update {
-            let raw = u.fields.raw_output.as_ref().unwrap();
-            assert!(
-                raw.as_str().unwrap_or("").contains("hello"),
-                "raw_output must contain bash stdout; got: {raw:?}"
-            );
-        }
+    if let Some(n) = completed
+        && let SessionUpdate::ToolCallUpdate(u) = &n.update
+    {
+        let raw = u.fields.raw_output.as_ref().unwrap();
+        assert!(
+            raw.as_str().unwrap_or("").contains("hello"),
+            "raw_output must contain bash stdout; got: {raw:?}"
+        );
     }
 }
 
 /// After `MAX_TOOL_ROUNDS` (10) bash executions, the next bash call must cause
-/// the agent to return `StopReason::Cancelled` without executing the tool.
+/// the agent to return `StopReason::MaxTurnRequests` without executing the tool.
 #[tokio::test]
-async fn max_tool_rounds_cap_returns_cancelled() {
+async fn max_tool_rounds_cap_returns_max_turn_requests() {
     use agent_client_protocol::{
         CreateTerminalResponse, TerminalExitStatus, TerminalId, TerminalOutputResponse,
         WaitForTerminalExitResponse,
@@ -3965,8 +3968,8 @@ async fn max_tool_rounds_cap_returns_cancelled() {
 
     assert_eq!(
         resp.stop_reason,
-        StopReason::Cancelled,
-        "hitting MAX_TOOL_ROUNDS must return Cancelled"
+        StopReason::MaxTurnRequests,
+        "hitting MAX_TOOL_ROUNDS must return MaxTurnRequests"
     );
     let calls = mock.calls.lock().unwrap();
     assert_eq!(calls.len(), 11, "expected exactly 11 HTTP calls (10 bash + 1 cap hit)");
@@ -5205,4 +5208,683 @@ async fn bash_tool_spec_has_correct_parameters_schema() {
     } else {
         panic!("bash tool must be ToolSpec::Function, not ServerSide");
     }
+}
+
+// ── ext_method / session/export and session/import (integration) ──────────────
+
+#[tokio::test]
+async fn ext_method_export_returns_session_history_as_portable_messages() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent
+        .test_insert_session_with_history(
+            "export-1",
+            "/tmp",
+            vec![
+                trogon_xai_runner::Message::user("hi"),
+                trogon_xai_runner::Message::assistant_text("hello"),
+            ],
+        )
+        .await;
+
+    let raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"export-1"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new("session/export", std::sync::Arc::from(raw)))
+        .await
+        .unwrap();
+
+    let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(resp.0.get()).unwrap();
+
+    assert_eq!(portable.len(), 2, "expected 2 messages; got: {portable:?}");
+    assert_eq!(portable[0].role, "user");
+    assert_eq!(portable[0].text, "hi");
+    assert_eq!(portable[1].role, "assistant");
+    assert_eq!(portable[1].text, "hello");
+}
+
+#[tokio::test]
+async fn ext_method_import_replaces_history_and_export_verifies() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent.test_insert_session("dst-1", "/tmp", None).await;
+
+    let import_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-1","messages":[{"role":"user","text":"imported msg"}]}"#.to_string(),
+    )
+    .unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    let export_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-1"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_raw),
+        ))
+        .await
+        .unwrap();
+
+    let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(resp.0.get()).unwrap();
+
+    assert_eq!(portable.len(), 1, "expected 1 imported message; got: {portable:?}");
+    assert_eq!(portable[0].text, "imported msg");
+}
+
+#[tokio::test]
+async fn ext_method_export_import_round_trip() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let agent = make_agent(Arc::new(MockXaiHttpClient::new())).await;
+
+    agent
+        .test_insert_session_with_history(
+            "src-rt",
+            "/tmp",
+            vec![
+                trogon_xai_runner::Message::user("q"),
+                trogon_xai_runner::Message::assistant_text("a"),
+            ],
+        )
+        .await;
+    agent.test_insert_session("dst-rt", "/tmp", None).await;
+
+    // Export from "src-rt"
+    let export_src_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"src-rt"}"#.to_string(),
+    )
+    .unwrap();
+    let resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_src_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Import into "dst-rt" using the raw JSON from export
+    let exported_json = resp.0.get().to_string();
+    let import_params_str = format!(r#"{{"sessionId":"dst-rt","messages":{exported_json}}}"#);
+    let import_raw = serde_json::value::RawValue::from_string(import_params_str).unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Export from "dst-rt"
+    let export_dst_raw = serde_json::value::RawValue::from_string(
+        r#"{"sessionId":"dst-rt"}"#.to_string(),
+    )
+    .unwrap();
+    let dst_resp = agent
+        .ext_method(ExtRequest::new(
+            "session/export",
+            std::sync::Arc::from(export_dst_raw),
+        ))
+        .await
+        .unwrap();
+
+    let src_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(&exported_json).unwrap();
+    let dst_portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
+        serde_json::from_str(dst_resp.0.get()).unwrap();
+
+    assert_eq!(
+        src_portable.len(),
+        dst_portable.len(),
+        "round-trip must preserve message count"
+    );
+    for (i, (s, d)) in src_portable.iter().zip(dst_portable.iter()).enumerate() {
+        assert_eq!(s.role, d.role, "role mismatch at index {i}");
+        assert_eq!(s.text, d.text, "text mismatch at index {i}");
+    }
+}
+
+/// `session/import` must clear `last_response_id` so the next prompt sends the
+/// full imported history to xAI rather than using a stale `previous_response_id`
+/// that would reference the old conversation thread and silently ignore the import.
+#[tokio::test]
+async fn ext_method_import_clears_last_response_id() {
+    use agent_client_protocol::ExtRequest;
+    let _guard = env_lock().lock().unwrap();
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Turn 1 response (gives the session a last_response_id).
+    mock.push_response(text_response_with_id("first reply", "resp_turn1"));
+    // Turn 2 response (after import; must use full history, not previous_response_id).
+    mock.push_response(text_response(&["second reply"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    // Turn 1: establishes last_response_id = "resp_turn1".
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("first question"))],
+        ))
+        .await
+        .unwrap();
+
+    // Import replaces history with new messages; must clear last_response_id.
+    let import_raw = serde_json::value::RawValue::from_string(format!(
+        r#"{{"sessionId":"{sid}","messages":[{{"role":"user","text":"imported user"}},{{"role":"assistant","text":"imported assistant"}}]}}"#,
+    ))
+    .unwrap();
+    agent
+        .ext_method(ExtRequest::new(
+            "session/import",
+            std::sync::Arc::from(import_raw),
+        ))
+        .await
+        .unwrap();
+
+    // Turn 2: must send full history (imported messages + new user), not previous_response_id.
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("follow-up"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "expected two recorded HTTP requests");
+
+    // Turn 2 must NOT send previous_response_id — import must have cleared it.
+    assert!(
+        calls[1].previous_response_id.is_none(),
+        "import must clear last_response_id; turn after import must not send previous_response_id"
+    );
+    // Turn 2 input must include the imported history + the new user message.
+    assert!(
+        calls[1].input.len() >= 3,
+        "turn after import must send imported messages + new user message, got {} items",
+        calls[1].input.len()
+    );
+    let last_input = calls[1].input.last().unwrap();
+    assert_eq!(last_input.role().unwrap(), "user");
+    assert_eq!(last_input.content().unwrap(), "follow-up");
+}
+
+// ── MCP client support ──────────────────────────────────────────────────────────
+
+/// A function-call response that signals a tool round so the agent dispatches the
+/// call and makes a follow-up request with the tool output.
+fn tool_call_round(call_id: &str, name: &str, args: &str) -> Vec<XaiEvent> {
+    vec![
+        XaiEvent::ResponseId {
+            id: "resp_mcp".to_string(),
+        },
+        XaiEvent::FunctionCall {
+            call_id: call_id.to_string(),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        },
+        XaiEvent::Finished {
+            reason: FinishReason::ToolCalls,
+            incomplete_reason: None,
+        },
+        XaiEvent::Done,
+    ]
+}
+
+/// End-to-end: a session with an MCP server advertises its tool to the model;
+/// when the model calls `{server}__{tool}`, the runner dispatches it to the MCP
+/// server and feeds the result back into the follow-up model turn.
+#[tokio::test]
+async fn mcp_tool_call_dispatched_and_result_fed_back() {
+    let _guard = env_lock().lock().unwrap();
+
+    // Stand up a mock HTTP MCP server: initialize + tools/list + tools/call.
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[
+                {"name":"search","description":"Search the web","inputSchema":{"type":"object"}}
+            ]}
+        }));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust"}],"isError":false}
+        }));
+    });
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Round 1: model calls the prefixed MCP tool.
+    mock.push_response(tool_call_round("call_mcp", "web__search", r#"{"query":"rust"}"#));
+    // Round 2: model replies after receiving the tool output.
+    mock.push_response(text_response(&["all done"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await;
+
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("search rust"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "agent must make a follow-up call after MCP tool execution"
+    );
+    let follow_up = &calls[1].input;
+    let mcp_output = follow_up.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_mcp" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        mcp_output.as_deref(),
+        Some("MCP RESULT: rust"),
+        "follow-up turn must carry the MCP tool result as FunctionCallOutput"
+    );
+}
+
+// ── elicitation (ask_user) ──────────────────────────────────────────────────────
+
+/// When the model calls `ask_user`, the runner round-trips the question through
+/// the elicitation channel and returns the answer as the tool output.
+#[tokio::test]
+async fn ask_user_round_trips_through_elicitation_channel() {
+    let _guard = env_lock().lock().unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    // Round 1: model asks the user a question.
+    mock.push_response(tool_call_round(
+        "call_ask",
+        "ask_user",
+        r#"{"question":"What is your favorite color?"}"#,
+    ));
+    // Round 2: model replies after receiving the answer.
+    mock.push_response(text_response(&["thanks"]));
+
+    // Inject an elicitation channel and a responder that answers "blue".
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let responder = tokio::spawn(async move {
+        if let Some(req) = elic_rx.recv().await {
+            // Capture the question text the runner forwarded.
+            let q = req.request.message.clone();
+            let mut content = std::collections::BTreeMap::new();
+            content.insert(
+                "answer".to_string(),
+                agent_client_protocol::ElicitationContentValue::String("blue".to_string()),
+            );
+            let resp = agent_client_protocol::ElicitationResponse::new(
+                agent_client_protocol::ElicitationAction::Accept(
+                    agent_client_protocol::ElicitationAcceptAction::new().content(content),
+                ),
+            );
+            let _ = req.response_tx.send(Ok(resp));
+            q
+        } else {
+            String::new()
+        }
+    });
+
+    let agent = make_agent(Arc::clone(&mock)).await.with_elicitation(elic_tx);
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("ask me"))],
+        ))
+        .await
+        .unwrap();
+
+    let question = responder.await.unwrap();
+    assert_eq!(
+        question, "What is your favorite color?",
+        "elicitation request must carry the model's question"
+    );
+
+    let calls = mock.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        2,
+        "agent must make a follow-up call after ask_user is answered"
+    );
+    let answer = calls[1].input.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        answer.as_deref(),
+        Some("blue"),
+        "follow-up turn must carry the user's answer as the ask_user tool output"
+    );
+}
+
+/// Without an elicitation channel, `ask_user` is not advertised; if the model
+/// somehow calls it anyway, the runner returns a graceful unavailable message.
+#[tokio::test]
+async fn ask_user_unavailable_without_elicitation_channel() {
+    let _guard = env_lock().lock().unwrap();
+
+    let mock = Arc::new(MockXaiHttpClient::new());
+    mock.push_response(tool_call_round(
+        "call_ask",
+        "ask_user",
+        r#"{"question":"anything?"}"#,
+    ));
+    mock.push_response(text_response(&["ok"]));
+
+    let agent = make_agent(Arc::clone(&mock)).await; // no with_elicitation
+
+    let sess = agent
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap();
+    let sid = sess.session_id.to_string();
+
+    agent
+        .prompt(PromptRequest::new(
+            sid.clone(),
+            vec![ContentBlock::Text(TextContent::new("ask me"))],
+        ))
+        .await
+        .unwrap();
+
+    let calls = mock.calls.lock().unwrap();
+    let output = calls[1].input.iter().find_map(|item| match item {
+        InputItem::FunctionCallOutput { call_id, output } if call_id == "call_ask" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        output.as_deref(),
+        Some("ask_user is not available in this session."),
+    );
+}
+
+// ── LIVE end-to-end (real grok via xAI Responses API) ─────────────────────────
+//
+// Gated: `#[ignore]` + requires `XAI_API_KEY` in the environment. Uses the
+// cheapest model (`grok-3-mini`, override with `XAI_LIVE_MODEL`). Drives the
+// REAL model against a REAL local HTTP MCP server and a REAL elicitation channel
+// round-trip, so it exercises the full runner→grok→MCP / runner→grok→ask_user
+// paths end-to-end. Run with:
+//   XAI_API_KEY=... cargo test -p trogon-xai-runner --features test-helpers \
+//     --test xai_integration live_e2e_mcp_and_ask_user -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "live: requires XAI_API_KEY and spends real money"]
+async fn live_e2e_mcp_and_ask_user() {
+    let key = match std::env::var("XAI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            eprintln!("SKIP live_e2e_mcp_and_ask_user: XAI_API_KEY not set");
+            return;
+        }
+    };
+    let model = std::env::var("XAI_LIVE_MODEL").unwrap_or_else(|_| "grok-3-mini".to_string());
+
+    // ---- Part 1: MCP — real grok must call the advertised {server}__{tool} ----
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[{
+                "name":"search",
+                "description":"Search the web for a query and return a short result.",
+                "inputSchema":{"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"}
+                },"required":["query"]}
+            }]}
+        }));
+    });
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust is a systems programming language"}],"isError":false}
+        }));
+    });
+
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model.clone(),
+        key.clone(),
+        trogon_xai_runner::XaiClient::new(),
+    );
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p1 = "You have a tool named `web__search`. Call it with query \"rust\" to look it up. \
+        You MUST call the web__search tool — do not answer from your own knowledge. \
+        After you receive the tool result, reply with one short sentence.";
+    let r1 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(
+            sid,
+            vec![ContentBlock::Text(TextContent::new(p1))],
+        )),
+    )
+    .await
+    .expect("MCP prompt timed out")
+    .expect("MCP prompt failed");
+    let hits = call_mock.hits();
+    eprintln!("LIVE/MCP: stop_reason={:?}, tools/call hits={hits}", r1.stop_reason);
+    assert!(hits >= 1, "real grok did not call the MCP tool web__search (hits=0)");
+
+    // ---- Part 2: elicitation — real grok must call ask_user, answer round-trips ----
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(8);
+    let captured_q = Arc::new(Mutex::new(None::<String>));
+    let cq = Arc::clone(&captured_q);
+    let responder = tokio::spawn(async move {
+        if let Some(req) = elic_rx.recv().await {
+            *cq.lock().unwrap() = Some(req.request.message.clone());
+            let mut content = std::collections::BTreeMap::new();
+            content.insert(
+                "answer".to_string(),
+                agent_client_protocol::ElicitationContentValue::String("teal".to_string()),
+            );
+            let resp = agent_client_protocol::ElicitationResponse::new(
+                agent_client_protocol::ElicitationAction::Accept(
+                    agent_client_protocol::ElicitationAcceptAction::new().content(content),
+                ),
+            );
+            let _ = req.response_tx.send(Ok(resp));
+        }
+    });
+
+    let agent2 = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model,
+        key,
+        trogon_xai_runner::XaiClient::new(),
+    )
+    .with_elicitation(elic_tx);
+    let sid2 = agent2
+        .new_session(NewSessionRequest::new("/tmp"))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p2 = "Use the `ask_user` tool to ask me exactly: What is your favorite color? \
+        You MUST call the ask_user tool to ask — do not guess. After I answer, \
+        reply telling me which color I chose.";
+    let r2 = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent2.prompt(PromptRequest::new(
+            sid2,
+            vec![ContentBlock::Text(TextContent::new(p2))],
+        )),
+    )
+    .await
+    .expect("ask_user prompt timed out")
+    .expect("ask_user prompt failed");
+    let _ = responder.await;
+    let q = captured_q.lock().unwrap().clone();
+    eprintln!("LIVE/ask_user: stop_reason={:?}, forwarded question={q:?}", r2.stop_reason);
+    assert!(
+        q.is_some(),
+        "real grok did not call ask_user (no question forwarded through the channel)"
+    );
+}
+
+/// LIVE permission round-trip: in `default` mode an MCP tool requires approval,
+/// so when real grok calls it the runner fires a `PermissionReq`; an auto-approver
+/// signals `started` + allows it, and the tool then executes.
+#[tokio::test]
+#[ignore = "live: requires XAI_API_KEY and spends real money"]
+async fn live_e2e_permission_round_trip() {
+    let key = match std::env::var("XAI_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            eprintln!("SKIP live_e2e_permission_round_trip: XAI_API_KEY not set");
+            return;
+        }
+    };
+    let model = std::env::var("XAI_LIVE_MODEL").unwrap_or_else(|_| "grok-3-mini".to_string());
+
+    let mcp = httpmock::MockServer::start();
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("\"initialize\"");
+        then.status(200)
+            .json_body(serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}}));
+    });
+    mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/list");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":2,
+            "result":{"tools":[{
+                "name":"search",
+                "description":"Search the web for a query and return a short result.",
+                "inputSchema":{"type":"object","properties":{
+                    "query":{"type":"string","description":"the search query"}
+                },"required":["query"]}
+            }]}
+        }));
+    });
+    let call_mock = mcp.mock(|when, then| {
+        when.method(httpmock::Method::POST).body_contains("tools/call");
+        then.status(200).json_body(serde_json::json!({
+            "jsonrpc":"2.0","id":3,
+            "result":{"content":[{"type":"text","text":"MCP RESULT: rust"}],"isError":false}
+        }));
+    });
+
+    // Permission channel + auto-approver: capture the requested tool name, signal
+    // `started`, then allow. Loops so every request in the turn is approved.
+    let (perm_tx, mut perm_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(8);
+    let requested = Arc::new(Mutex::new(Vec::<String>::new()));
+    let rq = Arc::clone(&requested);
+    let approver = tokio::spawn(async move {
+        while let Some(req) = perm_rx.recv().await {
+            rq.lock().unwrap().push(req.tool_name.clone());
+            let _ = req.started_tx.send(());
+            let _ = req.response_tx.send(true);
+        }
+    });
+
+    let agent = XaiAgent::new_in_memory(
+        MockSessionNotifier::new(),
+        model,
+        key,
+        trogon_xai_runner::XaiClient::new(),
+    )
+    .with_permission_gate(perm_tx, trogon_runner_tools::AllowedToolsSessionStore::new());
+    // new_session defaults to mode "default" → MCP tools require approval.
+    let server = McpServer::Http(McpServerHttp::new("web", mcp.url("/mcp")));
+    let sid = agent
+        .new_session(NewSessionRequest::new("/tmp").mcp_servers(vec![server]))
+        .await
+        .unwrap()
+        .session_id
+        .to_string();
+
+    let p = "You have a tool named `web__search`. Call it with query \"rust\". \
+        You MUST call the web__search tool. After the result, reply with one short sentence.";
+    let r = tokio::time::timeout(
+        Duration::from_secs(180),
+        agent.prompt(PromptRequest::new(
+            sid,
+            vec![ContentBlock::Text(TextContent::new(p))],
+        )),
+    )
+    .await
+    .expect("permission prompt timed out")
+    .expect("permission prompt failed");
+    approver.abort();
+
+    let reqs = requested.lock().unwrap().clone();
+    let hits = call_mock.hits();
+    eprintln!(
+        "LIVE/permission: stop_reason={:?}, approvals requested for={reqs:?}, tools/call hits={hits}",
+        r.stop_reason
+    );
+    assert!(
+        reqs.iter().any(|t| t == "web__search"),
+        "permission approval must be requested for the MCP tool web__search; got {reqs:?}"
+    );
+    assert!(hits >= 1, "MCP tool must execute after approval");
 }

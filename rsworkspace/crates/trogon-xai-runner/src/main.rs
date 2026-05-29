@@ -15,7 +15,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let nats_url =
         std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
+    // MED-34: default to a runner-specific prefix so the spawn subscriber does not
+    // share `acp.agent.spawn` with the openrouter runner (which would round-robin
+    // spawn requests to the wrong backend). The dev script still overrides this.
+    let prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp.grok".to_string());
     let default_model = std::env::var("XAI_DEFAULT_MODEL").unwrap_or_else(|_| "grok-4".to_string());
     let api_key = std::env::var("XAI_API_KEY").unwrap_or_else(|_| {
         info!("XAI_API_KEY not set; users must authenticate with their own key via 'xai-api-key'");
@@ -76,17 +79,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let reg_store = trogon_registry::provision(&js_ctx).await
         .map_err(|e| format!("registry provisioning failed: {e}"))?;
     let registry = trogon_registry::Registry::new(reg_store);
+    let model_ids: Vec<String> = models
+        .split(',')
+        .filter_map(|entry| entry.split(':').next().map(|id| id.trim().to_string()))
+        .filter(|id| !id.is_empty())
+        .collect();
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string()],
+        capabilities: vec!["chat".to_string(), "explore".to_string(), "plan".to_string()],
         nats_subject: format!("{}.agent.>", prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &prefix }),
+        metadata: serde_json::json!({ "acp_prefix": &prefix, "models": model_ids }),
     };
-    registry.register(&cap).await
-        .map_err(|e| format!("initial registry registration failed: {e}"))?;
-    info!(agent_type, prefix, "registered in agent registry");
     let registry_for_agent = registry.clone();
+    let registry_for_register = registry.clone();
     tokio::spawn({
         let cap = cap.clone();
         async move {
@@ -99,6 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     });
+
+    let spawn_api_key = api_key.clone();
+    let spawn_model = default_model.clone();
+    let spawn_prefix = prefix.clone();
 
     let notifier = NatsSessionNotifier::new(nats.clone(), acp_prefix.clone());
     let mut agent = XaiAgent::new(notifier, default_model, api_key)
@@ -133,13 +143,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     }
 
+    {
+        use trogon_xai_runner::spawn_handler::{ReqwestSpawnClient, run_spawn_subscriber};
+        let base_url = std::env::var("XAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.x.ai/v1".to_string());
+        tokio::spawn(run_spawn_subscriber(
+            nats.clone(),
+            spawn_prefix,
+            spawn_api_key,
+            spawn_model,
+            base_url,
+            Arc::new(ReqwestSpawnClient),
+        ));
+    }
+
     let local = tokio::task::LocalSet::new();
+    let (perm_tx, mut perm_rx) = tokio::sync::mpsc::channel::<trogon_runner_tools::PermissionReq>(32);
+    let perm_store = trogon_runner_tools::AllowedToolsSessionStore::new();
+    agent = agent.with_permission_gate(perm_tx, perm_store.clone());
+    let nats_for_perm = nats.clone();
+    let prefix_for_perm = acp_prefix.clone();
+
+    let (elic_tx, mut elic_rx) =
+        tokio::sync::mpsc::channel::<trogon_runner_tools::ElicitationReq>(32);
+    agent = agent.with_elicitation(elic_tx);
+    let nats_for_elic = nats.clone();
+    let prefix_for_elic = acp_prefix.clone();
+
     let result = local
         .run_until(async {
+            tokio::task::spawn_local(async move {
+                while let Some(req) = perm_rx.recv().await {
+                    trogon_runner_tools::handle_permission_request_nats(
+                        req,
+                        nats_for_perm.clone(),
+                        prefix_for_perm.clone(),
+                        &perm_store,
+                    )
+                    .await;
+                }
+            });
+
+            tokio::task::spawn_local(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    trogon_runner_tools::handle_elicitation_request_nats(
+                        req,
+                        nats_for_elic.clone(),
+                        prefix_for_elic.clone(),
+                    )
+                    .await;
+                }
+            });
+
             let (_conn, io_task) =
                 AgentSideNatsConnection::with_jetstream(agent, nats, js, acp_prefix, |fut| {
                     tokio::task::spawn_local(fut);
                 });
+            // LOW-16: register AFTER the ACP subscription is established so
+            // incoming requests are not received before we can handle them.
+            if let Err(e) = registry_for_register.register(&cap).await {
+                return Err(acp_nats_agent::ConnectionError::Subscribe(
+                    format!("initial registry registration failed: {e}").into(),
+                ));
+            }
+            info!(agent_type, prefix, "registered in agent registry");
             info!("xai-runner listening on NATS");
             tokio::select! {
                 result = io_task => result,

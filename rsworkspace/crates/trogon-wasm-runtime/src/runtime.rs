@@ -208,11 +208,25 @@ where
         }
     }
 
+    /// MED-31: `tokio::task::spawn_local` panics when called outside a `LocalSet`.
+    /// Production always drives this runtime inside a `LocalSet`, but tests and
+    /// future callers may not. Probe once (a no-op spawn) so the sync method can
+    /// degrade to synchronous-only cleanup instead of panicking. There is no public
+    /// API to detect a `LocalSet`, hence the `catch_unwind`.
+    fn local_set_available() -> bool {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio::task::spawn_local(async {}).abort();
+        }))
+        .is_ok()
+    }
+
     /// Cleans up sessions that have been idle longer than `session_idle_timeout_secs`.
     pub fn cleanup_idle_sessions(&self) {
         if self.session_idle_timeout_secs == 0 {
             return;
         }
+        // Whether we can schedule the async parts (terminal kill, sandbox removal).
+        let can_spawn_local = Self::local_set_available();
         let now = self.clock.now();
         let timeout = std::time::Duration::from_secs(self.session_idle_timeout_secs);
         let idle: Vec<String> = {
@@ -243,22 +257,38 @@ where
                 if let Some(mut t) = self.terminals.borrow_mut().remove(&tid) {
                     // Spawn kill + collector abort so native processes are not orphaned.
                     // cleanup_idle_sessions is sync, so async work must go to spawn_local.
-                    tokio::task::spawn_local(async move {
-                        t.kill().await;
+                    if can_spawn_local {
+                        tokio::task::spawn_local(async move {
+                            t.kill().await;
+                            if let Some(c) = t.output_collector.take() {
+                                c.abort();
+                            }
+                        });
+                    } else {
+                        // B15: no LocalSet to drive the async kill. `start_kill` is
+                        // sync and kills the native child (and aborts the WASM
+                        // collector), so the process isn't orphaned when we drop the
+                        // terminal here. Previously only the collector was aborted,
+                        // leaving the native child running.
+                        t.start_kill();
                         if let Some(c) = t.output_collector.take() {
                             c.abort();
                         }
-                    });
+                    }
                 }
             }
             if let Some(session) = self.sessions.borrow_mut().remove(&session_id) {
                 let dir = session.dir.clone();
                 let fs = self.fs.clone();
                 // Spawn the fs removal as a background task if we're in an async context.
-                tokio::task::spawn_local(async move {
-                    let _ = fs.remove_dir_all(&dir).await;
-                    debug!(session_id = %session_id, "Idle session sandbox cleaned up");
-                });
+                if can_spawn_local {
+                    tokio::task::spawn_local(async move {
+                        let _ = fs.remove_dir_all(&dir).await;
+                        debug!(session_id = %session_id, "Idle session sandbox cleaned up");
+                    });
+                }
+                // Without a LocalSet (non-production callers) the sandbox dir removal
+                // is skipped — the in-memory session state is still cleaned up above.
             }
         }
     }
@@ -319,7 +349,7 @@ where
             let sessions = self.sessions.borrow();
             sessions
                 .get(session_id)
-                .map(|s| s.terminal_cwd(req.cwd.as_deref()))
+                .map(|s| s.terminal_cwd(req.cwd.as_deref(), self.wasm_only))
                 .unwrap_or_else(|| sandbox_dir.clone())
         };
 
@@ -436,7 +466,7 @@ where
         let terminal = WasmTerminal {
             kind: TerminalKind::Native {
                 child: Some(handle),
-                stdin,
+                stdin: std::sync::Arc::new(tokio::sync::Mutex::new(stdin)),
             },
             output_buf,
             output_collector: Some(collector),
@@ -547,7 +577,14 @@ where
         let collector = tokio::task::spawn_local(async move {
             // Backpressure: acquire a permit before executing. The permit is held
             // for the lifetime of the task and released when dropped.
-            let _permit = task_limiter.acquire().await;
+            let Some(_permit) = task_limiter.acquire().await else {
+                // MED-30: limiter closed (runtime shutting down). Set the exit arc
+                // so a concurrent wait_for_terminal_exit doesn't loop forever.
+                let _ = exit_arc.set(
+                    TerminalExitStatus::new().signal(Some("runtime shutting down".to_string())),
+                );
+                return;
+            };
             // Count tasks that actually start executing, not just those queued for a permit.
             METRICS
                 .wasm_tasks_started
@@ -654,13 +691,13 @@ where
     ) -> agent_client_protocol::Result<KillTerminalResponse> {
         let terminal_id = req.terminal_id.0.as_ref().to_string();
         self.tick_last_activity_for_terminal(&terminal_id);
-        // Remove the terminal from the map so the borrow is dropped before the await.
-        let t = self.terminals.borrow_mut().remove(&terminal_id);
-        match t {
-            Some(mut terminal) => {
-                terminal.kill().await;
-                // Put the terminal back so it can still be waited on / released.
-                self.terminals.borrow_mut().insert(terminal_id, terminal);
+        // Signal kill while holding the borrow (start_kill is sync, no await needed).
+        // The terminal stays in the map the entire time so concurrent writes never see
+        // a phantom "Unknown terminal" during the kill window (HIGH-26).
+        let mut terminals = self.terminals.borrow_mut();
+        match terminals.get_mut(&terminal_id) {
+            Some(t) => {
+                t.start_kill();
                 Ok(KillTerminalResponse::new())
             }
             None => Err(agent_client_protocol::Error::new(
@@ -676,27 +713,51 @@ where
         data: &[u8],
     ) -> agent_client_protocol::Result<()> {
         self.tick_last_activity_for_terminal(terminal_id);
-        // Remove the terminal from the map so the borrow is dropped before the await.
-        let t = self.terminals.borrow_mut().remove(terminal_id);
-        match t {
-            Some(mut terminal) => {
-                let ok = terminal.write_stdin(data).await;
-                self.terminals
-                    .borrow_mut()
-                    .insert(terminal_id.to_string(), terminal);
+        // Clone the stdin Arc while the RefCell borrow is held (sync), then drop the
+        // borrow and perform the async write through the Arc. This keeps the terminal
+        // in the map during the write, so concurrent kill / output calls never see a
+        // phantom "Unknown terminal" error (HIGH-23, HIGH-26).
+        let stdin_arc = {
+            let terminals = self.terminals.borrow();
+            match terminals.get(terminal_id) {
+                Some(t) => {
+                    if let crate::terminal::TerminalKind::Native { ref stdin, .. } = t.kind {
+                        Some(std::sync::Arc::clone(stdin))
+                    } else {
+                        None // WASM terminal: no stdin
+                    }
+                }
+                None => {
+                    return Err(agent_client_protocol::Error::new(
+                        -32602,
+                        format!("Unknown terminal: {terminal_id}"),
+                    ));
+                }
+            }
+        };
+        match stdin_arc {
+            Some(arc) => {
+                let mut guard = arc.lock().await;
+                let ok = if let Some(ref mut s) = *guard {
+                    use tokio::io::AsyncWriteExt;
+                    s.write_all(data).await.is_ok()
+                } else {
+                    false
+                };
                 if ok {
                     Ok(())
                 } else {
                     Err(agent_client_protocol::Error::new(
                         -32603,
-                        "Failed to write to terminal stdin (WASM terminals do not support stdin)"
+                        "Failed to write to terminal stdin (stdin closed or WASM terminal)"
                             .to_string(),
                     ))
                 }
             }
             None => Err(agent_client_protocol::Error::new(
-                -32602,
-                format!("Unknown terminal: {terminal_id}"),
+                -32603,
+                "Failed to write to terminal stdin (WASM terminals do not support stdin)"
+                    .to_string(),
             )),
         }
     }
@@ -848,7 +909,9 @@ where
                     }
                 };
                 if let Some(c) = collector {
-                    let _ = c.await;
+                    if let Err(e) = c.await {
+                        tracing::warn!("stdout collector task panicked: {e}");
+                    }
                 }
                 s
             } else {
@@ -860,7 +923,9 @@ where
                 {
                     Ok(Ok(exit_status)) => {
                         if let Some(c) = collector {
-                            let _ = c.await;
+                            if let Err(e) = c.await {
+                                tracing::warn!("stdout collector task panicked: {e}");
+                            }
                         }
                         crate::terminal::exit_status_from_std(&exit_status)
                     }
@@ -888,7 +953,15 @@ where
             }
         } else if let Some(c) = collector {
             // WASM background task: wait for the task to finish.
-            let _ = c.await;
+            if let Err(e) = c.await {
+                tracing::warn!("stdout collector task panicked: {e}");
+            }
+            // Ensure exit_arc is populated even if the task panicked before setting it.
+            // Any concurrent wait_for_terminal_exit caller spinning on arc.get() will
+            // unblock once this set() call succeeds.
+            if let Some(ref arc) = wasm_exit_arc {
+                let _ = arc.set(TerminalExitStatus::new().signal(Some("task_panic".to_string())));
+            }
             wasm_exit_arc
                 .as_ref()
                 .and_then(|arc| arc.get().cloned())
@@ -908,7 +981,10 @@ where
                     if let Some(status) = arc.get().cloned() {
                         break status;
                     }
-                    tokio::task::yield_now().await;
+                    // B15: back off instead of a tight yield_now() loop, which
+                    // hot-spins the single-threaded executor and starves the
+                    // background task we're waiting on.
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             } else {
                 tracing::warn!(
@@ -1058,7 +1134,7 @@ where
 
     // ── Permission ─────────────────────────────────────────────────────────
 
-    pub fn handle_request_permission(
+    pub async fn handle_request_permission(
         &self,
         req: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
@@ -1071,10 +1147,61 @@ where
                 return Ok(RequestPermissionResponse::new(outcome));
             }
         }
-        // No options or permissions disabled → cancel.
-        Ok(RequestPermissionResponse::new(
-            RequestPermissionOutcome::Cancelled,
-        ))
+        // Headless fallback: `WASM_AUTO_ALLOW_PERMISSIONS` is read at startup into
+        // `auto_allow_permissions` above; `TROGON_NON_INTERACTIVE=1` can also opt in at runtime.
+        if std::env::var("TROGON_NON_INTERACTIVE").as_deref() == Ok("1") {
+            if let Some(first) = req.options.first() {
+                tracing::info!(
+                    option = %first.option_id.0,
+                    "TROGON_NON_INTERACTIVE=1 — auto-selecting first permission option (no NATS)"
+                );
+                let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    first.option_id.clone(),
+                ));
+                return Ok(RequestPermissionResponse::new(outcome));
+            }
+        }
+
+        // Forward to the CLI via NATS so the user can approve or deny.
+        if let Some(ref nats) = self.nats_client {
+            let session_id = req.session_id.0.as_ref();
+            let subject = format!(
+                "{}.session.{}.client.session.request_permission",
+                self.acp_prefix, session_id
+            );
+            if let Ok(payload) = serde_json::to_vec(&req) {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(60),
+                    nats.request(subject, bytes::Bytes::from(payload)),
+                )
+                .await
+                {
+                    Ok(Ok(msg)) => {
+                        match serde_json::from_slice::<RequestPermissionResponse>(&msg.payload) {
+                            Ok(resp) => return Ok(resp),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to deserialize permission response — cancelling");
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "NATS permission request failed — cancelling");
+                    }
+                    Err(_) => {
+                        tracing::warn!("NATS permission request timed out after 60s — cancelling");
+                    }
+                }
+            } else {
+                tracing::warn!("Failed to serialize permission request — cancelling");
+            }
+        } else {
+            tracing::warn!(
+                session_id = %req.session_id.0,
+                "no NATS client for permission request — cancelling; set WASM_AUTO_ALLOW_PERMISSIONS=1 \
+                 at startup or TROGON_NON_INTERACTIVE=1 for headless auto-approve"
+            );
+        }
+        Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
     }
 
     /// Returns a snapshot of all active session IDs.
@@ -1182,11 +1309,11 @@ where
         WasmRuntime::handle_read_text_file(self, session_id, req).await
     }
 
-    fn handle_request_permission(
+    async fn handle_request_permission(
         &self,
         req: agent_client_protocol::RequestPermissionRequest,
     ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
-        WasmRuntime::handle_request_permission(self, req)
+        WasmRuntime::handle_request_permission(self, req).await
     }
 
     fn handle_session_notification(&self, notif: agent_client_protocol::SessionNotification) {
@@ -1365,7 +1492,9 @@ mod tests {
 
     impl TaskLimiter for UnlimitedTaskLimiter {
         type Permit = ();
-        async fn acquire(&self) {}
+        async fn acquire(&self) -> Option<()> {
+            Some(())
+        }
     }
 
     // ── NeverHandle / NeverProcessSpawner ─────────────────────────────────────
@@ -1390,6 +1519,9 @@ mod tests {
             panic!("NeverHandle used in test")
         }
         async fn kill(&mut self) -> io::Result<()> {
+            panic!("NeverHandle used in test")
+        }
+        fn start_kill(&mut self) -> io::Result<()> {
             panic!("NeverHandle used in test")
         }
     }
@@ -1464,6 +1596,74 @@ mod tests {
             _: &str,
         ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
             Err("no nats broker".into())
+        }
+    }
+
+    // ── PermissionResponderNats ───────────────────────────────────────────────
+    // A broker whose `request` records the subject and replies with a Selected
+    // outcome — simulating the CLI answering a forwarded permission prompt.
+
+    #[derive(Clone)]
+    struct PermissionResponderNats {
+        selected_option: String,
+        last_subject: Arc<Mutex<Option<String>>>,
+    }
+
+    impl PermissionResponderNats {
+        fn new(selected_option: &str) -> Self {
+            Self {
+                selected_option: selected_option.to_string(),
+                last_subject: Arc::new(Mutex::new(None)),
+            }
+        }
+    }
+
+    impl NatsBroker for PermissionResponderNats {
+        type Sub = futures::stream::Empty<async_nats::Message>;
+
+        async fn subscribe(
+            &self,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
+        }
+
+        async fn publish(
+            &self,
+            _: async_nats::Subject,
+            _: bytes::Bytes,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
+        }
+
+        async fn request(
+            &self,
+            subject: impl Into<String> + Send,
+            _: bytes::Bytes,
+        ) -> Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>> {
+            *self.last_subject.lock().unwrap() = Some(subject.into());
+            let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                SelectedPermissionOutcome::new(self.selected_option.clone()),
+            ));
+            let payload = bytes::Bytes::from(serde_json::to_vec(&resp).unwrap());
+            let length = payload.len();
+            Ok(async_nats::Message {
+                subject: "_INBOX.reply".into(),
+                reply: None,
+                payload,
+                headers: None,
+                status: None,
+                description: None,
+                length,
+            })
+        }
+
+        async fn queue_subscribe(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<Self::Sub, Box<dyn std::error::Error + Send + Sync>> {
+            Err("not used".into())
         }
     }
 
@@ -1620,7 +1820,7 @@ mod tests {
         let mut config = test_config();
         config.auto_allow_permissions = true;
         let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
         assert!(
             matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
             "first option must be selected when auto_allow is true"
@@ -1632,15 +1832,58 @@ mod tests {
         let mut config = test_config();
         config.auto_allow_permissions = true;
         let rt = make_runtime_with(config, MockFs::new(), MockClock::new());
-        let resp = rt.handle_request_permission(perm_req(vec![])).unwrap();
+        let resp = rt.handle_request_permission(perm_req(vec![])).await.unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
     }
 
     #[tokio::test]
     async fn request_permission_cancelled_when_auto_allow_disabled() {
-        let rt = make_runtime(); // auto_allow_permissions = false
-        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).unwrap();
+        let rt = make_runtime(); // auto_allow_permissions = false, no nats_client
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
         assert_eq!(resp.outcome, RequestPermissionOutcome::Cancelled);
+    }
+
+    /// CRIT-5: with auto_allow disabled but a NATS client present, the handler must
+    /// forward the prompt to the CLI and honour its response — NOT silently deny.
+    #[tokio::test]
+    async fn request_permission_forwards_to_cli_when_nats_present() {
+        type ForwardingRuntime = WasmRuntime<
+            MockFs,
+            NeverProcessSpawner,
+            PermissionResponderNats,
+            NeverWasmExecutor<PermissionResponderNats>,
+            MockClock,
+            MockIdGenerator,
+            UnlimitedTaskLimiter,
+        >;
+
+        let nats = PermissionResponderNats::new("opt-allow");
+        let config = test_config(); // auto_allow_permissions = false
+        let rt: ForwardingRuntime = WasmRuntime::with_services(
+            &config,
+            Some(nats.clone()),
+            MockFs::new(),
+            NeverProcessSpawner,
+            NeverWasmExecutor(PhantomData),
+            MockClock::new(),
+            MockIdGenerator::new(),
+            UnlimitedTaskLimiter,
+        )
+        .unwrap();
+
+        let resp = rt.handle_request_permission(perm_req(vec![allow_option()])).await.unwrap();
+
+        assert!(
+            matches!(&resp.outcome, RequestPermissionOutcome::Selected(s) if s.option_id.0.as_ref() == "opt-allow"),
+            "permission must be forwarded to the CLI and its Selected outcome returned, got: {:?}",
+            resp.outcome
+        );
+        // It actually published to the per-session request_permission subject.
+        let subject = nats.last_subject.lock().unwrap().clone();
+        assert_eq!(
+            subject.as_deref(),
+            Some("acp.session.sess1.client.session.request_permission"),
+        );
     }
 
     // ── list_sessions / list_terminals ────────────────────────────────────────
