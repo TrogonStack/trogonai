@@ -1091,6 +1091,11 @@ pub fn resolve_model_alias(input: &str) -> String {
         "grok-mini" => "grok-3-mini".into(),
         "openrouter" => std::env::var("OPENROUTER_DEFAULT_MODEL")
             .unwrap_or_else(|_| "anthropic/claude-sonnet-4".into()),
+        // Short aliases for the OpenRouter models. These must match the IDs the
+        // openrouter runner registers (OPENROUTER_MODELS); update both together.
+        "op-claude" => "anthropic/claude-sonnet-4".into(),
+        "op-gpt" => "openai/gpt-4o".into(),
+        "op-gemini" => "google/gemini-2.5-pro".into(),
         "codex" => std::env::var("CODEX_DEFAULT_MODEL").unwrap_or_else(|_| "o4-mini".into()),
         "o3" => "o3".into(),
         "gpt-4o" => "gpt-4o".into(),
@@ -1330,6 +1335,9 @@ pub(crate) async fn format_model_catalog<RS: RegistryStore>(
                 "o4-mini" => Some("o4-mini"),
                 "o3" => Some("o3"),
                 "gpt-4o" => Some("gpt-4o"),
+                "anthropic/claude-sonnet-4" => Some("op-claude"),
+                "openai/gpt-4o" => Some("op-gpt"),
+                "google/gemini-2.5-pro" => Some("op-gemini"),
                 _ => None,
             };
             if let Some(a) = alias {
