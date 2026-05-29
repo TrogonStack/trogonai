@@ -1,15 +1,15 @@
 //! Maps `StreamEvent` → terminal output for one assistant turn.
 //!
-//! This reproduces the streaming render behavior of the REPL: streamed vs
-//! buffered (markdown-rendered) text, the live `┆` tool line, tool output,
-//! diffs, and the end-of-turn token footer. When a new `StreamEvent` variant
-//! is added, add a match arm here.
+//! Visual style is the unified CLI design (assistant prefix, running-tool pill,
+//! `── tokens ──` footer). Behavior keeps full functionality: streamed vs
+//! buffered (markdown-rendered) text, tool output, and diffs. When a new
+//! `StreamEvent` variant is added, add a match arm here.
 
 use std::io::Write as _;
 
 use agent_client_protocol::ToolCallStatus;
 
-use crate::repl::fmt_tokens;
+use crate::app::display::print_assistant_prefix;
 use crate::session::StreamEvent;
 use crate::terminal::{print_tool_output, reset_display};
 
@@ -40,10 +40,12 @@ pub struct TurnRenderer {
     /// and markdown-rendered when the turn (or a tool call) interrupts the text.
     stream: bool,
     response_buf: String,
-    /// True while a `┆` tool line is live on stderr (no trailing newline).
-    tool_line_active: bool,
-    /// True after the first text token — `reset_display` runs once per text run.
+    /// True once the bold `Trogon` prefix has been printed for the current text run.
     text_started: bool,
+    tools_done: u32,
+    running_tool: Option<String>,
+    /// True while a `▸ … tools` pill is live on stderr (no trailing newline).
+    pill_line: bool,
     stop: Option<TurnStop>,
 }
 
@@ -52,8 +54,10 @@ impl TurnRenderer {
         Self {
             stream,
             response_buf: String::new(),
-            tool_line_active: false,
             text_started: false,
+            tools_done: 0,
+            running_tool: None,
+            pill_line: false,
             stop: None,
         }
     }
@@ -67,29 +71,19 @@ impl TurnRenderer {
     }
 
     pub fn on_ctrl_c(&mut self) {
-        self.clear_tool_line();
+        self.flush_pill();
         eprintln!("\n[cancelled]");
     }
 
     pub fn handle(&mut self, event: StreamEvent, metrics: &mut TurnMetrics) -> Option<CwdSync> {
-        let mut stdout = std::io::stdout();
         let mut cwd_sync = None;
         match event {
             StreamEvent::Text(text) => {
-                if self.tool_line_active {
-                    // clear tool line before text starts
-                    eprint!("\r\x1b[2K\n");
-                    let _ = std::io::stderr().flush();
-                    self.tool_line_active = false;
-                    self.text_started = false;
-                }
-                if !self.text_started {
-                    reset_display();
-                    self.text_started = true;
-                }
+                self.flush_pill();
                 if self.stream {
+                    self.start_text();
                     print!("{text}");
-                    let _ = stdout.flush();
+                    let _ = std::io::stdout().flush();
                 } else {
                     self.response_buf.push_str(&text);
                 }
@@ -97,16 +91,15 @@ impl TurnRenderer {
             StreamEvent::Thinking => {}
             StreamEvent::ToolCall(name) => {
                 self.flush_buffered_markdown();
-                if self.tool_line_active {
-                    // overwrite the previous tool line in place
-                    eprint!("\r\x1b[2K\x1b[2m┆ {name}\x1b[0m");
-                } else {
-                    eprint!("\n\x1b[2m┆ {name}\x1b[0m");
-                    self.tool_line_active = true;
+                if self.text_started {
+                    println!();
+                    self.text_started = false;
                 }
-                let _ = std::io::stderr().flush();
+                self.running_tool = Some(name);
+                self.render_tool_pill();
             }
             StreamEvent::Diff(diff) => {
+                self.flush_pill();
                 reset_display();
                 eprintln!("{diff}");
             }
@@ -116,11 +109,16 @@ impl TurnRenderer {
                 exit_code,
                 status,
             } => {
-                self.clear_tool_line();
+                self.tools_done += 1;
+                self.running_tool = None;
                 let failed = matches!(status, ToolCallStatus::Failed);
                 let code_suffix = exit_code.map(|c| format!(" (exit {c})")).unwrap_or_default();
-                let badge = if failed { " [failed]" } else { "" };
-                eprintln!("\x1b[2m┆ {name}{code_suffix}{badge}\x1b[0m");
+                let badge = if failed { " ✗" } else { "" };
+                self.flush_pill();
+                eprintln!(
+                    "\x1b[2m  {} {}{code_suffix}{badge}\x1b[0m",
+                    self.tools_done, name
+                );
                 if !output.is_empty() {
                     print_tool_output(&output);
                     cwd_sync = Some(CwdSync {
@@ -137,58 +135,101 @@ impl TurnRenderer {
                 metrics.context_size = context_size;
             }
             StreamEvent::Error(msg) => {
-                self.clear_tool_line();
+                self.flush_pill();
                 self.flush_buffered_markdown();
                 eprintln!("\n\x1b[31merror: {msg}\x1b[0m");
-                let _ = stdout.flush();
+                let _ = std::io::stdout().flush();
                 self.stop = Some(TurnStop::Error(msg));
             }
             StreamEvent::Done(reason) => {
-                self.clear_tool_line();
+                self.flush_pill();
                 self.flush_buffered_markdown();
+                if self.text_started {
+                    println!();
+                    self.text_started = false;
+                }
                 if reason == "cancelled" {
                     eprintln!("\n[cancelled]");
                 } else if reason == "maxTurnRequests" {
                     eprintln!(
                         "\n\x1b[33m[max tool rounds reached — try rephrasing or using \x1b[35m/compact\x1b[33m]\x1b[0m"
                     );
+                } else if metrics.context_size > 0 {
+                    let pct = metrics.used_tokens * 100 / metrics.context_size;
+                    eprintln!(
+                        "\x1b[90m── {}/{} tokens ({}%) ──\x1b[0m",
+                        fmt_tokens(metrics.used_tokens),
+                        fmt_tokens(metrics.context_size),
+                        pct,
+                    );
+                    println!();
                 } else {
                     println!();
-                    if metrics.context_size > 0 {
-                        let pct = metrics.used_tokens * 100 / metrics.context_size;
-                        eprintln!(
-                            "\x1b[90m[tokens: {}/{} ({}%)]\x1b[0m",
-                            fmt_tokens(metrics.used_tokens),
-                            fmt_tokens(metrics.context_size),
-                            pct,
-                        );
-                    }
-                    eprintln!();
                 }
-                let _ = stdout.flush();
+                let _ = std::io::stdout().flush();
                 self.stop = Some(TurnStop::Done { reason });
             }
         }
         cwd_sync
     }
 
-    /// Clear the live `┆` tool line, if any.
-    fn clear_tool_line(&mut self) {
-        if self.tool_line_active {
-            eprint!("\r\x1b[2K\n");
-            let _ = std::io::stderr().flush();
-            self.tool_line_active = false;
+    /// Print the bold assistant prefix once per text run.
+    fn start_text(&mut self) {
+        if !self.text_started {
+            print_assistant_prefix();
+            self.text_started = true;
         }
     }
 
     /// In non-streaming mode, render and print any buffered text as markdown.
     fn flush_buffered_markdown(&mut self) {
         if !self.stream && !self.response_buf.is_empty() {
-            reset_display();
+            self.start_text();
             print!("{}", crate::markdown::render(&self.response_buf));
             let _ = std::io::stdout().flush();
             self.response_buf.clear();
         }
+    }
+
+    /// Clear the live tool pill, if any, moving to a fresh line.
+    fn flush_pill(&mut self) {
+        if self.pill_line {
+            eprint!("\r\x1b[2K\n");
+            let _ = std::io::stderr().flush();
+            self.pill_line = false;
+        }
+    }
+
+    /// Draw/refresh the `▸ N tools · name running…` pill in place.
+    fn render_tool_pill(&mut self) {
+        let running = self
+            .running_tool
+            .as_deref()
+            .map(|n| format!(" · {n} running…"))
+            .unwrap_or_default();
+        let total = self.tools_done + u32::from(self.running_tool.is_some());
+        let line = if total == 0 {
+            "▸ tools".to_string()
+        } else {
+            format!("▸ {total} tools{running}")
+        };
+        if self.pill_line {
+            eprint!("\r\x1b[2K\x1b[2m{line}\x1b[0m");
+        } else {
+            eprint!("\n\x1b[2m{line}\x1b[0m");
+            self.pill_line = true;
+        }
+        let _ = std::io::stderr().flush();
+    }
+}
+
+fn fmt_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
     }
 }
 
@@ -220,8 +261,7 @@ mod tests {
             },
             &mut m,
         );
-        assert!(sync.is_some());
-        let sync = sync.unwrap();
+        let sync = sync.expect("output present → cwd sync");
         assert_eq!(sync.tool_name, "bash");
         assert_eq!(sync.output, "/tmp\n");
     }
@@ -232,5 +272,12 @@ mod tests {
         let mut m = TurnMetrics::default();
         r.handle(StreamEvent::Error("boom".into()), &mut m);
         assert!(matches!(r.take_stop(), Some(TurnStop::Error(msg)) if msg == "boom"));
+    }
+
+    #[test]
+    fn fmt_tokens_uses_compact_units() {
+        assert_eq!(fmt_tokens(42), "42");
+        assert_eq!(fmt_tokens(1_500), "1.5k");
+        assert_eq!(fmt_tokens(2_000_000), "2.0M");
     }
 }

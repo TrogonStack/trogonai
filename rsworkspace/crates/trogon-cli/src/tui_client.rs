@@ -11,7 +11,7 @@ use agent_client_protocol::{
     WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
-use crate::app::{permission_summary, print_permission_prompt};
+use crate::app::{permission_from_request, print_permission_prompt};
 use crate::terminal::reset_display;
 use std::io::{self, BufRead, Write};
 use std::os::unix::io::AsRawFd;
@@ -522,10 +522,10 @@ async fn handle_tool_permission(
     // Pause the streaming-input reader so it doesn't steal/echo the a/w/r keypress.
     let _prompt_guard = crate::stream_input::TtyPromptGuard::new();
 
-    let summary = permission_summary(req);
+    let display = permission_from_request(req);
     reset_display();
     eprint!("\r\x1b[2K");
-    print_permission_prompt(&summary);
+    print_permission_prompt(&display);
     flush_stderr();
 
     let key = match tokio::task::spawn_blocking(move || read_permission_key(&coordinator)).await {

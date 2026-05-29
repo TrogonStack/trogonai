@@ -250,7 +250,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     } else {
         std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
     };
-    print_startup_banner(session.session_id());
+    print_startup_banner(session.session_id(), &prefix, &session_mode);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
@@ -1600,7 +1600,7 @@ fn estimate_cost(tokens: u64, model: &str) -> String {
 
 // ── token formatting ──────────────────────────────────────────────────────────
 
-pub(crate) fn fmt_tokens(n: u64) -> String {
+fn fmt_tokens(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().rev().enumerate() {
