@@ -228,7 +228,7 @@ Mirrors `MCP_GATEWAY_AGENT_IDENTITY` phasing.
 
 ## CEL surface
 
-Pinned additions to the `jwt.*` namespace (`MCP_GATEWAY_PLAN.md` §8):
+Pinned additions to the `jwt.*` namespace:
 
 | Variable / function | Type | Semantics |
 |---|---|---|
@@ -309,7 +309,7 @@ STS exchange audit events (`mcp.audit.sts.*`) include the same `act_chain` on bo
 
 ## Failure modes
 
-New JSON-RPC codes in Trogon allocation `-32100` … `-32199` (to be pinned in `MCP_GATEWAY_PLAN.md` §6):
+New JSON-RPC codes in Trogon allocation `-32100` … `-32199`:
 
 | Code | Symbol | Condition | Outcome |
 |---|---|---|---|

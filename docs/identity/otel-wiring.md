@@ -42,7 +42,6 @@ Traces answer “which hop added 400 ms?” Metrics answer “is deny rate climb
 | Phase | Ship | Defer | Rationale |
 |---|---|---|---|
 | **v1 (Block G)** | Traces + metrics from `trogon-mcp-gateway`, `trogon-sts`, `trogon-agent-registry`; trace context on NATS headers; span catalog in §3; metric catalog in §4 | Structured OTel **logs** export as first-class signal | `trogon-telemetry` already bridges `tracing` events to OTel logs, but gateway hot path still relies on audit + metrics for compliance; logs-as-OTel need redaction review (§7) |
-| **v2** | OTel **logs** with explicit redaction pipeline; `trogon-traffic-view` consumer spans; WASM policy boundary spans ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F) | Per-request log export of JSON-RPC bodies | Log volume and PII risk exceed trace/metric budgets without tier-3 redaction parity |
 | **v3+** | Cross-region trace correlation, tail-based sampling hooks, SIEM trace_id join (audit `trace_id` field) | — | Depends on multi-region Block G items |
 
 **v1 success criteria:** An operator can open a trace for a `tools/call`, see gateway child spans (`mcp.gateway.authz`, `mcp.gateway.spicedb.check`, `mcp.gateway.egress`, `mcp.gateway.audit.publish`), and correlate `trace_id` with JSON-RPC error `data.trace_id` and (when present) audit envelope `trace_id` — without copying JWT material or tool arguments into span attributes.
@@ -75,7 +74,6 @@ Distributed tracing uses **W3C Trace Context** (`traceparent`, `tracestate`). Tr
 
 | Carrier | Header / field | Direction | Required v1 | Notes |
 |---|---|---|---|---|
-| NATS message headers | `traceparent` | both | Yes | Pinned in [MCP_GATEWAY_PLAN.md § Wire-Format Pins](../../MCP_GATEWAY_PLAN.md#1-nats-message-headers) |
 | NATS message headers | `tracestate` | both | Yes | Pass-through; gateway MUST NOT strip vendor entries |
 | JSON-RPC request | `_meta.traceparent` | client → gateway | Yes (stdio/hybrid) | **Trogon convention** — see §2.2 |
 | JSON-RPC request | `_meta.tracestate` | client → gateway | Optional | Mirror of W3C tracestate when `_meta` is the only carrier |
@@ -775,7 +773,6 @@ Operator searches traces by `trace_id`; SIEM searches audit by the same id when 
 |---|---|
 | [W3C Trace Context](https://www.w3.org/TR/trace-context/) | `traceparent` / `tracestate` |
 | [OpenTelemetry Semantic Conventions — Messaging](https://opentelemetry.io/docs/specs/semconv/messaging/) | NATS span kind and attributes |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G, § Wire-Format Pins | Headers, error `trace_id`, audit legal record |
 | [integration-touchpoints.md](integration-touchpoints.md) | Integration ownership |
 | [reference-audit-envelope.md](reference-audit-envelope.md) | Audit schema and redaction |
 | `rsworkspace/crates/trogon-telemetry` | Current OTel bootstrap |

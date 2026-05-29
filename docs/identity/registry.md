@@ -143,7 +143,7 @@ agents/
 
 Manifest properties:
 
-- Signed by an org-controlled NKey (same trust domain as policy bundles — see `MCP_GATEWAY_PLAN.md` § Config Distribution).
+- Signed by an org-controlled NKey.
 - PR-reviewed; CI lints schema, SPIFFE ID format, and `allowed_*` cross-references.
 - Merge to `main` triggers the control-plane sync.
 
@@ -261,7 +261,7 @@ Every registry mutation emits an audit envelope to:
 mcp.audit.registry.{outcome}
 ```
 
-Where `{outcome}` follows the gateway audit subject grammar (`MCP_GATEWAY_PLAN.md:537–556`): `allow` for successful sync, `deny` for rejected manifest, `error` for controller failure.
+Where `{outcome}` follows the gateway audit subject grammar: `allow` for successful sync, `deny` for rejected manifest, `error` for controller failure.
 
 Envelope payload (minimum):
 

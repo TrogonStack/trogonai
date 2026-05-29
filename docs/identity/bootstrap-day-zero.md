@@ -25,7 +25,7 @@
 | SpiceDB schema | SpiceDB datastore | Zed schema + relationships | **Seed only** — e.g. A2A dev seed (`user`, `agent`, `task`, `agent_card` in `devops/docker/compose/services/spicedb/schema.zed`) without MCP resource definitions (`trogon/mcp_tool`, `trogon/mcp_resource`, …) or tenant tuples |
 | Audit stream | JetStream | Stream `MCP_AUDIT`, filter `{MCP_PREFIX}.audit.>` | May exist from gateway startup (`MCP_GATEWAY_AUDIT_STREAM`, default `MCP_AUDIT`) even when policy is absent |
 
-> **Naming note.** Some planning docs refer colloquially to a "policy bundles bucket." The **implemented** config distribution bucket is `mcp-gateway-config` ([MCP_GATEWAY_PLAN.md § Config Distribution](../../MCP_GATEWAY_PLAN.md#nats-subject-topology)). Binary WASM artifacts use JetStream Object Store (Phase 3); Phase 1–2 store the active bundle pointer and Tier-1 YAML in KV. There is **no** separate `mcp-policy-bundles` bucket in the codebase today.
+> **Naming note.** Some planning docs refer colloquially to a "policy bundles bucket." The **implemented** config distribution bucket is `mcp-gateway-config`. Binary WASM artifacts use JetStream Object Store (Phase 3); Phase 1–2 store the active bundle pointer and Tier-1 YAML in KV. There is **no** separate `mcp-policy-bundles` bucket in the codebase today.
 
 ### 1.2 Runtime services on day zero
 
@@ -57,7 +57,7 @@ These paths are **outside** the gateway data plane and remain available to opera
 - Auth callout at CONNECT (bootstrap User JWT with `mcp.gateway.request.>` publish ACL).
 - `mcp.sts.exchange` request/reply (returns structured errors until registry + attestation succeed).
 - `mcp.registry.agent.lookup` (returns miss until seeded).
-- `mcp.control.discovery.register.{server_id}` publish from backend MCP server ([MCP_GATEWAY_PLAN.md § Control plane subjects](../../MCP_GATEWAY_PLAN.md#control-plane-subjects)).
+- `mcp.control.discovery.register.{server_id}` publish from backend MCP server.
 - JetStream audit consumers on `mcp.audit.>` (may receive deny/error envelopes from partial bootstrap).
 
 ---
@@ -104,7 +104,6 @@ When a gated method arrives and `tenant_initialised` is false:
 
 | Field | Value |
 |---|---|
-| JSON-RPC code | `-32108` `no_policy` ([MCP_GATEWAY_PLAN.md § Gateway-emitted JSON-RPC error codes](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)) |
 | JSON-RPC `data.reason` | `tenant_uninitialised` **(proposed stable string;** not yet in `rpc_codes.rs`) |
 | JSON-RPC `data.missing` | Array of failed readiness checks, e.g. `["policy_bundle","registry","spicedb_tuples"]` **(proposed)** |
 | Audit subject | `mcp.audit.deny.request.{method_root}` |
@@ -202,7 +201,7 @@ Minimum manifest fields: `agent_id`, `allowed_workloads` (caller's SPIFFE ID), `
 Backend MCP servers use existing `mcp-nats` subjects. Register the server id in gateway config and announce liveness:
 
 1. **Config:** Put backend entry in `mcp-gateway-config` keyed by `backend/{server_id}` with `{ "server_id": "github", "enabled": true }` (shape **proposed** — exact key TBD in bundle loader spec).
-2. **Discovery:** On server start, publish to `mcp.control.discovery.register.{server_id}` ([MCP_GATEWAY_PLAN.md § Control plane subjects](../../MCP_GATEWAY_PLAN.md#control-plane-subjects)).
+2. **Discovery:** On server start, publish to `mcp.control.discovery.register.{server_id}`.
 3. Run `mcp-nats` server subscribed on `mcp.server.github.>`.
 
 **Verify:** Gateway logs show discovery event; `tools/list` in bootstrap_mode returns tools (may be empty catalog).
@@ -221,7 +220,7 @@ Backend MCP servers use existing `mcp-nats` subjects. Register the server id in 
    - Audit envelope defaults.
 2. Sign manifest with org NKey (Phase 3 bundle format; Phase 1 may use unsigned dev bundle only when `MCP_GATEWAY_BOOTSTRAP_POSTURE=permissive` **(proposed)** — production requires signature).
 3. Write active pointer: `nats kv put mcp-gateway-config bundle/active @manifest.json`
-4. Optional belt-and-braces: publish `mcp.control.bundle.reload` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md)).
+4. Optional belt-and-braces: publish `mcp.control.bundle.reload`.
 
 **SpiceDB minimum:**
 
@@ -551,8 +550,6 @@ When immediate fail-closed is required:
 | Identity layers and enforce modes | [overview.md](overview.md) |
 | STS wire contract | [sts-exchange.md](sts-exchange.md) |
 | SDK smoke path | [sdk.md](sdk.md), [trogon-a2a-sdk README](../../rsworkspace/crates/trogon-a2a-sdk/README.md) |
-| Subject grammar | [MCP_GATEWAY_PLAN.md § NATS Subject Topology](../../MCP_GATEWAY_PLAN.md#nats-subject-topology) |
-| Block C open item | [MCP_GATEWAY_PLAN.md TODO Block C](../../MCP_GATEWAY_PLAN.md#block-c--design-specs-to-write-paper-before-code) |
 | Tenancy | [ADR 0001](../adr/0001-tenancy-model.md) |
 | Bootstrap vs mesh tokens | [ADR 0003](../adr/0003-bootstrap-vs-mesh-tokens.md) |
 
@@ -560,7 +557,7 @@ When immediate fail-closed is required:
 
 ## 9. Implementation gap (Phase 1 vs this spec)
 
-`trogon-mcp-gateway` Phase 1 ([MCP_GATEWAY_PLAN.md Block D](../../MCP_GATEWAY_PLAN.md#block-d--phase-1-vertical-slice-24-weeks)) still **allow-all** on gated methods when `MCP_GATEWAY_SPICEDB_ENDPOINT` is unset and does not load policy bundles from KV. Treat that as **dev-only** until engineering lands: readiness evaluator + KV watches, mixed method classifier, audit `extra.reason` / `extra.bootstrap_mode`, `MCP_GATEWAY_BOOTSTRAP_POSTURE` **(proposed)**, and `-32108` with `data.reason: tenant_uninitialised` **(proposed)**.
+`trogon-mcp-gateway` Phase 1 still **allow-all** on gated methods when `MCP_GATEWAY_SPICEDB_ENDPOINT` is unset and does not load policy bundles from KV. Treat that as **dev-only** until engineering lands: readiness evaluator + KV watches, mixed method classifier, audit `extra.reason` / `extra.bootstrap_mode`, `MCP_GATEWAY_BOOTSTRAP_POSTURE` **(proposed)**, and `-32108` with `data.reason: tenant_uninitialised` **(proposed)**.
 
 Illustrative audit deny envelope when implemented:
 

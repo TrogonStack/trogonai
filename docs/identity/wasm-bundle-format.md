@@ -68,7 +68,6 @@ Phase 3 introduces **signed WASM policy components** that implement the guest ex
 
 | Aspect | Assessment |
 |---|---|
-| **Pros** | Familiar to release engineering; can hold multiple files; JetStream Object Store already mentioned in [MCP_GATEWAY_PLAN.md § Config Distribution](../../MCP_GATEWAY_PLAN.md) for binary WASM artifacts. |
 | **Cons** | Signing and content-addressing are ad hoc unless wrapped in OCI anyway; bucket ACLs are separate from artifact signature verification; harder to standardize cosign/Rekor. |
 | **Verdict** | Acceptable **staging** format for CI output, but **publish step should wrap tarball layers into OCI** before production promotion. Object Store may hold the same bytes as an OCI layer blob for NATS-centric fleets **(proposed)** — digest must still match OCI manifest. |
 
@@ -525,7 +524,7 @@ KV path skips network pull; add 0–50 ms for KV get. Exceeding P99 during promo
 | Wasmtime compiled component | Per `{digest, target_wit}` | Digest change |
 | Instance pool | Per active digest | Hot-swap |
 
-Previous digest remains in memory until in-flight evaluations complete ([MCP_GATEWAY_PLAN.md § Hot-swap](../../MCP_GATEWAY_PLAN.md)).
+Previous digest remains in memory until in-flight evaluations complete.
 
 ### 8.4 Pre-fetch and promotion **(proposed)**
 
@@ -546,7 +545,7 @@ This avoids cold-load latency on first production request after promotion.
 | New digest fails verify | Old digest unchanged; `/ready` false if no old digest |
 | Rollback | Repoint active digest to `D_old`; optional KV/OCI tag move |
 
-Signal: `mcp.control.bundle.reload` ([MCP_GATEWAY_PLAN.md § Control subjects](../../MCP_GATEWAY_PLAN.md)) — belt-and-braces; KV watcher is primary.
+Signal: `mcp.control.bundle.reload` — belt-and-braces; KV watcher is primary.
 
 ---
 
@@ -610,7 +609,6 @@ Cross-reference [failure-mode-matrix.md](failure-mode-matrix.md) rows 3–5.
 | Gateway integrations, KV buckets, STS | [integration-touchpoints.md](integration-touchpoints.md) |
 | Audit fields for bundle digest | [reference-audit-envelope.md](reference-audit-envelope.md) |
 | Failure defaults (rows 3–5) | [failure-mode-matrix.md](failure-mode-matrix.md) |
-| Block F checklist (bundle format item) | [MCP_GATEWAY_PLAN.md Block F](../../MCP_GATEWAY_PLAN.md) |
 | Operator KV overview | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) |
 | Hierarchical policy (CEL layers vs WASM) | [hierarchical-policy-merge.md](hierarchical-policy-merge.md) |
 | Bootstrap / day-zero bundle pointer | [bootstrap-day-zero.md](bootstrap-day-zero.md) |
@@ -668,7 +666,6 @@ nats kv put mcp-gateway-config policy/wasm/active_digest @active-pointer.json
 
 ## Appendix D — Block F checklist mapping
 
-| [MCP_GATEWAY_PLAN.md Block F](../../MCP_GATEWAY_PLAN.md) item | Satisfied by this doc |
 |---|---|
 | Bundle format (manifest + WASM components) | §3 layout, `bundle.toml`, `policy.wasm` |
 | NKey signature verification | §5 (cosign primary; NKey optional migration) |

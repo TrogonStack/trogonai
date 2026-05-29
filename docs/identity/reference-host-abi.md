@@ -44,7 +44,7 @@ Side-effect class definitions:
 | `nats-io` | NATS request/reply to an allowed subject prefix |
 | `kv-io` | JetStream KV read on an allowed bucket prefix |
 
-Default host timeouts apply when the builtin performs I/O. Authors may pass an explicit timeout only where noted (`nats.request`). All timeouts are clamped to the request deadline from header `mcp-deadline-unix-ms` ([MCP_GATEWAY_PLAN.md SS1](../../MCP_GATEWAY_PLAN.md#1-nats-message-headers)).
+Default host timeouts apply when the builtin performs I/O. Authors may pass an explicit timeout only where noted (`nats.request`). All timeouts are clamped to the request deadline from header `mcp-deadline-unix-ms`.
 
 | Host function | CEL signature | Return type | Side-effect class | Error behavior | Default timeout |
 |---|---|---|---|---|---|
@@ -110,7 +110,6 @@ spicedb.check(subject, permission, resource) -> bool
 |---|---|---|
 | `subject` | `string` | SpiceDB subject reference, e.g. `user:alice`, `agent:acme/oncall-responder` |
 | `permission` | `string` | Permission name on the resource type, e.g. `invoke`, `read`, `list` |
-| `resource` | `string` | Resource object id string per tuple derivation table ([MCP_GATEWAY_PLAN.md SS SpiceDB Integration Model](../../MCP_GATEWAY_PLAN.md#spicedb-integration-model)), e.g. `tool:github|create_issue`, `mcp_server:github` |
 
 **Return:** `true` if Authzed `CHECK_PERMISSIONSHIP_HAS_PERMISSION`; `false` if denied or resource not found in graph for that check (see SS3.4).
 
@@ -153,7 +152,6 @@ spicedb.bulk_check(subject, permission, resources) -> map<string, bool>
 | Session establish | `initialize` (or first gated call) stores latest `checked_at` ZedToken in session KV keyed by `mcp-session-id` |
 | Subsequent `check` / `bulk_check` | Host attaches token as `at_least_as_fresh` cursor |
 | After successful bulk | Host updates session token from response `checked_at` |
-| Audit envelope | `spicedb.zedtoken`, `spicedb.checks`, `spicedb.cache_hit` fields ([MCP_GATEWAY_PLAN.md SS7](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema)) |
 
 **Cache hit semantics:** When a `(subject, permission, resource)` result is served from the gateway check cache without a new RPC, audit records `spicedb.cache_hit: true`. Cache entries are invalidated when session ZedToken advances or TTL expires ([bulk-check-permission.md SS4](bulk-check-permission.md)).
 
@@ -167,7 +165,7 @@ spicedb.bulk_check(subject, permission, resources) -> map<string, bool>
 | Caveated / conditional | `false` until caveat satisfied | `false` | Caveats not evaluated in Phase 1 host ABI **(proposed Phase 2+)** |
 | gRPC / item `Error` | CEL error (fail-closed) | Key omitted or entire call fails | List shaping: drop item on partial error |
 
-Policy authors should assume **`false` means "must not proceed"** on gated methods unless a bundle explicitly implements fail-open for list paths ([MCP_GATEWAY_PLAN.md SS SpiceDB Integration Model](../../MCP_GATEWAY_PLAN.md#spicedb-integration-model)).
+Policy authors should assume **`false` means "must not proceed"** on gated methods unless a bundle explicitly implements fail-open for list paths.
 
 ---
 
@@ -272,7 +270,7 @@ mcp.method == "tools/call"
   && rate.acquire("cluster", "tool/" + jwt.tenant + "/" + mcp.tool.name, 10, duration("1m"))
 ```
 
-When `false`, gateway JSON-RPC on explicit deny path uses `-32105` `rate_limited` with `data.scope` derived from `scope` and key prefix ([MCP_GATEWAY_PLAN.md SS6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)).
+When `false`, gateway JSON-RPC on explicit deny path uses `-32105` `rate_limited` with `data.scope` derived from `scope` and key prefix.
 
 **Errors:** KV unreachable for `cluster` scope -> fail-closed per [rate-limiting.md SS7](rate-limiting.md). Wrong arity/types -> `-32101`.
 
@@ -329,7 +327,7 @@ Arbitrary bucket names (`app-config`, `secrets`) -> `-32101` `policy_fault`.
 nats.request(subject, payload, timeout) -> bytes
 ```
 
-Synchronous NATS request/reply for Tier 2.5 ext-proc-style plugins ([MCP_GATEWAY_PLAN.md SS Plugin / ext-proc subjects](../../MCP_GATEWAY_PLAN.md#plugin--ext-proc-subjects)). Required when policy must consult an out-of-process modifier before allow/deny.
+Synchronous NATS request/reply for Tier 2.5 ext-proc-style plugins. Required when policy must consult an out-of-process modifier before allow/deny.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -555,14 +553,10 @@ Side-effecting builtins (`audit.emit`, `rate.acquire` with `cluster` scope, `cac
 | Topic | Document |
 |---|---|
 | WIT sketch (v0.1.0 subset) | [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md) |
-| CEL variable namespace | [reference-cel-variables.md](reference-cel-variables.md), [MCP_GATEWAY_PLAN.md SS8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) |
 | WASM bundle packaging + capabilities | [wasm-bundle-format.md](wasm-bundle-format.md) |
 | DSL choice + compile contract | [policy-dsl-choice.md](policy-dsl-choice.md) |
-| Block B Host ABI todo | [MCP_GATEWAY_PLAN.md Block B](../../MCP_GATEWAY_PLAN.md) (Host ABI surface) |
-| Wire-format pins (audit, errors, deadlines) | [MCP_GATEWAY_PLAN.md Wire-Format Pins](../../MCP_GATEWAY_PLAN.md#wire-format-pins-for-phase-1) |
 | ZedToken + bulk check cache | [bulk-check-permission.md](bulk-check-permission.md) |
 | Rate limit placement | [rate-limiting.md](rate-limiting.md) |
-| Plugin bus subjects | [reference-subject-grammar.md SS2](reference-subject-grammar.md), [MCP_GATEWAY_PLAN.md SS Plugin](../../MCP_GATEWAY_PLAN.md#plugin--ext-proc-subjects) |
 | Audit envelope `extra` field | [reference-audit-envelope.md](reference-audit-envelope.md) |
 | Failure modes | [failure-mode-matrix.md](failure-mode-matrix.md) |
 

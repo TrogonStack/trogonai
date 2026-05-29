@@ -6,7 +6,7 @@
 
 **Wire-format version:** `trogon.mcp/v1` (header `mcp-schema`).
 
-**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-audit-envelope.md](reference-audit-envelope.md), [act-chain.md](act-chain.md), [ADR 0002](../adr/0002-identity-layers.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1.
+**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-audit-envelope.md](reference-audit-envelope.md), [act-chain.md](act-chain.md), [ADR 0002](../adr/0002-identity-layers.md).
 
 **Implementation anchors:**
 
@@ -23,7 +23,7 @@ Unless marked **proposed**, fields below match [MCP_GATEWAY_PLAN.md](../../MCP_G
 
 ## 1. Header catalog
 
-Every gateway-handled NATS message in the edge zone (`{prefix}.gateway.request.>`) and backend zone (`{prefix}.server.*`, `{prefix}.client.*`) carries the pinned header set below. CEL rules read headers via `nats.headers` ([MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace)).
+Every gateway-handled NATS message in the edge zone (`{prefix}.gateway.request.>`) and backend zone (`{prefix}.server.*`, `{prefix}.client.*`) carries the pinned header set below. CEL rules read headers via `nats.headers`.
 
 ### 1.1 Full header table
 
@@ -122,7 +122,7 @@ Per header: who sets it, who clamps or transforms it, who strips it.
 | Gateway → backend | Gateway via `trogon_nats::inject_trace_context` — continues active span or creates root when ingress header absent. |
 | Gateway → client (reply) | Gateway injects current span context on edge reply. |
 
-JSON-RPC error `data.trace_id` matches the trace id from the active `traceparent` ([MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)).
+JSON-RPC error `data.trace_id` matches the trace id from the active `traceparent`.
 
 ### 4.2 `tracestate`
 
@@ -213,7 +213,6 @@ Audit payloads publish to JetStream stream `MCP_AUDIT`. Header values map to env
 | NATS header | Audit envelope field | Notes |
 |---|---|---|
 | `mcp-correlation-id` | `correlation_id` (common header) / `request_id` (gateway wire today) | Opaque client correlator; JSON-RPC `id` used when header absent. |
-| `mcp-instance-id` | `instance_id` | Top-level in target schema ([MCP_GATEWAY_PLAN.md §7](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema)). |
 | `mcp-session-id` | `session_id` | Top-level and `caller` context when identity block populated. |
 | `mcp-tenant` | `tenant` / `tenant_id` | Mirror for legibility; authority remains JWT claim. |
 | `mcp-caller-sub` | `caller.sub` / `caller_sub` | Populated from JWT on publish; header mirrors JWT after hardening. |
@@ -299,7 +298,6 @@ Gateway sets `mcp-schema: trogon.mcp/v1` on every egress message. Backends SHOUL
 | [otel-wiring.md](otel-wiring.md) | W3C propagation, span attributes from headers |
 | [mcp-session-model.md](mcp-session-model.md) | `mcp-session-id` lifecycle |
 | [reply-correlation.md](reply-correlation.md) | `mcp-instance-id` and inbox routing |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pin 1 | Authoritative pin source |
 
 ---
 
