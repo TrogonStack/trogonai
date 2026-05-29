@@ -279,6 +279,7 @@ Cross-reference [failure-mode-matrix.md](../identity/failure-mode-matrix.md) row
 | First-party `mcp-pack` bundle | **Pending** — Block F item 6 |
 | KV bucket `mcp-policy-bundles` provisioning | **Pending** — operator automation |
 | Audit `bundle_loaded` / `bundle_rejected` envelopes | **Pending** — Block F loader + audit schema update |
+| Multi-source bundle composition (merging bundles from multiple KV sources at load time) | **Future work** — not on the critical path; revisit when a real composition use case appears |
 
 ---
 
