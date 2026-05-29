@@ -9,6 +9,7 @@ pub mod indexer;
 pub mod projector;
 pub mod query;
 pub mod siem;
+pub mod chain_explorer;
 
 pub use envelope::AuditEnvelope;
 pub use error::{IndexerError, ProjectorError, TrafficViewError};
