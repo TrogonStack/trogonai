@@ -22,6 +22,29 @@ use std::sync::Arc;
 /// Ctrl+G — the next submitted line jumps to the front of the queue.
 const PRIORITY_KEY: u8 = 0x07;
 
+/// Set while a permission/elicitation prompt is reading `/dev/tty`. The streaming
+/// input reader pauses (stops consuming bytes) so those prompts get the keypress
+/// instead of us stealing and echoing it. There's only one terminal, so a global
+/// flag is sufficient.
+pub(crate) static TTY_PROMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard: marks a `/dev/tty` prompt active for its lifetime, so the streaming
+/// input reader yields the terminal. Created by the permission/elicitation reader.
+pub(crate) struct TtyPromptGuard;
+
+impl TtyPromptGuard {
+    pub(crate) fn new() -> Self {
+        TTY_PROMPT_ACTIVE.store(true, Ordering::SeqCst);
+        TtyPromptGuard
+    }
+}
+
+impl Drop for TtyPromptGuard {
+    fn drop(&mut self) {
+        TTY_PROMPT_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamInputEvent {
     /// A normal line submitted during streaming — queued, auto-submitted in order.
@@ -140,6 +163,12 @@ impl StreamInputReader {
                 std::mem::ManuallyDrop::new(std::fs::File::from_raw_fd(reader_fd))
             };
             while !stop_thread.load(Ordering::Relaxed) {
+                // A permission/elicitation prompt owns the terminal right now —
+                // don't read or echo, so its keypress (a/w/r) isn't stolen by us.
+                if TTY_PROMPT_ACTIVE.load(Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                    continue;
+                }
                 if !poll_readable(reader_fd, 100) {
                     continue;
                 }
