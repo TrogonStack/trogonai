@@ -10,6 +10,7 @@ use serde_json::Value as JsonValue;
 use crate::act_chain::ActChainEntry;
 use crate::approvals::{build_approval_required, build_approval_required_step_up};
 use crate::authz::GatewayIdentity;
+use crate::cel_builtins::{register_all, with_host_eval, HostEvalContext};
 use crate::jwt::VerifiedJwtClaims;
 use crate::rpc_codes;
 use crate::throttle::{ContextThrottler, ThrottleConfig, ThrottleKey};
@@ -268,7 +269,7 @@ fn act_chain_entry_agent_id(entry: &Value) -> Option<&str> {
     }
 }
 
-/// Bind `jwt`, `chain`, and act-chain helper functions for policy evaluation.
+/// Bind `jwt`, `chain`, act-chain helpers, and host builtins for policy evaluation.
 pub fn configure_policy_cel_context(
     ctx: &mut Context,
     identity: &GatewayIdentity,
@@ -284,26 +285,24 @@ pub fn configure_policy_cel_context(
     let chain = act_chain_cel_value(act_chain);
     let chain_value = cel_interpreter::to_value(&chain).map_err(|e| PolicyError(e.to_string()))?;
     ctx.add_variable_from_value("chain", chain_value);
+
+    register_all(ctx).map_err(|e| PolicyError(e.to_string()))?;
     Ok(())
 }
 
-/// Fresh CEL context with standard functions, policy variables, act-chain helpers, and `mcp` bindings.
-pub fn new_policy_cel_context_for_request(
-    identity: &GatewayIdentity,
-    claims: &VerifiedJwtClaims,
-    act_chain: &[ActChainEntry],
-    jsonrpc_method: &str,
-    tool_name: Option<&str>,
-) -> Result<Context<'static>, PolicyError> {
-    let mut ctx = new_policy_cel_context(identity, claims, act_chain)?;
-    let mcp = if let Some(tool) = tool_name {
-        serde_json::json!({ "method": jsonrpc_method, "tool": { "name": tool } })
-    } else {
-        serde_json::json!({ "method": jsonrpc_method })
-    };
-    let value = cel_interpreter::to_value(&mcp).map_err(|e| PolicyError(e.to_string()))?;
-    ctx.add_variable_from_value("mcp", value);
-    Ok(ctx)
+/// Execute a compiled CEL program with host builtins and request-scoped host state.
+pub fn evaluate_cel_with_host(
+    program: &Program,
+    host: &HostEvalContext,
+    configure: impl FnOnce(&mut Context) -> Result<(), PolicyError>,
+) -> Result<Value, PolicyError> {
+    let mut ctx = Context::default();
+    configure(&mut ctx)?;
+    with_host_eval(host, || {
+        program
+            .execute(&ctx)
+            .map_err(|e| PolicyError(e.to_string()))
+    })
 }
 
 /// Fresh CEL context with standard functions, policy variables, and act-chain helpers.
