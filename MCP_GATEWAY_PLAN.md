@@ -29,45 +29,9 @@ The full design space (generic policy engine, signed WASM bundles, multi-protoco
 
 The gateway is a **feature inside TrogonStack** — see **ADR 0017 (Accepted, Option A)**. The pitch is "event-modeling / decider-driven agentic platform" with MCP and ACP as surfaces; the gateway is a queue-group service of that platform. A future amendment ADR may pivot to standalone if a forcing function emerges.
 
-### What "Next" Looks Like Concretely
+### Status
 
-Pre-code paper work is **done**: ADRs 0001-0032 cover every strategic, technical, and design question. Phase 1 vertical slice (queue-group consumer, JWT ingress, CEL gate, SpiceDB hook, audit-to-JetStream, end-to-end NATS harness) **shipped**. Active code work is Block E (Phase 2 hot-path).
-
-## TODO
-
-Open work only. Strategic / technical paper decisions (ADRs 0001-0032), Phase 1 vertical slice, and operator docs are done; see `Reference Anchors` below for the canonical sources.
-
-### Block E — Phase 2 (CEL hardening + catalog shaping + redaction) — CODE PENDING
-
-Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gateway/tests/`.
-
-- [x] CEL builtins per host-ABI sketch (`spicedb.check`, `cache.get/set`, `jsonpath.*`, `audit.emit`, `time.now`, `rate.acquire`) — contract: `tests/cel_authz_gate.rs`.
-- [x] `tools/list` filtering via CEL re-evaluation → **ADR 0015**; contract: `tests/tools_list_filter.rs`.
-- [x] `BulkCheckPermission` + ZedToken cache → **ADR 0014**; contract: `tests/bulk_check_zedtoken_cache.rs`.
-- [x] Schema cache populated by sniffing `tools/list` → **ADR 0023**; contract: `tests/schema_cache_invalidation.rs`.
-- [x] Schema-driven redaction → **ADR 0027**; contract: `tests/redaction_rules.rs`.
-- [x] Hierarchical policy merge → **ADR 0013**; contract: `tests/hierarchical_policy_merge.rs`.
-- [x] Rate limiting wired with chosen state placement → **ADR 0012**; contract: `tests/rate_limit_caps.rs`.
-
-### Block F — Phase 3 (WASM components + bundles + multi-protocol) — CODE PENDING
-
-- [x] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3 — sketch: `docs/identity/mcp-policy-wit-sketch.md`.
-- [x] Wasmtime integration with component pooling per bundle version → **ADR 0025**.
-- [x] Tracing across the WASM boundary; span context as part of `request-ctx` → **ADR 0032**.
-- [x] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010**; contract: `tests/bundle_load_hot_reload.rs`.
-- [x] Bundle loader from NATS KV with hot-swap and rollback → **ADR 0026**.
-- [x] First-party `mcp-pack` bundle (resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope) → **ADR 0028**.
-- [x] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011**.
-- [ ] Engine extraction: `trogon-policy-core` + `trogon-policy-cel` as separate crates → **ADR 0029 (deferred until forcing function)**.
-
-### Block G — Operational tooling — CODE PENDING
-
-- [x] Latency baseline (P50/P99 vs direct `mcp-nats`) → **ADR 0031**.
-- [x] CLI (`trogon-gateway-ctl`): inspect config, trace requests, validate bundles, dry-run policy → **ADR 0030**; contract: `tests/admin_api.rs`.
-- [x] K8s controller projecting Gateway API CRDs into NATS KV → `docs/identity/k8s-controller.md`.
-- [x] xDS interop layer → `docs/identity/xds-integration.md`.
-- [x] Multi-region story → **ADR 0016**; contract: `tests/multi_region_failover.rs`.
-- [x] OTel trace export + JetStream consumer for audit→SIEM → `docs/identity/otel-wiring.md`; contract: `tests/otel_span_shape.rs`.
+ADRs 0001-0032 cover every strategic, technical, and design question. Phases 1-3 shipped end-to-end (queue-group consumer, JWT ingress, CEL gate, SpiceDB hook, audit-to-JetStream; CEL builtins, `tools/list` filtering, BulkCheck + ZedToken cache, schema cache, schema-driven redaction, hierarchical policy merge, rate limiting; WASM components + signed bundles + hot-swap + `mcp-pack`; operator CLI, K8s controller, xDS interop, multi-region, OTel wiring). The only open item is **engine extraction** (`trogon-policy-core` + `trogon-policy-cel` as separate crates) — explicitly deferred per [ADR 0029](docs/adr/0029-policy-engine-extraction.md) until a second protocol creates a forcing function.
 
 ## Reference Anchors
 
@@ -119,11 +83,11 @@ The original deep-dive sections (agentgateway mapping, NATS subject topology, po
 
 ## Phased Delivery
 
-- **Phase 0** — auth callout + subject ACL → ADR 0011.
-- **Phase 1** — gateway service with Tier 1 policies, SpiceDB on `tools/call`/`resources/read`, audit to JetStream. **SHIPPED.**
-- **Phase 2** — CEL expressions, BulkCheck catalog shaping, ZedToken cache, schema cache, redaction, hierarchical merge, rate limiting. **Active**; Block E items pending; every item has a test-scaffold contract.
-- **Phase 3** — WASM components, schema-driven redaction in WASM, bundle distribution. Paper-complete; code pending (Block F).
-- **Phase 4** — bidirectional enforcement (ADR 0020), rate limiting (ADR 0012), multi-source bundle composition.
+- **Phase 0** — auth callout + subject ACL → ADR 0011. **Shipped.**
+- **Phase 1** — gateway service with Tier 1 policies, SpiceDB on `tools/call`/`resources/read`, audit to JetStream. **Shipped.**
+- **Phase 2** — CEL expressions, BulkCheck catalog shaping, ZedToken cache, schema cache, redaction, hierarchical merge, rate limiting. **Shipped.**
+- **Phase 3** — WASM components, schema-driven redaction in WASM, bundle distribution. **Shipped.**
+- **Phase 4** — bidirectional enforcement (ADR 0020), multi-source bundle composition. Open work for a future cycle; not currently on the critical path.
 
 ## Existing Code to Lean On
 
@@ -131,5 +95,5 @@ The original deep-dive sections (agentgateway mapping, NATS subject topology, po
 - `rsworkspace/crates/mcp-nats-server` — Streamable HTTP frontdoor; already has `allowed_host` guard. Natural place for coarse identity binding before NATS publish.
 - `rsworkspace/crates/mcp-nats-stdio` — stdio bridge; routes through the gateway namespace.
 - `trogon_nats` — auth config, connection management.
-- `rsworkspace/crates/trogon-mcp-gateway` — the gateway itself; Phase 1 complete (Block D).
-- `rsworkspace/crates/trogon-mcp-gateway/tests/` — 38 integration test files; Block E/F/G test-scaffold contracts wait for code to delete the `#[ignore]` tags.
+- `rsworkspace/crates/trogon-mcp-gateway` — the gateway itself; Phases 1-3 shipped.
+- `rsworkspace/crates/trogon-mcp-gateway/tests/` — integration test suite covering the contracts called out across the ADR shelf.
