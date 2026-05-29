@@ -2,7 +2,7 @@
 
 **Status:** DRAFT — for human review before wire-format pin in `MCP_GATEWAY_PLAN.md`.
 
-**Related:** `PENDING_TODO.md` Block 2.2, Block 1.3 (claim schema); `MCP_GATEWAY_PLAN.md` § Wire-Format Pins (headers, audit, CEL).
+**Related:** `docs/identity/jwt-claim-schema.md`; `MCP_GATEWAY_PLAN.md` § Wire-Format Pins (headers, audit, CEL).
 
 ---
 
@@ -151,7 +151,7 @@ Per-entry signatures remain a documented **future extension** (optional `sig` fi
 ## Propagation rules
 
 1. **Bootstrap (first hop).** The initial mesh or bootstrap token contains a single-entry `act_chain` describing the originator. Humans via OIDC: `{ sub, wkl: "human", iat }` without `agent_id`. Agents: include `agent_id` and attested `wkl`.
-2. **STS exchange (subsequent hops).** On every successful token exchange (`PENDING_TODO.md` Block 2.1), the STS:
+2. **STS exchange (subsequent hops).** On every successful token exchange, the STS:
    - Copies the inbound `act_chain` verbatim.
    - Appends one new entry for the **exchanger** (inbound token’s current actor: `sub`, `agent_id`, `wkl`, fresh `iat`).
    - Refuses append if `len(act_chain) >= max_depth` (default 8).
@@ -200,7 +200,7 @@ For agent entries, `wkl` MUST appear in the agent record’s `allowed_workloads`
 
 Depth counts **entries**, not HTTP/NATS hops. A chain of length 8 is the hard reject threshold; length 9 is never minted.
 
-**Why 8:** Covers typical `user → orchestrator → specialist → tool → backend` paths with headroom; bounds JWT size and loop search; aligns with `PENDING_TODO.md`. Tenants may lower via bundle; raising requires ADR (blast-radius tradeoff).
+**Why 8:** Covers typical `user → orchestrator → specialist → tool → backend` paths with headroom; bounds JWT size and loop search. Tenants may lower via bundle; raising requires ADR (blast-radius tradeoff).
 
 ### 5. Loop detection
 
@@ -222,7 +222,7 @@ Loop detection runs at **every** verifier (gateway ingress, STS pre-mint, backen
 | `shadow` | Run full validation; log violations; do **not** reject. |
 | `enforce` | Violations → JSON-RPC error (see below). |
 
-Mirrors `MCP_GATEWAY_AGENT_IDENTITY` phasing (`PENDING_TODO.md` Block 6).
+Mirrors `MCP_GATEWAY_AGENT_IDENTITY` phasing.
 
 ---
 
@@ -300,7 +300,7 @@ Per `MCP_GATEWAY_PLAN.md` §7 (audit envelope schema), embed the chain under `ca
 ```
 
 - `caller.act_chain` — full array (same as JWT).
-- `caller.originator_sub` — denormalized from `act_chain[0].sub` for indexing (`PENDING_TODO.md` Block 4).
+- `caller.originator_sub` — denormalized from `act_chain[0].sub` for indexing.
 - `caller.chain_depth` — denormalized `len(act_chain)` for dashboards.
 
 STS exchange audit events (`mcp.audit.sts.*`) include the same `act_chain` on both request (inbound token) and response (minted token) sides.
@@ -337,7 +337,7 @@ In **`shadow`** mode, the same conditions emit audit/`extra` warnings with `woul
 
 ## Open questions
 
-The list below is the surviving v2-and-beyond set; the questions removed are resolved in `PENDING_TODO.md` "Decisions log" (depth, batch originator, purpose refinement, STS user exposure, OAuth-MCP) or tracked under `PENDING_TODO.md` "Open work" (gateway-as-registered-agent).
+The list below is the surviving v2-and-beyond set. Earlier questions on depth, batch originator, purpose refinement, STS user exposure, OAuth-MCP, and gateway-as-registered-agent have been resolved in their respective ADRs / specs.
 
 1. **Per-entry signatures.** Defer to v2 unless cross-org witnessing is required before GA.
 2. **Human re-entry.** Can the same `user:…` appear at index &gt; 0 (e.g. human-in-the-loop approval mid-chain)?

@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-27) |
 | **Date** | 2026-05-27 |
 | **Deciders** | *(author / platform security — TBD)* |
-| **Blocks** | Block 0 (`PENDING_TODO.md`), Block A item 3 (`MCP_GATEWAY_PLAN.md`) |
-| **Related** | `MCP_GATEWAY_PLAN.md` § NATS Subject Topology → Tenancy; `PENDING_TODO.md` Block 0 (tenancy); A2A operator docs (account-per-tenant already landed for A2A) |
+| **Blocks** | Block A item 3 (`MCP_GATEWAY_PLAN.md`) |
+| **Related** | `MCP_GATEWAY_PLAN.md` § NATS Subject Topology → Tenancy; A2A operator docs (account-per-tenant already landed for A2A) |
 
 ## Context
 
