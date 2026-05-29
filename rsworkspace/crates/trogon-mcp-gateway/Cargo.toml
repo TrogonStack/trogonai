@@ -33,6 +33,7 @@ trogon-sts = { workspace = true }
 trogon-sts-client = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal"] }
 trogon-telemetry = { workspace = true }
+wasmtime = { workspace = true, features = ["component-model", "component-model-async"] }
 
 [dev-dependencies]
 base64 = { workspace = true }

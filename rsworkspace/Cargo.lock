@@ -7225,6 +7225,7 @@ dependencies = [
  "trogon-sts-client",
  "trogon-telemetry",
  "uuid",
+ "wasmtime",
 ]
 
 [[package]]
