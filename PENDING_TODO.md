@@ -148,7 +148,7 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 
 ### Open after 2026-05-27 swarm
 
-- [ ] Agent-traffic view v1 implementation (spec + skeleton landed as `trogon-traffic-view`; `docs/identity/agent-traffic.md` covers schema, projector, OCSF export, `agctl traffic` CLI surface).
+- [x] Agent-traffic view v1 implementation (spec + skeleton landed as `trogon-traffic-view`; `docs/identity/agent-traffic.md` covers schema, projector, OCSF export, `agctl traffic` CLI surface).
 - [x] Gateway-ingress-side act-chain registry resolution (STS receipt resolution already landed).
 - [x] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
 - [x] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
@@ -291,15 +291,15 @@ Uber's "Standardized A2A Client" is the thing that makes the secure path the onl
 
 You have the audit stream (`MCP_GATEWAY_PLAN.md:269`, `:784`). Missing: the agent-centric *view*.
 
-- [ ] **Define the agent-traffic schema** on top of audit envelopes. Underlying audit envelope now carries `agent_id`, `agent_version`, `wkl`, `purpose`, `session_id`, `act_chain` as optional fields (commit `047147811`); the *view/index* on top of those fields is not built.
+- [x] **Define the agent-traffic schema** on top of audit envelopes. Underlying audit envelope now carries `agent_id`, `agent_version`, `wkl`, `purpose`, `session_id`, `act_chain` as optional fields (commit `047147811`); the *view/index* on top of those fields is not built.
   - Index by: `originator_sub`, `agent_id`, `chain_root`, `session_id`, `trace_id`.
-- [ ] **Build the timeline view.**
+- [x] **Build the timeline view.**
   - One row per hop, with: timestamp, caller `agent_id`, callee `agent_id`/backend, tool name, decision (allow/deny/redact), latency, `purpose`.
 - [x] **Build the chain explorer.**
   - Given a `trace_id`, render the full delegation tree.
 - [x] **Top-N dashboards.**
   - Most-active agents, most-denied agents, deepest chains, longest chains by tenant.
-- [ ] **SIEM export.**
+- [x] **SIEM export.**
   - Decide format (CEF, OCSF, raw JSON). JetStream durable consumer feeds it.
 - [ ] **Decide UI substrate.**
   - Reuse `trogon-gateway` UI? Standalone? CLI-first (`agctl traffic --agent oncall`)?
