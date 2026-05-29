@@ -1,156 +1,623 @@
-//! Hierarchical policy merge integration tests (scaffold).
+//! Hierarchical policy merge integration tests (ADR 0013).
 //!
-//! Phase 2 merges policy bundles across `org -> tenant -> server-group -> server -> method`
-//! with sticky deny, explicit allow, and default deny per ADR 0013. These tests define the
-//! contract for end-to-end merge evaluation once `trogon_mcp_gateway::policy::hierarchical`
-//! lands; bodies stay skeletal until Block E item 6 is implemented.
-//!
-//! Cross-refs:
-//! - `docs/adr/0013-hierarchical-policy-merge.md`
-//! - `docs/identity/hierarchical-policy-merge.md`
-//! - `MCP_GATEWAY_PLAN.md` Block E item 6
-//!
-//! Once implemented, each test will seed KV policy bundles at the relevant hierarchy levels,
-//! drive a gateway request (or direct merge evaluation), and assert allow/deny plus audit
-//! envelope fields (`rules_fired`, `policy_merge.expression_hash`).
-//!
-//! Harness pattern (see `e2e_nats_forward.rs`): `mcp_nats::Config`, `McpPrefix`,
-//! `trogon_nats::NatsAuth`, `GatewaySettings`, `AllowAllPermissionChecker`, `TraceStore`.
+//! Direct `MergeEngine` evaluation covers merge semantics; gateway audit envelope cases
+//! remain ignored until full NATS harness wiring lands.
+
+use std::sync::Arc;
+
+use cel_interpreter::Context;
+use trogon_mcp_gateway::authz::{GatewayIdentity, IdentitySource};
+use trogon_mcp_gateway::jwt::VerifiedJwtClaims;
+use trogon_mcp_gateway::policy::hierarchical::{
+    HierarchicalDecision, MergeEngine, MergeRequestContext, PolicyEffect, PolicyLevel, PolicyRule,
+    PolicyStore, ScopeBundle, ScopeConfig, ScopeKey, NO_POLICY_CODE,
+};
+use trogon_mcp_gateway::policy::new_policy_cel_context_for_request;
+use trogon_mcp_gateway::rpc_codes;
+
+fn cel_context(method: &str, tool: Option<&str>) -> Context<'static> {
+    let identity = GatewayIdentity {
+        tenant: Some("acme".into()),
+        caller_sub: Some("alice".into()),
+        issuer: None,
+        jti: None,
+        source: IdentitySource::Jwt,
+    };
+    new_policy_cel_context_for_request(&identity, &VerifiedJwtClaims::default(), &[], method, tool)
+        .expect("cel context")
+}
+
+fn org_allow_rule() -> PolicyRule {
+    PolicyRule {
+        policy_id: "org/default-employees".into(),
+        revision: 3,
+        effect: PolicyEffect::Allow,
+        priority: 0,
+        cel: r#"jwt.sub == "alice""#.into(),
+    }
+}
+
+fn tenant_deny_rule() -> PolicyRule {
+    PolicyRule {
+        policy_id: "tenant/acme-block-secrets".into(),
+        revision: 17,
+        effect: PolicyEffect::Deny,
+        priority: 0,
+        cel: r#"mcp.tool.name == "prod_deploy""#.into(),
+    }
+}
+
+fn seed_org_allow(engine: &MergeEngine) {
+    engine.upsert_scope(
+        ScopeKey {
+            level: PolicyLevel::Org,
+            tenant: None,
+            server_group: None,
+            server_id: None,
+            method: None,
+            tool: None,
+        },
+        ScopeBundle {
+            rules: vec![org_allow_rule()],
+            config: ScopeConfig::default(),
+        },
+    );
+}
 
 mod org_baseline_allow {
-    //! Org-only allow with empty downstream layers.
+    use super::*;
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn only_org_allow_permits_request() {
-        // Arrange: org bundle with allow rule; tenant, server-group, server, method unset.
-        // Act: evaluate via trogon_mcp_gateway::policy::hierarchical::MergeEngine (proposed).
-        // Assert: decision == Allow; no deny layers fired.
-        unimplemented!("org-only allow should permit when no downstream deny exists");
+    #[test]
+    fn only_org_allow_permits_request() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        seed_org_allow(&engine);
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/list".into(),
+            tool_name: None,
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/list", None))
+            .expect("eval");
+        assert!(matches!(decision, HierarchicalDecision::Allow { .. }));
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn org_allow_skips_empty_tenant_and_server_layers() {
-        // Arrange: org allow; KV keys for tenant/server-group/server/method absent.
-        // Act: merge walk org -> tenant -> server-group -> server -> method.
-        // Assert: empty levels contribute false disjuncts; merged allow side satisfied.
-        unimplemented!("skipped empty layers must not block org allow");
+    #[test]
+    fn org_allow_skips_empty_tenant_and_server_layers() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        seed_org_allow(&engine);
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("deploy")))
+            .expect("eval");
+        assert!(matches!(decision, HierarchicalDecision::Allow { .. }));
     }
 }
 
 mod sticky_deny {
-    //! Deny is sticky across hierarchy levels — allow at any layer cannot override deny.
+    use super::*;
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn tenant_deny_overrides_org_allow() {
-        // Arrange: org allow + tenant deny for same request context.
-        // Act: hierarchical merge per ADR 0013 hybrid semantics.
-        // Assert: decision == Deny; error cites tenant deny policy_id.
-        unimplemented!("tenant deny must stick over org allow");
+    #[test]
+    fn tenant_deny_overrides_org_allow() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        seed_org_allow(&engine);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Tenant,
+                tenant: Some("acme".into()),
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![tenant_deny_rule()],
+                config: ScopeConfig::default(),
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("prod_deploy".into()),
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("prod_deploy")))
+            .expect("eval");
+        match decision {
+            HierarchicalDecision::Deny {
+                policy_id,
+                code,
+                reason,
+                ..
+            } => {
+                assert_eq!(policy_id, Some("tenant/acme-block-secrets".into()));
+                assert_eq!(code, rpc_codes::POLICY_DENY);
+                assert_eq!(reason, "policy_deny");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn server_group_deny_overrides_method_allow() {
-        // Arrange: server-group deny + method-level allow rule.
-        // Act: merge with precedence org -> tenant -> server-group -> server -> method.
-        // Assert: decision == Deny; method allow does not widen server-group deny.
-        unimplemented!("server-group deny must stick over method allow");
+    #[test]
+    fn server_group_deny_overrides_method_allow() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::ServerGroup,
+                tenant: Some("acme".into()),
+                server_group: Some("incident-response".into()),
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "server-group/no-call".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Deny,
+                    priority: 0,
+                    cel: r#"mcp.method == "tools/call""#.into(),
+                }],
+                config: ScopeConfig::default(),
+            },
+        );
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Method,
+                tenant: Some("acme".into()),
+                server_group: Some("incident-response".into()),
+                server_id: Some("github".into()),
+                method: Some("tools/call".into()),
+                tool: Some("deploy".into()),
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "method/allow-deploy".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: "true".into(),
+                }],
+                config: ScopeConfig::default(),
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: Some("incident-response".into()),
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("deploy")))
+            .expect("eval");
+        assert!(matches!(
+            decision,
+            HierarchicalDecision::Deny {
+                policy_id: Some(id),
+                code: rpc_codes::POLICY_DENY,
+                ..
+            } if id == "server-group/no-call"
+        ));
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn org_deny_sticks_over_all_lower_layer_allows() {
-        // Arrange: org deny; tenant, server-group, server, and method all allow.
-        // Act: hierarchical merge.
-        // Assert: decision == Deny; org deny short-circuits despite downstream allows.
-        unimplemented!("org deny must stick over every lower-layer allow");
+    #[test]
+    fn org_deny_sticks_over_all_lower_layer_allows() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Org,
+                tenant: None,
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "org/deny-all".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Deny,
+                    priority: 0,
+                    cel: "true".into(),
+                }],
+                config: ScopeConfig::default(),
+            },
+        );
+        for level in [
+            PolicyLevel::Tenant,
+            PolicyLevel::ServerGroup,
+            PolicyLevel::Server,
+            PolicyLevel::Method,
+        ] {
+            engine.upsert_scope(
+                ScopeKey {
+                    level,
+                    tenant: Some("acme".into()),
+                    server_group: Some("proj".into()),
+                    server_id: Some("github".into()),
+                    method: Some("tools/call".into()),
+                    tool: Some("deploy".into()),
+                },
+                ScopeBundle {
+                    rules: vec![PolicyRule {
+                        policy_id: format!("{}/allow", level.as_str()),
+                        revision: 1,
+                        effect: PolicyEffect::Allow,
+                        priority: 0,
+                        cel: "true".into(),
+                    }],
+                    config: ScopeConfig::default(),
+                },
+            );
+        }
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: Some("proj".into()),
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("deploy")))
+            .expect("eval");
+        assert!(matches!(
+            decision,
+            HierarchicalDecision::Deny {
+                policy_id: Some(id),
+                code: rpc_codes::POLICY_DENY,
+                ..
+            } if id == "org/deny-all"
+        ));
     }
 }
 
 mod default_deny {
-    //! Default deny when no layer contributes an allow.
+    use super::*;
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn empty_hierarchy_defaults_to_deny() {
-        // Arrange: no bundles at org, tenant, server-group, server, or method.
-        // Act: merge evaluation in production enforce mode.
-        // Assert: decision == Deny; JSON-RPC -32108 no_policy.
-        unimplemented!("absence of rules is not allow; default deny");
+    #[test]
+    fn empty_hierarchy_defaults_to_deny() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: None,
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", None))
+            .expect("eval");
+        assert!(matches!(
+            decision,
+            HierarchicalDecision::Deny {
+                code: NO_POLICY_CODE,
+                reason,
+                ..
+            } if reason == "no_policy"
+        ));
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn no_explicit_allow_side_denies_without_matching_deny() {
-        // Arrange: layers present but none emit allow predicates (config-only bundles).
-        // Act: hierarchical merge.
-        // Assert: decision == Deny even when no deny rule matched.
-        unimplemented!("empty allow side denies per ADR 0013 default");
+    #[test]
+    fn no_explicit_allow_side_denies_without_matching_deny() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Tenant,
+                tenant: Some("acme".into()),
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "tenant/config-only".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Deny,
+                    priority: 0,
+                    cel: "false".into(),
+                }],
+                config: ScopeConfig {
+                    rate_max_requests: Some(50),
+                    ..ScopeConfig::default()
+                },
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: None,
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", None))
+            .expect("eval");
+        assert!(matches!(
+            decision,
+            HierarchicalDecision::Deny {
+                code: NO_POLICY_CODE,
+                ..
+            }
+        ));
     }
 }
 
 mod shallow_cel_merge {
-    //! Shallow field-level merge: later layers override earlier CEL/config fields.
+    use super::*;
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn method_layer_cel_overrides_server_group_allow() {
-        // Arrange: org/tenant/server-group allow with CEL predicate A; method allow with
-        // conflicting CEL predicate B on the same merged field.
-        // Act: shallow merge producing single merged expression H(M).
-        // Assert: method-layer CEL wins; evaluation uses predicate B not A.
-        unimplemented!("method layer must override server-group CEL on field collision");
+    #[test]
+    fn method_layer_cel_overrides_server_group_allow() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::ServerGroup,
+                tenant: Some("acme".into()),
+                server_group: Some("proj".into()),
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "server-group/allow-a".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: r#"mcp.tool.name == "other""#.into(),
+                }],
+                config: ScopeConfig {
+                    spicedb_gate_cel: Some(r#"mcp.method == "tools/list""#.into()),
+                    ..ScopeConfig::default()
+                },
+            },
+        );
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Method,
+                tenant: Some("acme".into()),
+                server_group: Some("proj".into()),
+                server_id: Some("github".into()),
+                method: Some("tools/call".into()),
+                tool: Some("deploy".into()),
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "method/allow-b".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: r#"mcp.tool.name == "deploy""#.into(),
+                }],
+                config: ScopeConfig {
+                    spicedb_gate_cel: Some(r#"mcp.method == "tools/call""#.into()),
+                    ..ScopeConfig::default()
+                },
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: Some("proj".into()),
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+        let effective = engine.effective_policy(&ctx).expect("merge");
+        assert_eq!(
+            effective.config.spicedb_gate_cel.as_deref(),
+            Some(r#"mcp.method == "tools/call""#)
+        );
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("deploy")))
+            .expect("eval");
+        assert!(matches!(decision, HierarchicalDecision::Allow { .. }));
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn server_group_overrides_tenant_cel_on_shallow_merge() {
-        // Arrange: tenant and server-group both allow with different CEL on same config key.
-        // Act: shallow merge walk.
-        // Assert: server-group expression replaces tenant wholesale (no deep merge).
-        unimplemented!("server-group shallow merge replaces tenant CEL field");
+    #[test]
+    fn server_group_overrides_tenant_cel_on_shallow_merge() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Tenant,
+                tenant: Some("acme".into()),
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "tenant/allow".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: r#"mcp.method == "tools/list""#.into(),
+                }],
+                config: ScopeConfig {
+                    spicedb_gate_cel: Some(r#"mcp.method == "tools/list""#.into()),
+                    ..ScopeConfig::default()
+                },
+            },
+        );
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::ServerGroup,
+                tenant: Some("acme".into()),
+                server_group: Some("proj".into()),
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "server-group/allow".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: r#"mcp.method == "tools/call""#.into(),
+                }],
+                config: ScopeConfig {
+                    spicedb_gate_cel: Some(
+                        r#"mcp.method == "tools/call" || mcp.method == "resources/read""#.into(),
+                    ),
+                    ..ScopeConfig::default()
+                },
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: Some("proj".into()),
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+        let effective = engine.effective_policy(&ctx).expect("merge");
+        assert_eq!(
+            effective.config.spicedb_gate_cel.as_deref(),
+            Some(r#"mcp.method == "tools/call" || mcp.method == "resources/read""#)
+        );
     }
 
-    #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
-    async fn merged_allow_side_or_across_non_conflicting_layers() {
-        // Arrange: org allow predicate matches; tenant adds non-colliding allow predicate.
-        // Act: merge authorization OR semantics across layers.
-        // Assert: both predicates compiled into merged allow side; either match permits.
-        unimplemented!("non-colliding allow predicates OR across layers");
+    #[test]
+    fn merged_allow_side_or_across_non_conflicting_layers() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        seed_org_allow(&engine);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Tenant,
+                tenant: Some("acme".into()),
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![PolicyRule {
+                    policy_id: "tenant/call-allow".into(),
+                    revision: 1,
+                    effect: PolicyEffect::Allow,
+                    priority: 0,
+                    cel: r#"mcp.method == "tools/call""#.into(),
+                }],
+                config: ScopeConfig::default(),
+            },
+        );
+
+        let list_ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/list".into(),
+            tool_name: None,
+        };
+        let call_ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("deploy".into()),
+        };
+
+        assert!(matches!(
+            engine.evaluate(&list_ctx, &cel_context("tools/list", None)).expect("eval"),
+            HierarchicalDecision::Allow { .. }
+        ));
+        assert!(matches!(
+            engine
+                .evaluate(&call_ctx, &cel_context("tools/call", Some("deploy")))
+                .expect("eval"),
+            HierarchicalDecision::Allow { .. }
+        ));
     }
 }
 
 mod audit_rules_fired {
-    //! Audit envelope lists every contributing rule across hierarchy levels.
+    use super::*;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
+    #[ignore = "requires gateway NATS harness for audit envelope publish"]
     async fn rules_fired_lists_org_and_tenant_contributors() {
-        // Arrange: org + tenant bundles both compiled into merged expression M.
-        // Act: gateway request through policy gate; capture audit envelope.
-        // Assert: rules_fired contains every policy_id compiled into M at merge time.
-        unimplemented!("rules_fired must list all contributing policy_ids");
+        unimplemented!("gateway audit envelope wiring pending");
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
+    #[ignore = "requires gateway NATS harness for audit envelope publish"]
     async fn rules_fired_spans_all_merged_hierarchy_levels() {
-        // Arrange: bundles at org, tenant, server-group, server, and method.
-        // Act: merge + evaluate; publish audit deny or allow envelope.
-        // Assert: rules_fired includes policy_id from each populated level.
-        unimplemented!("rules_fired must span every hierarchy level in M");
+        unimplemented!("gateway audit envelope wiring pending");
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when hierarchical merge per ADR 0013 lands"]
+    #[ignore = "requires gateway NATS harness for audit envelope publish"]
     async fn audit_envelope_carries_policy_merge_expression_hash() {
-        // Arrange: multi-layer merge producing stable hash H(M).
-        // Act: gateway audit publish on policy decision.
-        // Assert: envelope policy_merge.expression_hash == H(M); offline replay matches.
-        unimplemented!("audit envelope must carry policy_merge.expression_hash");
+        unimplemented!("gateway audit envelope wiring pending");
+    }
+
+    #[test]
+    fn rules_fired_lists_contributors_at_merge_time() {
+        let store = Arc::new(PolicyStore::default());
+        let engine = MergeEngine::new(store, true);
+        seed_org_allow(&engine);
+        engine.upsert_scope(
+            ScopeKey {
+                level: PolicyLevel::Tenant,
+                tenant: Some("acme".into()),
+                server_group: None,
+                server_id: None,
+                method: None,
+                tool: None,
+            },
+            ScopeBundle {
+                rules: vec![tenant_deny_rule()],
+                config: ScopeConfig::default(),
+            },
+        );
+
+        let ctx = MergeRequestContext {
+            tenant: "acme".into(),
+            server_group: None,
+            server_id: "github".into(),
+            jsonrpc_method: "tools/call".into(),
+            tool_name: Some("prod_deploy".into()),
+        };
+        let decision = engine
+            .evaluate(&ctx, &cel_context("tools/call", Some("prod_deploy")))
+            .expect("eval");
+        match decision {
+            HierarchicalDecision::Deny { rules_fired, expression_hash, .. } => {
+                assert!(rules_fired.contains(&"org/default-employees".to_string()));
+                assert!(rules_fired.contains(&"tenant/acme-block-secrets".to_string()));
+                assert!(expression_hash.starts_with("sha256:"));
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
     }
 }
