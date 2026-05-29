@@ -1,0 +1,37 @@
+[package]
+name = "trogon-gateway-k8s"
+version = "0.1.0"
+edition = "2024"
+description = "Kubernetes controller projecting Gateway API and Trogon CRDs into MCP gateway NATS KV"
+publish = false
+
+[[bin]]
+name = "trogon-gateway-k8s"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+async-trait = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+hex = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+kube-runtime = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "net", "io-util"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+trogon-mcp-gateway = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
