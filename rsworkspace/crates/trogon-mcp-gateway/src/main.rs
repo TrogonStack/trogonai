@@ -133,6 +133,7 @@ async fn main() -> Result<(), BoxError> {
         jwt,
         egress,
         chain_resolver,
+        rate_limit: None,
     };
 
     info!(
