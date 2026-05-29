@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/adr/0015-tools-list-filtering.md` (accepted decision)
 //! - `docs/identity/tools-list-filtering.md` (algorithm, CEL bindings, audit fields)
-//! - `MCP_GATEWAY_PLAN.md` Block E item 2
+//! - item 2
 //!
 //! Unit cases below exercise `policy::list_filter` directly. NATS harness cases remain
 //! `#[ignore]` until the gateway e2e stub lands (`e2e_nats_forward.rs` pattern).
@@ -223,7 +223,7 @@ mod catalog_list_parity {
     #[tokio::test]
     #[ignore = "needs NATS harness comparing tools/call and tools/list policy paths"]
     async fn tools_list_per_item_cel_filter_matches_call_authorization_rule() {
-        unimplemented!("tools/list parity per MCP_GATEWAY_PLAN Block E item 2");
+        unimplemented!("tools/list parity");
     }
 
     #[tokio::test]
