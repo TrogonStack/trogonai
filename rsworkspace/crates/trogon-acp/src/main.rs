@@ -453,7 +453,7 @@ async fn handle_permission_request<S: SessionStore>(
                     NatsSessionStore,
                     NatsSessionNotifier,
                 >::build_config_options(
-                    &mode, current_model, allow_bypass()
+                    &mode, current_model, allow_bypass(), state.compactor_model.as_deref()
                 );
                 let config_n = SessionNotification::new(
                     req.session_id.clone(),
