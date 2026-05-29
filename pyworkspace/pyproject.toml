@@ -1,0 +1,11 @@
+[project]
+name = "trogonai-pyworkspace"
+version = "0.0.0"
+description = "TrogonAI Python workspace root"
+requires-python = ">=3.13"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv]
+package = false
