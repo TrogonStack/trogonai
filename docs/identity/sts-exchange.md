@@ -146,7 +146,7 @@ Structured error on the NATS reply (exchange denied).
 
 ### Mesh-specific JSON-RPC mapping
 
-When the **gateway** surfaces STS or token-validation failures to MCP clients, use Trogon allocation `-32100` … `-32199` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §6):
+When the **gateway** surfaces STS or token-validation failures to MCP clients, use Trogon allocation `-32100` … `-32199`:
 
 | Code | Symbol | STS / token condition |
 |---|---|---|

@@ -35,7 +35,7 @@ A **tenant** is the smallest unit of **organizational ownership** in the Trogon 
 
 The wire field is **`tenant_id`**: a non-empty slug (lowercase alphanumeric plus `-` / `_`, max length per operator convention; examples in code use `acme`, `tenant-1`). On JWTs the claim name is **`tenant`** or the namespaced alias **`https://trogon.ai/tenant`** ([jwt-claim-schema.md](jwt-claim-schema.md)). Audit envelopes target the canonical name **`tenant_id`** ([reference-audit-envelope.md](reference-audit-envelope.md)); producers today often emit **`tenant`** — indexers normalize both.
 
-A tenant is **not** a NATS subject segment. Subject grammar is fixed without `{tenant}` ([reference-subject-grammar.md](reference-subject-grammar.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Tenancy). Tenant identity lives in **connection context** (NATS Account), **signed JWT claims**, and **KV key prefixes** — never in `mcp.gateway.request.{server_id}.{method}`.
+A tenant is **not** a NATS subject segment. Subject grammar is fixed without `{tenant}` ([reference-subject-grammar.md](reference-subject-grammar.md)). Tenant identity lives in **connection context** (NATS Account), **signed JWT claims**, and **KV key prefixes** — never in `mcp.gateway.request.{server_id}.{method}`.
 
 ### 1.2 Where `tenant_id` first enters a request
 
@@ -134,7 +134,6 @@ The following artifacts are **tenant-private**. Any read, write, cache hit, subs
 | **Approval requests** | HITL context is tenant-private | `mcp.approvals.{request_id}` — request_id must be unguessable; waiter binds tenant from ingress JWT | Same subject space — **must** reject decision if approver tenant ≠ request tenant | `approvals/types.rs:40-45` |
 | **NATS audit subscriptions** | JetStream consumer sees all messages on filter | Durable consumer filter scoped to account's stream only | Consumer filter + envelope `tenant_id` check on ingest | `audit.rs:130`, `projector/mod.rs:17` |
 | **JetStream KV reads** | Registry, sessions, config, trust bundles | Bucket per account (same logical name, different account) | Single bucket; key **must** start with `{tenant_id}/` | [reference-subject-grammar.md §7](reference-subject-grammar.md#7-kv-buckets) |
-| **Policy bundles** | CEL rules, rate limits, tool policies | Bucket `mcp-gateway-config` per account | Keys `{tenant_id}/{bundle_name}` | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Config Distribution |
 | **Trust bundles (SPIFFE)** | Wrong bundle → accept wrong SVID | KV `mcp-trust-bundles/{trust_domain}` per account; trust domain maps 1:1 to tenant | Key prefix or separate trust_domain per tenant (`spiffe://{tenant}.…`) | `trogon-sts/src/lib.rs:30`, [sts-exchange.md](sts-exchange.md) |
 
 ### 2.2 Explanation — why each class is sensitive
@@ -179,7 +178,6 @@ Some data is intentionally shared at the **operator** or **platform** tier. Thes
 | Category | Examples | Conditions |
 |---|---|---|
 | **Anonymised metrics** | Gateway queue depth, STS P99 latency, SpiceDB error rate, process RSS | No `tenant_id`, `sub`, `agent_id`, or tool names; histograms only |
-| **Operational health pings** | `mcp.control.gateway.heartbeat.{instance_id}` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Control plane) | Instance id is operational, not customer data |
 | **Platform probes** | `mcp.metrics.sts.latency` from STS probe binary | Schema tagged; no customer payload |
 | **Cross-tenant compliance reports** | Operator SIEM dashboard "total denials per day" | Aggregated in warehouse **after** tenant partition at ingest; raw envelopes never land in a shared index without `tenant_id` column enforced |
 | **Signed policy bundle _templates_** | Org-wide baseline CEL shipped to all tenants | Template is public; **activated** bundle version is still per-tenant |
@@ -246,7 +244,7 @@ CEL exposure: `jwt.tenant` ([jwt-claim-schema.md](jwt-claim-schema.md)). Policie
 | Gateway HA | One queue group **may** serve multiple accounts via imports (see §5) | Would require prefix in every subscription |
 | Operator mental model | Same subjects everywhere; account is boundary | Subject encodes tenant — duplicates topology in two places |
 
-**Soft mode subject partition:** Optional **`MCP_PREFIX=acme.mcp`** per deployment ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Tenancy). This shifts all subjects (`acme.mcp.gateway.request.>`) without embedding tenant in the middle of the grammar. It is an escape hatch for labs, **not** a substitute for account isolation in production.
+**Soft mode subject partition:** Optional **`MCP_PREFIX=acme.mcp`** per deployment. This shifts all subjects (`acme.mcp.gateway.request.>`) without embedding tenant in the middle of the grammar. It is an escape hatch for labs, **not** a substitute for account isolation in production.
 
 **Subject ACL invariant (hard mode):** Caller User JWT allows only `mcp.gateway.>` (or `{prefix}.gateway.>`) **inside its account**. Cross-account publish is impossible without export/import.
 
@@ -294,7 +292,7 @@ Session-scoped ZedToken in `mcp-sessions` KV: `{tenant_id}/{session_id}` → lat
 
 ### 4.5 Policy bundle key prefix
 
-Policy bundles live in **`mcp-gateway-config`** ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md)).
+Policy bundles live in **`mcp-gateway-config`**.
 
 | Mode | Key pattern | Reload watcher scope |
 |---|---|---|
@@ -432,7 +430,6 @@ Traffic projector (`trogon-traffic-view`):
 | [mcp-session-model.md](mcp-session-model.md) | Session KV tenant namespacing |
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) | Deployment topology; shared control plane |
 | [../adr/0001-tenancy-model.md](../adr/0001-tenancy-model.md) | Accepted hybrid decision |
-| [../../MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block A | Strategic item: tenancy boundary (this document) |
 
 ---
 

@@ -19,7 +19,7 @@
 
 The client always negotiates capabilities with the **gateway** implementation (`trogon-mcp-gateway`). Backend `InitializeResult` values are cached per `(session, server_id)` and are not re-exposed to the client unless the session is torn down and a new edge `initialize` runs.
 
-Authoritative plan text ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins, item 5):
+Authoritative plan text:
 
 > **Gateway-terminated by default.** The gateway answers `initialize` itself; the client sees the gateway as the MCP server.
 >
@@ -160,7 +160,6 @@ Stored verbatim on the session record as `gateway.capabilities_aggregate` ([mcp-
 
 | Property | Value | Pin status |
 |---|---|---|
-| Bucket name | `mcp-sessions` | **proposed** — cited in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Session correlation, [reference-subject-grammar.md §7.4](reference-subject-grammar.md#74-proposed-buckets), [mcp-session-model.md](mcp-session-model.md); **not** provisioned in gateway code yet |
 | Key (soft tenancy) | `{tenant}.{session_id}` | **proposed** |
 | Key (hard tenancy) | `{session_id}` | **proposed** |
 | Schema | `trogon.mcp.session/v1` | **proposed** |
@@ -183,7 +182,7 @@ Minimum client context persisted before responding:
 | `gateway.instance_id_init` | Processing replica NUID |
 | `phase` | `initializing` until `notifications/initialized` or first operational RPC |
 
-Header issued to client: `mcp-session-id: {session_id}` — authoritative for all later edge messages ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins, header table).
+Header issued to client: `mcp-session-id: {session_id}` — authoritative for all later edge messages.
 
 ### 5.3 Backend init slots
 
@@ -236,7 +235,7 @@ Subject rewrite for lazy init: `{prefix}.server.{server_id}.initialize` ([refere
 
 ## 7. Lazy forward — virtual targets
 
-For federated `server_id` values `virtual-{id}` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Virtual MCP in subjects):
+For federated `server_id` values `virtual-{id}`:
 
 | Trigger | Lazy init scope |
 |---|---|
@@ -353,10 +352,6 @@ Bridges MUST read and echo `mcp-session-id`; backends MUST expect lazy init with
 |---|---|
 | Session KV schema, HA, phase machine | [mcp-session-model.md](mcp-session-model.md) |
 | Subject `…initialize`, `…notifications.initialized` | [reference-subject-grammar.md](reference-subject-grammar.md) |
-| Wire-Format Pin 5 (authoritative) | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) — § Wire-Format Pins, item 5 |
-| Virtual `::` tool names | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) — § Wire-Format Pins, item 4 |
-| `mcp-session-id` header | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) — § Wire-Format Pins, item 1 |
-| Session correlation bucket | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) — § Session correlation |
 | Dedup / initialize class | [reply-correlation.md](reply-correlation.md) |
 | Virtual `tools/list` fan-out | [tools-list-filtering.md](tools-list-filtering.md), plan Block E / federation sections |
 

@@ -4,7 +4,7 @@
 
 **Diátaxis:** Explanation (why, consistency contracts, invalidation trade-offs) plus reference (key shapes, metrics names, pseudocode).
 
-**Cross-references:** [Identity overview](overview.md), [Gateway failure-mode matrix](failure-mode-matrix.md), [MCP session model](mcp-session-model.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E.
+**Cross-references:** [Identity overview](overview.md), [Gateway failure-mode matrix](failure-mode-matrix.md), [MCP session model](mcp-session-model.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md).
 
 ---
 
@@ -535,7 +535,6 @@ All names are normative for the implementation PR. Use OpenTelemetry semantic co
 | `rsworkspace/crates/trogon-mcp-gateway/src/gateway.rs:278–288` | Ingress `authorize_mcp_request` call |
 | `rsworkspace/crates/trogon-mcp-gateway/src/policy.rs:467` | `tools/list` not SpiceDB-gated today |
 | `rsworkspace/crates/a2a-nats/src/catalog/import_gate/spicedb/` | Prior art: session ZedToken cache + bulk |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E | Outstanding work item |
 | Authzed API docs | `CheckBulkPermissions`, consistency, Watch |
 
 ---

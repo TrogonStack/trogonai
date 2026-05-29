@@ -6,7 +6,7 @@
 
 **Related:** [Identity overview](overview.md), [Adaptive access](adaptive-access.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block B (Host ABI surface) and Block F (Phase 3 WASM), [Failure-mode matrix](failure-mode-matrix.md), [Act chain](act-chain.md).
 
-**Implementation target:** `rsworkspace/crates/trogon-mcp-gateway` Phase 3; CEL builtins in Phase 2 are shaped to desugar into this surface ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E).
+**Implementation target:** `rsworkspace/crates/trogon-mcp-gateway` Phase 3; CEL builtins in Phase 2 are shaped to desugar into this surface.
 
 ---
 
@@ -29,7 +29,6 @@ This sketch pins the **guest export surface** (`evaluate`, `init`, `version`) an
 | WIT package name | `trogon:mcp-policy` |
 | Initial package version | `0.1.0` |
 | World name | `policy-bundle` |
-| Pin target (Phase 3) | WASI 0.3 + Component Model async host calls **(per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F)** |
 
 ### Semver guarantees
 
@@ -162,7 +161,7 @@ world policy-bundle {
 
 ### Mapping to CEL builtins (Phase 2 alignment)
 
-Block B lists host ABI names that Phase 2 CEL should mirror ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B, Block E):
+Block B lists host ABI names that Phase 2 CEL should mirror:
 
 | CEL / plan name | WIT import | Notes |
 |---|---|---|
@@ -180,7 +179,6 @@ Block B lists host ABI names that Phase 2 CEL should mirror ([MCP_GATEWAY_PLAN.m
 |---|---|
 | `request-id` | JSON-RPC `id` stringified, or gateway synthetic id for notifications |
 | `actor-id` | Validated JWT `sub` ([overview.md](overview.md)) |
-| `subject-id` | SpiceDB subject string chosen by bundle manifest / tuple derivation table ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § SpiceDB Integration Model) |
 | `method` | Parsed MCP method from NATS subject + JSON-RPC |
 | `params-json` | Serialized `params` object; `{}` when absent |
 | `act-chain-json` | JWT `act_chain` or reconstructed from `mcp-act-chain` header after gateway append ([act-chain.md](act-chain.md)) |
@@ -206,7 +204,6 @@ Policy replay and SIEM correlation require explicit handling of **non-determinis
 |---|---|---|
 | `time-now-ms` | Wall clock advances between calls and replays | If `evaluate` calls `time-now-ms` and the decision depends on it (directly or via guest branch), guest **must** call `audit-emit` with category `determinism:time` and JSON fields including `{ "time_now_ms": <value> }` before returning the decision. |
 | `cache-get` | Another evaluation or gateway instance may `cache-set` between runs | If decision depends on cache hit/miss or cached bytes, guest **must** `audit-emit` category `determinism:cache` with `{ "key": "...", "hit": true\|false, "value_b64": "..." }` **(proposed field names)**. |
-| `spicedb-check` | SpiceDB graph may change between replay time and original time | Not treated as non-deterministic for **authorization truth** — replay uses recorded SpiceDB checks from audit envelope (`spicedb` block in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §7). Guest should still emit audit when check result is surprising **(optional)**. |
 | `log` | Side effect only | Does not affect decision determinism for replay classification. |
 
 ### Host obligations
@@ -237,7 +234,6 @@ Concrete limits apply per **`evaluate` invocation** (and per `init` where noted)
 | **`cache-set` TTL max** | `86_400` seconds (24 h) | Clamped by host even if guest requests longer. |
 | **`audit-emit` fields max bytes** | `16_384` | Keeps JetStream messages bounded. |
 | **Host import call count per `evaluate`** | `64` | Prevents host DoS via import spam; exceeding → trap. |
-| **Concurrent pooled instances per bundle version** | `32` per gateway process **(proposed)** | Matches inflight cap philosophy ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §9). |
 
 ### Fuel exhaustion behavior
 
@@ -344,7 +340,7 @@ WASM policy bundles are **untrusted tenant code**. They run sandboxed with only 
 
 ### Signing requirement
 
-Production bundles **MUST** be signed before activation. The plan specifies **NKey signature over manifest digest** ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Bundles, Block F). Cosign / Sigstore-style signatures are acceptable at the **OCI packaging layer** **(proposed)** as long as the gateway verifies an allowed signer set before load.
+Production bundles **MUST** be signed before activation. The plan specifies **NKey signature over manifest digest**. Cosign / Sigstore-style signatures are acceptable at the **OCI packaging layer** **(proposed)** as long as the gateway verifies an allowed signer set before load.
 
 **Crypto algorithm:** TBD; see future signing-policy doc **(explicitly out of scope here)**.
 
@@ -398,7 +394,7 @@ Span context from `attributes-json.trace_id` / W3C headers is attached as a host
 
 3. **`spicedb-check` async vs sync:** SpiceDB gRPC is async on the gateway tokio runtime. WIT guest call is synchronous from the component's view. Host options: (a) block worker thread inside `spicedb-check` **(simple, risks pool starvation)**; (b) async component model with yield **(WASI 0.3 async)**; (c) bulk prefetch before `evaluate` **(not visible to guest)**. **Recommendation for Phase 3 MVP:** (a) with short PDP timeout matching Phase 1; revisit (b) when P99 > 40 ms **(proposed)**.
 
-4. **Response-phase evaluation:** Plan shows `shape-response` in an earlier WIT draft ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Tier 3). v0.1.0 exports only request-phase `evaluate`. Add `evaluate-response` in `0.2.0` or separate `redaction-bundle` world **(open)**.
+4. **Response-phase evaluation:** Plan shows `shape-response` in an earlier WIT draft. v0.1.0 exports only request-phase `evaluate`. Add `evaluate-response` in `0.2.0` or separate `redaction-bundle` world **(open)**.
 
 5. **`challenge` vs risk library:** [adaptive-access.md](adaptive-access.md) implements risk in native Rust today (`policy::run_with_risk`). Should WASM `challenge` delegate to the same approval subjects, or can guests emit custom approval subjects? **Proposal:** gateway ignores guest-suggested subjects; always uses `mcp.approvals.{request_id}`.
 
@@ -416,11 +412,8 @@ Span context from `attributes-json.trace_id` / W3C headers is attached as a host
 |---|---|
 | Mesh identity, JWT, STS | [overview.md](overview.md) |
 | Approvals, `-32107`, throttling | [adaptive-access.md](adaptive-access.md) |
-| Host ABI todo, Phase 3 checklist | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B, Block F |
 | WASM panic, bundle signature failures | [failure-mode-matrix.md](failure-mode-matrix.md) rows 3–5 |
 | `act_chain` in `policy-input` | [act-chain.md](act-chain.md) |
-| Audit envelope shape | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §7 |
-| JSON-RPC codes | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §6, `rpc_codes.rs` |
 
 ---
 
@@ -588,7 +581,7 @@ A: Import returns `err`; gateway maps to `-32107` fail-closed.
 A: No. Phase 3 per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F; Phase 1 proves NATS/SpiceDB/audit substrate.
 
 **Q: How does this relate to Synadia Protect?**  
-A: Protect operates at NATS subject level; this WIT is JSON-RPC-aware MCP policy inside the gateway — complementary, not a replacement ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Inspiration).
+A: Protect operates at NATS subject level; this WIT is JSON-RPC-aware MCP policy inside the gateway — complementary, not a replacement.
 
 ---
 

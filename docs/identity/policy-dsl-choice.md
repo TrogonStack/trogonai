@@ -72,7 +72,7 @@ Cold path (bundle load, AST walk, first compile) may take milliseconds; that is 
 
 Constraints:
 
-- Pure Rust dependency acceptable in `trogon-mcp-gateway` and future `trogon-policy-cel` crate ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F engine extraction)
+- Pure Rust dependency acceptable in `trogon-mcp-gateway` and future `trogon-policy-cel` crate
 - No JVM, no Node embed, no mandatory `opa` sidecar
 - No JIT requirement (rules out some WASM-only language runtimes as the **primary** Phase 2 path)
 
@@ -117,7 +117,7 @@ Each alternative was evaluated against §1. **Chosen:** CEL. Others are rejected
 
 **What it is:** A small expression language designed for IAM, APIs, and Kubernetes admission. Syntax resembles C++/Java expressions; types include bool, int, uint, double, string, bytes, list, map, duration, timestamp.
 
-**Pros:** Google ecosystem (IAM, K8s admission); `cel-interpreter` already in repo (Phase 1 `policy.rs`); sandbox via host functions only; agentgateway alignment ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E); WASM desugar path in [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md); hierarchical merge compiles to one CEL program.
+**Pros:** Google ecosystem (IAM, K8s admission); `cel-interpreter` already in repo (Phase 1 `policy.rs`); sandbox via host functions only; agentgateway alignment; WASM desugar path in [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md); hierarchical merge compiles to one CEL program.
 
 **Cons:** Pin `cel_version` (§5); no graph queries in-language; deep JSON needs `jsonpath.*`; less familiar than Rego in some ops teams.
 
@@ -458,7 +458,7 @@ The [WIT host ABI](mcp-policy-wit-sketch.md) shields Phase 3 guests: policy sema
 | WASM components | Rebuild against new WIT if guest logic embedded CEL runtime |
 | KV keys | Unchanged if bundle ids stable; content hash changes |
 
-Tooling **(proposed):** `trogon-gateway-ctl` dry-run fixture traffic ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G) validates semantic equivalence before hot-swap.
+Tooling **(proposed):** `trogon-gateway-ctl` dry-run fixture traffic validates semantic equivalence before hot-swap.
 
 ### 7.3 Semantic preservation checklist
 
@@ -482,10 +482,6 @@ A successor (Rego, Cedar, …) would add a parallel evaluator crate while keepin
 | [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md) | Host ABI for WASM; CEL builtin ↔ WIT import table |
 | [hierarchical-policy-merge.md](hierarchical-policy-merge.md) | All tiers compile to CEL; merge semantics |
 | [tools-list-filtering.md](tools-list-filtering.md) | `tools_list_filter` program class; pure builtin rules |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B | Checkbox: DSL choice → this file |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E | CEL builtins implementation |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F | WASM bundles embedding policy |
-| [MCP_GATEWAY_PLAN.md §8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) | Extended variable roots (`mcp.*`, `jwt.*`, …) |
 | [rate-limiting.md](rate-limiting.md) | `rate.acquire` contract |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Fail-closed defaults |
 | [bootstrap-day-zero.md](bootstrap-day-zero.md) | Empty bundle behavior |

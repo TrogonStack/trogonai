@@ -193,7 +193,6 @@ HTTP MCP clients may validate OAuth at the gateway HTTP listener ([oauth-mcp-int
 |---|---|---|
 | Per-tool SpiceDB checks | `trogon-mcp-gateway` ingress | After CONNECT |
 | Mesh token mint | `trogon-sts` on `mcp.sts.exchange` | Bootstrap → mesh |
-| Tier 2.5 policy plugins | Gateway on `mcp.plugin.{plugin_name}` | Post-connect message path ([MCP_GATEWAY_PLAN.md § Extensibility](../../MCP_GATEWAY_PLAN.md)) |
 | Bridge internal mint | `a2a.bridge.auth.callout.request` | JSON path; not `$SYS.REQ.USER.AUTH` |
 
 ---

@@ -55,7 +55,7 @@ Gateway implementation today (`trogon-mcp-gateway`): validates `iss`, `aud`, `ex
 
 **ADR 0001 (tenancy model):** whether `tenant` is required, namespaced, or redundant under hard NATS account tenancy.
 
-CEL namespace (`MCP_GATEWAY_PLAN.md:941`) already documents `jwt.tenant` and `jwt.roles`; gateway code extracts tenant but does not yet surface `roles` to CEL.
+CEL namespace already documents `jwt.tenant` and `jwt.roles`; gateway code extracts tenant but does not yet surface `roles` to CEL.
 
 ### Bootstrap NATS User JWT extensions (auth-callout)
 
@@ -76,7 +76,7 @@ These claims support NATS subject ACLs (`a2a.gateway.>`, `_INBOX.{caller_id}.>`)
 |---|---|---|---|---|---|
 | *(header)* `mcp-session-id` | string | Per MCP session | Opaque; gateway-issued at `initialize` | Gateway session KV | `"sess_01J…"` |
 
-**Proposed lift:** `session_id` claim (see New claims). Until then, CEL exposes `request.session_id` from the header (`MCP_GATEWAY_PLAN.md:943`).
+**Proposed lift:** `session_id` claim (see New claims). Until then, CEL exposes `request.session_id` from the header.
 
 ---
 
@@ -155,7 +155,7 @@ Custom claims remain accessible via `jwt.<name>` without a plan bump. Renaming o
 
 ## Ingress hardening
 
-**Rule (existing):** On every message entering the gateway from the edge zone, drop client-supplied identity headers and replace with JWT-derived values (`MCP_GATEWAY_PLAN.md:835`).
+**Rule (existing):** On every message entering the gateway from the edge zone, drop client-supplied identity headers and replace with JWT-derived values.
 
 ### Headers — strip / overwrite on ingress
 
@@ -276,7 +276,7 @@ Forgeable identity claims from issuers outside `MCP_GATEWAY_TRUSTED_MINT_ISSUERS
 6. **`roles` extraction:** promote from plan-only CEL to gateway-validated claim, or keep in `data` for bootstrap only.
 7. **Per-entry `act_chain` signatures** vs. outer-JWT integrity only (affects size and STS cost).
 8. **Signing keys and JWKS** for mesh tokens (**ADR 0006**): publication subject/URL for gateway validation of STS-issued JWTs.
-9. **OAuth-MCP composition:** which claims OAuth access tokens map to before callout minting (`MCP_GATEWAY_PLAN.md:67`).
+9. **OAuth-MCP composition:** which claims OAuth access tokens map to before callout minting.
 
 ---
 

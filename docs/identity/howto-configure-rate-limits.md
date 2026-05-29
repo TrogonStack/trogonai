@@ -328,7 +328,6 @@ Saturation and KV-unavailable behaviour: [failure-mode-matrix row 10](failure-mo
 | [hierarchical-policy-merge.md](hierarchical-policy-merge.md) | KV key patterns, narrow-only rate merge |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Row 10 saturation; `-32105` audit subject |
 | [howto-write-bundle.md](howto-write-bundle.md) | CEL `rate.acquire` in bundle programs |
-| [MCP_GATEWAY_PLAN.md § Pin 9](../../MCP_GATEWAY_PLAN.md#9-per-target-inflight-cap-and-rate-limit-defaults) | Authoritative default cap table |
 | [tests/rate_limit_caps.rs](../../rsworkspace/crates/trogon-mcp-gateway/tests/rate_limit_caps.rs) | Block E verification contract |
 
 ---

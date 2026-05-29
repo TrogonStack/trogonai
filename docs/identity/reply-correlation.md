@@ -14,7 +14,7 @@
 
 The Trogon MCP gateway is a **queue-group worker**: NATS delivers each ingress message to any healthy replica subscribed under `mcp-gateway`. MCP clients, however, expect **request/reply semantics** — a JSON-RPC call with an `id` must receive exactly one matching response on the reply subject they attached to the publish.
 
-That asymmetry is an irreversible architectural decision ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B). Before changing the reply path, operators and implementers need a written contract for:
+That asymmetry is an irreversible architectural decision. Before changing the reply path, operators and implementers need a written contract for:
 
 - how replies are correlated today and in the target architecture;
 - what happens when a replica dies, a reply is dropped, or a client retries;
@@ -311,7 +311,7 @@ sequenceDiagram
 
 ### 4.1 Justification
 
-Phase 1 already binds one queue-group member to one request via inline NATS request/reply. Phase 2 adds explicit `_INBOX.gateway.{instance_id}.{nuid}` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inbox naming) without changing ingress — smallest delta from working code.
+Phase 1 already binds one queue-group member to one request via inline NATS request/reply. Phase 2 adds explicit `_INBOX.gateway.{instance_id}.{nuid}` without changing ingress — smallest delta from working code.
 
 Modes (a) and (b) cannot be hidden without exactly-once delivery, which core NATS does not offer. Client retry with stable JSON-RPC `id` is required; the gateway makes retries **safe** via KV dedup, not invisible.
 
@@ -456,7 +456,6 @@ Every gateway-to-client publish on the client reply subject **must** include the
 | Header | Required | Source | Purpose |
 |---|---|---|---|
 | `mcp-request-id` | **MUST** | JSON-RPC `id` serialized as string | Client-side correlation; audit join |
-| `mcp-correlation-id` | SHOULD | Client `mcp-correlation-id` if present, else copy of `mcp-request-id` | Cross-system tracing ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins) |
 | `mcp-producer-replica-id` | **MUST** | Gateway boot `instance_id` (NUID) | Forensics: which replica produced this reply |
 | `mcp-dedup-state` | MAY | `primary \| cached \| error` **(proposed)** | Indicates whether response was executed or served from dedup cache |
 
@@ -582,9 +581,6 @@ Join audit to client logs via `request_id` + `correlation_id` ([reference-audit-
 | [failure-mode-matrix.md](failure-mode-matrix.md) | CLOSED/Open defaults; backend timeout row; audit subjects |
 | [reference-subject-grammar.md](reference-subject-grammar.md) | Ingress/backend subjects; queue group names; `_INBOX.*` not in grammar table |
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) | §4 "No sticky routing for reply correlation"; five-bullet on-bus model |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B | Irreversible decision list; Host ABI excludes raw `nats.request` from WASM |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Reply inbox naming | Normative inbox token layout |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins | `mcp-correlation-id`, `mcp-instance-id` headers |
 | [reference-audit-envelope.md](reference-audit-envelope.md) | `request_id` / `correlation_id` audit fields |
 | [bidirectional-enforcement.md](bidirectional-enforcement.md) | Server→client reply correlation (mirror contract) |
 

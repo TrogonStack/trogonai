@@ -665,7 +665,7 @@ sequenceDiagram
 
 ### 8.2 Audit subjects
 
-All audit envelopes publish to JetStream stream `MCP_AUDIT` under `mcp.audit.>` ([MCP_GATEWAY_PLAN.md § NATS Subject Topology](../../MCP_GATEWAY_PLAN.md)). OAuth-specific subjects **(proposed)** extend the tree without breaking existing consumers:
+All audit envelopes publish to JetStream stream `MCP_AUDIT` under `mcp.audit.>`. OAuth-specific subjects **(proposed)** extend the tree without breaking existing consumers:
 
 | Subject | When emitted | Key fields |
 |---|---|---|
@@ -794,7 +794,6 @@ Environment variables below consolidate this spec for operators. Names align wit
 | [auth-callout-design.md](../a2a/explanation/auth-callout-design.md) | NATS CONNECT mint |
 | [ADR 0001](../adr/0001-tenancy-model.md) | Account-per-tenant |
 | [ADR 0003](../adr/0003-bootstrap-vs-mesh-tokens.md) | Bootstrap vs mesh |
-| [MCP_GATEWAY_PLAN.md Block C](../../MCP_GATEWAY_PLAN.md) | Parent planning item |
 
 ---
 

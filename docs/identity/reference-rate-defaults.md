@@ -145,7 +145,7 @@ When the gateway returns JSON-RPC `-32105` on the NATS reply path, it **SHOULD**
 
 **Rationale:** JSON-RPC `data` is authoritative for MCP clients; headers mirror the hint for NATS-native tooling and align with HTTP `Retry-After` semantics without claiming HTTP compatibility.
 
-**Implementation status:** Header echo is **proposed** for Block E — not set in `trogon-mcp-gateway` reply publish paths today. Ingress hardening rules ([MCP_GATEWAY_PLAN.md Pin 1](../../MCP_GATEWAY_PLAN.md#1-nats-message-headers)) do not include these headers on ingress from clients; gateway sets them only on **egress reply** to the client inbox.
+**Implementation status:** Header echo is **proposed** for Block E — not set in `trogon-mcp-gateway` reply publish paths today. Ingress hardening rules do not include these headers on ingress from clients; gateway sets them only on **egress reply** to the client inbox.
 
 ### 4.2 Example reply headers
 
@@ -332,7 +332,7 @@ Stable client contract for Pin 9 denials:
 }
 ```
 
-Full code table: [reference-error-codes.md](reference-error-codes.md) (includes `-32105` row from [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)).
+Full code table: [reference-error-codes.md](reference-error-codes.md).
 
 | Code | Symbol | Pin 9 relevance |
 |---|---|---|
@@ -377,8 +377,6 @@ Lower `inflight_max` when:
 | [rate-limiting.md](rate-limiting.md) | Full mode discussion, hybrid store, ingress layers, `rate.acquire` |
 | [reference-error-codes.md](reference-error-codes.md) | JSON-RPC `-32100`…`-32199` catalog |
 | [otel-wiring.md](otel-wiring.md) | `gateway.rate_limited` span event; `reason=rate_limited` |
-| [MCP_GATEWAY_PLAN.md § Wire-Format Pin 9](../../MCP_GATEWAY_PLAN.md#9-per-target-inflight-cap-and-rate-limit-defaults) | Authoritative pin table |
-| [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes) | `-32105` `data` shape |
 | [hierarchical-policy-merge.md §6](hierarchical-policy-merge.md#6-storage) | `inflight.server.*`, `inflight.tenant` KV keys |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Row 10 saturation |
 

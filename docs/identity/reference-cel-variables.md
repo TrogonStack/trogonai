@@ -558,7 +558,7 @@ Example runtime host error:
 rate.acquire: expected 3 argument(s), got 2
 ```
 
-Runtime failures map to JSON-RPC `-32101` `policy_fault` with `data.tier = "cel"` and `data.error` carrying the interpreter or host message ([MCP gateway plan §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes)).
+Runtime failures map to JSON-RPC `-32101` `policy_fault` with `data.tier = "cel"` and `data.error` carrying the interpreter or host message.
 
 ---
 
@@ -575,5 +575,4 @@ Runtime failures map to JSON-RPC `-32101` `policy_fault` with `data.tier = "cel"
 | JWT claim registry | [jwt-claim-schema.md](jwt-claim-schema.md) |
 | Audit envelope fields merged with `audit.emit` | [reference-audit-envelope.md](reference-audit-envelope.md) |
 | NATS subject grammar | [reference-subject-grammar.md](reference-subject-grammar.md) |
-| Authoritative wire pin table | [MCP_GATEWAY_PLAN.md § Wire-Format Pin 8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace) |
 | Identity layers ADR | [ADR 0002](../adr/0002-identity-layers.md) |

@@ -768,7 +768,6 @@ Same NATS KV layout; CRDs become desired state. `agctl` shifts to validation and
 | [integration-touchpoints.md](integration-touchpoints.md) | KV bucket names (`mcp-gateway-config`, `mcp-trust-bundles`), gateway watch behavior, trust bundle ownership (`trogon-sts`) |
 | [registry-operations.md](registry-operations.md) | ACL pattern for controller NATS identity; tombstone vs hard delete; Git-authoritative registry (out of scope) |
 | [howto-integrate-third-party-mcp.md](howto-integrate-third-party-mcp.md) | Imperative workflow this controller replaces; backend JSON shape; promotion lifecycle |
-| [MCP_GATEWAY_PLAN.md Block G](../../MCP_GATEWAY_PLAN.md#block-g--operational-tooling) | Parent backlog item; optional K8s controller v2 |
 | [bootstrap-day-zero.md](bootstrap-day-zero.md) | Tenant readiness predicate; KV key shapes; day-zero posture interaction |
 | [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md) | `targetWit` validation on `MCPPolicyBundle` |
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) | Data-plane topology; where controller sits in ops mental model |

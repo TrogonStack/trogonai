@@ -4,16 +4,13 @@
 
 **Status banner:** Phase 1 contract. Queue group names are pinned.
 
-**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-reply-inboxes.md](reference-reply-inboxes.md), [rate-limiting.md](rate-limiting.md), [reference-error-codes.md](reference-error-codes.md), [reply-correlation.md](reply-correlation.md), [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) (Wire-Format Pin 3).
+**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-reply-inboxes.md](reference-reply-inboxes.md), [rate-limiting.md](rate-limiting.md), [reference-error-codes.md](reference-error-codes.md), [reply-correlation.md](reply-correlation.md), [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md).
 
 **Implementation anchors:**
 
 | Surface | Env override | Default queue group | Subscribe pattern | Source |
 |---|---|---|---|---|
 | Gateway request ingress | `MCP_GATEWAY_QUEUE_GROUP` | `mcp-gateway` | `{prefix}.gateway.request.>` | `trogon-mcp-gateway/src/config.rs`, `gateway.rs` |
-| Gateway callback lane | *(pinned — no env override in Phase 1)* | `mcp-gateway-callbacks` | `{prefix}.client.>` | [MCP_GATEWAY_PLAN.md § Wire-Format Pin 3](../../MCP_GATEWAY_PLAN.md) |
-| Per-instance reply inbox | *(none — direct subscribe)* | *(none)* | `_INBOX.gateway.{my_instance_id}.>` | [MCP_GATEWAY_PLAN.md § Wire-Format Pin 2](../../MCP_GATEWAY_PLAN.md) |
-| NATS-callout policy plugin | *(derived from plugin name)* | `mcp-plugin-{plugin_name}` | `mcp.plugin.{plugin_name}` | [MCP_GATEWAY_PLAN.md § Wire-Format Pin 3](../../MCP_GATEWAY_PLAN.md) |
 
 Unless noted **(today)**, behaviour described here is the Phase 1 wire contract. Phase 1 shipped code today implements only the request ingress row; callback lane, per-instance inbox, and plugin queue groups are pinned for Block H reference closure and Phase 2 wiring.
 
@@ -65,7 +62,7 @@ Gateway lookup  →  in-memory map: nuid_g → { client reply inbox, span, deadl
 Gateway publish →  client original reply inbox
 ```
 
-The `{instance_id}` is a NUID generated at gateway boot ([MCP_GATEWAY_PLAN.md § Wire-Format Pin 2](../../MCP_GATEWAY_PLAN.md#2-reply-inbox-naming)). Each process subscribes **directly** (no queue group) to `_INBOX.gateway.{my_instance_id}.>` so that backend replies land on the replica that created the correlation entry.
+The `{instance_id}` is a NUID generated at gateway boot. Each process subscribes **directly** (no queue group) to `_INBOX.gateway.{my_instance_id}.>` so that backend replies land on the replica that created the correlation entry.
 
 **Why queue-grouping breaks this:** NATS queue groups deliver each message to **one** member of the group. If multiple gateway replicas shared a queue group on `_INBOX.gateway.*`, a backend reply could arrive at a replica that never saw the original ingress message and holds no correlation map entry. The reply would be dropped or mis-handled.
 
@@ -77,7 +74,7 @@ See [reference-reply-inboxes.md](reference-reply-inboxes.md) and [reply-correlat
 
 ## 4. Plugin queue groups
 
-Tier-2.5 NATS-callout policy plugins ([MCP_GATEWAY_PLAN.md § Plugin / ext-proc subjects](../../MCP_GATEWAY_PLAN.md#plugin--ext-proc-subjects)) use a **dedicated queue group per plugin name**:
+Tier-2.5 NATS-callout policy plugins use a **dedicated queue group per plugin name**:
 
 | Published subject | Queue group | Scale model |
 |---|---|---|
@@ -99,7 +96,7 @@ Tier-2.5 NATS-callout policy plugins ([MCP_GATEWAY_PLAN.md § Plugin / ext-proc 
 1. Subscribe with `queue_subscribe("{prefix}.plugin.{plugin_name}", "mcp-plugin-{plugin_name}")`.
 2. Publish replies to the gateway-provided reply inbox on the request message (standard NATS request/reply).
 3. Run N replicas behind the same queue group name for horizontal scale; NATS delivers each plugin invocation to one healthy worker.
-4. Align NATS account ACLs: publish on `{prefix}.plugin.>` is gateway-only; plugin principals subscribe on their `{prefix}.plugin.{plugin_name}` subtree ([MCP_GATEWAY_PLAN.md § ACL matrix](../../MCP_GATEWAY_PLAN.md)).
+4. Align NATS account ACLs: publish on `{prefix}.plugin.>` is gateway-only; plugin principals subscribe on their `{prefix}.plugin.{plugin_name}` subtree.
 
 **failClosed default:** if no plugin consumer replies within the configured deadline, the gateway treats the policy tier as deny ([nats-callout-plugin.md](nats-callout-plugin.md)).
 
@@ -197,7 +194,7 @@ Queue-group delivery is implemented by the NATS server: when multiple subscriber
 - Distribution fairness is **best-effort** at the NATS server; extremely hot consumers may receive slightly more messages depending on server version and connection count. Monitor per-replica lag and CPU rather than assuming perfect uniformity.
 - Queue groups provide **competing consumer** semantics, not **partitioned consumer** semantics (contrast with JetStream ordered consumers).
 
-**Relationship to control-plane heartbeats:** each replica publishes `mcp.control.gateway.heartbeat.{instance_id}` so operators can enumerate live instance IDs for inbox ACL templates and correlation debugging ([MCP_GATEWAY_PLAN.md § Control plane subjects](../../MCP_GATEWAY_PLAN.md#control-plane-subjects)).
+**Relationship to control-plane heartbeats:** each replica publishes `mcp.control.gateway.heartbeat.{instance_id}` so operators can enumerate live instance IDs for inbox ACL templates and correlation debugging.
 
 ---
 
@@ -284,8 +281,6 @@ End-to-end verification:
 | [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) | Scaling heuristics; day-2 checklist queue group line |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Row 10 saturation semantics |
 | [nats-callout-plugin.md](nats-callout-plugin.md) | Tier-2.5 plugin subject and entitlement model |
-| [MCP_GATEWAY_PLAN.md § Wire-Format Pin 3](../../MCP_GATEWAY_PLAN.md#3-queue-group-strategy) | Authoritative pinned table and backpressure paragraph |
-| [MCP_GATEWAY_PLAN.md §9](../../MCP_GATEWAY_PLAN.md) | Platform default limits (inflight + caller rate) |
 
 ---
 

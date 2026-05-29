@@ -300,7 +300,7 @@ Publish a Tier-1 / CEL policy bundle that **allows one tool** on your server and
 Create `bundles/acme-github-smoke.yaml`:
 
 ```yaml
-# Tier-1 declarative rules (MCP_GATEWAY_PLAN.md § Policy Engine)
+# Tier-1 declarative rules
 apiVersion: trogon.ai/mcp-gateway-config/v1
 kind: McpGatewayBundle
 metadata:

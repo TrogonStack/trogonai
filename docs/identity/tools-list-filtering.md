@@ -50,7 +50,6 @@ Subject shape (from tests and README): `{prefix}.gateway.request.{server_id}.too
 |---|---|
 | **Information leak** | Tool `name`, `description`, and `inputSchema` often reveal internal APIs, data models, or privileged operations. An agent authorised for three tools must not learn that forty-seven others exist. |
 | **Agent confusion** | LLM clients treat `tools/list` as the action space. Irrelevant tools increase mistaken `tools/call` attempts, wasted tokens, and false confidence about capabilities. |
-| **Policy inconsistency** | Block E goal: the **same CEL predicate** that will gate `tools/call` should decide visibility in `tools/list` (agentgateway pattern, adopted in [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block E). Today, list and call are decoupled. |
 | **Audit blind spot** | Phase 1 audit records method and outcome but not how many tools were hidden from a list response. Operators cannot prove least-privilege catalogue shaping. |
 
 Tool restrictions in Trogon identity belong in JWT `scope` and registry-backed attributes ([overview.md](overview.md)); catalog filtering is how those restrictions become **visible** to the agent without changing MCP client code.
@@ -396,7 +395,6 @@ Serialised JSON-RPC success body (after filter + redaction), plus metadata:
 | **Schema change** | New `schema_hash` from sniffed `tools/list` or `notifications/tools/list_changed` → miss per `(server_id, schema_hash)`. |
 | **Attribute change** | Registry update or JWT claim change affecting `actor.attributes` → miss per `agent_id` / `sub` (no version bump on server). |
 | **TTL expiry** | Safety net when notifications are lost (see section 9). |
-| **Server reconnect** | Optional version bump on backend session re-`initialize` (align with [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) schema cache bullet). |
 
 `should_invalidate` today only recognises `notifications/tools/list_changed` method string ([`schema_cache/invalidate.rs`](../../rsworkspace/crates/trogon-mcp-gateway/src/schema_cache/invalidate.rs)). Gateway workers subscribed to backend notifications must drop:
 
@@ -565,7 +563,6 @@ sequenceDiagram
 |---|---|
 | Identity claims (`agent_id`, `scope`, `act_chain`) | [overview.md](overview.md), [jwt-claim-schema.md](jwt-claim-schema.md) |
 | Risk / rate on call path | [adaptive-access.md](adaptive-access.md) |
-| Block E checklist | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E |
 | Ingress handler | `rsworkspace/crates/trogon-mcp-gateway/src/gateway.rs` |
 | Act-chain ingress gate | `rsworkspace/crates/trogon-mcp-gateway/src/ingress.rs` |
 | CEL gate (call/read) | `rsworkspace/crates/trogon-mcp-gateway/src/policy.rs` |

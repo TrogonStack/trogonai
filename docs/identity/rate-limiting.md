@@ -329,7 +329,7 @@ Label cardinality rules: `tool` label omitted (empty string) for non-`tools/call
 
 ### Audit envelope additions (proposed fields)
 
-Published on gateway audit JSON ([MCP_GATEWAY_PLAN.md §7](../../MCP_GATEWAY_PLAN.md)); additive to `trogon.mcp.audit/v1`:
+Published on gateway audit JSON; additive to `trogon.mcp.audit/v1`:
 
 | Field | Type | When present |
 |---|---|---|
@@ -448,9 +448,6 @@ Inflight caps = semaphores (in-process). Rate budgets = token bucket (§4) with 
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Row 10 saturation; row 12 KV unavailable; CLOSED semantics |
 | [adaptive-access.md](adaptive-access.md) | Purpose throttle; `-32105` on risk path |
 | [act-chain.md](act-chain.md) | Originator-scoped `rate.acquire` examples (update arity to 3-arg) |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block C | Rate-limit state placement (this doc closes) |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E | Rate limiting wired (implementation) |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §9 | Inflight + default caller rate |
 | `cel_builtins/rate.rs` | `ACQUIRE_NAME = "rate.acquire"`, arity 3 |
 | `throttle.rs` | Current sliding-window adaptive throttle (migration target) |
 

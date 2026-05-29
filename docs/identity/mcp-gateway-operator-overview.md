@@ -419,7 +419,6 @@ When in doubt, read `MCP_GATEWAY_PLAN.md` TODO blocks D–H for the authoritativ
 | [Actor chain](act-chain.md) | Verification rules, CEL surface, error codes |
 | [Adaptive access](adaptive-access.md) | Approvals, throttling, anomaly stream |
 | [A2A SDK contract](sdk.md) | Client publish rules — never bypass gateway subjects |
-| [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) | Full subject topology, policy engine tiers, Block H docs backlog |
 | [ADR 0001 Tenancy](../adr/0001-tenancy-model.md) | Account-per-tenant vs JWT claim |
 | [trogon-mcp-gateway README](../../rsworkspace/crates/trogon-mcp-gateway/README.md) | Env vars, SpiceDB tuple shapes, integration tests |
 

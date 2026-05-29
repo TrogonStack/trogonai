@@ -2,7 +2,7 @@
 
 **Status:** Diátaxis explanation + decision record (2026-05-28). Block G paper item — no implementation.
 
-**Related:** [integration-touchpoints.md](integration-touchpoints.md) · [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) · [k8s-controller.md](k8s-controller.md) *(forward-ref)* · [on-bus-vs-hybrid.md](on-bus-vs-hybrid.md) *(forward-ref)* · [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G · [overview.md](overview.md) · [reference-subject-grammar.md](reference-subject-grammar.md)
+**Related:** [integration-touchpoints.md](integration-touchpoints.md) · [mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md) · [k8s-controller.md](k8s-controller.md) *(forward-ref)* · [on-bus-vs-hybrid.md](on-bus-vs-hybrid.md) *(forward-ref)*· [overview.md](overview.md) · [reference-subject-grammar.md](reference-subject-grammar.md)
 
 **Audience:** Platform engineers who operate Envoy, Istio, or Cilium and want to know whether the Trogon MCP gateway will ever participate in an xDS control plane — and, if so, in which role.
 
@@ -124,7 +124,6 @@ Evaluation criteria: **implementation complexity**, **operator surface area**, *
 |---|---|
 | **Complexity** | High. Requires gRPC management server, resource caching, versioning, ACK/NACK handling, and translation from Trogon config (KV, registry) into valid Envoy protos. Must stay compatible with at least one consumer (Istio agent, raw Envoy, or Cilium) — each has subtly different expectations. |
 | **Operator surface** | Increases. Operators now run **two** config pipelines: NATS KV (authoritative for MCP policy) **and** xDS streams (derived view for mesh). Drift between KV revision and xDS `version_info` becomes a new failure mode. |
-| **K8s controller fit** | Complements a **proposed** `trogon-mcp-gateway-controller` that projects Gateway API CRDs into KV ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G). That controller would need a **second projection path** (CRD → xDS) or an xDS emitter watching the same KV — duplicated logic unless carefully factored. |
 | **Queue-group / NATS fit** | **Poor for MCP routing.** MCP ingress is `mcp.gateway.request.{server_id}.{method}` → `mcp.server.{server_id}.{method}` ([mcp-gateway-operator-overview.md](mcp-gateway-operator-overview.md)). NATS queue groups load-balance **messages**, not TCP connections. Envoy RDS (path/host/header matching) does not map to subject grammar; there is no `:authority` on the bus. xDS-as-server helps **adjacent** HTTP entry (hybrid) or **secrets/endpoints**, not core MCP JSON-RPC routing. |
 | **When it helps** | External Envoys must trust Trogon-issued SPIFFE bundles (SDS). External L7 load balancers need **EDS** for gateway HTTP listeners without adopting NATS. Multi-team meshes that forbid NATS on the edge but allow xDS consumption. |
 
@@ -177,7 +176,7 @@ Evaluation criteria: **implementation complexity**, **operator surface area**, *
 
 ## 4. Recommendation
 
-**Decision:** Do **not** implement xDS in **v1** or **v2** unless a **paying customer** or **signed design partner** requires mesh interop on a deadline. The **on-bus model**, **JetStream KV control plane**, and the **proposed Kubernetes controller that projects CRDs into KV** ([k8s-controller.md](k8s-controller.md) *(forward-ref)*, [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G) are **sufficient** for Trogon's differentiated substrate story.
+**Decision:** Do **not** implement xDS in **v1** or **v2** unless a **paying customer** or **signed design partner** requires mesh interop on a deadline. The **on-bus model**, **JetStream KV control plane**, and the **proposed Kubernetes controller that projects CRDs into KV** ([k8s-controller.md](k8s-controller.md) *(forward-ref)*) are **sufficient** for Trogon's differentiated substrate story.
 
 ### 4.1 Why NATS KV replaces xDS for Trogon
 
@@ -214,7 +213,6 @@ Absent those triggers, xDS is **negative ROI**: large proto surface, compatibili
 | Release | xDS |
 |---|---|
 | **v1** | **Out of scope** — no server, no client, no `xds` crate dependency. |
-| **v2** | **Out of scope by default** — same unless customer trigger in §4.2 fires. Block G checklist item remains unchecked intentionally ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G). |
 | **v3+** | Revisit **narrowly** (likely SDS-first, then EDS, then CDS) per §5–6. |
 
 ---
@@ -301,7 +299,7 @@ Typically arrives bundled with CDS via ADS. Separate EDS-only subscribe is unnec
 
 ## 7. Comparison to proposed K8s controller
 
-Block G lists an **optional K8s controller** projecting Gateway API CRDs into NATS KV ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G). That controller and xDS interact as follows:
+Block G lists an **optional K8s controller** projecting Gateway API CRDs into NATS KV. That controller and xDS interact as follows:
 
 | Approach | Config enters Trogon via | Best for |
 |---|---|---|
@@ -335,7 +333,7 @@ If xDS is ever implemented, these constraints apply regardless of shape:
 
 - **mTLS** on gRPC management channel — mesh practices expect client cert on the proxy side.
 - **AuthZ** on xDS gRPC — node metadata must map to Trogon tenant/mesh identity; prevent cross-tenant secret leak via SDS.
-- **Observability** — `version_info`, ACK/NACK rate, resource count, push latency as metrics ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G OTel item).
+- **Observability** — `version_info`, ACK/NACK rate, resource count, push latency as metrics.
 - **Failure modes** — xDS stall must not block NATS MCP path; SDS outage must not block on-bus MCP (only hybrid TLS legs).
 
 ---
@@ -364,8 +362,6 @@ If xDS is ever implemented, these constraints apply regardless of shape:
 | [reference-subject-grammar.md](reference-subject-grammar.md) | Subject routing vs Envoy RDS |
 | [k8s-controller.md](k8s-controller.md) | *(forward-ref)* CRD → KV projection |
 | [on-bus-vs-hybrid.md](on-bus-vs-hybrid.md) | *(forward-ref)* When CDS/EDS client matters |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block G | Checklist: xDS interop v2+; K8s controller; latency baseline |
-| [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § agentgateway Deep Dive | xDS → KV equivalence table |
 | [sts-exchange.md](sts-exchange.md) | SPIFFE attestation; trust bundle source |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | Trust bundle missing (row 15) — orthogonal to xDS until SDS projection |
 

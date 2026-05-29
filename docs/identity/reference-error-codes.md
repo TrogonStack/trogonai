@@ -293,7 +293,6 @@ See [failure-mode-matrix.md § JSON-RPC code quick reference](failure-mode-matri
 
 | Document | Relevance |
 |---|---|
-| [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes) | Wire-Format Pin 6 source of truth |
 | [failure-mode-matrix.md](failure-mode-matrix.md) | CLOSED / OPEN / DEGRADED defaults per failure class |
 | [reference-audit-envelope.md](reference-audit-envelope.md) | Audit `outcome`, subjects, `decision_reason` |
 | [rate-limiting.md](rate-limiting.md) | `-32105` scopes, `retry_after_ms`, placement layers |

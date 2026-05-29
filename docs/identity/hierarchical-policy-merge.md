@@ -29,9 +29,9 @@ This document pins the merge semantics so implementation can follow in a later t
 
 1. **Security-first defaults.** Less-specific layers must not widen access that a more-specific layer removed; organisation-wide allows must not override tenant denies.
 2. **Order independence.** The merged predicate must be identical regardless of the order bundles were published to KV.
-3. **Single evaluator.** Every tier compiles to CEL; the merged result is one CEL expression evaluated by the same interpreter on the hot path ([MCP_GATEWAY_PLAN.md § Policy Engine](../../MCP_GATEWAY_PLAN.md#policy-engine)).
+3. **Single evaluator.** Every tier compiles to CEL; the merged result is one CEL expression evaluated by the same interpreter on the hot path.
 4. **Auditable denies.** A deny must cite every contributing `policy_id` and a stable hash of the merged expression so offline replay reproduces the decision ([failure-mode-matrix.md](failure-mode-matrix.md) invariant 4).
-5. **KV-native distribution.** Policy bundles live in NATS KV ([MCP_GATEWAY_PLAN.md § Config Distribution](../../MCP_GATEWAY_PLAN.md#nats-subject-topology)); merge runs at bundle reload and on cache miss, not per NATS round-trip.
+5. **KV-native distribution.** Policy bundles live in NATS KV; merge runs at bundle reload and on cache miss, not per NATS round-trip.
 
 ### Relationship to agentgateway
 
@@ -135,7 +135,7 @@ ALLOW ⇔ (A_1 ∨ A_2 ∨ … ∨ A_6) ∧ ¬(D_1 ∨ D_2 ∨ … ∨ D_6)
 
 Where `A_n` is absent (no allow rules at that level) ⇒ treat as `false` for that disjunct. **Default deny:** if the allow side is entirely false, result is deny regardless of denies.
 
-For **list shaping** (`tools/list`, `prompts/list`, `resources/list`), the same merged predicate is re-evaluated per catalog item with `response.list_filter_index` set ([MCP_GATEWAY_PLAN.md § MCP Authorization](../../MCP_GATEWAY_PLAN.md#3-mcp-authorization-cel--automatic-list-filtering)).
+For **list shaping** (`tools/list`, `prompts/list`, `resources/list`), the same merged predicate is re-evaluated per catalog item with `response.list_filter_index` set.
 
 For **risk scoring** ([adaptive-access.md](adaptive-access.md)), `policy::evaluate_risk` runs **after** the merged allow gate passes; risk thresholds remain in gateway config, not in hierarchical bundles, until Block E wires bundle-sourced risk rules.
 
@@ -324,7 +324,7 @@ Each policy rule compiles to a CEL predicate `P`. The merged predicate `M` is it
 
 #### Host builtins in merged expressions
 
-Merged CEL may call host builtins ([MCP_GATEWAY_PLAN.md § CEL variable namespace](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace)): `spicedb.check`, `rate.acquire`, `time.now`, etc. **Compilation** resolves builtins at merge time; **evaluation** remains on the request hot path.
+Merged CEL may call host builtins: `spicedb.check`, `rate.acquire`, `time.now`, etc. **Compilation** resolves builtins at merge time; **evaluation** remains on the request hot path.
 
 Rules that invoke `spicedb.check` compile to the same AST shape; the merge tree does not short-circuit SpiceDB calls across rules — the evaluator may apply internal short-circuit on deny for latency once Phase 2 optimizes.
 
@@ -363,7 +363,7 @@ Example audit fragment:
 
 ### 6. Storage
 
-Policy bundles distribute through NATS JetStream KV. Binary WASM artifacts (Phase 3) use JetStream Object Store ([MCP_GATEWAY_PLAN.md § Config Distribution](../../MCP_GATEWAY_PLAN.md#nats-subject-topology)).
+Policy bundles distribute through NATS JetStream KV. Binary WASM artifacts (Phase 3) use JetStream Object Store.
 
 #### Primary bucket: `mcp-gateway-config`
 
@@ -419,7 +419,6 @@ When `H(M)` hits the process-local cache:
 |---|---|---|
 | HashMap lookup | **~50–200 ns** | `MergeKey` → `Arc<CompiledProgram>` |
 | CEL evaluation (typical rule set) | **~5–50 µs** | Dominated by JWT claim access + string ops |
-| SpiceDB `check` (if invoked from CEL) | **~1–20 ms** | Network; separate ZedToken cache ([MCP_GATEWAY_PLAN.md Phase 2](../../MCP_GATEWAY_PLAN.md#phased-delivery)) |
 
 **Target:** merged policy evaluation (CEL only, no SpiceDB) adds **< 100 µs** P99 on warm cache vs Phase 1 hardcoded gate.
 
@@ -443,7 +442,7 @@ When `H(M)` hits the process-local cache:
 
 ### 8. Audit
 
-Every audit envelope ([MCP_GATEWAY_PLAN.md § Audit envelope schema](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema)) for gated methods MUST include sufficient policy-merge context to reproduce denies.
+Every audit envelope for gated methods MUST include sufficient policy-merge context to reproduce denies.
 
 #### Required fields (extension to `trogon.mcp.audit/v1`)
 
@@ -566,7 +565,7 @@ Aligns with [failure-mode-matrix.md](failure-mode-matrix.md) invariants 1, 8, 9.
 
 **Question:** For `virtual-default::github::create_issue`, is server level `virtual-default` or `github`?
 
-**Tentative recommendation:** **member server** (`github`) for policy merge; virtual id affects routing only ([MCP_GATEWAY_PLAN.md § Virtual MCP Federation](../../MCP_GATEWAY_PLAN.md#5-virtual-mcp-federation-target-prefix-multiplexing)).
+**Tentative recommendation:** **member server** (`github`) for policy merge; virtual id affects routing only.
 
 ---
 

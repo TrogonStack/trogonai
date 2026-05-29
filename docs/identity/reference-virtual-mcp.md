@@ -4,7 +4,7 @@
 
 **Status banner:** Phase 1 contract. Default separator is `::`. Configurable per virtual server.
 
-**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-audit-envelope.md](reference-audit-envelope.md), [hierarchical-policy-merge.md](hierarchical-policy-merge.md), [tools-list-filtering.md](tools-list-filtering.md), [failure-mode-matrix.md](failure-mode-matrix.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) (Wire-Format Pin 4, Virtual MCP in subjects).
+**Related:** [reference-subject-grammar.md](reference-subject-grammar.md), [reference-audit-envelope.md](reference-audit-envelope.md), [hierarchical-policy-merge.md](hierarchical-policy-merge.md), [tools-list-filtering.md](tools-list-filtering.md), [failure-mode-matrix.md](failure-mode-matrix.md), Virtual MCP in subjects).
 
 **Implementation target:** `trogon-mcp-gateway` virtual-server federation layer (policy transform before backend fan-out). Backends remain unaware of prefixing.
 
@@ -34,7 +34,6 @@ Virtual server membership (bundle / KV config), hierarchical CEL merge ([hierarc
 
 | Term | Definition |
 |---|---|
-| **Virtual server** | Edge `server_id` matching `virtual-{id}` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) subject grammar). Example: `virtual-default`. |
 | **Target prefix** | Alias of a federation member backend; becomes the left segment before the separator. Must resolve to a registered `server_id` on the backend lane. Example: `github`. |
 | **Native name** | Tool / prompt / resource identifier as the member backend exposes it before federation. Example: `create_issue`. |
 | **Federated name** | `{target_prefix}{separator}{native_name}`. Example: `github::create_issue`. |
@@ -94,7 +93,7 @@ The target prefix is typically identical to the member backend's `server_id`, bu
 
 ## 3. Why `::`
 
-Wire-Format Pin 4 rationale (verbatim from [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md)):
+Wire-Format Pin 4 rationale:
 
 > Rationale: the MCP spec restricts tool names to a pattern that excludes `:`, so `::` cannot collide with any legal native tool name. Single `:` would be ambiguous with URI schemes in resource references. The separator is configurable per virtual server in the bundle (`separator: "::"` default) for operators who need to interop with prior conventions.
 
@@ -201,7 +200,7 @@ Client → mcp.gateway.request.virtual-default.tools.list
            ▼ single tools/list JSON-RPC result to client
 ```
 
-Member initialization follows Wire-Format Pin 5 ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §5): lazy per member, parallel before merge when `tools/list` runs.
+Member initialization follows Wire-Format Pin 5: lazy per member, parallel before merge when `tools/list` runs.
 
 ### 6.2 Merge rules
 
@@ -225,7 +224,7 @@ Default is **off** to keep client-visible text identical to backend semantics as
 
 ### 6.4 Schema cache keying
 
-After merge, the gateway schema cache keys redaction and policy by `{resolved_server_id, native_name, schema_hash}` — not by federated name. A `tools/call` for `github::create_issue` resolves to server `github`, tool `create_issue` before cache lookup ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Guardrails).
+After merge, the gateway schema cache keys redaction and policy by `{resolved_server_id, native_name, schema_hash}` — not by federated name. A `tools/call` for `github::create_issue` resolves to server `github`, tool `create_issue` before cache lookup.
 
 ### 6.5 Partial member failure
 
@@ -338,7 +337,7 @@ Audit: `mcp.audit.error.request.tools` (or matching `method_root`) with `decisio
 
 `schema_unknown` `data` shape: `{ trace_id, server_id, tool }` where `tool` is the **native** name (post-split), not the federated name.
 
-Virtual `tools/list` merge populates cache per member. Stale cache after `notifications/tools/list_changed` from a member follows existing invalidation on `mcp.control.cache.invalidate.{server_id}` ([MCP_GATEWAY_PLAN.md control plane subjects](../../MCP_GATEWAY_PLAN.md)).
+Virtual `tools/list` merge populates cache per member. Stale cache after `notifications/tools/list_changed` from a member follows existing invalidation on `mcp.control.cache.invalidate.{server_id}`.
 
 ### 9.3 Ambiguous legacy separator (`:`)
 
@@ -364,10 +363,6 @@ Audit envelopes SHOULD record ingress virtual id on `subject_in`, member backend
 | Topic | Document / plan section |
 |---|---|
 | NATS subject patterns, `{server_id}` token rules | [reference-subject-grammar.md](reference-subject-grammar.md) |
-| Wire-Format Pin 4 (authoritative separator pin) | [MCP_GATEWAY_PLAN.md § Wire-Format Pins — §4](../../MCP_GATEWAY_PLAN.md) |
-| Virtual MCP fan-out in subjects | [MCP_GATEWAY_PLAN.md § Virtual MCP (federation) in subjects](../../MCP_GATEWAY_PLAN.md) |
-| `initialize` parallel member init | [MCP_GATEWAY_PLAN.md § Wire-Format Pins — §5](../../MCP_GATEWAY_PLAN.md) |
-| JSON-RPC error codes `-32103`, `-32104` | [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md) |
 | Policy merge uses member server, not virtual id | [hierarchical-policy-merge.md §10.5](hierarchical-policy-merge.md#105-virtual-mcp-federation) |
 | `tools/list` CEL filtering after merge | [tools-list-filtering.md](tools-list-filtering.md) |
 | Audit envelope fields | [reference-audit-envelope.md](reference-audit-envelope.md) |
