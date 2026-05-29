@@ -3,7 +3,7 @@
 Reference: https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/
 Companion to: `MCP_GATEWAY_PLAN.md`
 
-**Status: closed except for the two items in "Open work" below.** Every planned block landed on `yordis/agentgateway`; the residual ADR open-questions are resolved in "Decisions log" rather than parked.
+**Status: closed.** Every planned block landed on `yordis/agentgateway`; the residual ADR open-questions are resolved in "Decisions log" rather than parked.
 
 ## Binding decisions
 
@@ -43,5 +43,4 @@ First-deploy gate: every onboarded caller passes shadow-mode without `aud_mismat
 
 ## Open work
 
-1. **Gateway as registered agent.** `rsworkspace/crates/trogon-mcp-gateway/src/act_chain.rs:86` appends a gateway entry with `agent_id: None, wkl: None`. Register each gateway instance as `agent:trogon/gateway-{instance_id}`, plumb its agent_id + SPIFFE `wkl` into the appended entry, and ship a default manifest under `examples/agent-registry/gateway.toml`. Why: uniform model — every act_chain hop names a registered agent; audit + traffic-view stop carrying anonymous infra hops.
-2. **Batch-originator example.** `docs/identity/act-chain.md` documents the sentinel envelope (`wkl:sentinel:batch` + `auth_method:"service-account"`) for non-interactive originators per ADR 0002, but lacks a copy-pasteable originator entry. Add one block with the full `ActChainEntry` shape so operators don't re-derive the encoding.
+None. The two residuals (gateway as registered agent, batch-originator example) landed in `act_chain.rs`, `docs/identity/act-chain.md`, and `rsworkspace/crates/trogon-agent-registry/examples/mcp-gateway.toml`.
