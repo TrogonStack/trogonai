@@ -28,6 +28,23 @@ pub enum RedactionAction {
     Hash,
     Drop,
     Replace(String),
+    RegexReplace {
+        pattern: String,
+        replacement: String,
+    },
+}
+
+impl RedactionAction {
+    #[must_use]
+    pub fn audit_op(&self) -> &str {
+        match self {
+            Self::Mask => "mask",
+            Self::Hash => "hash",
+            Self::Drop => "drop",
+            Self::Replace(_) => "mask",
+            Self::RegexReplace { .. } => "regex_replace",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

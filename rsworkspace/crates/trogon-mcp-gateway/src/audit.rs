@@ -8,6 +8,26 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::authz::IdentitySource;
+use crate::redaction::RewriteEntry;
+
+/// One redaction rewrite attestation for audit consumers (path and op only; no plaintext).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuditRedactionRewrite {
+    pub path: String,
+    pub op: String,
+}
+
+impl From<&RewriteEntry> for AuditRedactionRewrite {
+    fn from(entry: &RewriteEntry) -> Self {
+        Self {
+            path: entry.path.clone(),
+            op: entry.op.clone(),
+        }
+    }
+}
+
+pub const AUDIT_OUTCOME_REDACTED: &str = "redacted";
+pub const AUDIT_OUTCOME_REDACTION_SKIPPED: &str = "redaction_skipped";
 
 /// One hop in a delegation chain (`act_chain` JWT claim / audit embedding).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -59,6 +79,10 @@ pub struct AuditEnvelope {
     pub rate_limit_scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewrites: Option<Vec<AuditRedactionRewrite>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redaction_skip_reason: Option<String>,
 }
 
 impl AuditEnvelope {
@@ -96,6 +120,8 @@ impl AuditEnvelope {
             act_chain: None,
             rate_limit_scope: None,
             retry_after_ms: None,
+            rewrites: None,
+            redaction_skip_reason: None,
         };
         envelope.apply_identity_fields(identity);
         envelope
@@ -117,6 +143,17 @@ impl AuditEnvelope {
     pub fn apply_rate_limit_fields(&mut self, scope: &str, retry_after_ms: u64) {
         self.rate_limit_scope = Some(scope.to_string());
         self.retry_after_ms = Some(retry_after_ms);
+    }
+
+    pub fn apply_rewrites(&mut self, rewrites: &[RewriteEntry]) {
+        if rewrites.is_empty() {
+            return;
+        }
+        self.rewrites = Some(rewrites.iter().map(AuditRedactionRewrite::from).collect());
+    }
+
+    pub fn apply_redaction_skip_reason(&mut self, reason: impl Into<String>) {
+        self.redaction_skip_reason = Some(reason.into());
     }
 }
 
@@ -206,6 +243,8 @@ mod tests {
         assert!(!obj.contains_key("purpose"));
         assert!(!obj.contains_key("session_id"));
         assert!(!obj.contains_key("act_chain"));
+        assert!(!obj.contains_key("rewrites"));
+        assert!(!obj.contains_key("redaction_skip_reason"));
         assert_eq!(
             obj.get("subject_in").and_then(|v| v.as_str()),
             Some("mcp.gateway.request.fs.tools.call")
