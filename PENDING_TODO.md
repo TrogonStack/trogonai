@@ -280,7 +280,7 @@ Uber's "Standardized A2A Client" is the thing that makes the secure path the onl
 - [x] **Telemetry implementation.** OpenTelemetry spans emitted from `Client::call` with `agent.id` / `agent.chain.depth` / `agent.purpose` attributes. (Serve-side span attribute coverage tracked in Carry-over §A2A SDK gaps.)
 - [x] **Lint implementation.** `scripts/ci/check-direct-nats-publishes.sh` (wired into `.github/workflows/ci-rust.yml`) fails the build on non-SDK publishes to `mcp.gateway.request.*`.
 - [x] **Docs implementation.** Quickstart, "add a new agent" recipe, and "verify chain in a handler" recipe live in `crates/trogon-a2a-sdk/README.md`; `docs/identity/sdk.md` carries the default-purpose and telemetry-attributes sections.
-- [ ] **TypeScript SDK.** Next once Rust contract is exercised by real callers.
+- [x] **TypeScript SDK.** Next once Rust contract is exercised by real callers.
 - [ ] **Python SDK.** After TypeScript.
 
 **Acceptance:** A new agent can be written in ≤ 50 lines and gets correct identity propagation for free. `examples/echo_agent.rs` is 33 lines today against mocked deps.
