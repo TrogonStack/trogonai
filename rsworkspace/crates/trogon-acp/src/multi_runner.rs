@@ -647,6 +647,11 @@ where
         // only reaches the embedded acp-runner; xai-runner and openrouter-runner
         // keep compactor_model in their own in-memory session state keyed by runner_sid.
         // Best-effort: if the bridge call fails, compaction falls back to the session model.
+        // Forward "compactor_model" to the active external runner so its in-memory
+        // session state is updated. Pattern mirrors open_runner_session: try the
+        // bridge first; if the runner is temporarily down, fall through to inner
+        // (best-effort, no error propagated to IDE). On success, return the
+        // runner's own response which carries its correct config_options.
         if args.config_id.0.as_ref() == "compactor_model" {
             let acp_sid = args.session_id.0.to_string();
             if let Some((prefix, runner_sid)) = self.route_of(&acp_sid) {
@@ -654,11 +659,16 @@ where
                     if let Some(bridge) = self.get_or_create_bridge(&prefix) {
                         let mut ext_args = args.clone();
                         ext_args.session_id = runner_sid.into();
-                        let _ = bridge.set_session_config_option(ext_args).await;
+                        match bridge.set_session_config_option(ext_args).await {
+                            Ok(resp) => return Ok(resp),
+                            Err(e) => warn!(
+                                error = %e, prefix,
+                                "multi-runner: compactor_model forward failed — falling to inner"
+                            ),
+                        }
                     }
-                    // Return the external runner's response (contains its config_options).
-                    // Do NOT fall through to inner — the external runner owns this session.
-                    return self.inner.set_session_config_option(args).await;
+                    // Bridge unavailable: fall through to inner (same best-effort
+                    // pattern as open_runner_session returning None → caller uses inner).
                 }
             }
         }
