@@ -4,6 +4,7 @@ use crate::cel_builtins::CelBuiltinsError;
 
 use super::bindings::LogLevel;
 use super::runtime::trogon::mcp_policy::host::{HostFailure as WitHostFailure, HostWithStore, LogLevel as WitLogLevel};
+use super::tracing::{set_guest_span_attribute, set_guest_span_event, tracing_level_from_log};
 use super::wasi_stub::StoreHost;
 
 impl HostWithStore for StoreHost {
@@ -134,48 +135,13 @@ impl HostWithStore for StoreHost {
         message: String,
     ) -> Result<(), WitHostFailure> {
         let mapped = map_log_level(level);
+        let tracing_level = tracing_level_from_log(mapped);
         let state = host.get();
         let component_id = std::sync::Arc::clone(&state.component_id);
         let instance_id = state.instance_id;
         state
             .with_host(|_| {
-                match mapped {
-                    LogLevel::Trace => tracing::event!(
-                        target: "trogon_mcp_gateway::wasm",
-                        tracing::Level::TRACE,
-                        component_id = %component_id,
-                        instance_id = instance_id,
-                        "{message}"
-                    ),
-                    LogLevel::Debug => tracing::event!(
-                        target: "trogon_mcp_gateway::wasm",
-                        tracing::Level::DEBUG,
-                        component_id = %component_id,
-                        instance_id = instance_id,
-                        "{message}"
-                    ),
-                    LogLevel::Info => tracing::event!(
-                        target: "trogon_mcp_gateway::wasm",
-                        tracing::Level::INFO,
-                        component_id = %component_id,
-                        instance_id = instance_id,
-                        "{message}"
-                    ),
-                    LogLevel::Warn => tracing::event!(
-                        target: "trogon_mcp_gateway::wasm",
-                        tracing::Level::WARN,
-                        component_id = %component_id,
-                        instance_id = instance_id,
-                        "{message}"
-                    ),
-                    LogLevel::Error => tracing::event!(
-                        target: "trogon_mcp_gateway::wasm",
-                        tracing::Level::ERROR,
-                        component_id = %component_id,
-                        instance_id = instance_id,
-                        "{message}"
-                    ),
-                }
+                emit_guest_log(tracing_level, &component_id, instance_id, &message);
                 Ok(())
             })
             .map_err(map_host_failure)?
@@ -184,20 +150,71 @@ impl HostWithStore for StoreHost {
 
     fn span_attribute_set<T>(
         mut host: wasmtime::component::Access<T, Self>,
-        _key: String,
-        _value: String,
+        key: String,
+        value: String,
     ) -> Result<(), WitHostFailure> {
         let state = host.get();
-        state.with_host(|_| Ok(())).map_err(map_host_failure)?
+        state
+            .with_host(|_| set_guest_span_attribute(&key, &value))
+            .map_err(map_host_failure)?
+            .map_err(map_host_failure_from_bindings)
     }
 
     fn span_event<T>(
         mut host: wasmtime::component::Access<T, Self>,
-        _name: String,
-        _attributes_json: String,
+        name: String,
+        attributes_json: String,
     ) -> Result<(), WitHostFailure> {
         let state = host.get();
-        state.with_host(|_| Ok(())).map_err(map_host_failure)?
+        state
+            .with_host(|_| set_guest_span_event(&name, &attributes_json))
+            .map_err(map_host_failure)?
+            .map_err(map_host_failure_from_bindings)
+    }
+}
+
+fn emit_guest_log(
+    level: tracing::Level,
+    component_id: &str,
+    instance_id: u64,
+    message: &str,
+) {
+    match level {
+        tracing::Level::TRACE => tracing::event!(
+            target: "trogon_mcp_gateway::wasm",
+            tracing::Level::TRACE,
+            component_id = %component_id,
+            instance_id = instance_id,
+            "{message}"
+        ),
+        tracing::Level::DEBUG => tracing::event!(
+            target: "trogon_mcp_gateway::wasm",
+            tracing::Level::DEBUG,
+            component_id = %component_id,
+            instance_id = instance_id,
+            "{message}"
+        ),
+        tracing::Level::INFO => tracing::event!(
+            target: "trogon_mcp_gateway::wasm",
+            tracing::Level::INFO,
+            component_id = %component_id,
+            instance_id = instance_id,
+            "{message}"
+        ),
+        tracing::Level::WARN => tracing::event!(
+            target: "trogon_mcp_gateway::wasm",
+            tracing::Level::WARN,
+            component_id = %component_id,
+            instance_id = instance_id,
+            "{message}"
+        ),
+        tracing::Level::ERROR => tracing::event!(
+            target: "trogon_mcp_gateway::wasm",
+            tracing::Level::ERROR,
+            component_id = %component_id,
+            instance_id = instance_id,
+            "{message}"
+        ),
     }
 }
 
@@ -219,6 +236,10 @@ fn map_host_failure(err: super::bindings::HostFailure) -> WitHostFailure {
 }
 
 fn map_host_failure_inner(err: super::bindings::HostFailure) -> WitHostFailure {
+    map_host_failure(err)
+}
+
+fn map_host_failure_from_bindings(err: super::bindings::HostFailure) -> WitHostFailure {
     map_host_failure(err)
 }
 
@@ -311,7 +332,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::cel_builtins::{HostEvalContext, SpicedbHostBackend};
+    use crate::wasm::bindings::LogLevel;
     use crate::wasm::store_state::WasmStoreState;
+    use crate::wasm::tracing::{set_guest_span_attribute, tracing_level_from_log};
 
     struct AllowBackend;
 
@@ -324,6 +347,31 @@ mod tests {
         ) -> Result<bool, crate::cel_builtins::HostFailure> {
             Ok(true)
         }
+    }
+
+    #[test]
+    fn host_span_attribute_set_callthrough_on_active_span() {
+        let host = HostEvalContext::for_tests();
+        let mut state = WasmStoreState::new(
+            host,
+            super::super::config::PoolConfig::for_tests(),
+            Arc::from("demo"),
+            1,
+        );
+        let span = tracing::info_span!("mcp.gateway.wasm.evaluate");
+        let _guard = span.enter();
+        state
+            .with_host(|_| set_guest_span_attribute("wasm.rule_id", "deny-large-payload"))
+            .expect("host")
+            .expect("attribute");
+    }
+
+    #[test]
+    fn host_log_level_maps_to_tracing_level() {
+        assert_eq!(
+            tracing_level_from_log(LogLevel::Warn),
+            tracing::Level::WARN
+        );
     }
 
     #[test]
