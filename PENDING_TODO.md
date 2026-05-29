@@ -150,7 +150,7 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 
 - [ ] Agent-traffic view v1 implementation (spec + skeleton landed as `trogon-traffic-view`; `docs/identity/agent-traffic.md` covers schema, projector, OCSF export, `agctl traffic` CLI surface).
 - [ ] Gateway-ingress-side act-chain registry resolution (STS receipt resolution already landed).
-- [ ] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
+- [x] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
 - [ ] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
 - [ ] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
 - [ ] A2A SDK TypeScript + Python tracks.
