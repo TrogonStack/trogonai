@@ -119,7 +119,11 @@ nkeys = { version = "=0.4.5", features = ["xkeys"] }
 
 # SpiceDB / Authzed gRPC (org-standard `authzed` crate name; generated API from buf.build/authzed/api)
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
-tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen"] }
+tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
+tonic-build = "=0.14.6"
+prost = "=0.14.3"
+prost-types = "=0.14.3"
+arc-swap = "=1.7.1"
 moka = { version = "=0.12.10", features = ["future"] }
 notify = "=7.0.0"
 rustls = { version = "=0.23.35", default-features = false, features = ["ring", "std", "tls12"] }
