@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 4 (bundle format + NKey signature verification), Block F item 5 (bundle loader from NATS KV with hot-swap and rollback) |
+| **Blocks** | Bundle format + NKey signature verification; bundle loader from NATS KV with hot-swap and rollback |
 | **Related** | [wasm-bundle-format.md](../identity/wasm-bundle-format.md), [howto-write-bundle.md](../identity/howto-write-bundle.md), [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md), [reference-host-abi.md](../identity/reference-host-abi.md), [ADR 0006](0006-mesh-token-signing-keys.md), [ADR 0001](0001-tenancy-model.md) |
 
 ## Context

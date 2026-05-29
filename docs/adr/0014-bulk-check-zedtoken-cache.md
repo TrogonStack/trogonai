@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block E item 3 (`BulkCheckPermission` + ZedToken cache keyed to MCP session id) |
-| **Related** | [bulk-check-permission.md](../identity/bulk-check-permission.md), [tools-list-filtering.md](../identity/tools-list-filtering.md), [reference-host-abi.md](../identity/reference-host-abi.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block E |
+| **Blocks** | `BulkCheckPermission` + ZedToken cache keyed to MCP session id |
+| **Related** | [bulk-check-permission.md](../identity/bulk-check-permission.md), [tools-list-filtering.md](../identity/tools-list-filtering.md), [reference-host-abi.md](../identity/reference-host-abi.md) |
 
 ## Context
 

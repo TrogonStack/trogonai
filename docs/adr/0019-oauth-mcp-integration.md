@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 6 (OAuth 2.0 MCP integration); unblocks Phase 0 MCP OAuth ingress, auth-callout OAuth CONNECT path, and STS bootstrap exchange wiring |
+| **Blocks** | OAuth 2.0 MCP integration; unblocks Phase 0 MCP OAuth ingress, auth-callout OAuth CONNECT path, and STS bootstrap exchange wiring |
 | **Related** | [oauth-mcp-integration.md](../identity/oauth-mcp-integration.md); [sts-exchange.md](../identity/sts-exchange.md); [jwt-claim-schema.md](../identity/jwt-claim-schema.md); [nats-callout-plugin.md](../identity/nats-callout-plugin.md); [auth-callout-design.md](../a2a/explanation/auth-callout-design.md); [0001-tenancy-model.md](0001-tenancy-model.md); [0003-bootstrap-vs-mesh-tokens.md](0003-bootstrap-vs-mesh-tokens.md); [0004-sts-form-factor.md](0004-sts-form-factor.md); [0005-token-ttl-and-audience.md](0005-token-ttl-and-audience.md); [0011-nats-auth-callout.md](0011-nats-auth-callout.md) |
 
 ## Context

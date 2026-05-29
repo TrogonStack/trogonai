@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 7 (Bidirectional enforcement); unblocks Phase 4 callback ingress consumer, callback policy bundle section, inverted SpiceDB schema, and callback audit envelope fields (Wire-Format Pin 7) |
-| **Related** | [bidirectional-enforcement.md](../identity/bidirectional-enforcement.md) · [overview.md](../identity/overview.md) · [act-chain.md](../identity/act-chain.md) · [adaptive-access.md](../identity/adaptive-access.md) · [sts-exchange.md](../identity/sts-exchange.md) · [reference-audit-envelope.md](../identity/reference-audit-envelope.md) · ADR 0005 (callback audience URI) · ADR 0008 (CEL) · ADR 0009 (reply correlation) · ADR 0011 (NATS auth callout / subscription scoping) · ADR 0012 (rate limits) · ADR 0013 (hierarchical merge) · `MCP_GATEWAY_PLAN.md` § NATS Subject Topology, § SpiceDB Integration Model, Wire-Format Pin 7 |
+| **Blocks** | Bidirectional enforcement; unblocks Phase 4 callback ingress consumer, callback policy bundle section, inverted SpiceDB schema, and callback audit envelope fields (audit envelope schema) |
+| **Related** | [bidirectional-enforcement.md](../identity/bidirectional-enforcement.md) · [overview.md](../identity/overview.md) · [act-chain.md](../identity/act-chain.md) · [adaptive-access.md](../identity/adaptive-access.md) · [sts-exchange.md](../identity/sts-exchange.md) · [reference-audit-envelope.md](../identity/reference-audit-envelope.md) · ADR 0005 (callback audience URI) · ADR 0008 (CEL) · ADR 0009 (reply correlation) · ADR 0011 (NATS auth callout / subscription scoping) · ADR 0012 (rate limits) · ADR 0013 (hierarchical merge) |
 
 ## Context
 

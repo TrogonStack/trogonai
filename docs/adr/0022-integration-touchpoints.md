@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 9 (Integration touch-points); unblocks decider bridge design, Slack approval wiring, and multi-consumer audit fan-out planning |
-| **Related** | [integration-touchpoints.md](../identity/integration-touchpoints.md) (design spec); [reference-audit-envelope.md](../identity/reference-audit-envelope.md); [adaptive-access.md](../identity/adaptive-access.md); [agent-traffic.md](../identity/agent-traffic.md); [act-chain.md](../identity/act-chain.md); [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 7 (audit envelope schema); [ADR 0001](0001-tenancy-model.md) (tenancy / shared account); [ADR 0011](0011-nats-auth-callout.md) (perimeter auth); [ADR 0016](0016-multi-region-topology.md) (regional audit streams) |
+| **Blocks** | Integration touch-points; unblocks decider bridge design, Slack approval wiring, and multi-consumer audit fan-out planning |
+| **Related** | [integration-touchpoints.md](../identity/integration-touchpoints.md) (design spec); [reference-audit-envelope.md](../identity/reference-audit-envelope.md); [adaptive-access.md](../identity/adaptive-access.md); [agent-traffic.md](../identity/agent-traffic.md); [act-chain.md](../identity/act-chain.md); [reference-audit-envelope.md](../identity/reference-audit-envelope.md); [ADR 0001](0001-tenancy-model.md) (tenancy / shared account); [ADR 0011](0011-nats-auth-callout.md) (perimeter auth); [ADR 0016](0016-multi-region-topology.md) (regional audit streams) |
 
 ## Context
 

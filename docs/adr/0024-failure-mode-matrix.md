@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 4 (Failure-mode matrix); unblocks Block E failure-mode wiring, operator runbooks, and SIEM correlation for dependency outages |
+| **Blocks** | Failure-mode matrix; unblocks failure-mode wiring, operator runbooks, and SIEM correlation for dependency outages |
 | **Related** | [failure-mode-matrix.md](../identity/failure-mode-matrix.md); [reference-error-codes.md](../identity/reference-error-codes.md); [multi-region.md](../identity/multi-region.md); [nats-callout-plugin.md](../identity/nats-callout-plugin.md); [ADR 0011](0011-nats-auth-callout.md); [ADR 0012](0012-rate-limit-state.md); [ADR 0016](0016-multi-region-topology.md) |
 
 ## Context
