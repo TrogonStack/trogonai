@@ -346,7 +346,7 @@ Instrument types:
 | `method` | JSON-RPC method |
 | `tenant` | Tenant slug |
 
-Explicit histogram buckets (**proposed**): `5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000` ms — aligned with gateway SLO bands in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) latency baseline work.
+Explicit histogram buckets (**proposed**): `5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000` ms — aligned with gateway SLO bands latency baseline work.
 
 ### 4.3 `mcp_gateway_authz_decision_total`
 
@@ -657,8 +657,6 @@ With `parentbased_traceidratio` at 0.1 and 1k RPS ingress, expect ~100 traces/s 
 | [`redaction/rule.rs`](../../rsworkspace/crates/trogon-mcp-gateway/src/redaction/rule.rs) | `RedactionAction`, `JsonPath` |
 | [`redaction/engine.rs`](../../rsworkspace/crates/trogon-mcp-gateway/src/redaction/engine.rs) | Apply rules (stub today) |
 | [`redaction/ruleset.rs`](../../rsworkspace/crates/trogon-mcp-gateway/src/redaction/ruleset.rs) | YAML loading **pending** |
-
-### 9.3 MCP_GATEWAY_PLAN.md Block G mapping
 
 | Block G item | This spec section |
 |---|---|

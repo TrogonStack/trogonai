@@ -4,7 +4,7 @@
 
 **Document type:** Diátaxis **reference** (CRD schemas, KV mappings, RBAC, metrics) with **explanation** prose where architectural trade-offs matter.
 
-**Related:** [Integration touch-points](integration-touchpoints.md) · [Registry operations](registry-operations.md) · [How to integrate a third-party MCP server](howto-integrate-third-party-mcp.md) · [MCP gateway plan Block G](../../MCP_GATEWAY_PLAN.md#block-g--operational-tooling) · [Bootstrap / day-zero](bootstrap-day-zero.md) · [MCP policy WIT sketch](mcp-policy-wit-sketch.md)
+**Related:** [Integration touch-points](integration-touchpoints.md) · [Registry operations](registry-operations.md) · [How to integrate a third-party MCP server](howto-integrate-third-party-mcp.md) · [Bootstrap / day-zero](bootstrap-day-zero.md) · [MCP policy WIT sketch](mcp-policy-wit-sketch.md)
 
 Unless noted **proposed**, NATS bucket names, subject prefixes, and KV key shapes match identifiers verified in the repo (`trogon-sts`, `trogon-mcp-gateway`, `trogon-agent-registry-controller`, `agctl`).
 
@@ -12,7 +12,7 @@ Unless noted **proposed**, NATS bucket names, subject prefixes, and KV key shape
 
 ## 1. Goal
 
-Production operators need a **Kubernetes-native** way to declare MCP server registration, policy bundles, and SPIFFE trust bundles without shell scripts, ad-hoc `nats kv put`, or break-glass KV writes. Block G in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) lists an optional K8s controller as v2 operational tooling; this document pins the design before any Rust controller crate lands.
+Production operators need a **Kubernetes-native** way to declare MCP server registration, policy bundles, and SPIFFE trust bundles without shell scripts, ad-hoc `nats kv put`, or break-glass KV writes. Block G lists an optional K8s controller as v2 operational tooling; this document pins the design before any Rust controller crate lands.
 
 ### 1.1 What the controller does
 
@@ -565,7 +565,7 @@ Operators who need temporary KV overrides must either pause sync (annotation) or
 
 **One controller instance per tenant namespace** (not one cluster-wide controller): dedicated NATS creds scoped to that tenant's JetStream account, `--watch-namespace=tenant-acme`, KV buckets `mcp-gateway-config` and `mcp-trust-bundles` in that account.
 
-**Rationale:** mirrors [registry-operations.md § ACL rule](registry-operations.md#roles) (single writer SA per bucket), aligns with NATS-account-per-tenant topology from [MCP_GATEWAY_PLAN.md Block A](../../MCP_GATEWAY_PLAN.md#block-a--strategic-decisions-paper-no-code), and prevents one compromised SA from overwriting any tenant's `bundle/active`.
+**Rationale:** mirrors [registry-operations.md § ACL rule](registry-operations.md#roles) (single writer SA per bucket), aligns with NATS-account-per-tenant topology, and prevents one compromised SA from overwriting any tenant's `bundle/active`.
 
 **Soft tenancy (JWT claim only):** if Block A resolves to shared-account claim scoping, a cluster-wide controller requires **proposed** KV key prefix `tenant/{tenant}/…` — not in the codebase today; use separate namespaces + NATS accounts until a plan amendment lands.
 

@@ -4,7 +4,7 @@
 
 **Document type:** Diátaxis **reference** (field tables, layout, validation rules, failure codes) with **explanation** prose where distribution and lifecycle trade-offs matter.
 
-**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md), [Agent registry](registry.md), [Integration touch-points](integration-touchpoints.md), [Audit envelope schema reference](reference-audit-envelope.md), [Failure-mode matrix](failure-mode-matrix.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block F (Phase 3 WASM components + bundles).
+**Related:** [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md), [Agent registry](registry.md), [Integration touch-points](integration-touchpoints.md), [Audit envelope schema reference](reference-audit-envelope.md), [Failure-mode matrix](failure-mode-matrix.md)(Phase 3 WASM components + bundles).
 
 **Implementation target:** `rsworkspace/crates/trogon-mcp-gateway` Phase 3 bundle loader; operator tooling in `agctl` (`Policies` subcommands — stubs today).
 
@@ -27,7 +27,7 @@ Phase 3 introduces **signed WASM policy components** that implement the guest ex
 
 - WIT host ABI details — see [mcp-policy-wit-sketch.md](mcp-policy-wit-sketch.md).
 - Tier 1 declarative YAML and Tier 2 CEL file layout inside a full `mcp-pack` — this spec covers the **Tier 3 WASM policy component artifact** and its envelope; a complete pack may embed additional layers **(proposed)** in future revisions.
-- NATS subject constants for control-plane signals — cite [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) examples as **proposed** where not verified in repo ([reference-subject-grammar.md § proposed buckets](reference-subject-grammar.md#74-proposed-buckets)).
+- NATS subject constants for control-plane signals — examples as **proposed** where not verified in repo ([reference-subject-grammar.md § proposed buckets](reference-subject-grammar.md#74-proposed-buckets)).
 
 ### 1.3 Terminology
 

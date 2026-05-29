@@ -345,7 +345,7 @@ Synchronous NATS request/reply for Tier 2.5 ext-proc-style plugins. Required whe
 
 Examples: `mcp.plugin.redaction`, `mcp.plugin.risk-scorer`. Wildcards and non-plugin subjects (`mcp.server.*`, `mcp.gateway.*`, `$SYS.*`) -> `-32101`.
 
-**Queue group:** Gateway publishes to the subject; plugins subscribe with queue group `mcp-plugin-{plugin_name}` per [MCP_GATEWAY_PLAN.md SS3](../../MCP_GATEWAY_PLAN.md#3-queue-group-strategy).
+**Queue group:** Gateway publishes to the subject; plugins subscribe with queue group `mcp-plugin-{plugin_name}`.
 
 **Failure behavior (failClosed default):** No responder or timeout -> CEL evaluation error -> deny path `-32100` or `-32101` depending on bundle `plugin.fail_mode` **(proposed)**; default **closed**.
 

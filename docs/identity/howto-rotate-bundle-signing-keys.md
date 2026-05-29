@@ -4,7 +4,7 @@
 
 **Audience:** platform operators rotating the NATS NKey that signs Trogon MCP gateway policy bundles. Not mesh STS signing keys, NATS account Operator keys, or SPIFFE trust-bundle PEM.
 
-**Related:** [ADR 0010 — Bundle format](../adr/0010-bundle-format.md) · [ADR 0026 — Hot-swap and rollback](../adr/0026-bundle-hot-swap-rollback.md) · [WASM bundle format](wasm-bundle-format.md) · [How to write a bundle](howto-write-bundle.md) · [Failure mode matrix](failure-mode-matrix.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md) · [MCP gateway plan Block F](../../MCP_GATEWAY_PLAN.md)
+**Related:** [ADR 0010 — Bundle format](../adr/0010-bundle-format.md) · [ADR 0026 — Hot-swap and rollback](../adr/0026-bundle-hot-swap-rollback.md) · [WASM bundle format](wasm-bundle-format.md) · [How to write a bundle](howto-write-bundle.md) · [Failure mode matrix](failure-mode-matrix.md) · [MCP gateway operator overview](mcp-gateway-operator-overview.md)
 
 | Placeholder | Example value |
 |---|---|

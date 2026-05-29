@@ -4,7 +4,7 @@
 
 **Document type:** Diátaxis **explanation** (why queue-group workers break naive reply routing, failure modes, strategy trade-offs) plus **reference** (headers, dedup contract, metrics, idempotency table).
 
-**Related:** [MCP session model](mcp-session-model.md), [Failure-mode matrix](failure-mode-matrix.md), [Reference subject grammar](reference-subject-grammar.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block B (Reply correlation mechanism), Block D Phase 1 (shipped substrate), § Reply inbox naming, § Wire-Format Pins.
+**Related:** [MCP session model](mcp-session-model.md), [Failure-mode matrix](failure-mode-matrix.md), [Reference subject grammar](reference-subject-grammar.md), [MCP gateway operator overview](mcp-gateway-operator-overview.md)(Reply correlation mechanism), Block D Phase 1 (shipped substrate), § Reply inbox naming, § Wire-Format Pins.
 
 **Implementation target:** `rsworkspace/crates/trogon-mcp-gateway` Phase 2 (per-instance inbox subscription and dedup store). Phase 1 behaviour is documented as **(today)** throughout.
 
@@ -584,7 +584,7 @@ Join audit to client logs via `request_id` + `correlation_id` ([reference-audit-
 | [reference-audit-envelope.md](reference-audit-envelope.md) | `request_id` / `correlation_id` audit fields |
 | [bidirectional-enforcement.md](bidirectional-enforcement.md) | Server→client reply correlation (mirror contract) |
 
-**Implementation phases:** Phase 1 **(today)** — inline `Message.reply`; Phase 2a — per-instance inbox + in-memory map; Phase 2b — `mcp-reply-dedup` KV + metrics + reply headers; Phase 3 — cancel inflight keys, drain-on-SIGTERM. Block B sign-off: satisfies **Reply correlation mechanism** in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block B.
+**Implementation phases:** Phase 1 **(today)** — inline `Message.reply`; Phase 2a — per-instance inbox + in-memory map; Phase 2b — `mcp-reply-dedup` KV + metrics + reply headers; Phase 3 — cancel inflight keys, drain-on-SIGTERM. Block B sign-off: satisfies **Reply correlation mechanism**.
 
 **Glossary:** `producer_replica_id` / `instance_id` = boot NUID; `nuid_g` = gateway inbox suffix; `dedup_key` = §6.1 hash (not raw JSON-RPC `id`).
 

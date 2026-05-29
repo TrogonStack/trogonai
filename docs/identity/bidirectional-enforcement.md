@@ -3,7 +3,7 @@
 **Status:** DRAFT — Block C design spec (paper, before code).  
 **Diátaxis:** [Explanation](#explanation) (why and how the gateway thinks about callbacks) + [Reference](#reference) (subjects, permissions, audit fields, error codes).
 
-**Related:** [Identity overview](overview.md), [Actor chain](act-chain.md), [Adaptive access](adaptive-access.md), [STS exchange](sts-exchange.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block C and § NATS Subject Topology.
+**Related:** [Identity overview](overview.md), [Actor chain](act-chain.md), [Adaptive access](adaptive-access.md), [STS exchange](sts-exchange.md).
 
 ---
 

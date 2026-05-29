@@ -2,7 +2,7 @@
 
 **Status:** Normative operator reference (Block C). Specifies default gateway behaviour when a dependency fails. Implementation may lag; rows marked **(today)** describe shipped Phase 1 behaviour in `trogon-mcp-gateway`.
 
-**Cross-references:** [Identity overview](overview.md) (mesh identity, STS fail-closed), [Adaptive access](adaptive-access.md) (approvals, throttling), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block C (open design item), §6 JSON-RPC codes, §7 audit envelope, §9 backpressure.
+**Cross-references:** [Identity overview](overview.md) (mesh identity, STS fail-closed), [Adaptive access](adaptive-access.md) (approvals, throttling)(open design item), §6 JSON-RPC codes, §7 audit envelope, §9 backpressure.
 
 ---
 

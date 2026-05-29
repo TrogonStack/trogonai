@@ -4,7 +4,7 @@
 
 **Audience:** platform SREs deploying `trogon-mcp-gateway` into an existing TrogonStack mesh (NATS, JetStream, STS, SpiceDB, agent registry).
 
-**Related:** [MCP gateway operator overview](mcp-gateway-operator-overview.md) · [Reference queue groups](reference-queue-groups.md) · [Reference NATS headers](reference-nats-headers.md) · [Bootstrap / day-zero](bootstrap-day-zero.md) · [Failure mode matrix](failure-mode-matrix.md) · [MCP gateway plan Block D](../../MCP_GATEWAY_PLAN.md) · [Kubernetes controller](k8s-controller.md) (v2 — not required here)
+**Related:** [MCP gateway operator overview](mcp-gateway-operator-overview.md) · [Reference queue groups](reference-queue-groups.md) · [Reference NATS headers](reference-nats-headers.md) · [Bootstrap / day-zero](bootstrap-day-zero.md) · [Failure mode matrix](failure-mode-matrix.md) · [Kubernetes controller](k8s-controller.md) (v2 — not required here)
 
 | Placeholder | Example value |
 |---|---|

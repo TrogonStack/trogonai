@@ -48,7 +48,7 @@ On Streamable HTTP transports, the specification defines optional **session IDs*
 - The server **may** terminate the session at any time (HTTP 404); the client **must** re-`initialize` without a session id.
 - The client **should** send HTTP DELETE with `MCP-Session-Id` to explicitly close when finished.
 
-Trogon maps this concept to the NATS header **`mcp-session-id`**, already pinned in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Wire-Format Pins. The gateway **issues** the opaque id at `initialize`; clients echo it on every later edge-zone message. Mesh JWTs may also carry `session_id` for egress cache keying ([overview.md](overview.md) claim cheatsheet).
+Trogon maps this concept to the NATS header **`mcp-session-id`**, already pinned. The gateway **issues** the opaque id at `initialize`; clients echo it on every later edge-zone message. Mesh JWTs may also carry `session_id` for egress cache keying ([overview.md](overview.md) claim cheatsheet).
 
 ### Operation phase and server lifecycle
 

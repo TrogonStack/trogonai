@@ -4,7 +4,7 @@
 
 **Document type:** Diátaxis **reference** (stable identifiers, WIT surface, error mapping) with short **explanation** prose where design intent matters.
 
-**Related:** [Identity overview](overview.md), [Adaptive access](adaptive-access.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block B (Host ABI surface) and Block F (Phase 3 WASM), [Failure-mode matrix](failure-mode-matrix.md), [Act chain](act-chain.md).
+**Related:** [Identity overview](overview.md), [Adaptive access](adaptive-access.md)(Host ABI surface) and Block F (Phase 3 WASM), [Failure-mode matrix](failure-mode-matrix.md), [Act chain](act-chain.md).
 
 **Implementation target:** `rsworkspace/crates/trogon-mcp-gateway` Phase 3; CEL builtins in Phase 2 are shaped to desugar into this surface.
 
@@ -357,7 +357,7 @@ There is **no** WIT import for cryptography in v0.1.0. Guests cannot verify thei
 
 ### Signer trust
 
-Trusted signer NKeys (or cosign key refs) live in NATS KV `mcp-gateway-config/trusted_signers` **(proposed key)** per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) § Bundles. Unknown signer → load rejected.
+Trusted signer NKeys (or cosign key refs) live in NATS KV `mcp-gateway-config/trusted_signers` **(proposed key)**. Unknown signer → load rejected.
 
 ### Capability manifest
 
@@ -578,7 +578,7 @@ A: No. Manifest `wit.version` selects the linker.
 A: Import returns `err`; gateway maps to `-32107` fail-closed.
 
 **Q: Is WASM Phase 1?**  
-A: No. Phase 3 per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F; Phase 1 proves NATS/SpiceDB/audit substrate.
+A: No. Phase 3; Phase 1 proves NATS/SpiceDB/audit substrate.
 
 **Q: How does this relate to Synadia Protect?**  
 A: Protect operates at NATS subject level; this WIT is JSON-RPC-aware MCP policy inside the gateway — complementary, not a replacement.

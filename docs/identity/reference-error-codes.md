@@ -43,7 +43,7 @@ Every gateway-emitted Trogon error **MUST** include `trace_id` in `error.data`.
 
 ## 3. Full code table (Wire-Format Pin 6)
 
-Reproduced from [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md#6-gateway-emitted-json-rpc-error-codes). Each row adds a JSON `data` example and a typical trigger. Symbols match the plan column **Symbol**.
+Reproduced. Each row adds a JSON `data` example and a typical trigger. Symbols match the plan column **Symbol**.
 
 | Code | Symbol | Meaning | `data` shape (JSON example) | Example trigger |
 |---|---|---|---|---|

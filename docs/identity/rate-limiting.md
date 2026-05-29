@@ -4,7 +4,7 @@
 
 **Diátaxis:** Explanation (sections 1–5, narrative in 6–10) + reference (tables, contracts, operator knobs).
 
-**Related:** [Identity overview](overview.md), [Failure-mode matrix](failure-mode-matrix.md), [Adaptive access](adaptive-access.md), [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Blocks C and E, §9 backpressure defaults.
+**Related:** [Identity overview](overview.md), [Failure-mode matrix](failure-mode-matrix.md), [Adaptive access](adaptive-access.md).
 
 **Implementation note:** `trogon-mcp-gateway::throttle` (`throttle.rs`) implements a **sliding-window** context throttler keyed by `(tenant, agent_id, purpose)` for adaptive-access risk paths. The CEL host builtin `rate.acquire` in `cel_builtins/rate.rs` is **not yet implemented** (`NotImplemented`). This document is the contract both paths must converge on in Block E; code changes to `throttle.rs` and `rate.rs` are explicitly out of scope for this paper.
 

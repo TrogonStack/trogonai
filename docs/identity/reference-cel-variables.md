@@ -4,7 +4,7 @@
 
 **Status:** Phase 1 contract. Roots are pinned; fields under a root may be added without a version bump, never renamed or moved.
 
-**Related:** [Policy DSL choice](policy-dsl-choice.md) · [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md) · [Actor chain (`act_chain`)](act-chain.md) · [BulkCheckPermission and ZedToken cache](bulk-check-permission.md) · [MCP gateway plan § Wire-Format Pin 8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace)
+**Related:** [Policy DSL choice](policy-dsl-choice.md) · [MCP policy WIT host ABI sketch](mcp-policy-wit-sketch.md) · [Actor chain (`act_chain`)](act-chain.md) · [BulkCheckPermission and ZedToken cache](bulk-check-permission.md)
 
 **Implementation anchors:** `rsworkspace/crates/trogon-mcp-gateway/src/policy.rs` (variable binding, `chain.*` helpers), `rsworkspace/crates/trogon-mcp-gateway/src/cel_builtins/` (host functions). Block E stubs return `NotImplemented` until wired; signatures in this document match the wired host ABI where noted.
 
@@ -12,7 +12,7 @@
 
 ## 1. Roots overview
 
-Reproduced verbatim from [MCP gateway plan § Wire-Format Pin 8](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace):
+Reproduced verbatim:
 
 | Root | Phase | Variables | Notes |
 |---|---|---|---|

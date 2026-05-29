@@ -4,7 +4,7 @@
 
 **Diátaxis:** [Explanation](#explanation) (why merge order matters and how hybrid semantics protect tenants) + [Reference](#reference) (levels, merge rules, CEL composition, storage keys, audit fields, failure modes).
 
-**Related:** [Identity overview](overview.md), [Adaptive access](adaptive-access.md), [Failure-mode matrix](failure-mode-matrix.md), [Bootstrap / day-zero](bootstrap-day-zero.md), [MCP gateway plan § Hierarchical Policy Merge](../../MCP_GATEWAY_PLAN.md#4-hierarchical-policy-merge-backend--target), [MCP gateway plan § Audit envelope](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema), [MCP gateway plan § CEL variable namespace](../../MCP_GATEWAY_PLAN.md#8-cel-variable-namespace).
+**Related:** [Identity overview](overview.md), [Adaptive access](adaptive-access.md), [Failure-mode matrix](failure-mode-matrix.md), [Bootstrap / day-zero](bootstrap-day-zero.md).
 
 ---
 

@@ -316,7 +316,7 @@ Egress mesh token mint targets the **resolved backend** audience (`server_id` af
 
 ## 9. Failure modes
 
-Errors cite [MCP_GATEWAY_PLAN.md §6](../../MCP_GATEWAY_PLAN.md) Trogon JSON-RPC allocation unless marked **proposed**.
+Errors Trogon JSON-RPC allocation unless marked **proposed**.
 
 ### 9.1 Target not registered
 

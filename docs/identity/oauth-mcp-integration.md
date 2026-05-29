@@ -2,13 +2,13 @@
 
 **Status:** Design spec (paper, Block C). Operator reference target after implementation review.
 
-**Related:** [Agent identity overview](overview.md) · [STS exchange](sts-exchange.md) · [JWT claim schema](jwt-claim-schema.md) · [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) Block C · [A2A auth callout design](../a2a/explanation/auth-callout-design.md)
+**Related:** [Agent identity overview](overview.md) · [STS exchange](sts-exchange.md) · [JWT claim schema](jwt-claim-schema.md) · [A2A auth callout design](../a2a/explanation/auth-callout-design.md)
 
 ---
 
 ## Purpose
 
-This document closes the open Block C item **"OAuth 2.0 MCP integration"** in [`MCP_GATEWAY_PLAN.md`](../../MCP_GATEWAY_PLAN.md). It explains how a third-party MCP client authenticates to the Trogon MCP gateway using OAuth 2.0 / OIDC, and how that OAuth identity becomes:
+This document closes the open Block C item **"OAuth 2.0 MCP integration"**. It explains how a third-party MCP client authenticates to the Trogon MCP gateway using OAuth 2.0 / OIDC, and how that OAuth identity becomes:
 
 1. A **bootstrap NATS User JWT** minted at CONNECT via NATS **auth callout**, and
 2. The **`subject_token`** presented to STS on `mcp.sts.exchange` for the first mesh hop.

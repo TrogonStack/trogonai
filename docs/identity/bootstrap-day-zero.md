@@ -4,7 +4,7 @@
 
 **Diátaxis:** This document is a **how-to** (numbered bootstrap sequence, idempotency, failure recovery) plus **explanation** (why the default posture is mixed, how partial state behaves, migration semantics).
 
-**Related:** [identity overview](overview.md), [registry operations](registry-operations.md), [STS exchange](sts-exchange.md), [A2A SDK contract](sdk.md), [MCP gateway plan § NATS Subject Topology](../../MCP_GATEWAY_PLAN.md#nats-subject-topology).
+**Related:** [identity overview](overview.md), [registry operations](registry-operations.md), [STS exchange](sts-exchange.md), [A2A SDK contract](sdk.md).
 
 ---
 
