@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block G item 2 (CLI: inspect config, trace requests, validate bundles offline, dry-run policy against fixture traffic); unblocks admin HTTP handler implementation guided by `tests/admin_api.rs`, bundle author workflows in `docs/identity/howto-write-bundle.md`, and operator cache introspection tied to ADR 0023 / ADR 0014 |
+| **Blocks** | Operator CLI surface (inspect config, trace requests, validate bundles offline, dry-run policy against fixture traffic); unblocks admin HTTP handler implementation guided by `tests/admin_api.rs`, bundle author workflows in `docs/identity/howto-write-bundle.md`, and operator cache introspection tied to ADR 0023 / ADR 0014 |
 | **Related** | ADR 0010 (bundle format + offline NKey verification), ADR 0013 (hierarchical policy merge — effective config view), ADR 0014 (ZedToken cache stats), ADR 0023 (schema cache stats), `docs/identity/howto-write-bundle.md`, `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`, `rsworkspace/crates/trogon-mcp-gateway/src/trace.rs` (`TraceStore`, `DecisionTrace`), `rsworkspace/crates/agctl/src/mcp/mod.rs` (precedent CLI patterns) |
 
 ## Context

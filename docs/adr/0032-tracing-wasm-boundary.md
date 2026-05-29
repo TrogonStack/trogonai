@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block F item 3 (Tracing across the WASM boundary; span context as part of `request-ctx`); unblocks Phase 3 Wasmtime linker work ([ADR 0025](0025-wasmtime-component-pooling.md)), redaction span attributes ([ADR 0027](0027-redaction-span-attributes.md)), and acceptance tests in `tests/otel_span_shape.rs` / `tests/traceparent_propagation.rs` |
+| **Blocks** | Tracing across the WASM boundary; span context as part of `request-ctx`; unblocks Phase 3 Wasmtime linker work ([ADR 0025](0025-wasmtime-component-pooling.md)), redaction span attributes ([ADR 0027](0027-redaction-span-attributes.md)), and acceptance tests in `tests/otel_span_shape.rs` / `tests/traceparent_propagation.rs` |
 | **Related** | [ADR 0024](0024-failure-mode-matrix.md) (WASM trap row 3); [ADR 0025](0025-wasmtime-component-pooling.md); [ADR 0027](0027-redaction-span-attributes.md); [mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md); [reference-host-abi.md](../identity/reference-host-abi.md); [otel-wiring.md](../identity/otel-wiring.md); `rsworkspace/crates/trogon-mcp-gateway/tests/otel_span_shape.rs`; `tests/traceparent_propagation.rs`; `tests/wasm_host_abi.rs` |
 
 ## Context
