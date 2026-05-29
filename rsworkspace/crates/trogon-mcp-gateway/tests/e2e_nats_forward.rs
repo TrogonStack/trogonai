@@ -70,6 +70,7 @@ async fn gateway_forwards_tools_list_request_reply() {
         jwt: trogon_mcp_gateway::jwt::JwtValidator::disabled().expect("jwt ingress off"),
         egress: None,
         chain_resolver: None,
+        rate_limit: None,
     };
 
     let gateway_client = Arc::new(connect(&nats_conf, connect_timeout).await.expect("gateway nats"));
