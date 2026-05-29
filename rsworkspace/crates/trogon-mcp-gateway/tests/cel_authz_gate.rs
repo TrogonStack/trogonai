@@ -9,61 +9,121 @@
 //! - `docs/adr/0008-policy-dsl.md` (CEL policy DSL)
 //! - `docs/identity/policy-dsl-choice.md` (DSL selection rationale)
 //!
-//! Once implemented, each test will drive the gateway harness (`mcp_nats::Config`, `McpPrefix`,
-//! `trogon_nats::NatsAuth`, `GatewaySettings`, etc.) and assert whether the checker was invoked
-//! via a spy/counter hook exposed by the gate (`authz` / `policy` modules).
-
-#![allow(unused_imports)]
+//! NATS harness cases remain `#[ignore]` until a counting checker spy is exposed on the
+//! gateway ingress path; unit cases below exercise gate selection and host-builtin wiring.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use mcp_nats::{Config as McpConfig, McpPrefix};
-use trogon_mcp_gateway::authz::AllowAllPermissionChecker;
-use trogon_mcp_gateway::gateway::GatewaySettings;
+use cel_interpreter::{to_value, Context, Program, Value};
+use trogon_mcp_gateway::cel_builtins::{register_all, with_host_eval, HostEvalContext};
 use trogon_mcp_gateway::policy::SpicedbGatePolicy;
-use trogon_nats::{NatsAuth, NatsConfig, connect};
 
-mod gate_selects_spicedb {
+mod gate_selection {
     use super::*;
 
+    #[test]
+    fn gate_is_true_for_tools_call() {
+        let policy = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        assert!(policy.requires_spicedb_for_method("tools/call").unwrap());
+    }
+
+    #[test]
+    fn gate_is_true_for_resources_read() {
+        let policy = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        assert!(policy.requires_spicedb_for_method("resources/read").unwrap());
+    }
+
+    #[test]
+    fn gate_is_false_for_tools_list() {
+        let policy = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        assert!(!policy.requires_spicedb_for_method("tools/list").unwrap());
+    }
+
+    #[test]
+    fn gate_is_false_for_initialize() {
+        let policy = SpicedbGatePolicy::phase1_hardcoded().unwrap();
+        assert!(!policy.requires_spicedb_for_method("initialize").unwrap());
+    }
+}
+
+mod host_builtins_wiring {
+    use super::*;
+
+    fn eval(source: &str) -> Value {
+        let mut ctx = Context::default();
+        register_all(&mut ctx).unwrap();
+        let mcp = to_value(serde_json::json!({ "method": "tools/call" })).unwrap();
+        ctx.add_variable_from_value("mcp", mcp);
+        let host = HostEvalContext::for_tests().with_clock_ms(Arc::new(|| 1_700_000_000_000));
+        let program = Program::compile(source).unwrap();
+        with_host_eval(&host, || program.execute(&ctx)).unwrap()
+    }
+
+    #[test]
+    fn cache_roundtrip_in_policy_context() {
+        assert_eq!(
+            eval(
+                r#"cache.set("k", {"v": 1}, duration("30s")) && cache.get("k").v == 1"#
+            ),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn jsonpath_has_on_mcp_params() {
+        assert_eq!(
+            eval(
+                r#"jsonpath.has(mcp, "$.method") && jsonpath.extract(mcp, "$.method") == "tools/call""#
+            ),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn audit_emit_and_time_now_succeed() {
+        assert_eq!(
+            eval(
+                r#"audit.emit({"rule": "gate"}) && time.now() == 1700000000000"#
+            ),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn rate_acquire_local_budget() {
+        assert_eq!(
+            eval(
+                r#"rate.acquire("local", "gate", 1, duration("1m")) && !rate.acquire("local", "gate", 1, duration("1m"))"#
+            ),
+            Value::Bool(true)
+        );
+    }
+}
+
+mod gate_selects_spicedb {
     #[tokio::test]
-    #[ignore = "scaffold; implement when MCP_GATEWAY_PLAN Block D Phase 1 CEL gate exposes spy / counter hook (ADR 0008)"]
+    #[ignore = "needs NATS harness and counting PermissionChecker spy on gateway ingress"]
     async fn gate_evaluates_true_for_tools_call_invokes_spicedb_checker() {
-        unimplemented!("scaffold; populate when CEL gate exposes spy / counter hook");
-        // Arrange: NATS broker, gateway with SpicedbGatePolicy::phase1_hardcoded(), counting checker.
-        // Act: publish JSON-RPC tools/call on ingress subject.
-        // Assert: checker invocation count == 1.
+        unimplemented!("populate when gateway exposes checker invocation counter");
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when MCP_GATEWAY_PLAN Block D Phase 1 CEL gate exposes spy / counter hook (ADR 0008)"]
+    #[ignore = "needs NATS harness and counting PermissionChecker spy on gateway ingress"]
     async fn gate_evaluates_true_for_resources_read_invokes_spicedb_checker() {
-        unimplemented!("scaffold; populate when CEL gate exposes spy / counter hook");
-        // Arrange: NATS broker, gateway with SpicedbGatePolicy::phase1_hardcoded(), counting checker.
-        // Act: publish JSON-RPC resources/read on ingress subject.
-        // Assert: checker invocation count == 1.
+        unimplemented!("populate when gateway exposes checker invocation counter");
     }
 }
 
 mod gate_bypasses_spicedb {
-    use super::*;
-
     #[tokio::test]
-    #[ignore = "scaffold; implement when MCP_GATEWAY_PLAN Block D Phase 1 CEL gate exposes spy / counter hook (ADR 0008)"]
+    #[ignore = "needs NATS harness and counting PermissionChecker spy on gateway ingress"]
     async fn gate_evaluates_false_for_tools_list_bypasses_spicedb_checker() {
-        unimplemented!("scaffold; populate when CEL gate exposes spy / counter hook");
-        // Arrange: NATS broker, gateway with AllowAllPermissionChecker replaced by counting spy.
-        // Act: publish JSON-RPC tools/list on ingress subject.
-        // Assert: checker invocation count == 0; request still forwards.
+        unimplemented!("populate when gateway exposes checker invocation counter");
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when MCP_GATEWAY_PLAN Block D Phase 1 CEL gate exposes spy / counter hook (ADR 0008)"]
+    #[ignore = "needs NATS harness and counting PermissionChecker spy on gateway ingress"]
     async fn gate_evaluates_false_for_initialize_bypasses_spicedb_checker() {
-        unimplemented!("scaffold; populate when CEL gate exposes spy / counter hook");
-        // Arrange: NATS broker, gateway with counting checker spy.
-        // Act: publish JSON-RPC initialize on ingress subject.
-        // Assert: checker invocation count == 0; request still forwards.
+        unimplemented!("populate when gateway exposes checker invocation counter");
     }
 }
