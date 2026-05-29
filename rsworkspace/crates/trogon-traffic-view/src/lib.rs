@@ -24,6 +24,8 @@ pub use query::{parse_since, render_table};
 pub use siem::ocsf::{DefaultOcsfExporter, OcsfExporter, emit_ndjson};
 pub use siem::{OcsfSiemExporter, SiemExporter};
 
+pub mod top_n;
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
