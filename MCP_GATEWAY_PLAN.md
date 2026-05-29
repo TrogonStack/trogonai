@@ -43,7 +43,7 @@ Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gat
 
 - [ ] CEL builtins per host-ABI sketch (`spicedb.check`, `cache.get/set`, `jsonpath.*`, `audit.emit`, `time.now`, `rate.acquire`) — contract: `tests/cel_authz_gate.rs`.
 - [ ] `tools/list` filtering via CEL re-evaluation → **ADR 0015**; contract: `tests/tools_list_filter.rs`.
-- [ ] `BulkCheckPermission` + ZedToken cache → **ADR 0014**; contract: `tests/bulk_check_zedtoken_cache.rs`.
+- [x] `BulkCheckPermission` + ZedToken cache → **ADR 0014**; contract: `tests/bulk_check_zedtoken_cache.rs`.
 - [ ] Schema cache populated by sniffing `tools/list` → **ADR 0023**; contract: `tests/schema_cache_invalidation.rs`.
 - [ ] Schema-driven redaction → **ADR 0027**; contract: `tests/redaction_rules.rs`.
 - [ ] Hierarchical policy merge → **ADR 0013**; contract: `tests/hierarchical_policy_merge.rs`.
