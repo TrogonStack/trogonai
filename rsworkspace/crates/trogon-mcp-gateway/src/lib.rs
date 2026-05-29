@@ -19,5 +19,6 @@ pub mod throttle;
 pub mod spicedb;
 pub mod subject;
 pub mod trace;
+pub mod wasm;
 
 pub use gateway::{GatewayError, run};
