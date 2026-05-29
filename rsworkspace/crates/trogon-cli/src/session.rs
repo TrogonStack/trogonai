@@ -49,6 +49,10 @@ struct CompactorMessage {
 ///   - `compacted == false` AND `error.is_none()` → compaction was skipped (short history)
 #[derive(Deserialize)]
 struct CompactResponse {
+    /// `#[serde(default)]` so a failure response (which omits `messages` and
+    /// carries only `error`) still parses — otherwise the real error is masked
+    /// by a "missing field `messages`" deserialization error.
+    #[serde(default)]
     messages: Vec<CompactorMessage>,
     #[serde(default)]
     compacted: bool,
