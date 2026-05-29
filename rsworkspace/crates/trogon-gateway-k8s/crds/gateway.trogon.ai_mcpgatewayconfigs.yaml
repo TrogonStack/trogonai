@@ -1,0 +1,90 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpgatewayconfigs.gateway.trogon.ai
+spec:
+  group: gateway.trogon.ai
+  names:
+    kind: MCPGatewayConfig
+    listKind: MCPGatewayConfigList
+    plural: mcpgatewayconfigs
+    shortNames:
+      - mgw
+    singular: mcpgatewayconfig
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - bundleRef
+                - tenantId
+              properties:
+                bundleRef:
+                  type: string
+                  description: Bundle scope name (`tenant/slug`) validated against gateway manifest rules.
+                tenantId:
+                  type: string
+                  description: Tenant identifier copied into NATS KV JSON.
+                redactionPolicies:
+                  type: array
+                  items:
+                    type: string
+                rateLimits:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                    format: int32
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                lastSyncedAt:
+                  type: string
+                natsKey:
+                  type: string
+                kvRevision:
+                  type: integer
+                  format: int64
+                contentHash:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantId
+        - name: Bundle
+          type: string
+          jsonPath: .spec.bundleRef
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
