@@ -6,7 +6,7 @@
 //!
 //! Cross-references:
 //! - `docs/identity/reference-jwt.md` — `jti` claim, replay window, clock skew bounds
-//! - `MCP_GATEWAY_PLAN.md` Block E (auth hardening) — replay protection rollout
+//! - auth hardening
 //! - RFC 7519 §4.1.7 — JWT ID (`jti`) claim semantics
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,

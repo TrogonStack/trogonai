@@ -1,12 +1,12 @@
 //! Integration scaffold for MCP gateway audit envelope wire shape (Wire-Format Pin 7).
 //!
 //! Scenario: Phase 1 publishes decision audits on JetStream; Phase 2 pins the JSON envelope
-//! on `{prefix}.audit.{outcome}.request.{method_root}` per MCP_GATEWAY_PLAN.md Wire-Format Pin 7.
+//! on `{prefix}.audit.{outcome}.request.{method_root}` per reference-audit-envelope.md.
 //!
 //! Cross-references:
 //! - `docs/identity/reference-audit-envelope.md` (field-by-field contract)
 //! - ADR 0002 (`docs/adr/0002-identity-layers.md`, optional identity layers)
-//! - `MCP_GATEWAY_PLAN.md` section "7. Audit envelope schema"
+//! - section "7. Audit envelope schema"
 //!
 //! Once implemented, these tests assert serialized payloads from the live publish path
 //! (`trogon_mcp_gateway::audit::AuditEnvelope`, `audit_publish_subject`) match the pinned

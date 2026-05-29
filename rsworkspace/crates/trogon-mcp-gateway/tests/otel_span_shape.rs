@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/identity/reference-audit-envelope.md` (`latency_us`, routing fields, `spicedb` block)
 //! - `docs/identity/otel-wiring.md` (span hierarchy, propagation, redaction rules)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 7 (audit envelope) and Block G OTel export
+//! - `reference-audit-envelope.md` (audit envelope) and Block G OTel export
 //! - OpenTelemetry semantic conventions for messaging and RPC spans
 //!
 //! Harness types: `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,

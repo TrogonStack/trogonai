@@ -5,7 +5,7 @@
 //! runs on ingress JSON-RPC requests. Methods outside that set must bypass SpiceDB entirely.
 //!
 //! Cross-refs:
-//! - `MCP_GATEWAY_PLAN.md` Block D Phase 1 (CEL gate + SpiceDB hook)
+//! - CEL gate + SpiceDB hook
 //! - `docs/adr/0008-policy-dsl.md` (CEL policy DSL)
 //! - `docs/identity/policy-dsl-choice.md` (DSL selection rationale)
 //!
