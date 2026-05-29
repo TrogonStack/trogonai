@@ -1,0 +1,176 @@
+/// MCP gateway policy bundle — guest exports and host imports for Tier-3 WASM.
+///
+/// Canonical source for `trogon:mcp-policy@0.1.0`. Host ABI mapping:
+/// `docs/identity/reference-host-abi.md`.
+package trogon:mcp-policy@0.1.0;
+
+/// Shared record and enum types for host and guest interfaces.
+interface policy-types {
+  /// Host-provided logging levels for `log`.
+  enum log-level {
+    trace,
+    debug,
+    info,
+    warn,
+    error,
+  }
+
+  /// Structured host failure returned from fallible imports and `init`.
+  record host-failure {
+    /// Stable machine code, e.g. `spicedb_unavailable`, `cache_key_too_long`.
+    code: string,
+    /// Human-readable detail; not a stable contract.
+    message: string,
+  }
+
+  /// W3C trace context snapshot carried on each evaluation (ADR 0032).
+  record span-context {
+    /// 32-hex trace id (lowercase, no dashes).
+    trace-id: string,
+    /// Full W3C `traceparent` header value.
+    traceparent: string,
+    /// Optional W3C `tracestate` pass-through.
+    tracestate: option<string>,
+  }
+
+  /// MCP tool descriptor for list/catalog shaping paths.
+  record tool-descriptor {
+    /// Normalized tool name (virtual MCP suffix after first `::` when present).
+    name: string,
+    /// Parsed MCP server id from ingress subject.
+    server-id: string,
+    /// Optional tool description from catalogue entry.
+    description: option<string>,
+    /// JSON Schema for tool input, when present on the catalogue entry.
+    input-schema-json: option<string>,
+  }
+
+  /// Normalized evaluation input — one JSON-RPC request on the gateway path.
+  record request-ctx {
+    /// Gateway-correlated id (JSON-RPC `id` when present, else synthetic).
+    request-id: string,
+    /// Current hop logical actor (`jwt.sub` after validation).
+    actor-id: string,
+    /// SpiceDB / policy subject string for this evaluation.
+    subject-id: string,
+    /// MCP method with slash, e.g. `tools/call`, `resources/read`.
+    method: string,
+    /// JSON object string of JSON-RPC `params` (may be large — host caps apply).
+    params-json: string,
+    /// JSON array string of act-chain entries per act-chain.md (may be `[]`).
+    act-chain-json: string,
+    /// JSON object string of auxiliary attributes (tenant, session_id, nats.subject, …).
+    attributes-json: string,
+    /// Trace context snapshot for audit replay and bundle dry-run.
+    span: span-context,
+    /// Populated on `tools/list` and related catalogue methods; empty list otherwise.
+    tools: list<tool-descriptor>,
+  }
+
+  /// Guest decision for a single evaluation.
+  variant policy-decision {
+    /// Proceed; gateway continues pipeline.
+    allow,
+    /// Hard deny; maps to JSON-RPC `policy_deny`.
+    deny(string),
+    /// Adaptive challenge: step-up or HITL; maps to JSON-RPC `approval_required`.
+    challenge(string),
+  }
+
+  /// SpiceDB CheckPermission-style triple derived by `materialize-bindings`.
+  record spicedb-binding {
+    /// SpiceDB object id string, e.g. `tool:github|create_issue`.
+    object-id: string,
+    permission: string,
+    subject: string,
+  }
+}
+
+/// Capability surface the gateway implements for guests.
+interface host {
+  use policy-types.{host-failure, log-level};
+
+  /// CEL: `spicedb.check(subject, permission, resource)`.
+  spicedb-check: func(
+    subject: string,
+    permission: string,
+    object-id: string,
+  ) -> result<bool, host-failure>;
+
+  /// CEL: `cache.get(key)` — opaque bytes; host deserializes JSON at CEL boundary.
+  cache-get: func(key: string) -> option<list<u8>>;
+
+  /// CEL: `cache.set(key, value, ttl)`.
+  cache-set: func(
+    key: string,
+    value: list<u8>,
+    ttl-secs: u32,
+  ) -> result<_, host-failure>;
+
+  /// CEL: `audit.emit(map)` — `fields-json` MUST be a JSON object string.
+  audit-emit: func(
+    category: string,
+    fields-json: string,
+  ) -> result<_, host-failure>;
+
+  /// CEL: `time.now()` — wall-clock milliseconds since Unix epoch.
+  time-now: func() -> u64;
+
+  /// CEL: `rate.acquire(scope, key, budget, window)`.
+  rate-acquire: func(
+    scope: string,
+    key: string,
+    budget: u32,
+    window-secs: u32,
+  ) -> result<bool, host-failure>;
+
+  /// CEL: `jsonpath.extract(json, path)` — exactly one match required.
+  jsonpath-read: func(
+    document-json: string,
+    path: string,
+  ) -> result<string, host-failure>;
+
+  /// CEL: `jsonpath.has(json, path)`.
+  jsonpath-has: func(
+    document-json: string,
+    path: string,
+  ) -> result<bool, host-failure>;
+
+  /// Structured log line attributed to bundle id + instance id in host telemetry.
+  log: func(level: log-level, message: string) -> result<_, host-failure>;
+
+  /// Set a string attribute on the host-owned `mcp.gateway.wasm.evaluate` span (ADR 0032).
+  span-attribute-set: func(key: string, value: string) -> result<_, host-failure>;
+
+  /// Record a named event on the WASM evaluation span (ADR 0032).
+  span-event: func(name: string, attributes-json: string) -> result<_, host-failure>;
+}
+
+/// Guest exports implemented by the policy component.
+interface policy-guest {
+  use policy-types.{
+    host-failure,
+    request-ctx,
+    policy-decision,
+    spicedb-binding,
+  };
+
+  /// Called once after instantiation before any `evaluate`.
+  init: func() -> result<_, host-failure>;
+
+  /// Author semver for audit (`bundle_version` field) — not used for linker selection.
+  version: func() -> string;
+
+  /// Primary authorization / risk decision entrypoint.
+  evaluate: func(input: request-ctx) -> policy-decision;
+
+  /// Optional tuple derivation for SpiceDB checks; host may call before `evaluate` on list paths.
+  materialize-bindings: func(input: request-ctx) -> result<list<spicedb-binding>, host-failure>;
+}
+
+/// World exported by policy bundle components (`target_wit = trogon:mcp-policy@0.1.0`).
+world policy-bundle {
+  include wasi:cli/imports@0.3.0-rc-2025-09-16;
+  import host;
+  export policy-guest;
+}
