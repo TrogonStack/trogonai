@@ -2250,7 +2250,7 @@ impl AgentLoop {
                     if !checker.check(id, name, input).await {
                         results.push(ToolResult {
                             tool_use_id: id.clone(),
-                            content: format!("Permission denied: user refused to run tool `{name}`"),
+                            content: format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)"),
                         });
                         continue;
                     }

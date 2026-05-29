@@ -220,6 +220,10 @@ impl ChildProcessHandle for MockProcessHandle {
     async fn kill(&mut self) -> io::Result<()> {
         Ok(())
     }
+
+    fn start_kill(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 // ── MockProcessSpawner ────────────────────────────────────────────────────────
@@ -448,7 +452,9 @@ pub struct UnlimitedTaskLimiter;
 
 impl TaskLimiter for UnlimitedTaskLimiter {
     type Permit = ();
-    async fn acquire(&self) -> () {}
+    async fn acquire(&self) -> Option<()> {
+        Some(())
+    }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

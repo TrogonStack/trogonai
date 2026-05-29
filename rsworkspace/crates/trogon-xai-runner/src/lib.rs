@@ -1,5 +1,6 @@
 mod agent;
 pub mod agent_loader;
+pub mod spawn_handler;
 mod client;
 mod http_client;
 mod session_notifier;

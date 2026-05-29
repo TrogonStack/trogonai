@@ -24,6 +24,21 @@ pub trait RequestClient: Send + Sync + Clone + 'static {
         headers: HeaderMap,
         payload: Bytes,
     ) -> impl Future<Output = Result<Message, Self::RequestError>> + Send;
+
+    /// Like [`request_with_headers`] but with the client-level request timeout
+    /// disabled — the future resolves only when a reply arrives (or the connection
+    /// drops). Use for requests that legitimately block on human input, such as
+    /// permission prompts, where any fixed timeout would wrongly deny the user.
+    ///
+    /// The default delegates to the timed variant; real NATS clients override it.
+    fn request_with_headers_no_timeout<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> impl Future<Output = Result<Message, Self::RequestError>> + Send {
+        self.request_with_headers(subject, headers, payload)
+    }
 }
 
 pub trait PublishClient: Send + Sync + Clone + 'static {
@@ -68,6 +83,19 @@ impl RequestClient for NatsAsyncClient {
         payload: Bytes,
     ) -> Result<Message, Self::RequestError> {
         self.request_with_headers(subject, headers, payload).await
+    }
+
+    async fn request_with_headers_no_timeout<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Message, Self::RequestError> {
+        let request = async_nats::Request::new()
+            .headers(headers)
+            .payload(payload)
+            .timeout(None);
+        self.send_request(subject, request).await
     }
 }
 

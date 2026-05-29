@@ -37,12 +37,19 @@ impl WasmSession {
 
     /// Returns the effective working directory for a terminal command.
     ///
-    /// If the agent provided a `cwd`, it is resolved inside the sandbox.
-    /// Falls back to the session root if unset or out-of-bounds.
-    pub fn terminal_cwd(&self, requested_cwd: Option<&Path>) -> PathBuf {
-        requested_cwd
-            .and_then(|p| self.resolve_path(p))
-            .unwrap_or_else(|| self.dir.clone())
+    /// In native mode (`wasm_only=false`), an absolute path that exists on the host
+    /// filesystem and is outside the sandbox is used as-is (supports `change_directory`
+    /// to arbitrary host dirs). All other paths are resolved inside the sandbox.
+    pub fn terminal_cwd(&self, requested_cwd: Option<&Path>, wasm_only: bool) -> PathBuf {
+        if let Some(p) = requested_cwd {
+            if !wasm_only && p.is_absolute() && !p.starts_with(&self.dir) && p.exists() {
+                return normalize_path(p);
+            }
+            if let Some(resolved) = self.resolve_path(p) {
+                return resolved;
+            }
+        }
+        self.dir.clone()
     }
 }
 
@@ -111,14 +118,14 @@ mod tests {
     #[test]
     fn terminal_cwd_none_returns_session_dir() {
         let s = session("/sandbox/abc");
-        assert_eq!(s.terminal_cwd(None), PathBuf::from("/sandbox/abc"));
+        assert_eq!(s.terminal_cwd(None, true), PathBuf::from("/sandbox/abc"));
     }
 
     #[test]
     fn terminal_cwd_valid_path_resolves_inside_sandbox() {
         let s = session("/sandbox/abc");
         assert_eq!(
-            s.terminal_cwd(Some(Path::new("work"))),
+            s.terminal_cwd(Some(Path::new("work")), true),
             PathBuf::from("/sandbox/abc/work"),
         );
     }
@@ -128,8 +135,25 @@ mod tests {
         let s = session("/sandbox/abc");
         // "../../outside" escapes the sandbox — resolve_path returns None → fallback
         assert_eq!(
-            s.terminal_cwd(Some(Path::new("../../outside"))),
+            s.terminal_cwd(Some(Path::new("../../outside")), true),
             PathBuf::from("/sandbox/abc"),
+        );
+    }
+
+    #[test]
+    fn terminal_cwd_native_mode_uses_absolute_host_path() {
+        let tmp = std::env::temp_dir();
+        let s = session("/sandbox/abc");
+        // tmp_dir exists on the host and is outside /sandbox/abc → used as-is
+        assert_eq!(s.terminal_cwd(Some(&tmp), false), tmp);
+    }
+
+    #[test]
+    fn terminal_cwd_native_mode_relative_still_maps_to_sandbox() {
+        let s = session("/sandbox/abc");
+        assert_eq!(
+            s.terminal_cwd(Some(Path::new("work")), false),
+            PathBuf::from("/sandbox/abc/work"),
         );
     }
 }

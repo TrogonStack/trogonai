@@ -64,7 +64,7 @@ pub trait Runtime {
     fn handle_request_permission(
         &self,
         req: RequestPermissionRequest,
-    ) -> agent_client_protocol::Result<RequestPermissionResponse>;
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<RequestPermissionResponse>>;
 
     fn handle_session_notification(&self, notif: SessionNotification);
 
@@ -192,6 +192,15 @@ pub trait NatsBroker: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<
         Output = Result<async_nats::Message, Box<dyn std::error::Error + Send + Sync>>,
     > + Send;
+
+    /// Returns the NATS server's maximum message payload size in bytes.
+    ///
+    /// Used by the dispatcher to guard replies before publishing so that
+    /// oversized payloads are caught here rather than silently dropped by the
+    /// server. The default matches the NATS server default (1 MiB).
+    fn max_payload(&self) -> usize {
+        1024 * 1024
+    }
 }
 
 /// Blanket implementation of `NatsBroker` for the real `async_nats::Client`.
@@ -235,6 +244,10 @@ impl NatsBroker for async_nats::Client {
         async_nats::Client::request(self, subject.into(), payload)
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    fn max_payload(&self) -> usize {
+        self.server_info().max_payload
     }
 }
 
@@ -327,6 +340,12 @@ pub trait ChildProcessHandle: 'static {
     fn wait(&mut self) -> impl std::future::Future<Output = io::Result<std::process::ExitStatus>>;
 
     fn kill(&mut self) -> impl std::future::Future<Output = io::Result<()>>;
+
+    /// Sends a kill signal without waiting for the process to exit.
+    /// Used by `handle_kill_terminal` so the terminal can stay in the map
+    /// during the signal delivery, preventing concurrent writes from seeing
+    /// "Unknown terminal" (HIGH-26).
+    fn start_kill(&mut self) -> io::Result<()>;
 }
 
 /// Implement `ChildProcessHandle` for the real `tokio::process::Child`.
@@ -353,6 +372,10 @@ impl ChildProcessHandle for tokio::process::Child {
 
     async fn kill(&mut self) -> io::Result<()> {
         tokio::process::Child::kill(self).await
+    }
+
+    fn start_kill(&mut self) -> io::Result<()> {
+        tokio::process::Child::start_kill(self)
     }
 }
 
@@ -462,7 +485,9 @@ impl IdGenerator for UuidGenerator {
 pub trait TaskLimiter: Clone + 'static {
     /// Token held for the duration of a task; dropped when the task finishes.
     type Permit: 'static;
-    fn acquire(&self) -> impl std::future::Future<Output = Self::Permit>;
+    /// Acquire a permit. Returns `None` when the limiter is closed (runtime
+    /// shutting down) so callers can bail out instead of panicking.
+    fn acquire(&self) -> impl std::future::Future<Output = Option<Self::Permit>>;
 }
 
 /// Real implementation backed by `tokio::sync::Semaphore`.
@@ -477,11 +502,11 @@ impl SemaphoreTaskLimiter {
 
 impl TaskLimiter for SemaphoreTaskLimiter {
     type Permit = tokio::sync::OwnedSemaphorePermit;
-    async fn acquire(&self) -> Self::Permit {
-        std::sync::Arc::clone(&self.0)
-            .acquire_owned()
-            .await
-            .expect("task semaphore closed unexpectedly")
+    async fn acquire(&self) -> Option<Self::Permit> {
+        // MED-30: the semaphore is closed when the runtime is dropped at
+        // shutdown. Return None instead of panicking — a panic here would leave
+        // the task's exit arc unset and deadlock wait_for_terminal_exit (HIGH-25).
+        std::sync::Arc::clone(&self.0).acquire_owned().await.ok()
     }
 }
 

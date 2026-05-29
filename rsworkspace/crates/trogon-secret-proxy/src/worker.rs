@@ -168,11 +168,14 @@ async fn process_request_streaming<V, H, N>(
         .headers
         .iter()
         .filter(|(k, _)| {
-            !k.eq_ignore_ascii_case("authorization") && !k.eq_ignore_ascii_case("x-request-id")
+            !k.eq_ignore_ascii_case("authorization")
+                && !k.eq_ignore_ascii_case("x-api-key")
+                && !k.eq_ignore_ascii_case("x-request-id")
         })
         .cloned()
         .collect();
-    forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
+    let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &real_key);
+    forwarded_headers.push((auth_name, auth_val));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
     if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
         forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
@@ -265,17 +268,20 @@ where
     };
 
     // Build the forwarded header list:
-    // - strip any existing Authorization and X-Request-Id from the client
-    // - add the resolved real key and the idempotency key
+    // - strip any existing Authorization, x-api-key and X-Request-Id from the client
+    // - add the resolved real key using the correct auth header for the provider
     let mut forwarded_headers: Vec<(String, String)> = request
         .headers
         .iter()
         .filter(|(k, _)| {
-            !k.eq_ignore_ascii_case("authorization") && !k.eq_ignore_ascii_case("x-request-id")
+            !k.eq_ignore_ascii_case("authorization")
+                && !k.eq_ignore_ascii_case("x-api-key")
+                && !k.eq_ignore_ascii_case("x-request-id")
         })
         .cloned()
         .collect();
-    forwarded_headers.push(("Authorization".to_string(), format!("Bearer {}", real_key)));
+    let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &real_key);
+    forwarded_headers.push((auth_name, auth_val));
     forwarded_headers.push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
     if !forwarded_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
         forwarded_headers.push(("User-Agent".to_string(), "trogon-agent/1.0".to_string()));
@@ -307,12 +313,13 @@ where
                 .iter()
                 .filter(|(k, _)| {
                     !k.eq_ignore_ascii_case("authorization")
+                        && !k.eq_ignore_ascii_case("x-api-key")
                         && !k.eq_ignore_ascii_case("x-request-id")
                 })
                 .cloned()
                 .collect();
-            fallback_headers
-                .push(("Authorization".to_string(), format!("Bearer {}", prev)));
+            let (auth_name, auth_val) = crate::provider::auth_header(&request.url, &prev);
+            fallback_headers.push((auth_name, auth_val));
             fallback_headers
                 .push(("X-Request-Id".to_string(), request.idempotency_key.clone()));
             return match forward_request(http_client, request, &fallback_headers).await {

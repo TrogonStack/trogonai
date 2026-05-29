@@ -146,3 +146,87 @@ pub mod mock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use super::RegistryStore as _;
+    use super::mock::MockRegistryStore;
+
+    #[tokio::test]
+    async fn put_then_get_returns_value() {
+        let store = MockRegistryStore::new();
+        store.put("key-a", Bytes::from("value-a")).await.unwrap();
+        let got = store.get("key-a").await.unwrap();
+        assert_eq!(got, Some(Bytes::from("value-a")));
+    }
+
+    #[tokio::test]
+    async fn get_missing_key_returns_none() {
+        let store = MockRegistryStore::new();
+        let got = store.get("no-such-key").await.unwrap();
+        assert!(got.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_removes_key() {
+        let store = MockRegistryStore::new();
+        store.put("del-key", Bytes::from("v")).await.unwrap();
+        store.delete("del-key").await.unwrap();
+        assert!(store.get("del-key").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_key_is_noop() {
+        let store = MockRegistryStore::new();
+        store.delete("ghost").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn keys_returns_all_live_keys() {
+        let store = MockRegistryStore::new();
+        store.put("k1", Bytes::from("v1")).await.unwrap();
+        store.put("k2", Bytes::from("v2")).await.unwrap();
+        store.put("k3", Bytes::from("v3")).await.unwrap();
+        let mut keys = store.keys().await.unwrap();
+        keys.sort();
+        assert_eq!(keys, vec!["k1", "k2", "k3"]);
+    }
+
+    #[tokio::test]
+    async fn keys_excludes_deleted_keys() {
+        let store = MockRegistryStore::new();
+        store.put("live", Bytes::from("v")).await.unwrap();
+        store.put("gone", Bytes::from("v")).await.unwrap();
+        store.delete("gone").await.unwrap();
+        let keys = store.keys().await.unwrap();
+        assert_eq!(keys, vec!["live"]);
+    }
+
+    #[tokio::test]
+    async fn snapshot_reflects_current_state() {
+        let store = MockRegistryStore::new();
+        store.put("snap-k", Bytes::from("snap-v")).await.unwrap();
+        let snap = store.snapshot();
+        assert_eq!(snap.get("snap-k").cloned(), Some(Bytes::from("snap-v")));
+        assert_eq!(snap.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn clone_shares_underlying_storage() {
+        let store = MockRegistryStore::new();
+        let clone = store.clone();
+        store.put("shared", Bytes::from("data")).await.unwrap();
+        let got = clone.get("shared").await.unwrap();
+        assert_eq!(got, Some(Bytes::from("data")));
+    }
+
+    #[tokio::test]
+    async fn put_overwrites_existing_value() {
+        let store = MockRegistryStore::new();
+        store.put("key", Bytes::from("v1")).await.unwrap();
+        store.put("key", Bytes::from("v2")).await.unwrap();
+        let got = store.get("key").await.unwrap();
+        assert_eq!(got, Some(Bytes::from("v2")));
+    }
+}

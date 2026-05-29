@@ -1,6 +1,7 @@
 use crate::traits::ChildProcessHandle;
 use agent_client_protocol::{TerminalExitStatus, TerminalOutputResponse};
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::warn;
 
 /// Distinguishes the two kinds of terminal the runtime can host.
@@ -12,8 +13,10 @@ pub(crate) enum TerminalKind<H: ChildProcessHandle> {
     Native {
         /// The child process handle. Taken out when `wait_for_terminal_exit` is called.
         child: Option<H>,
-        /// Stdin pipe. `None` after `close_stdin()` or if piping failed.
-        stdin: Option<H::Stdin>,
+        /// Stdin pipe wrapped in an async mutex so `write_stdin` can write without
+        /// removing the terminal from the map (prevents TOCTOU "Unknown terminal" errors
+        /// when concurrent callers access the same terminal during the write await).
+        stdin: Arc<AsyncMutex<Option<H::Stdin>>>,
     },
     /// A WASM module running as a background `spawn_local` task.
     Wasm {
@@ -62,25 +65,41 @@ impl<H: ChildProcessHandle> WasmTerminal<H> {
         TerminalOutputResponse::new(output, truncated).exit_status(exit_status)
     }
 
-    /// Writes bytes to the stdin pipe of a native process.
-    /// Returns `true` on success, `false` for WASM terminals (no stdin) or on error.
-    pub async fn write_stdin(&mut self, data: &[u8]) -> bool {
-        use tokio::io::AsyncWriteExt;
-        if let TerminalKind::Native {
-            stdin: Some(ref mut s),
-            ..
-        } = self.kind
-        {
-            return s.write_all(data).await.is_ok();
-        }
-        false
-    }
-
     /// Closes the stdin pipe of a native process, sending EOF.
     /// No-op for WASM terminals.
     pub fn close_stdin(&mut self) {
-        if let TerminalKind::Native { ref mut stdin, .. } = self.kind {
-            stdin.take();
+        if let TerminalKind::Native { ref stdin, .. } = self.kind {
+            if let Ok(mut guard) = stdin.try_lock() {
+                guard.take();
+            }
+        }
+    }
+
+    /// Sends a kill signal (native) or aborts the task (WASM) without awaiting exit.
+    /// The terminal stays in the map so concurrent writes never see "Unknown terminal"
+    /// during the kill window (HIGH-26). Returns `true` if a signal was sent.
+    pub fn start_kill(&mut self) -> bool {
+        match self.kind {
+            TerminalKind::Native { ref mut child, .. } => {
+                if let Some(c) = child {
+                    if let Err(e) = c.start_kill() {
+                        warn!(error = %e, "Failed to send kill signal to terminal process");
+                        return false;
+                    }
+                    return true;
+                }
+                false
+            }
+            TerminalKind::Wasm { ref exit_arc } => {
+                if let Some(ref c) = self.output_collector {
+                    c.abort();
+                    let _ = exit_arc
+                        .set(TerminalExitStatus::new().signal(Some("SIGKILL".to_string())));
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -140,6 +159,20 @@ pub(crate) fn append_output(
         }
         guard.drain(..trim_at);
         was_truncated.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    // Trim any incomplete trailing UTF-8 sequence from the end of the buffer.
+    // Bytes at the tail that form the start of a multi-byte sequence but lack
+    // their continuation bytes would produce U+FFFD on the next snapshot.
+    // Walk backward: drop leading bytes (0xC0–0xFF) that are not followed by
+    // enough continuation bytes (0x80–0xBF) to complete the sequence.
+    let len = guard.len();
+    if len > 0 {
+        // Find the last valid UTF-8 boundary by trying to decode from the end.
+        let valid_up_to = match std::str::from_utf8(&guard) {
+            Ok(_) => len,
+            Err(e) => e.valid_up_to(),
+        };
+        guard.truncate(valid_up_to);
     }
 }
 

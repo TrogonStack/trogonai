@@ -205,6 +205,132 @@ impl<C: SummarizationClient> crate::traits::LlmProvider for AnthropicLlmProvider
     }
 }
 
+// ── OpenAI-compatible provider (xAI, OpenRouter) ────────────────────────────────
+
+#[derive(Serialize)]
+pub(crate) struct ChatRequest<'a> {
+    model: &'a str,
+    max_tokens: u32,
+    messages: [ChatMessage<'a>; 2],
+}
+
+#[derive(Serialize)]
+struct ChatMessage<'a> {
+    role: &'a str,
+    content: &'a str,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ChatResponse {
+    pub(crate) choices: Vec<ChatChoice>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ChatChoice {
+    pub(crate) message: ChatRespMessage,
+    #[serde(default)]
+    pub(crate) finish_reason: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ChatRespMessage {
+    #[serde(default)]
+    pub(crate) content: String,
+}
+
+/// Sends a single POST to an OpenAI-compatible `/chat/completions` endpoint.
+pub(crate) trait ChatCompletionsClient: Send + Sync {
+    fn call<'a>(
+        &'a self,
+        url: &'a str,
+        auth_value: &'a str,
+        request: &'a ChatRequest<'a>,
+    ) -> impl Future<Output = Result<ChatResponse, CompactorError>> + Send + 'a;
+}
+
+impl ChatCompletionsClient for reqwest::Client {
+    fn call<'a>(
+        &'a self,
+        url: &'a str,
+        auth_value: &'a str,
+        request: &'a ChatRequest<'a>,
+    ) -> impl Future<Output = Result<ChatResponse, CompactorError>> + Send + 'a {
+        async move {
+            Ok(self
+                .post(url)
+                .header("Authorization", auth_value)
+                .json(request)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<ChatResponse>()
+                .await?)
+        }
+    }
+}
+
+/// [`LlmProvider`] that calls an OpenAI-compatible Chat Completions API.
+///
+/// Used for xAI and OpenRouter (both expose `/chat/completions`). The system
+/// prompt is sent as a `role:"system"` message; auth is always `Bearer`.
+pub struct OpenAICompatLlmProvider<C = reqwest::Client> {
+    config: LlmConfig,
+    client: C,
+}
+
+impl OpenAICompatLlmProvider<reqwest::Client> {
+    pub fn new(config: LlmConfig) -> Self {
+        Self { config, client: reqwest::Client::new() }
+    }
+}
+
+#[allow(private_bounds)]
+impl<C: ChatCompletionsClient> OpenAICompatLlmProvider<C> {
+    pub fn with_client(config: LlmConfig, client: C) -> Self {
+        Self { config, client }
+    }
+}
+
+#[allow(private_bounds)]
+impl<C: ChatCompletionsClient> crate::traits::LlmProvider for OpenAICompatLlmProvider<C> {
+    fn generate_summary<'a>(
+        &'a self,
+        messages: &'a [crate::types::Message],
+        previous_summary: Option<&'a str>,
+    ) -> impl std::future::Future<Output = Result<String, crate::error::CompactorError>> + Send + 'a
+    {
+        async move {
+            let conversation = serialize_for_prompt(messages);
+            let prompt = build_prompt(&conversation, previous_summary);
+            let req = ChatRequest {
+                model: &self.config.model,
+                max_tokens: self.config.max_summary_tokens,
+                messages: [
+                    ChatMessage { role: "system", content: SYSTEM_PROMPT },
+                    ChatMessage { role: "user", content: &prompt },
+                ],
+            };
+            // OpenAI-compatible endpoints always use Bearer auth.
+            let auth_value = format!("Bearer {}", self.config.api_key);
+            let resp = self.client.call(&self.config.api_url, &auth_value, &req).await?;
+
+            let choice = resp
+                .choices
+                .into_iter()
+                .next()
+                .ok_or(CompactorError::EmptyResponse)?;
+            if !choice.finish_reason.is_empty() && choice.finish_reason != "stop" {
+                return Err(CompactorError::UnexpectedStopReason(choice.finish_reason));
+            }
+            let text = choice.message.content;
+            if text.is_empty() {
+                return Err(CompactorError::EmptyResponse);
+            }
+            Ok(text)
+        }
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Calls the LLM to summarize `messages_to_summarize`.
@@ -469,5 +595,71 @@ mod tests {
         generate_summary(&one_msg(), None, &cfg, &mock).await.unwrap();
         assert_eq!(mock.last_auth_header().as_deref(), Some("Authorization"));
         assert_eq!(mock.last_auth_value().as_deref(), Some("Bearer my-token"));
+    }
+
+    // ── OpenAICompatLlmProvider (xAI / OpenRouter) ────────────────────────────
+
+    struct MockChatClient {
+        response: Mutex<Option<Result<ChatResponse, CompactorError>>>,
+        last_auth: Mutex<Option<String>>,
+    }
+
+    impl ChatCompletionsClient for MockChatClient {
+        fn call<'a>(
+            &'a self,
+            _url: &'a str,
+            auth_value: &'a str,
+            _request: &'a ChatRequest<'a>,
+        ) -> impl Future<Output = Result<ChatResponse, CompactorError>> + Send + 'a {
+            *self.last_auth.lock().unwrap() = Some(auth_value.to_string());
+            let r = self.response.lock().unwrap().take().unwrap();
+            async move { r }
+        }
+    }
+
+    fn chat_resp(content: &str, finish: &str) -> ChatResponse {
+        ChatResponse {
+            choices: vec![ChatChoice {
+                message: ChatRespMessage { content: content.into() },
+                finish_reason: finish.into(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_compat_returns_text_and_sends_bearer() {
+        use crate::traits::LlmProvider;
+        let mock = MockChatClient {
+            response: Mutex::new(Some(Ok(chat_resp("## Summary\nok", "stop")))),
+            last_auth: Mutex::new(None),
+        };
+        let cfg = LlmConfig { api_key: "tok_xai".into(), ..config() };
+        let provider = OpenAICompatLlmProvider::with_client(cfg, mock);
+        let out = provider.generate_summary(&one_msg(), None).await.unwrap();
+        assert!(out.contains("## Summary"));
+    }
+
+    #[tokio::test]
+    async fn openai_compat_empty_choices_is_empty_response() {
+        use crate::traits::LlmProvider;
+        let mock = MockChatClient {
+            response: Mutex::new(Some(Ok(ChatResponse { choices: vec![] }))),
+            last_auth: Mutex::new(None),
+        };
+        let provider = OpenAICompatLlmProvider::with_client(config(), mock);
+        let err = provider.generate_summary(&one_msg(), None).await.unwrap_err();
+        assert!(matches!(err, CompactorError::EmptyResponse));
+    }
+
+    #[tokio::test]
+    async fn openai_compat_bad_finish_reason_errors() {
+        use crate::traits::LlmProvider;
+        let mock = MockChatClient {
+            response: Mutex::new(Some(Ok(chat_resp("partial", "length")))),
+            last_auth: Mutex::new(None),
+        };
+        let provider = OpenAICompatLlmProvider::with_client(config(), mock);
+        let err = provider.generate_summary(&one_msg(), None).await.unwrap_err();
+        assert!(matches!(err, CompactorError::UnexpectedStopReason(r) if r == "length"));
     }
 }

@@ -37,7 +37,8 @@ use trogon_acp_runner::{
     agent_runner::mock::MockAgentRunner,
     session_notifier::mock::MockSessionNotifier,
 };
-use trogon_agent_core::agent_loop::Message;
+use trogon_agent_core::agent_loop::{ContentBlock as AgentContentBlock, Message};
+use trogon_runner_tools::portable_session::PortableMessage;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -705,6 +706,166 @@ async fn fork_session_nonexistent_source_succeeds_with_real_store() {
                 "fork must record the nonexistent parent session ID in NATS KV"
             );
             assert!(fork_state.messages.is_empty(), "fork of nonexistent session must have empty history");
+        })
+        .await;
+}
+
+/// `ext_method("session/export")` reads the session from the real NATS KV
+/// bucket and returns a portable JSON array of messages.
+#[tokio::test]
+async fn ext_method_export_reads_from_nats_kv() {
+    let (_c, port) = start_nats().await;
+    let (_, js) = make_js(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+
+            let state = SessionState {
+                messages: vec![
+                    Message::user_text("question"),
+                    Message::assistant(vec![AgentContentBlock::Text {
+                        text: "answer".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("export-kv-1", &state).await.unwrap();
+
+            let agent = make_agent(store);
+
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({"sessionId": "export-kv-1"}).to_string(),
+                )
+                .unwrap()
+                .into();
+            let resp = agent
+                .ext_method(ExtRequest::new("session/export", params))
+                .await
+                .unwrap();
+
+            let portable: Vec<PortableMessage> =
+                serde_json::from_str(resp.0.get()).unwrap();
+
+            assert_eq!(portable.len(), 2, "must export exactly 2 messages");
+            assert_eq!(portable[0].role, "user");
+            assert_eq!(portable[0].text, "question");
+            assert_eq!(portable[1].role, "assistant");
+            assert_eq!(portable[1].text, "answer");
+        })
+        .await;
+}
+
+/// `ext_method("session/import")` writes the provided portable messages into
+/// the real NATS KV bucket so they can be loaded back from the store.
+#[tokio::test]
+async fn ext_method_import_writes_to_nats_kv() {
+    let (_c, port) = start_nats().await;
+    let (_, js) = make_js(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+
+            store.save("import-kv-1", &SessionState::default()).await.unwrap();
+
+            let agent = make_agent(store.clone());
+
+            let params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({
+                        "sessionId": "import-kv-1",
+                        "messages": [{"role": "user", "text": "imported"}]
+                    })
+                    .to_string(),
+                )
+                .unwrap()
+                .into();
+            let result = agent
+                .ext_method(ExtRequest::new("session/import", params))
+                .await;
+            assert!(result.is_ok(), "import must succeed");
+
+            let loaded = store.load("import-kv-1").await.unwrap();
+            assert_eq!(loaded.messages.len(), 1, "must have exactly 1 message after import");
+            assert_eq!(loaded.messages[0].role, "user");
+            assert!(
+                matches!(
+                    &loaded.messages[0].content[0],
+                    AgentContentBlock::Text { text } if text == "imported"
+                ),
+                "imported message content must be Text(\"imported\")"
+            );
+        })
+        .await;
+}
+
+/// A full export→import round-trip through the real NATS KV: export from
+/// source session, import into destination, verify the destination contains
+/// the same messages in order.
+#[tokio::test]
+async fn ext_method_export_import_round_trip_via_nats_kv() {
+    let (_c, port) = start_nats().await;
+    let (_, js) = make_js(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+
+            let src_state = SessionState {
+                messages: vec![
+                    Message::user_text("q1"),
+                    Message::assistant(vec![AgentContentBlock::Text { text: "a1".into() }]),
+                    Message::user_text("q2"),
+                ],
+                ..Default::default()
+            };
+            store.save("rt-src", &src_state).await.unwrap();
+            store.save("rt-dst", &SessionState::default()).await.unwrap();
+
+            let agent = make_agent(store.clone());
+
+            // Export from source.
+            let export_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({"sessionId": "rt-src"}).to_string(),
+                )
+                .unwrap()
+                .into();
+            let export_resp = agent
+                .ext_method(ExtRequest::new("session/export", export_params))
+                .await
+                .unwrap();
+
+            let exported: Vec<PortableMessage> =
+                serde_json::from_str(export_resp.0.get()).unwrap();
+
+            // Import into destination.
+            let import_params: Arc<serde_json::value::RawValue> =
+                serde_json::value::RawValue::from_string(
+                    serde_json::json!({
+                        "sessionId": "rt-dst",
+                        "messages": serde_json::to_value(&exported).unwrap()
+                    })
+                    .to_string(),
+                )
+                .unwrap()
+                .into();
+            agent
+                .ext_method(ExtRequest::new("session/import", import_params))
+                .await
+                .unwrap();
+
+            // Verify destination.
+            let dst_state = store.load("rt-dst").await.unwrap();
+            assert_eq!(dst_state.messages.len(), 3, "destination must have 3 messages after round-trip");
+            assert_eq!(dst_state.messages[0].role, "user");
+            assert_eq!(dst_state.messages[1].role, "assistant");
+            assert_eq!(dst_state.messages[2].role, "user");
         })
         .await;
 }

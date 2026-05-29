@@ -1,39 +1,57 @@
-# CLI branch — estado actual (2026-05-06)
+# Trogon CLI — status (2026-05-22)
 
-## Dev B completo
+Branch: `programming-cursor`  
+Canonical plan: [docs/terminal-agent-definitive-plan.md](../../docs/terminal-agent-definitive-plan.md)
 
-Todos los PRs del plan están implementados y testeados en la rama `cli`:
+## Stage 0 complete (PRs 0–3)
 
-| PR | Contenido | Estado |
-|---|---|---|
-| PR 3 | trogon-cli core (REPL, sesión NATS, historial) | ✅ |
-| PR 5 | @mentions de archivos + herramientas paralelas | ✅ |
-| PR 8 | TUI: diffs, Ctrl+C, usage, multilinea | ✅ |
-| PR 9 | Slash commands: /help /cost /clear /compact /config /model /init | ✅ |
-| PR 10 | Modo no-interactivo --print + --output-format json | ✅ |
-| PR 12 | Plugin JetBrains | ✅ |
+| PR | Title | Status |
+|----|-------|--------|
+| 0 | Permission UI design gate | ✅ |
+| 1 | Four-runner dev stack + NATS `-js` | ✅ |
+| 2 | `trogon doctor` + model aliases + default `TROGON_MODE` | ✅ |
+| 3 | Docs truth | ✅ |
+
+## What works today
+
+- REPL, `--print`, JSON output, NATS autostart with JetStream
+- Slash commands: `/help`, `/cost`, `/clear`, `/compact`, `/config`, `/model`, `/init`
+- Same-prefix `/model` (`set_model` on live session)
+- Cross-runner `/model` export/import (needs LocalSet + ACP client — Stage 1)
+- Four-runner dev launcher: `./scripts/trogon-dev.sh` or `trogon dev`
+- Stack health: `trogon doctor` / `trogon --doctor`
+- Default permission bridge: `TROGON_MODE=acceptEdits` on new sessions
+- Model aliases: `sonnet`, `grok`, `openrouter`, `codex`, `o3`, `gpt-4o`, …
+
+## Known gaps (Stage 1+)
+
+| Area | Symptom | Fix stage |
+|------|---------|-----------|
+| Permission prompts | ~60s timeout on write/bash | Stage 1 — ACP client + `/dev/tty` |
+| Cross-runner `/model` | `Bridge` `!Send`; no `set_model` after switch | Stage 1 |
+| Tool output | Bash stdout not shown in REPL | Stage 2 — `ToolCallUpdate` |
+| `/compact` | Wrong NATS subject + payload | Stage 2 |
+| Session resume | No `--continue` | Stage 3 |
+| MCP from CLI | Bridge exists, not wired | Stage 4 |
 
 ## Tests
 
-- 77 unit tests — todos pasan
-- 17 integration tests (testcontainers NATS) — todos pasan
-- 5 e2e tests (scripts/e2e-test.sh, sin credenciales) — todos pasan
+```bash
+cd rsworkspace
+cargo test -p trogon-cli --lib    # ~143 unit tests (10 cross_runner need Docker)
+cargo build -p trogon-cli
+```
 
-## Stubs parciales — esperando Dev A
+Cross-runner integration tests in `cross_runner.rs` require Docker (`testcontainers`); they fail without `/var/run/docker.sock`.
 
-| Comando | Qué hay ahora | Qué falta (requiere runner) |
-|---|---|---|
-| `/compact` | Muestra stats de contexto + threshold 85% | Trigger real vía `trogon.compactor.compact` |
-| `/model <id>` | Guarda en config, actualiza estimados de costo | Cambiar modelo en sesión viva sin reiniciar |
-| `/init` | Genera template TROGON.md con detección de lenguajes | Análisis LLM del proyecto vía ACP |
+## Dev quick start
 
-## Pendiente de Dev A
-
-PRs 1, 2, 4, 6, 7, 10-permisos, 11 (VS Code).
-Una vez que Dev A termine, se puede hacer merge de `cli` a `main` y completar los stubs.
-
-## Próximos pasos posibles en cli
-
-1. Mejorar `/init`: leer `Cargo.toml` / `package.json` para extraer nombre del proyecto y dependencias reales
-2. Más tests e2e del REPL (entrada simulada)
-3. Preparar merge a `main` cuando Dev A esté listo
+```bash
+cd rsworkspace
+cp .env.local.example .env.local   # fill API keys
+cargo build --release -p trogon-cli -p trogon-acp-runner -p trogon-xai-runner \
+  -p trogon-openrouter-runner -p trogon-codex-runner -p trogon-wasm-runtime -p trogon-compactor
+./scripts/trogon-dev.sh
+./target/release/trogon doctor
+cd /your/project && ./target/release/trogon
+```

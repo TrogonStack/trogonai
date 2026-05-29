@@ -53,7 +53,9 @@ pub struct Config {
 }
 
 const DEFAULT_SESSION_ROOT: &str = "/tmp/trogon-wasm-runtime";
-const DEFAULT_OUTPUT_BYTE_LIMIT: usize = 10 * 1024 * 1024; // 10 MB
+// Must stay below NATS default max_payload (1 MB). 900 KB leaves headroom for
+// JSON framing and session metadata in the NATS reply.
+const DEFAULT_OUTPUT_BYTE_LIMIT: usize = 900 * 1024; // 900 KB
 const ENV_SESSION_ROOT: &str = "WASM_SESSION_ROOT";
 const ENV_OUTPUT_BYTE_LIMIT: &str = "WASM_OUTPUT_BYTE_LIMIT";
 const ENV_AUTO_ALLOW_PERMISSIONS: &str = "WASM_AUTO_ALLOW_PERMISSIONS";
@@ -210,7 +212,7 @@ mod tests {
         clear_all_vars();
         let cfg = Config::from_env();
         assert_eq!(cfg.session_root, std::path::PathBuf::from("/tmp/trogon-wasm-runtime"));
-        assert_eq!(cfg.output_byte_limit, 10 * 1024 * 1024);
+        assert_eq!(cfg.output_byte_limit, 900 * 1024);
         assert!(!cfg.auto_allow_permissions);
         assert_eq!(cfg.wasm_timeout_secs, None);
         assert!(cfg.wasm_only);

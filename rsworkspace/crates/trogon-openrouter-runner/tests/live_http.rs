@@ -208,7 +208,7 @@ impl TestServer {
 
     async fn run(&self, model: &str, api_key: &str) -> Vec<OpenRouterEvent> {
         self.client()
-            .chat_stream(model, &[Message::user("hello")], api_key)
+            .chat_stream(model, &[Message::user("hello")], api_key, &[])
             .await
             .collect()
             .await
@@ -329,7 +329,7 @@ async fn request_body_contains_model_and_messages() {
         Message::user("And 3+3?"),
     ];
     client
-        .chat_stream("anthropic/claude-sonnet-4-6", &messages, "sk-test")
+        .chat_stream("anthropic/claude-sonnet-4-6", &messages, "sk-test", &[])
         .await
         .collect::<Vec<_>>()
         .await;
@@ -356,7 +356,7 @@ async fn request_body_does_not_include_token_counts() {
     let client = srv.client();
     let messages = vec![Message::assistant_with_usage("reply", 100, 50)];
     client
-        .chat_stream("test-model", &messages, "sk-test")
+        .chat_stream("test-model", &messages, "sk-test", &[])
         .await
         .collect::<Vec<_>>()
         .await;
@@ -655,7 +655,7 @@ async fn request_timeout_fires_when_server_never_sends_headers() {
         .with_request_timeout(Duration::from_millis(100));
 
     let events: Vec<OpenRouterEvent> = client
-        .chat_stream("test-model", &[Message::user("hello")], "sk-test")
+        .chat_stream("test-model", &[Message::user("hello")], "sk-test", &[])
         .await
         .collect()
         .await;

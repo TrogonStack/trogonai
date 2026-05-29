@@ -38,7 +38,7 @@ async fn smoke_prompt_returns_text_and_done() {
     let messages = vec![Message::user("Reply with exactly one word: hello")];
 
     let events: Vec<OpenRouterEvent> = client
-        .chat_stream(&model, &messages, &key)
+        .chat_stream(&model, &messages, &key, &[])
         .await
         .collect()
         .await;
@@ -80,7 +80,7 @@ async fn bad_key_produces_error_event() {
     let messages = vec![Message::user("ping")];
 
     let events: Vec<OpenRouterEvent> = client
-        .chat_stream(&model, &messages, "sk-bad-key-intentionally-wrong")
+        .chat_stream(&model, &messages, "sk-bad-key-intentionally-wrong", &[])
         .await
         .collect()
         .await;
@@ -105,7 +105,7 @@ async fn usage_tokens_are_reported() {
     let messages = vec![Message::user("Say the word OK")];
 
     let events: Vec<OpenRouterEvent> = client
-        .chat_stream(&model, &messages, &key)
+        .chat_stream(&model, &messages, &key, &[])
         .await
         .collect()
         .await;

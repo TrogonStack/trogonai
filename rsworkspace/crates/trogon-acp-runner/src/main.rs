@@ -74,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS")
         .ok()
         .and_then(|v| v.parse().ok());
+    let anthropic_base_url: Option<String> = std::env::var("ANTHROPIC_BASE_URL").ok();
 
     // ── NATS connection ───────────────────────────────────────────────────────
 
@@ -97,10 +98,13 @@ async fn main() -> anyhow::Result<()> {
     let registry = trogon_registry::Registry::new(reg_store);
     let cap = trogon_registry::AgentCapability {
         agent_type: agent_type.clone(),
-        capabilities: vec!["chat".to_string()],
+        capabilities: vec!["chat".to_string(), "code_edit".to_string()],
         nats_subject: format!("{}.agent.>", acp_prefix),
         current_load: 0,
-        metadata: serde_json::json!({ "acp_prefix": &acp_prefix }),
+        metadata: serde_json::json!({
+            "acp_prefix": &acp_prefix,
+            "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+        }),
     };
     registry.register(&cap).await
         .map_err(|e| anyhow::anyhow!("initial registry registration failed: {e}"))?;
@@ -122,15 +126,20 @@ async fn main() -> anyhow::Result<()> {
     // ── AgentLoop ─────────────────────────────────────────────────────────────
 
     let http_client = reqwest::Client::new();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string());
     let tool_context = Arc::new(ToolContext {
         proxy_url: proxy_url.clone(),
+        cwd,
+        http_client: http_client.clone(),
     });
 
     let mut agent_loop = AgentLoop {
         http_client,
         proxy_url,
         anthropic_token,
-        anthropic_base_url: None,
+        anthropic_base_url,
         anthropic_extra_headers: vec![],
         streaming_client: None,
         model: model.clone(),
@@ -196,8 +205,9 @@ async fn main() -> anyhow::Result<()> {
     let nats_for_elic = nats.clone();
     let prefix_for_perm = prefix.clone();
     let prefix_for_elic = prefix.clone();
+    let js_client = NatsJetStreamClient::new(js);
     let (_conn, io_task) =
-        AgentSideNatsConnection::new(agent, nats, acp_prefix_parsed, |fut| {
+        AgentSideNatsConnection::with_jetstream(agent, nats, js_client, acp_prefix_parsed, |fut| {
             tokio::task::spawn_local(fut);
         });
 

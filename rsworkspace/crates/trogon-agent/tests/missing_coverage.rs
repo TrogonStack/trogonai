@@ -29,6 +29,7 @@ fn make_ctx(proxy_url: &str) -> ToolContext {
     ToolContext::new(
         reqwest::Client::new(),
         proxy_url.to_string(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         "tok_linear_prod_test01".to_string(),
         String::new(),
@@ -40,6 +41,7 @@ fn make_agent(proxy_url: &str) -> AgentLoop {
     let tool_ctx = Arc::new(ToolContext::new(
         http_client.clone(),
         proxy_url.to_string(),
+        String::new(),
         "tok_github_prod_test01".to_string(),
         "tok_linear_prod_test01".to_string(),
         String::new(),
