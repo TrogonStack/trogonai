@@ -11,7 +11,7 @@ use agent_client_protocol::{
     WriteTextFileRequest, WriteTextFileResponse,
 };
 use async_trait::async_trait;
-use crate::app::{permission_from_request, print_permission_prompt};
+use crate::app::{permission_summary, print_permission_prompt};
 use crate::terminal::reset_display;
 use std::io::{self, BufRead, Write};
 use std::os::unix::io::AsRawFd;
@@ -126,7 +126,6 @@ enum PermissionKey {
     Cancel,
 }
 
-const PERMISSION_TIMEOUT: Duration = Duration::from_secs(55);
 const ESCAPE_FOLLOW_MS: i32 = 50;
 const POLL_SLICE_MS: i32 = 200;
 const INVALID_KEY_DEBOUNCE: Duration = Duration::from_millis(750);
@@ -333,7 +332,6 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
     let mut guard = RawModeGuard { fd, original, drain_stdin_on_drop: true };
 
     tty_debug("waiting for permission key…");
-    let deadline = Instant::now() + PERMISSION_TIMEOUT;
     let mut last_invalid_msg: Option<Instant> = None;
 
     loop {
@@ -341,15 +339,11 @@ fn read_permission_key(coordinator: &PermissionCoordinator) -> io::Result<Permis
             tty_debug("permission read cancelled by coordinator");
             break Ok(PermissionKey::Cancel);
         }
-        if Instant::now() >= deadline {
-            tty_debug("permission read timed out");
-            break Ok(PermissionKey::Cancel);
-        }
 
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let timeout_ms = remaining.as_millis().min(POLL_SLICE_MS as u128) as i32;
-
-        match read_byte_with_timeout(fd, timeout_ms)? {
+        // No wall-clock deadline: a permission prompt blocks on the human and must
+        // never auto-deny. Poll in fixed slices so coordinator cancellation (a newer
+        // prompt superseding this one, or session teardown) is still observed promptly.
+        match read_byte_with_timeout(fd, POLL_SLICE_MS)? {
             None => continue,
             Some(b'\r') | Some(b'\n') => {
                 tty_debug("permission read cancelled by Enter");
@@ -466,6 +460,9 @@ fn permission_key_to_outcome(key: PermissionKey) -> Option<RequestPermissionOutc
 async fn handle_exit_plan_mode_permission(
     coordinator: Arc<PermissionCoordinator>,
 ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+    // Pause the streaming-input reader so it doesn't steal the choice keypress.
+    let _prompt_guard = crate::stream_input::TtyPromptGuard::new();
+
     let options = exit_plan_mode_options(allow_bypass());
     eprint!("\r\x1b[2K");
     eprintln!();
@@ -522,10 +519,13 @@ async fn handle_tool_permission(
         return cancelled_outcome();
     }
 
-    let display = permission_from_request(req);
+    // Pause the streaming-input reader so it doesn't steal/echo the a/w/r keypress.
+    let _prompt_guard = crate::stream_input::TtyPromptGuard::new();
+
+    let summary = permission_summary(req);
     reset_display();
     eprint!("\r\x1b[2K");
-    print_permission_prompt(&display);
+    print_permission_prompt(&summary);
     flush_stderr();
 
     let key = match tokio::task::spawn_blocking(move || read_permission_key(&coordinator)).await {

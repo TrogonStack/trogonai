@@ -129,7 +129,28 @@ async fn main() -> anyhow::Result<()> {
         }
         let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
         let options = PrintOptions { print_tools: args.print_tools };
-        let session = TrogonSession::new(nats, &args.prefix, cwd, vec![]).await?;
+
+        // Resolve the target runner prefix: if a model is requested, look it up in
+        // the registry so cross-runner models (e.g. `--model haiku` while prefix is
+        // `acp.grok`) route to the correct runner instead of failing with "unknown model".
+        let target_prefix = if let Some(model) = &args.model {
+            let model_id = resolve_model_alias(model);
+            let js = async_nats::jetstream::new(nats.clone());
+            let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+                .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
+            let registry = trogon_registry::Registry::new(reg_store);
+            match registry.find_by_model(&model_id).await {
+                Ok(Some(cap)) => cap.metadata["acp_prefix"]
+                    .as_str()
+                    .unwrap_or(&args.prefix)
+                    .to_string(),
+                _ => args.prefix.clone(),
+            }
+        } else {
+            args.prefix.clone()
+        };
+
+        let session = TrogonSession::new(nats, &target_prefix, cwd, vec![]).await?;
         if args.dangerously_skip_permissions
             && let Err(e) = session.set_mode("bypassPermissions").await
         {
@@ -204,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
             args.nats_url,
             args.stream,
             resume,
+            args.dangerously_skip_permissions,
         )
         .await?;
     }

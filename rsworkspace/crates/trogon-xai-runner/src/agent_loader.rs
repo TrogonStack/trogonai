@@ -122,8 +122,12 @@ pub mod mock {
     use super::{AgentConfig, AgentLoading};
     use std::collections::HashMap;
 
+    /// `(skill_ids, system_prompt, model_id)` for a mocked agent config.
+    type MockConfig = (Vec<String>, Option<String>, Option<String>);
+
+    #[derive(Default)]
     pub struct MockAgentLoader {
-        configs: HashMap<String, (Vec<String>, Option<String>, Option<String>)>,
+        configs: HashMap<String, MockConfig>,
     }
 
     impl MockAgentLoader {

@@ -1,88 +1,39 @@
-//! Styled tool-permission prompts (matches unified transcript UI).
+//! Tool-permission prompt rendering for the CLI UI.
 
 use agent_client_protocol::RequestPermissionRequest;
-use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PermissionDisplay {
-    pub tool_name: String,
-    pub detail: String,
-}
-
-pub fn permission_from_request(req: &RequestPermissionRequest) -> PermissionDisplay {
-    let tool_name = req
-        .tool_call
-        .fields
-        .title
-        .as_deref()
-        .unwrap_or("tool")
-        .to_string();
-    let detail = req
+/// One-line summary of the tool call awaiting permission: the tool title, plus
+/// a truncated snippet of its raw input when present.
+pub fn permission_summary(req: &RequestPermissionRequest) -> String {
+    let title = req.tool_call.fields.title.as_deref().unwrap_or("tool");
+    let raw = req
         .tool_call
         .fields
         .raw_input
         .as_ref()
-        .map(detail_from_value)
+        .map(|v| v.to_string())
         .unwrap_or_default();
-    PermissionDisplay { tool_name, detail }
+    if raw.is_empty() {
+        title.to_string()
+    } else {
+        let snippet: String = raw.chars().take(120).collect();
+        format!("{title}  {snippet}")
+    }
 }
 
-fn detail_from_value(v: &Value) -> String {
-    if let Some(cmd) = v.get("command").and_then(Value::as_str) {
-        return cmd.to_string();
-    }
-    if let Some(path) = v.get("path").and_then(Value::as_str) {
-        let mut lines = vec![path.to_string()];
-        if let Some(old) = v.get("old_string").and_then(Value::as_str) {
-            lines.push(format!("  − {}", truncate_line(old, 120)));
-        }
-        if let Some(new) = v.get("new_string").and_then(Value::as_str) {
-            lines.push(format!("  + {}", truncate_line(new, 120)));
-        }
-        return lines.join("\n");
-    }
-    if let Some(url) = v.get("url").and_then(Value::as_str) {
-        return url.to_string();
-    }
-    if let Some(query) = v.get("query").and_then(Value::as_str) {
-        return query.to_string();
-    }
-    if let Some(s) = v.as_str() {
-        return s.to_string();
-    }
-    truncate_line(&v.to_string(), 160)
-}
-
-fn truncate_line(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max).collect();
-    out.push('…');
-    out
-}
-
-pub fn print_permission_prompt(display: &PermissionDisplay) {
+/// Print the permission prompt and its key options. The caller resets the
+/// display and clears the current line before calling this.
+pub fn print_permission_prompt(summary: &str) {
     eprintln!();
-    eprintln!(
-        "\x1b[1;33m▸ permission\x1b[0m  \x1b[1m{}\x1b[0m",
-        display.tool_name
-    );
-    if !display.detail.is_empty() {
-        for line in display.detail.lines() {
-            eprintln!("\x1b[90m  {line}\x1b[0m");
-        }
-    }
-    eprintln!();
-    eprintln!(
-        "  \x1b[32m[a]\x1b[0m allow   \x1b[33m[w]\x1b[0m always allow   \x1b[31m[r]\x1b[0m reject"
-    );
+    eprintln!("┆ {summary}");
+    eprintln!("[a] allow  [w] always allow  [r] reject");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agent_client_protocol::{ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
+    use serde_json::Value;
 
     fn req(title: &str, raw: Value) -> RequestPermissionRequest {
         let mut fields = ToolCallUpdateFields::new();
@@ -96,27 +47,21 @@ mod tests {
     }
 
     #[test]
-    fn bash_command_extracted() {
-        let d = permission_from_request(&req(
-            "bash",
-            serde_json::json!({"command": "python3 hello.py || python hello.py"}),
-        ));
-        assert_eq!(d.tool_name, "bash");
-        assert_eq!(d.detail, "python3 hello.py || python hello.py");
+    fn summary_includes_title_and_raw_input() {
+        let s = permission_summary(&req("bash", serde_json::json!({"command": "ls -la"})));
+        assert!(s.starts_with("bash  "));
+        assert!(s.contains("ls -la"));
     }
 
     #[test]
-    fn path_edit_shows_diff_hint() {
-        let d = permission_from_request(&req(
-            "str_replace",
-            serde_json::json!({
-                "path": "src/main.rs",
-                "old_string": "foo",
-                "new_string": "bar"
-            }),
-        ));
-        assert!(d.detail.contains("src/main.rs"));
-        assert!(d.detail.contains("− foo"));
-        assert!(d.detail.contains("+ bar"));
+    fn summary_title_only_when_no_raw_input() {
+        let mut fields = ToolCallUpdateFields::new();
+        fields.title = Some("fetch_url".into());
+        let r = RequestPermissionRequest::new(
+            "sess-1",
+            ToolCallUpdate::new(ToolCallId::new("tc-1"), fields),
+            vec![],
+        );
+        assert_eq!(permission_summary(&r), "fetch_url");
     }
 }

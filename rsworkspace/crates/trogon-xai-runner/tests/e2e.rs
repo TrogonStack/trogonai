@@ -3817,7 +3817,7 @@ async fn incomplete_continuation_non_max_output_tokens_resends_user_input_via_na
                 .iter()
                 .filter(|i| i.role() == Some("user"))
                 .filter_map(|i| i.content())
-                .last()
+                .next_back()
                 .unwrap_or("");
             assert_eq!(
                 cont_input, "original message",
@@ -3929,7 +3929,7 @@ async fn resource_link_content_block_forwarded_as_text_via_nats() {
                 .iter()
                 .filter(|i| i.role() == Some("user"))
                 .filter_map(|i| i.content())
-                .last()
+                .next_back()
                 .unwrap_or("");
             assert!(
                 user_text.contains("README") && user_text.contains("file:///README.md"),
@@ -3998,7 +3998,7 @@ async fn embedded_text_resource_content_forwarded_via_nats() {
                 .iter()
                 .filter(|i| i.role() == Some("user"))
                 .filter_map(|i| i.content())
-                .last()
+                .next_back()
                 .unwrap_or("");
             assert_eq!(
                 user_text, "fn main() {}",
@@ -4493,7 +4493,7 @@ async fn binary_blob_resource_content_forwarded_as_text_via_nats() {
                 .iter()
                 .filter(|i| i.role() == Some("user"))
                 .filter_map(|i| i.content())
-                .last()
+                .next_back()
                 .unwrap_or("");
             assert_eq!(
                 content,

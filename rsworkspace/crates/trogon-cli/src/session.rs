@@ -789,17 +789,29 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             if session_id.contains('.') {
                 return Err(anyhow::anyhow!("invalid session id: {session_id}"));
             }
+            // `agent.load` is captured by the COMMANDS JetStream stream, so a core
+            // request-reply would return the JetStream PubAck instead of the agent's
+            // response. Use the same req-id / response-subject pattern as set_model:
+            // the runner replies on `{prefix}.session.{id}.agent.response.{req_id}`.
+            let req_id = Uuid::now_v7().to_string();
             let subject = format!("{prefix}.session.{session_id}.agent.load");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
             let req = LoadSessionRequest::new(session_id, cwd).mcp_servers(mcp_servers);
             let payload = serde_json::to_vec(&req)?;
 
-            let bytes = tokio::time::timeout(
-                LOAD_SESSION_TIMEOUT,
-                nats.request_bytes(subject, payload.into()),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("timed out waiting for session load"))?
-            .map_err(|e| anyhow::anyhow!("NATS error loading session: {e}"))?;
+            let mut resp_rx = nats
+                .subscribe_bytes(resp_subject)
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS error loading session: {e}"))?;
+
+            nats.publish_with_req_id_bytes(subject, req_id, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS error loading session: {e}"))?;
+
+            let bytes = tokio::time::timeout(LOAD_SESSION_TIMEOUT, resp_rx.recv())
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for session load"))?
+                .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
 
             let v: Value = serde_json::from_slice(&bytes)
                 .map_err(|e| anyhow::anyhow!("invalid load session response: {e}"))?;

@@ -33,6 +33,7 @@ agent-client-protocol = { workspace = true, features = [
     "unstable_session_usage",
 ] }
 async-nats      = { workspace = true, features = ["jetstream", "kv"] }
+trogon-mcp          = { path = "../trogon-mcp" }
 trogon-nats         = { workspace = true }
 trogon-registry     = { workspace = true }
 trogon-runner-tools = { path = "../trogon-runner-tools" }
@@ -51,6 +52,7 @@ uuid            = { workspace = true }
 [dev-dependencies]
 axum                    = { workspace = true }
 futures                 = { workspace = true }
+httpmock                = "0.7"
 tempfile               = "3"
 testcontainers-modules = { workspace = true }
 trogon-nats             = { workspace = true, features = ["test-support"] }
