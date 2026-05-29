@@ -206,6 +206,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher>(
                             Ok(msg) => println!("{msg}"),
                             Err(e) => eprintln!("{e}"),
                         }
+                    } else if cmd == "/compact-model" {
+                        match do_compact_model(&session, arg.trim()).await {
+                            Ok(msg) => println!("{msg}"),
+                            Err(e) => eprintln!("error: {e}"),
+                        }
                     } else if cmd == "/init" {
                         match do_init(&session, &cwd, &fs).await {
                             Ok(InitResult::Written(dest)) => println!("created {}", dest.display()),
@@ -351,6 +356,7 @@ Commands:
   /cost               show token usage for this session
   /clear              start a new session (clears conversation history)
   /compact            force context compaction now
+  /compact-model      show compaction model  |  /compact-model <id> set it  |  /compact-model default reset
   /config             show config  |  /config set <key> <value>
   /model              show current model  |  /model <id> change model
   /init               analyze project with AI and generate TROGON.md
@@ -423,6 +429,35 @@ pub(crate) async fn do_compact<S: Session>(
         ))
     } else {
         Ok("compaction triggered".to_string())
+    }
+}
+
+/// Handle `/compact-model [<model_id>|default]`.
+///
+/// - No argument   → show current compaction model override (if any)
+/// - `default`     → clear the override; compaction uses the session model
+/// - `<model_id>`  → set the compaction model (must be same provider as current runner)
+pub(crate) async fn do_compact_model<S: Session>(
+    session: &S,
+    arg: &str,
+) -> Result<String, String> {
+    if arg.is_empty() {
+        return Ok(
+            "compaction model: default (same as session model)\n\
+             change with: /compact-model <model-id>\n\
+             reset with:  /compact-model default"
+                .to_string(),
+        );
+    }
+    let value = if arg == "default" { "" } else { arg };
+    session
+        .set_session_config_option("compactor_model", value)
+        .await
+        .map_err(|e| e.to_string())?;
+    if value.is_empty() {
+        Ok("compaction model reset to default (same as session model)".to_string())
+    } else {
+        Ok(format!("compaction model set to: {value}"))
     }
 }
 
