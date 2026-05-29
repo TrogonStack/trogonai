@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::approvals::state::{ApprovalCache, ApprovalStateMachine};
 use crate::approvals::types::{
-    ApprovalDecisionMessage, ApprovalError, ApprovalSubject, ApprovalWaitOutcome, ArgsHash, RequestId,
+    ApprovalDecisionMessage, ApprovalClientError, ApprovalSubject, ApprovalWaitOutcome, ArgsHash, RequestId,
 };
 
 pub struct ApprovalClient {
@@ -29,7 +29,7 @@ impl ApprovalClient {
         request_id: &RequestId,
         args_hash: &ArgsHash,
         ttl: Duration,
-    ) -> Result<ApprovalWaitOutcome, ApprovalError> {
+    ) -> Result<ApprovalWaitOutcome, ApprovalClientError> {
         if self.cache.is_approved(request_id, args_hash).await {
             return Ok(ApprovalWaitOutcome::Approved {
                 approver: "cached".into(),
@@ -41,7 +41,7 @@ impl ApprovalClient {
             .client
             .subscribe(subject.as_str().to_string())
             .await
-            .map_err(|e| ApprovalError::Subscribe(e.to_string()))?;
+            .map_err(|e| ApprovalClientError::Subscribe(e.to_string()))?;
 
         let wait = tokio::time::timeout(ttl, async {
             while let Some(message) = subscription.next().await {
