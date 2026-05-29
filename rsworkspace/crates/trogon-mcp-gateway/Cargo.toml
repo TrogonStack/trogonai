@@ -17,6 +17,7 @@ futures = { workspace = true }
 hex = { workspace = true }
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 mcp-nats = { workspace = true }
+nkeys = { workspace = true }
 moka = { workspace = true }
 pem = "=3.0.6"
 reqwest = { version = "=0.12.22", default-features = false, features = ["json", "rustls-tls"] }
@@ -35,6 +36,7 @@ trogon-std = { workspace = true, features = ["clap", "signal"] }
 trogon-telemetry = { workspace = true }
 
 [dev-dependencies]
+nkeys = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
