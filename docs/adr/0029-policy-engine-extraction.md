@@ -10,7 +10,7 @@
 
 ## Context
 
-`MCP_GATEWAY_PLAN.md` Block F item 8 schedules extraction of the policy engine into `trogon-policy-core` and `trogon-policy-cel` so ACP, A2A, and future JSON-RPC-over-NATS protocols can reuse the same evaluation stack without duplicating CEL, merge, and host-builtin machinery. The plan's agentgateway translation table (`MCP_GATEWAY_PLAN.md` §11) maps agentgateway `core` → `trogon-policy-core` and `cel-fork` / `celx` → `trogon-policy-cel`.
+Engine extraction schedules moving the policy engine into `trogon-policy-core` and `trogon-policy-cel` so ACP, A2A, and future JSON-RPC-over-NATS protocols can reuse the same evaluation stack without duplicating CEL, merge, and host-builtin machinery. The agentgateway translation maps agentgateway `core` → `trogon-policy-core` and `cel-fork` / `celx` → `trogon-policy-cel`.
 
 Today the engine lives **inside** `trogon-mcp-gateway`:
 
@@ -21,7 +21,7 @@ Today the engine lives **inside** `trogon-mcp-gateway`:
 | `src/redaction/` | Schema-driven `RedactionRule`, `RedactionRuleset`, `redact` engine (Block E item 5) |
 | `src/gateway.rs` | Orchestrates ingress, authz, policy gate, egress — NATS- and MCP-specific |
 
-Block E (`MCP_GATEWAY_PLAN.md` Block E items 1–6) is actively wiring CEL builtins, `tools/list` filtering ([ADR 0015](0015-tools-list-filtering.md)), schema cache, redaction, hierarchical merge ([ADR 0013](0013-hierarchical-policy-merge.md)), and rate limits **in place** inside the gateway crate. ADR 0013 already names a future `trogon-policy-core` merge crate but explicitly allows Phase 1 hardcoded CEL to remain until Block E lands.
+Phase 2 policy work is actively wiring CEL builtins, `tools/list` filtering ([ADR 0015](0015-tools-list-filtering.md)), schema cache, redaction, hierarchical merge ([ADR 0013](0013-hierarchical-policy-merge.md)), and rate limits **in place** inside the gateway crate. ADR 0013 already names a future `trogon-policy-core` merge crate but explicitly allows Phase 1 hardcoded CEL to remain until Phase 2 lands.
 
 **Why decide now (paper only):**
 
@@ -53,7 +53,7 @@ Normative status: **Accepted (defer)** — extraction is **planned and bounded**
 
 **Non-triggers (do not extract for these alone):**
 
-- Desire to mirror agentgateway crate layout aesthetically (`MCP_GATEWAY_PLAN.md` §11).
+- Desire to mirror agentgateway crate layout aesthetically.
 - Block E starting or mid-flight — see migration risk below.
 - WASM Tier 3 landing — WASM host ABI stays in gateway + WIT sketch until core traits exist; extraction follows stable builtin contracts ([reference-host-abi.md](../identity/reference-host-abi.md)).
 
@@ -138,7 +138,7 @@ Until [ADR 0017](0017-product-positioning.md) resolves:
 | `trogon-policy-cel` | Same repo; couples to `cel-interpreter` pin | Same; documented compatibility matrix with gateway |
 | `trogon-mcp-gateway` | TrogonStack-internal binary | May still be open core; commercial SKU is support + bundles |
 
-Extraction does **not** imply a separate git repository; it implies **workspace members** under `rsworkspace/crates/` per `MCP_GATEWAY_PLAN.md` §11. Repo split is an [ADR 0017](0017-product-positioning.md) follow-on, not Block F item 8.
+Extraction does **not** imply a separate git repository; it implies **workspace members** under `rsworkspace/crates/`. Repo split is an [ADR 0017](0017-product-positioning.md) follow-on, not part of engine extraction.
 
 ---
 
@@ -214,7 +214,7 @@ Extraction does **not** imply a separate git repository; it implies **workspace 
 3. **ADR 0017 verdict** — Option B may move extraction from P2 to P1; update trigger table in a one-line amendment to this ADR when 0017 accepts.
 4. **Published crate names** — `trogon-policy-core` vs `trogon_policy_core` on crates.io; trademark / neutral naming if standalone (TBD with 0017).
 5. **Whether redaction stays in `-core` or `trogon-mcp-gateway` only** — JSONPath redaction is protocol-agnostic; default is `-core`. If A2A uses a different ruleset shape, split `RedactionRuleset` versioning (future ADR).
-6. **NATS-callout Tier 2.5 plugins** (`MCP_GATEWAY_PLAN.md` Block F item 7) — plugin bus may live in gateway while eval stays in `-cel`; integration ADR TBD.
+6. **NATS-callout Tier 2.5 plugins** — plugin bus may live in gateway while eval stays in `-cel`; integration ADR TBD.
 7. **Deprecation period for `trogon_mcp_gateway::policy` re-exports** — one release vs immediate break (TBD at extraction PR).
 
 ---
@@ -270,9 +270,8 @@ Runtime rollback of policy behavior is unchanged: bundle KV pointer rollback and
 
 ### Documentation follow-ups (non-blocking)
 
-- `MCP_GATEWAY_PLAN.md` Block F item 8 checkbox — reference this ADR when editorially closing the item as "deferred with triggers."
 - [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md) checklist `trogon-policy-core` merge crate — implement in monolith first, move at extraction.
 
 ---
 
-*Contract sources: `MCP_GATEWAY_PLAN.md` (Take §4, Block E, Block F item 8, §11 crate translation); `rsworkspace/crates/trogon-mcp-gateway/src/policy.rs`, `cel_builtins/`, `redaction/`, `gateway.rs`, `Cargo.toml`; `docs/adr/0008-policy-dsl.md`, `docs/adr/0013-hierarchical-policy-merge.md`, `docs/adr/0015-tools-list-filtering.md`, `docs/adr/0017-product-positioning.md`; `docs/identity/policy-dsl-choice.md`, `hierarchical-policy-merge.md`, `reference-host-abi.md`, `reference-cel-variables.md`, `mcp-policy-wit-sketch.md`, `wasm-bundle-format.md`.*
+*Contract sources: `rsworkspace/crates/trogon-mcp-gateway/src/policy.rs`, `cel_builtins/`, `redaction/`, `gateway.rs`, `Cargo.toml`; `docs/adr/0008-policy-dsl.md`, `docs/adr/0013-hierarchical-policy-merge.md`, `docs/adr/0015-tools-list-filtering.md`, `docs/adr/0017-product-positioning.md`; `docs/identity/policy-dsl-choice.md`, `hierarchical-policy-merge.md`, `reference-host-abi.md`, `reference-cel-variables.md`, `mcp-policy-wit-sketch.md`, `wasm-bundle-format.md`.*

@@ -18,7 +18,7 @@ TrogonStack already ships two gateway-class ingress paths and an event-sourced d
 | **`trogon-gateway`** | Slack (and similar) ingress; publishes Slack events to core NATS | `slack.{event.type}` on stream **`SLACK`**, filter `slack.>` |
 | **`trogon-decider`** | Library for event-sourced command → event decisions | **No** NATS command subject to MCP gateway in-repo today |
 
-The MCP gateway program must plug into **`trogon-decider`** and coexist with **`trogon-gateway`** without re-inventing either. Block C item 9 in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) left three questions open:
+The MCP gateway program must plug into **`trogon-decider`** and coexist with **`trogon-gateway`** without re-inventing either. Three integration questions remained open until this ADR:
 
 1. How does the gateway emit to / consume from `trogon-decider`?
 2. How does it coexist with `trogon-gateway` (Slack, approvals)?
@@ -45,7 +45,7 @@ Without pinning integration shape:
 
 **Audit envelope as the natural intersection (Pin 7)**
 
-[MCP_GATEWAY_PLAN.md §7](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema) (Wire-Format Pin 7) pins the gateway audit JSON schema field `schema: "trogon.mcp.audit/v1"`. STS emits `trogon.mcp.audit.sts/v1`. Registry and approval flows have sibling shapes documented in [reference-audit-envelope.md](../identity/reference-audit-envelope.md). The legal/compliance record is the JetStream append-only stream; decider, traffic indexer, and future risk services are **downstream consumers** of the same envelopes — not parallel write paths.
+[reference-audit-envelope.md](../identity/reference-audit-envelope.md) pins the gateway audit JSON schema field `schema: "trogon.mcp.audit/v1"`. STS emits `trogon.mcp.audit.sts/v1`. Registry and approval flows have sibling shapes documented in [reference-audit-envelope.md](../identity/reference-audit-envelope.md). The legal/compliance record is the JetStream append-only stream; decider, traffic indexer, and future risk services are **downstream consumers** of the same envelopes — not parallel write paths.
 
 ---
 
@@ -203,7 +203,7 @@ Consumers must tolerate duplicate processing semantics only within their own pro
 
 ### Positive
 
-- **Single audit-of-truth.** JetStream `MCP_AUDIT` remains the legal record ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) audit story); decider, traffic view, and SIEM are projections — no competing write path.
+- **Single audit-of-truth.** JetStream `MCP_AUDIT` remains the legal record; decider, traffic view, and SIEM are projections — no competing write path.
 - **Gateway hot path stays simple.** Publish-only audit avoids decider latency and storage failures on every `tools/call`; bridge retries decoupled from request completion.
 - **Reuses existing Trogon patterns.** Same fan-out model as `trogon-traffic-view`; same approval subjects as adaptive-access; same account-per-tenant rule as A2A + MCP coexistence.
 - **Event-sourced risk path.** Moving HITL/risk to a decider-backed service enables replay, test fixtures (`trogon-decider::testing`), and consistent domain events instead of opaque in-process state.
@@ -232,7 +232,7 @@ Gateway or a sidecar writes audit rows directly to Postgres, BigQuery, or simila
 
 | Assessment | |
 |------------|---|
-| **Rejected because** | Violates the JetStream-first legal record in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) and [agent-traffic.md](../identity/agent-traffic.md); forks compliance consumers; `trogon-decider` loses a single ordered append log; direct DB writes on the hot path add latency and connection pool coupling. **Decider is the audit-of-truth for decision history** — facts still originate from JetStream envelopes. |
+| **Rejected because** | Violates the JetStream-first legal record (see [agent-traffic.md](../identity/agent-traffic.md)); forks compliance consumers; `trogon-decider` loses a single ordered append log; direct DB writes on the hot path add latency and connection pool coupling. **Decider is the audit-of-truth for decision history** — facts still originate from JetStream envelopes. |
 
 ### Separate audit stream that bypasses decider (parallel `MCP_AUDIT_DECIDER` only)
 
@@ -337,12 +337,11 @@ Full gateway env table: [integration-touchpoints.md § Environment variables](..
 |------|--------|----------------|
 | Design spec [integration-touchpoints.md](../identity/integration-touchpoints.md) | **Done** (paper) | Block C reference |
 | Gateway audit publish to `MCP_AUDIT` | **Done** (branch) | `trogon-mcp-gateway::audit` |
-| Pin 7 audit envelope schema | **Done** (plan) | [MCP_GATEWAY_PLAN.md §7](../../MCP_GATEWAY_PLAN.md#7-audit-envelope-schema), [reference-audit-envelope.md](../identity/reference-audit-envelope.md) |
+| Pin 7 audit envelope schema | **Done** | [reference-audit-envelope.md](../identity/reference-audit-envelope.md) |
 | Traffic indexer consumer | **Partial** | `agent-traffic-projector`; gateway subjects classified, not yet acked |
 | Decider audit bridge consumer | **Pending** | `mcp-decider-audit-bridge` |
 | Decider-backed risk evaluator | **Pending** | Replaces `policy::evaluate_risk` |
 | Slack → `mcp.approvals.*` bridge | **Pending** | `trogon-gateway` |
-| `MCP_GATEWAY_PLAN.md` Block C item 9 checkbox | **Pending** | Editorial after ADR acceptance |
 | This ADR | **Accepted** (2026-05-29) | `docs/adr/0022-integration-touchpoints.md` |
 
 ---
@@ -355,7 +354,7 @@ Full gateway env table: [integration-touchpoints.md § Environment variables](..
 | 2 | Exact decider event type names and aggregate boundaries for `McpGatewayDecision` vs session-scoped risk state | Bridge implementation ticket; mapping table in this ADR is **proposed** |
 | 3 | Fail-closed decider unreachable for HITL — timeout budget and fallback to inline heuristic | [failure-mode-matrix.md FM-DECIDER](../identity/failure-mode-matrix.md); default fail-closed for production |
 | 4 | Include registry audit schemas in phase-1 bridge or phase-2 only | **Phase 2** unless registry decisions needed for risk |
-| 5 | Hash-chained audit envelopes (prior digest in envelope) — decider idempotency interaction | [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) tamper-evidence note; bridge must treat chain as opaque metadata until Pin lands |
+| 5 | Hash-chained audit envelopes (prior digest in envelope) — decider idempotency interaction | Audit-stream tamper-evidence is a future addition; bridge must treat chain as opaque metadata until the field lands |
 | 6 | OAuth-specific audit subjects (`mcp.audit.oauth.*` proposed) — decider mapping | Defer until [oauth-mcp-integration.md](../identity/oauth-mcp-integration.md) subjects ship |
 
 ---

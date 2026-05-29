@@ -25,7 +25,7 @@ The gateway therefore maintains an **in-process schema cache** populated by **sn
 
 **Why `(server_id, schema_hash)` and not `(server_id, tool_name, schema_hash)`**
 
-Early plan text in `MCP_GATEWAY_PLAN.md` §7 Guardrails mentions `{server_id, tool_name, schema_hash}`. The integration test scaffold and `schema_cache` crate pin a leaner key: identical schema bytes on one server must dedupe regardless of tool name. Redaction and validation care about schema **shape**, not catalogue label. Tool name resolution happens before cache lookup on `tools/call`; the cache answers "what is the canonical schema for this hash on this server?"
+Earlier plan text mentioned `{server_id, tool_name, schema_hash}`. The integration test scaffold and `schema_cache` crate pin a leaner key: identical schema bytes on one server must dedupe regardless of tool name. Redaction and validation care about schema **shape**, not catalogue label. Tool name resolution happens before cache lookup on `tools/call`; the cache answers "what is the canonical schema for this hash on this server?"
 
 **Why invalidation cannot be optional**
 
@@ -113,7 +113,7 @@ Payload **(proposed minimal JSON)**:
 { "server_id": "...", "reason": "list_changed", "emitted_at": "<RFC3339>" }
 ```
 
-All gateway replicas subscribe (queue group **not** used -- every member must drop local state). This aligns with `MCP_GATEWAY_PLAN.md` control-plane table and `docs/identity/tools-list-filtering.md` §9.2.
+All gateway replicas subscribe (queue group **not** used -- every member must drop local state). This aligns with the gateway control-plane subject grammar and `docs/identity/tools-list-filtering.md` §9.2.
 
 Invalidation also drops sibling caches on the same signal where wired (ADR 0014 permission tuple cache, filtered-list cache keys scoped by `server_id`) -- shared handler entry point, distinct storage.
 
@@ -374,8 +374,7 @@ schema_cache_enabled?
 | Metrics `mcp_schema_cache_hits_total`, `mcp_schema_cache_size` | **Pending** (Block E) |
 | `schema_cache_enabled` config gate | **Pending** (Block E) |
 | Schema-driven redaction consumer | **Pending** (Block E item 5) |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 3 checkbox | **Pending** (editorial after ADR acceptance) |
 
 ---
 
-*Contract sources: `rsworkspace/crates/trogon-mcp-gateway/tests/schema_cache_invalidation.rs`, `rsworkspace/crates/trogon-mcp-gateway/src/schema_cache/`, `MCP_GATEWAY_PLAN.md` Block C item 3 / §7 / §10 / control-plane subjects, `docs/identity/tools-list-filtering.md` §5.4 and §6.3. This ADR formalizes the design until a focused identity paper spec is authored.*
+*Contract sources: `rsworkspace/crates/trogon-mcp-gateway/tests/schema_cache_invalidation.rs`, `rsworkspace/crates/trogon-mcp-gateway/src/schema_cache/`, `docs/identity/tools-list-filtering.md` §5.4 and §6.3. This ADR formalizes the design until a focused identity paper spec is authored.*

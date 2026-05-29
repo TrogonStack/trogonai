@@ -245,7 +245,7 @@ Default timeout: 500 ms + 50 ms per 100 items; clamp to request deadline from `m
 | `spicedb_bulk_check_latency_ms` | `tenant`, `item_count_bucket`, `method` |
 | `spicedb_cache_eviction_total` | `tenant`, `reason` (`ttl`, `lru`, `invalidation`) |
 
-Audit envelope extensions: `spicedb.cache_hit`, `spicedb.bulk_items`, `spicedb.zedtoken` per [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) §7.
+Audit envelope extensions: `spicedb.cache_hit`, `spicedb.bulk_items`, `spicedb.zedtoken` per [reference-audit-envelope.md](../identity/reference-audit-envelope.md).
 
 ### Files affected
 

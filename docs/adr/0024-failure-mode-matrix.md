@@ -302,7 +302,6 @@ Each failure mode exposes an **independent config knob**; rollback is **per-mode
 | Wire proposed RPC constants | **Pending** (Block E) | `rpc_codes.rs` |
 | `/ready` 503 on partition | **Pending** (Block G) | Gateway health handler |
 | Per-tenant `spicedb.unreachable_mode` | **Pending** (Block E) | Bundle schema + KV projection |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 4 checkbox | **Pending** | Editorial after ADR acceptance |
 
 ---
 

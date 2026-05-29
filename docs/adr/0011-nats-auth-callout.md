@@ -198,7 +198,7 @@ When multiple roles are present, effective template = **most privileged** by ord
 
 `caller_id` must be a **single subject token** (no `.` characters) — substituted into callback subscribe patterns at mint time.
 
-Gateway service and backend MCP server principals are **not** callout-minted; NSC provisions long-lived service Users per `MCP_GATEWAY_PLAN.md` Subject ACL.
+Gateway service and backend MCP server principals are **not** callout-minted; NSC provisions long-lived service Users per the gateway subject ACL (see [reference-subject-grammar.md](../identity/reference-subject-grammar.md)).
 
 ### Cache key shape and TTL
 

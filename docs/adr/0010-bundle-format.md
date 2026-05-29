@@ -28,7 +28,7 @@ The design context is captured in [wasm-bundle-format.md](../identity/wasm-bundl
 1. **Parseable without WASM execution** — CI and `agctl` must validate manifest, signatures, and size limits before Wasmtime links guest code ([wasm-bundle-format.md §1.1](../identity/wasm-bundle-format.md#11-design-goals)).
 2. **Mature distribution tooling** — production fleets already run OCI registries; reusing that ecosystem beats inventing a bespoke blob store ([wasm-bundle-format.md §2.1](../identity/wasm-bundle-format.md#21-recommendation-oci-artifact)).
 3. **Operational consistency with NATS** — JetStream KV is the config and trust surface for the rest of the stack (`mcp-gateway-config`, `mcp-agent-registry`, `mcp-trust-bundles` per [ADR 0001](0001-tenancy-model.md)); bundle promotion must fit the same watch-and-reload pattern.
-4. **NKey lineage** — MCP gateway bootstrap and auth-callout already use NATS NKeys; bundle signing reuses operator-familiar key material rather than introducing a parallel cosign-only path for the authoritative verification gate ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F item 4).
+4. **NKey lineage** — MCP gateway bootstrap and auth-callout already use NATS NKeys; bundle signing reuses operator-familiar key material rather than introducing a parallel cosign-only path for the authoritative verification gate.
 
 ### What breaks if this stays undecided
 
@@ -61,7 +61,7 @@ where `<semver>` is the author-facing `version` from `manifest.toml` and `<sha25
 
 **KV mirror:** JetStream KV bucket `mcp-policy-bundles` holds operator-published bundle bytes keyed by `{tenant}/{name}` (namespaced slug matching `manifest.toml` `name`, e.g. `acme/github-create-issue-gate`). The active version pin for each gateway instance lives in `mcp-gateway-config` and references digest + semver; KV is the air-gapped and NATS-native pull path when OCI egress is unavailable ([wasm-bundle-format.md §6.2](../identity/wasm-bundle-format.md#62-path-b--nats-kv-import-offline--air-gapped-fallback)).
 
-**WIT target:** `trogon:mcp-policy@0.1.0`, pinned to **WASI 0.3** and the WebAssembly Component Model ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md), [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F item 1). Guest components MUST export world `policy-bundle`; the host selects the Wasmtime linker from `manifest.toml` `target_wit` only.
+**WIT target:** `trogon:mcp-policy@0.1.0`, pinned to **WASI 0.3** and the WebAssembly Component Model ([mcp-policy-wit-sketch.md](../identity/mcp-policy-wit-sketch.md)). Guest components MUST export world `policy-bundle`; the host selects the Wasmtime linker from `manifest.toml` `target_wit` only.
 
 ## Consequences
 
@@ -172,7 +172,7 @@ Recommended OCI media types remain **proposed** in [wasm-bundle-format.md §2.3]
 | **Activate** | Atomic flip of in-memory active digest; drain prior pool after quiescence. |
 | **Reject** | On verify failure, retain prior bundle; emit audit `bundle_rejected`; set `/ready=false` if no prior bundle. |
 
-Control subject `mcp.control.bundle.reload` ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md)) is belt-and-braces; KV watcher is primary.
+Control subject `mcp.control.bundle.reload` is belt-and-braces; KV watcher is primary.
 
 ### Version pinning per gateway instance
 
