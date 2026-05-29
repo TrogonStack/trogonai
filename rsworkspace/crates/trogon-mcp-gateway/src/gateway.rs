@@ -24,6 +24,7 @@ use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::policy::hierarchical::{self, MergeRequestContext};
+use crate::policy::list_filter::{self, ListFilterParams, ToolCandidate};
 use crate::redaction::{
     RedactionApplyResult, RedactionDirection, RedactionOutcome, RedactionRegistry, RewriteEntry, SchemaRedactionContext,
     apply_schema_redaction, merge_outcomes,
@@ -746,8 +747,11 @@ async fn handle_ingress_inner(
             }
             let payload = if jsonrpc_method == "tools/list" {
                 shape_tools_list_response(
-                    checker.as_ref(),
+                    Arc::clone(checker),
                     &gateway_identity,
+                    &jwt_claims,
+                    act_chain_entries,
+                    tenant_for_rate,
                     server_id,
                     session_id.as_str(),
                     response.payload,
@@ -1305,8 +1309,11 @@ fn parse_server_id<'a>(prefix: &str, subject: &'a str) -> Result<&'a str, &'stat
 }
 
 async fn shape_tools_list_response(
-    checker: &dyn PermissionChecker,
+    checker: Arc<dyn PermissionChecker>,
     gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    act_chain: &[crate::act_chain::ActChainEntry],
+    tenant: &str,
     server_id: &str,
     session_id: &str,
     payload: Bytes,
@@ -1344,6 +1351,35 @@ async fn shape_tools_list_response(
         tool.get("name")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|name| allowed_set.contains(name))
+    });
+
+    let candidates: Vec<ToolCandidate> = tools
+        .iter()
+        .filter_map(|tool| {
+            let name = tool.get("name")?.as_str()?.to_string();
+            let input_schema = tool.get("inputSchema").cloned();
+            Some(ToolCandidate { name, input_schema })
+        })
+        .collect();
+
+    let cel_outcome = list_filter::filter_tools_by_cel(ListFilterParams {
+        identity: gateway_identity,
+        claims: jwt_claims,
+        act_chain,
+        tenant,
+        server_id,
+        session_id,
+        checker,
+        candidates,
+    });
+    list_filter::log_list_filter_audit_events(server_id, &cel_outcome.audit_events);
+
+    let kept_names: std::collections::HashSet<String> =
+        cel_outcome.kept.into_iter().map(|tool| tool.name).collect();
+    tools.retain(|tool| {
+        tool.get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|name| kept_names.contains(name))
     });
 
     let shaped = serde_json::to_vec(&value).map_err(|e| GatewayError(format!("tools/list response encode: {e}")))?;
