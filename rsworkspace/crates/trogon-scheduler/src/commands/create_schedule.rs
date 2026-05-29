@@ -1,7 +1,20 @@
+use buffa::MessageField;
 use trogon_decider_runtime::{Decider, Decision, WritePrecondition};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::{Job, ScheduleId, schedule_created_from_job};
+use super::domain::{Job, ScheduleDetails, ScheduleId};
+
+fn schedule_created_from_job(job: &Job) -> v1::ScheduleCreated {
+    let details = ScheduleDetails::from(job);
+
+    v1::ScheduleCreated {
+        schedule_id: job.id.as_str().to_string(),
+        status: MessageField::some(v1::ScheduleStatus::from(details.status)),
+        schedule: MessageField::some(v1::Schedule::from(&details.schedule)),
+        delivery: MessageField::some(v1::Delivery::from(&details.delivery)),
+        message: MessageField::some(v1::Message::from(&details.message)),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CreateScheduleCommand {

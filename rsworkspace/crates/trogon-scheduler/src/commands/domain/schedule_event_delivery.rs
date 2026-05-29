@@ -2,13 +2,13 @@ use buffa::MessageField;
 use buffa_types::google::protobuf::Duration;
 use trogonai_proto::scheduler::schedules::v1;
 
-use super::ScheduleEventSamplingSource;
+use super::{DeliveryRoute, ScheduleEventSamplingSource, TtlSeconds};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScheduleEventDelivery {
     NatsMessage {
-        subject: String,
-        ttl_sec: Option<u64>,
+        subject: DeliveryRoute,
+        ttl_sec: Option<TtlSeconds>,
         source: Option<ScheduleEventSamplingSource>,
     },
 }
@@ -23,11 +23,11 @@ impl From<&ScheduleEventDelivery> for v1::Delivery {
             } => v1::Delivery {
                 kind: Some(
                     v1::delivery::NatsMessage {
-                        subject: subject.clone(),
+                        subject: subject.as_str().to_string(),
                         ttl: ttl_sec
                             .map(|secs| {
                                 MessageField::some(Duration {
-                                    seconds: secs as i64,
+                                    seconds: i64::try_from(secs.as_u64()).unwrap_or(i64::MAX),
                                     nanos: 0,
                                     ..Duration::default()
                                 })

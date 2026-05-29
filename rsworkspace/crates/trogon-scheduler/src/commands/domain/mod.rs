@@ -13,7 +13,6 @@ pub use schedule::{
     RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
 pub use schedule_details::ScheduleDetails;
-pub(crate) use schedule_details::schedule_created_from_job;
 pub use schedule_event_delivery::ScheduleEventDelivery;
 pub use schedule_event_sampling_source::ScheduleEventSamplingSource;
 pub use schedule_event_schedule::ScheduleEventSchedule;

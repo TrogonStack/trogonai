@@ -808,12 +808,10 @@ impl From<&Schedule> for ScheduleEventSchedule {
     fn from(value: &Schedule) -> Self {
         match value {
             Schedule::At { at } => Self::At { at: *at },
-            Schedule::Every { every_sec } => Self::Every {
-                every_sec: every_sec.as_u64(),
-            },
+            Schedule::Every { every_sec } => Self::Every { every_sec: *every_sec },
             Schedule::Cron { expr, timezone } => Self::Cron {
-                expr: expr.as_str().to_string(),
-                timezone: timezone.as_ref().map(|timezone| timezone.as_str().to_string()),
+                expr: expr.clone(),
+                timezone: timezone.clone(),
             },
             Schedule::RRule {
                 dtstart,
@@ -823,8 +821,8 @@ impl From<&Schedule> for ScheduleEventSchedule {
                 exdate,
             } => Self::RRule {
                 dtstart: dtstart.to_datetime(),
-                rrule: rrule.as_str().to_string(),
-                timezone: timezone.as_ref().map(|timezone| timezone.as_str().to_string()),
+                rrule: rrule.clone(),
+                timezone: timezone.clone(),
                 rdate: rdate.iter().map(RRuleDateTime::to_datetime).collect(),
                 exdate: exdate.iter().map(RRuleDateTime::to_datetime).collect(),
             },
@@ -858,8 +856,8 @@ impl From<&Delivery> for ScheduleEventDelivery {
     fn from(value: &Delivery) -> Self {
         match value {
             Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsMessage {
-                subject: route.as_str().to_string(),
-                ttl_sec: ttl_sec.map(TtlSeconds::as_u64),
+                subject: route.clone(),
+                ttl_sec: *ttl_sec,
                 source: source.as_ref().map(Into::into),
             },
         }

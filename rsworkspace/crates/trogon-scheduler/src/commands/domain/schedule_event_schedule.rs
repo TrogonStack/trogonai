@@ -2,22 +2,24 @@ use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use trogonai_proto::scheduler::schedules::v1;
 
+use super::{CronExpression, EverySeconds, RRuleExpression, RRuleTimezone, ScheduleTimezone};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScheduleEventSchedule {
     At {
         at: chrono::DateTime<chrono::Utc>,
     },
     Every {
-        every_sec: u64,
+        every_sec: EverySeconds,
     },
     Cron {
-        expr: String,
-        timezone: Option<String>,
+        expr: CronExpression,
+        timezone: Option<ScheduleTimezone>,
     },
     RRule {
         dtstart: chrono::DateTime<chrono::Utc>,
-        rrule: String,
-        timezone: Option<String>,
+        rrule: RRuleExpression,
+        timezone: Option<RRuleTimezone>,
         rdate: Vec<chrono::DateTime<chrono::Utc>>,
         exdate: Vec<chrono::DateTime<chrono::Utc>>,
     },
@@ -32,15 +34,18 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
             .into(),
             ScheduleEventSchedule::Every { every_sec } => v1::schedule::Every {
                 every: MessageField::some(Duration {
-                    seconds: *every_sec as i64,
+                    seconds: i64::try_from(every_sec.as_u64()).unwrap_or(i64::MAX),
                     nanos: 0,
                     ..Duration::default()
                 }),
             }
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
-                expr: expr.clone(),
-                timezone: timezone.as_deref().map(timezone_from).unwrap_or_default(),
+                expr: expr.as_str().to_string(),
+                timezone: timezone
+                    .as_ref()
+                    .map(|timezone| timezone_from(timezone.as_str()))
+                    .unwrap_or_default(),
             }
             .into(),
             ScheduleEventSchedule::RRule {
@@ -51,8 +56,11 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
                 exdate,
             } => v1::schedule::RRule {
                 dtstart: MessageField::some(timestamp_from(dtstart)),
-                rrule: rrule.clone(),
-                timezone: timezone.as_deref().map(timezone_from).unwrap_or_default(),
+                rrule: rrule.as_str().to_string(),
+                timezone: timezone
+                    .as_ref()
+                    .map(|timezone| timezone_from(timezone.as_str()))
+                    .unwrap_or_default(),
                 rdate: rdate.iter().map(timestamp_from).collect(),
                 exdate: exdate.iter().map(timestamp_from).collect(),
             }
