@@ -202,6 +202,56 @@ where
     Arc::new(IngressChainResolver::new(registry, mode))
 }
 
+pub async fn spawn_schema_cache_invalidation(
+    client: Arc<async_nats::Client>,
+    prefix: &str,
+    runtime: Arc<crate::schema_cache::SchemaCacheRuntime>,
+) -> Result<(), String> {
+    use futures::StreamExt;
+
+    let notifications_subject = format!("{prefix}.client.>.notifications.>");
+    let mut notifications = client
+        .subscribe(notifications_subject.clone())
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let control_subject = format!("{prefix}.control.cache.invalidate.>");
+    let mut control = client
+        .subscribe(control_subject.clone())
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let prefix_notifications = prefix.to_string();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                message = notifications.next() => {
+                    let Some(msg) = message else { break };
+                    if let Err(err) = crate::schema_cache::handle_list_changed_notification(
+                        &runtime,
+                        prefix_notifications.as_str(),
+                        msg.subject.as_str(),
+                        &msg.payload,
+                    ).await {
+                        warn!(error = %err, "schema cache list_changed invalidation failed");
+                    }
+                }
+                message = control.next() => {
+                    let Some(msg) = message else { break };
+                    if let Err(err) = crate::schema_cache::handle_control_invalidate(
+                        &runtime,
+                        &msg.payload,
+                    ).await {
+                        warn!(error = %err, "schema cache control invalidation failed");
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
 fn is_originator_wkl(wkl: &str) -> bool {
     matches!(wkl, "human" | "batch") || wkl.starts_with("sentinel:")
 }
