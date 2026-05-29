@@ -1566,7 +1566,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         "ask_user is not available in this session.".to_string()
                     }
                 } else if !allowed {
-                    format!("Permission denied: user refused to run tool `{}`", call.name)
+                    format!("Permission denied: tool `{}` was not allowed (by the current mode, a rule, or user)", call.name)
                 } else if call.name == "change_directory" {
                     let path = tool_input
                         .get("path")

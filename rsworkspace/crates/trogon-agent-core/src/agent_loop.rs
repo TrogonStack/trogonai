@@ -916,7 +916,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         None => true,
                     };
                     if !allowed {
-                        format!("Permission denied: user refused to run tool `{name}`")
+                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
                     } else if let Some((_, original, client)) =
                         self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
                     {
@@ -1049,7 +1049,7 @@ impl<H: AnthropicHttpClient> AgentLoop<H> {
                         None => true,
                     };
                     if !allowed {
-                        format!("Permission denied: user refused to run tool `{name}`")
+                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
                     } else if let Some((_, original, client)) =
                         self.mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &name)
                     {
