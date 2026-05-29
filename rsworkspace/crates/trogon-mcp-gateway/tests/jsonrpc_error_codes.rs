@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/identity/reference-error-codes.md`
 //! - `docs/identity/failure-mode-matrix.md`
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 6
+//! - `reference-error-codes.md`
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings`, and gateway ingress request/reply (see `e2e_nats_forward.rs`).

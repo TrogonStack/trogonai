@@ -7,8 +7,8 @@
 //! metrics, and `/readyz` behavior during reconnect.
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block G — Operational tooling (config distribution, hot reload)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 9 — per-target inflight cap and rate-limit defaults
+//! - config distribution, hot reload
+//! - `reference-rate-defaults.md` — per-target inflight cap and rate-limit defaults
 //! - `docs/identity/reference-rate-defaults.md` — Pin 9 defaults, bucket refill semantics
 //! - `docs/adr/0006-mesh-token-signing-keys.md` — trust-bundle PEM reload on SIGHUP
 //!
@@ -32,7 +32,7 @@
 mod harness {
     #[allow(dead_code)]
     pub const CONFIG_RELOAD_IGNORE: &str =
-        "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands";
+        "scaffold; implement when config hot reload lands";
     #[allow(dead_code)]
     pub const METRIC_RELOAD_TOTAL: &str = "config.reload_total";
     #[allow(dead_code)]
@@ -45,7 +45,7 @@ mod sighup {
     //! SIGHUP triggers reload from the same config path; in-flight work keeps old config.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn sighup_reloads_config_from_same_path() {
         // Arrange: gateway running with YAML at temp path; note queue_group and audit settings.
         // Act: edit YAML (e.g. audit_stream_name), send SIGHUP, await reload ack.
@@ -54,7 +54,7 @@ mod sighup {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn in_flight_request_uses_config_active_at_request_start() {
         // Arrange: slow backend hold; start long-running tools/list before SIGHUP.
         // Act: change a visible setting (e.g. redaction rule path), SIGHUP while in-flight.
@@ -63,7 +63,7 @@ mod sighup {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn sighup_without_path_change_reuses_existing_file_handle() {
         // Arrange: gateway with config path `/tmp/gateway.yaml`.
         // Act: SIGHUP without moving/renaming the file; only mutate file contents.
@@ -72,7 +72,7 @@ mod sighup {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn concurrent_sighup_during_inflight_does_not_panic_gateway() {
         // Arrange: multiple slow in-flight requests.
         // Act: rapid SIGHUP while requests active.
@@ -85,7 +85,7 @@ mod invalid_reject {
     //! Invalid config changes are rejected; gateway continues on previous config.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn missing_required_field_rejects_reload() {
         // Arrange: valid running config; write YAML omitting required gateway field.
         // Act: SIGHUP.
@@ -94,7 +94,7 @@ mod invalid_reject {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn bad_nats_url_rejects_reload() {
         // Arrange: valid running config; write YAML with unreachable NATS URL.
         // Act: SIGHUP.
@@ -103,7 +103,7 @@ mod invalid_reject {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn rejected_reload_emits_config_reload_error_metric() {
         // Arrange: metrics scraper or in-process registry; valid gateway.
         // Act: SIGHUP with invalid YAML (missing required field).
@@ -112,7 +112,7 @@ mod invalid_reject {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn rejected_reload_leaves_in_flight_requests_unaffected() {
         // Arrange: slow in-flight request on valid config; prepare invalid reload file.
         // Act: SIGHUP during in-flight.
@@ -125,7 +125,7 @@ mod nats_reconnect {
     //! NATS URL change forces graceful reconnect and queue-group re-subscription.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn nats_url_change_triggers_graceful_reconnect() {
         // Arrange: gateway on broker A; second broker B with same subject layout.
         // Act: update YAML NATS URL to B, SIGHUP.
@@ -134,7 +134,7 @@ mod nats_reconnect {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn queue_group_subscriptions_reestablished_after_reconnect() {
         // Arrange: queue_group name in config; two gateway instances on same group (or spy subscriber).
         // Act: change NATS URL, SIGHUP.
@@ -143,7 +143,7 @@ mod nats_reconnect {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn unchanged_nats_url_skips_reconnect_on_reload() {
         // Arrange: running gateway; edit non-NATS field only (e.g. rate defaults).
         // Act: SIGHUP.
@@ -156,7 +156,7 @@ mod rate_defaults {
     //! Pin 9 rate-limit default changes: new buckets immediately, existing until refill.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn new_caller_buckets_use_updated_default_budget() {
         // Arrange: reload lowers caller budget from 100/10s to 3/1s (test override).
         // Act: SIGHUP; first request from fresh jwt.sub after reload.
@@ -165,7 +165,7 @@ mod rate_defaults {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn existing_buckets_keep_prior_limits_until_refill() {
         // Arrange: exhaust budget under old defaults; reload to stricter defaults before window ends.
         // Act: SIGHUP; same jwt.sub continues within original window.
@@ -174,7 +174,7 @@ mod rate_defaults {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn server_inflight_default_change_applies_to_new_servers() {
         // Arrange: reload changes per-server inflight cap default (Pin 9: 256).
         // Act: register new server_id after reload; saturate inflight.
@@ -187,7 +187,7 @@ mod trust_bundle {
     //! Trust-bundle path change re-validates JWTs against new signing keys.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn trust_bundle_path_change_reloads_jwks() {
         // Arrange: gateway with trust-bundle path A; token signed by key in bundle A accepted.
         // Act: SIGHUP with path B containing different trusted keys only.
@@ -196,7 +196,7 @@ mod trust_bundle {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn previously_accepted_token_rejected_after_untrusted_key_rotation() {
         // Arrange: JWT signed by key K1 in bundle A; request succeeds.
         // Act: reload bundle B that omits K1; retry same token.
@@ -205,7 +205,7 @@ mod trust_bundle {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn in_flight_request_keeps_prior_trust_bundle_until_complete() {
         // Arrange: slow in-flight with token valid under bundle A.
         // Act: SIGHUP to bundle B that would reject same token for new requests.
@@ -218,7 +218,7 @@ mod logging {
     //! Reload events log config SHA-256 before and after.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn successful_reload_logs_sha256_before_and_after() {
         // Arrange: log capture (tracing subscriber or structured log fixture).
         // Act: mutate config file, SIGHUP.
@@ -227,7 +227,7 @@ mod logging {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn rejected_reload_logs_sha256_before_only() {
         // Arrange: valid config hash H1; invalid reload file.
         // Act: SIGHUP.
@@ -236,7 +236,7 @@ mod logging {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn noop_reload_same_content_logs_matching_sha256() {
         // Arrange: capture hash H1 of running config.
         // Act: rewrite identical YAML, SIGHUP.
@@ -249,7 +249,7 @@ mod metrics {
     //! `config.reload_total{outcome}` tracks success and failure separately.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn successful_reload_increments_reload_total_outcome_success() {
         // Arrange: metrics registry; valid config edit.
         // Act: SIGHUP.
@@ -258,7 +258,7 @@ mod metrics {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn failed_reload_increments_reload_total_outcome_failure() {
         // Arrange: metrics registry; invalid config file prepared.
         // Act: SIGHUP.
@@ -267,7 +267,7 @@ mod metrics {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn success_and_failure_counters_are_independent() {
         // Arrange: zeroed counters.
         // Act: one successful reload then one failed reload.
@@ -280,7 +280,7 @@ mod readiness {
     //! `/readyz` flips to 503 during NATS reconnect, then back to 200.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn readyz_returns_503_during_nats_reconnect() {
         // Arrange: gateway admin listener on :8080; NATS URL change requiring reconnect.
         // Act: SIGHUP; poll GET /readyz during reconnect window.
@@ -289,7 +289,7 @@ mod readiness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn readyz_returns_200_after_reconnect_completes() {
         // Arrange: same as above; wait for NATS reconnect + queue-group bind.
         // Act: poll /readyz after reconnect.
@@ -298,7 +298,7 @@ mod readiness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when config hot reload per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when config hot reload lands"]
     async fn readyz_stays_200_when_reload_does_not_change_nats_url() {
         // Arrange: reload edits rate defaults only (no NATS URL change).
         // Act: SIGHUP; poll /readyz.

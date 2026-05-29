@@ -10,7 +10,7 @@
 //! - `docs/identity/tenancy-boundary.md` — normative MUST/MUST NOT tables, enforcement surfaces
 //! - `docs/adr/0002-identity-layers.md` — identity layer ordering (JWT before policy)
 //! - `docs/adr/0001-tenancy-model.md` — hybrid hard/soft tenancy model
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 3 (queue group strategy), Pin 6 (`-32100 policy_deny`)
+//! - `reference-queue-groups.md` (queue group strategy), Pin 6 (`-32100 policy_deny`)
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings` with `JwtValidator` in `Require` mode, gateway ingress request/reply
@@ -178,7 +178,7 @@ mod queue_group {
         // Arrange: gateway settings for tenant acme; Pin 3 base group `mcp-gateway`.
         // Act: inspect subscription queue group on `mcp.gateway.request.>`.
         // Assert: queue group name encodes tenant (e.g. mcp-gateway-acme or per-account variant).
-        unimplemented!("tenant-scoped queue group per MCP_GATEWAY_PLAN Pin 3 and tenancy-boundary.md §5");
+        unimplemented!("tenant-scoped queue group");
     }
 
     #[tokio::test]
@@ -245,7 +245,7 @@ mod no_tenant {
         // Arrange: valid JWT missing tenant and namespaced tenant claim; MCP_GATEWAY_JWT_MODE=require.
         // Act: tools/list ingress request.
         // Assert: deny before policy/SpiceDB; no anonymous-tier unless explicit bundle rule.
-        unimplemented!("default-deny without tenant claim per MCP_GATEWAY_PLAN and tenancy-boundary.md §4.1");
+        unimplemented!("default-deny without tenant claim");
     }
 
     #[tokio::test]
@@ -264,7 +264,7 @@ mod no_tenant {
         // Act: matching tools/list with anonymous principal.
         // Assert: allow only when explicit rule present; otherwise policy_deny or auth deny.
         let _ = rpc_codes::POLICY_DENY;
-        unimplemented!("anonymous-tier exception is opt-in per MCP_GATEWAY_PLAN bootstrap posture");
+        unimplemented!("anonymous-tier exception is opt-in");
     }
 }
 

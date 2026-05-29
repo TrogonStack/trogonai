@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/adr/0014-bulk-check-zedtoken-cache.md`
 //! - `docs/identity/bulk-check-permission.md`
-//! - `MCP_GATEWAY_PLAN.md` Block E item 3
+//! - item 3
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;

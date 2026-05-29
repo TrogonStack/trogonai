@@ -7,7 +7,7 @@
 //!
 //! Cross-references:
 //! - `docs/identity/reference-audit-envelope.md` (audit envelope contract, `delivered_at_us`, `ts_us`)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 7 (audit publish path and delivery guarantees)
+//! - `reference-audit-envelope.md` (audit publish path and delivery guarantees)
 //! - NATS JetStream publish deduplication (`Nats-Msg-Id` header within `duplicate_window`)
 //!
 //! Harness pattern: live NATS broker with JetStream, `mcp_nats::Config`, `McpPrefix`,

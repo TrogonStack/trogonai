@@ -18,7 +18,7 @@
 //!
 //! Cross-references:
 //! - Previously merged `adaptive-access` branch (`docs/identity/adaptive-access.md`)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 8 (CEL variable namespace; proposed `risk.*` root)
+//! - `reference-cel-variables.md` (CEL variable namespace; proposed `risk.*` root)
 //! - `docs/identity/reference-cel-variables.md` (Pin 8 roots and host ABI)
 //! - `docs/adr/0008-policy-dsl.md` (CEL policy DSL; `risk_adjunct` tier)
 //!

@@ -7,7 +7,7 @@
 //! (`min_ready_replicas`).
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block G operational section (health probes, k8s deployment)
+//! - health probes, k8s deployment
 //! - `docs/identity/k8s-controller.md` (probe endpoints on `:8080`, readiness semantics)
 //! - Kubernetes probe conventions: liveness != dependency health
 //!
@@ -56,7 +56,7 @@ mod liveness {
     use super::harness::{HEALTHZ_PATH, PROBE_LISTEN_ADDR};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_returns_200_after_nats_connection_bound() {
         // Arrange: start gateway with live NATS; wait for NATS client connected.
         // Act: GET http://{PROBE_LISTEN_ADDR}{HEALTHZ_PATH}.
@@ -66,7 +66,7 @@ mod liveness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_returns_200_when_spicedb_unreachable() {
         // Arrange: gateway with NATS up; SpiceDB endpoint blackholed or stopped.
         // Act: GET /healthz.
@@ -75,7 +75,7 @@ mod liveness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_does_not_require_bundle_loaded() {
         // Arrange: gateway started before bundle KV watcher delivers first revision.
         // Act: GET /healthz while /readyz still 503.
@@ -84,7 +84,7 @@ mod liveness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_json_body_reports_process_status() {
         // Arrange: gateway with NATS bound.
         // Act: GET /healthz.
@@ -97,7 +97,7 @@ mod readiness {
     use super::harness::{PROBE_POLL_INTERVAL, READYZ_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_returns_503_until_bundle_loaded() {
         // Arrange: gateway start; delay or block bundle KV initial load.
         // Act: GET /readyz before first bundle revision applied.
@@ -107,7 +107,7 @@ mod readiness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_returns_503_when_nats_disconnected() {
         // Arrange: gateway ready; stop NATS or sever client connection.
         // Act: GET /readyz.
@@ -116,7 +116,7 @@ mod readiness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_flips_to_200_on_nats_reconnect() {
         // Arrange: gateway was 503 due to NATS loss; restore broker / reconnect.
         // Act: poll GET /readyz until stable.
@@ -125,7 +125,7 @@ mod readiness {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_false_when_min_ready_replicas_unmet_for_any_server() {
         // Arrange: bundle declares min_ready_replicas per server_id; no upstream backends reachable.
         // Act: GET /readyz.
@@ -138,7 +138,7 @@ mod content_type {
     use super::harness::{HEALTHZ_PATH, PROBE_CONTENT_TYPE, READYZ_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_response_content_type_is_application_json() {
         // Arrange: gateway with probes enabled.
         // Act: GET /healthz; inspect headers.
@@ -148,7 +148,7 @@ mod content_type {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_response_content_type_is_application_json() {
         // Arrange: gateway ready or not.
         // Act: GET /readyz.
@@ -157,7 +157,7 @@ mod content_type {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn probe_json_body_includes_status_and_checks_object() {
         // Arrange: gateway in mixed dependency state.
         // Act: GET /healthz and /readyz.
@@ -166,7 +166,7 @@ mod content_type {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn probe_json_body_shape_is_stable_across_status_codes() {
         // Arrange: force 200 liveness and 503 readiness scenarios.
         // Act: compare JSON schemas.
@@ -179,7 +179,7 @@ mod exemptions {
     use super::harness::{HEALTHZ_PATH, READYZ_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_requests_do_not_count_toward_rate_limits() {
         // Arrange: saturate caller rate budget with MCP ingress traffic.
         // Act: burst GET /healthz beyond MCP request quota.
@@ -189,7 +189,7 @@ mod exemptions {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_requests_do_not_count_toward_rate_limits() {
         // Arrange: per-caller budget exhausted on gateway.request subjects.
         // Act: repeated GET /readyz.
@@ -199,7 +199,7 @@ mod exemptions {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn healthz_does_not_require_jwt() {
         // Arrange: gateway with JWT ingress enforced on MCP subjects.
         // Act: GET /healthz without Authorization header.
@@ -208,7 +208,7 @@ mod exemptions {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when health probes per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when health probes lands"]
     async fn readyz_does_not_require_jwt() {
         // Arrange: strict JWT on `{prefix}.gateway.request.>`.
         // Act: GET /readyz without credentials.

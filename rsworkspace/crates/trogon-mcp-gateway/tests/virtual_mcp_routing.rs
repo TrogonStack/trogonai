@@ -8,7 +8,7 @@
 //! Cross-references:
 //! - [reference-virtual-mcp.md](../../../docs/identity/reference-virtual-mcp.md) (splitting,
 //!   `tools/list` merge, resource URIs, failure codes)
-//! - [MCP_GATEWAY_PLAN.md](../../../MCP_GATEWAY_PLAN.md) Wire-Format Pin 4 and
+//! - and
 //!   "Virtual MCP (federation) in subjects"
 //!
 //! Implementation target (proposed): `trogon_mcp_gateway::gateway::virtual_mcp`.
@@ -48,7 +48,7 @@ mod tools_call_routing {
         // Arrange: virtual server with member `github` -> backend `github`.
         // Act: federated `tools/call` for `github::create_issue`.
         // Assert: egress subject `{prefix}.server.github.tools.call` (not `virtual-*`).
-        unimplemented!("virtual-MCP egress subject per MCP_GATEWAY_PLAN.md Virtual MCP in subjects");
+        unimplemented!("virtual-MCP egress subject");
     }
 
     #[tokio::test]
@@ -121,7 +121,7 @@ mod tools_list_federation {
         // Arrange: virtual server members `github`, `linear`, `notion`; session without prior init.
         // Act: `mcp.gateway.request.virtual-default.tools.list`.
         // Assert: parallel `initialize` (or equivalent) per member before list fan-out.
-        unimplemented!("parallel member init per MCP_GATEWAY_PLAN.md lazy virtual init");
+        unimplemented!("parallel member init");
     }
 
     #[tokio::test]
@@ -167,7 +167,7 @@ mod unknown_target_errors {
         // Act: virtual `tools/call`.
         // Assert: `error.message` / audit `decision_reason` = `backend_unreachable`.
         assert_eq!(rpc_codes::BACKEND_UNREACHABLE, -32_103);
-        unimplemented!("backend_unreachable symbol per MCP_GATEWAY_PLAN.md §6");
+        unimplemented!("backend_unreachable symbol per reference-error-codes.md");
     }
 }
 

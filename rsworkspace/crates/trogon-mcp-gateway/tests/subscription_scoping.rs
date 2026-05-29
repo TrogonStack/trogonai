@@ -8,7 +8,7 @@
 //! Cross-references:
 //! - `docs/identity/reference-reply-inboxes.md` — `_INBOX.client.{nuid}`, inbox ACL, subscribe topology
 //! - `docs/adr/0011-nats-auth-callout.md` — CONNECT-time User JWT and `nats.sub` permission templates
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 2 (reply inboxes and subscription scoping)
+//! - `reference-reply-inboxes.md` (reply inboxes and subscription scoping)
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings`, auth-callout mint stub or real callout handler, client CONNECT with
@@ -122,7 +122,7 @@ mod notifications {
         // Arrange: client subscribed to harness::client_notifications_list_changed(TEST_CLIENT_ID).
         // Act: backend (or gateway fan-out) publishes MCP notification on that exact subject.
         // Assert: client receives JSON-RPC notification envelope.
-        unimplemented!("allowed narrow notification subject per MCP_GATEWAY_PLAN Pin 2");
+        unimplemented!("allowed narrow notification subject");
     }
 
     #[tokio::test]
@@ -308,6 +308,6 @@ mod audit {
     async fn subscribe_audit_labels_include_subject_and_outcome_only() {
         // Arrange: capture metric sample after allow and deny attempts.
         // Assert: label set is {outcome} in {allow, deny}; no high-cardinality subject label.
-        unimplemented!("mcp_subscribe_total cardinality contract per MCP_GATEWAY_PLAN Pin 2");
+        unimplemented!("mcp_subscribe_total cardinality contract");
     }
 }

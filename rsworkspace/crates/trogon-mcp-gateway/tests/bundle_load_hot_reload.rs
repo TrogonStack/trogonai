@@ -8,7 +8,7 @@
 //! Cross-refs:
 //! - `docs/adr/0010-bundle-format.md`
 //! - `docs/identity/howto-write-bundle.md`
-//! - `MCP_GATEWAY_PLAN.md` Block F item 5 (gateway runtime wiring)
+//! - gateway runtime wiring
 //!
 //! The `loader_api` module exercises `trogon_mcp_gateway::bundle::load_bundle` directly.
 //! The `kv_loader_api` module exercises `BundleKvLoader` without gateway HTTP wiring.

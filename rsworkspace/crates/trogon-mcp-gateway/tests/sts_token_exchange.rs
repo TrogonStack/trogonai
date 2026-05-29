@@ -10,7 +10,7 @@
 //! - `docs/identity/sts-exchange.md` (wire contract, caching, failure modes)
 //! - `docs/adr/0002-identity-layers.md` (identity triplet, `act_chain` semantics)
 //! - `docs/adr/0003-bootstrap-vs-mesh-tokens.md` (bootstrap vs mesh token roles)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 6 (`-32107` `authz_unreachable`), audit `act_chain`
+//! - `reference-error-codes.md` (`-32107` `authz_unreachable`), audit `act_chain`
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings` with `EgressMinter` / `StsClient` (see `egress_mint.rs`, `e2e_nats_forward.rs`).
@@ -19,7 +19,7 @@
 //! - Happy path mints `aud=mcp_aud` with delegation in `act_chain`; backend receives mesh bearer.
 //! - STS timeout/refusal surfaces structured JSON-RPC errors without backend side effects.
 //! - Cache hit/miss and JWT rotation invalidation per `docs/identity/sts-exchange.md` caching contract.
-//! - `act_chain` depth cap rejects over-long chains with STS telemetry per MCP_GATEWAY_PLAN.md.
+//! - `act_chain` depth cap rejects over-long chains with STS telemetry per the gateway STS telemetry contract.
 
 #![allow(unused_imports)]
 
@@ -80,7 +80,7 @@ mod happy_path {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn inbound_client_aud_jwt_triggers_sts_exchange_for_backend_mcp_aud() {
         // Arrange: bootstrap JWT with `aud=urn:trogon:mcp:client:{tenant}:{client_id}`; stub STS responder.
         // Act: gateway ingress `tools/list` with Authorization bearer.
@@ -89,7 +89,7 @@ mod happy_path {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn minted_mesh_token_aud_matches_backend_target_not_inbound_client_aud() {
         // Arrange: STS stub returns signed mesh JWT for backend audience.
         // Act: complete egress forward path.
@@ -98,7 +98,7 @@ mod happy_path {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn minted_token_act_chain_carries_gateway_delegation_hop() {
         // Arrange: inbound JWT without pre-existing mesh chain; gateway actor_token configured.
         // Act: STS exchange + backend forward.
@@ -107,7 +107,7 @@ mod happy_path {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn backend_receives_minted_bearer_not_inbound_jwt() {
         // Arrange: distinct bootstrap inbound JWT and STS-minted mesh token (see `egress_mint.rs`).
         // Act: gateway forwards to `{prefix}.server.{server_id}.tools.list`.
@@ -122,7 +122,7 @@ mod failure {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn sts_unreachable_timeout_returns_authz_unreachable_with_elapsed_ms() {
         // Arrange: StsClientConfig with dead-letter subject and short timeout; no STS responder.
         // Act: ingress request requiring egress mint.
@@ -134,7 +134,7 @@ mod failure {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn sts_timeout_error_message_is_sts_unavailable() {
         // Arrange: STS NATS request times out (see `egress_mint::sts_timeout_returns_structured_error`).
         // Act: gateway ingress tools/list.
@@ -143,7 +143,7 @@ mod failure {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn sts_refuses_subject_not_allowed_for_target_audience_blocks_without_backend_hit() {
         // Arrange: STS stub returns ExchangeRejected { error: "invalid_target", .. }; backend spy subscribed.
         // Act: gateway ingress with inbound JWT whose subject cannot act-as target audience.
@@ -152,7 +152,7 @@ mod failure {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn sts_access_denied_emits_sts_deny_audit_without_backend_forward() {
         // Arrange: STS stub returns `access_denied`; JetStream audit consumer on `mcp.audit.sts.deny`.
         // Act: blocked exchange attempt.
@@ -167,7 +167,7 @@ mod caching {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn same_sub_aud_scope_reuses_cached_sts_minted_token_until_exp_minus_skew() {
         // Arrange: warm EgressMinter cache from first tools/list; clock before exp - 30s skew.
         // Act: second tools/list with identical principal, backend aud, and scope fingerprint.
@@ -176,7 +176,7 @@ mod caching {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn cache_hit_skips_second_sts_nats_exchange_request() {
         // Arrange: counting STS stub on `mcp.sts.exchange` (or test subject); warm cache.
         // Act: repeat ingress within cache TTL.
@@ -185,7 +185,7 @@ mod caching {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn inbound_jwt_rotation_new_kid_invalidates_cache_and_refreshes_sts() {
         // Arrange: warm cache with inbound JWT kid=A; re-mint inbound JWT with kid=B, same sub/aud.
         // Act: tools/list with rotated JWT.
@@ -194,7 +194,7 @@ mod caching {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn inbound_jwt_rotation_new_iat_invalidates_cache_and_refreshes_sts() {
         // Arrange: warm cache; inbound JWT reissued with newer `iat`, same `sub` and `aud`.
         // Act: tools/list with rotated JWT.
@@ -209,7 +209,7 @@ mod act_chain {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn act_chain_exceeding_configured_max_depth_rejected_by_sts() {
         // Arrange: inbound mesh JWT with act_chain.len() >= MAX_ACT_CHAIN_DEPTH (default 8).
         // Act: gateway egress STS exchange attempt.
@@ -221,7 +221,7 @@ mod act_chain {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn act_chain_depth_cap_blocks_backend_forward() {
         // Arrange: over-cap inbound chain; backend spy subscribed.
         // Act: gateway ingress requiring egress mint.
@@ -230,16 +230,16 @@ mod act_chain {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn act_chain_depth_exceeded_emits_sts_deny_audit_with_depth_reason() {
         // Arrange: audit consumer on `mcp.audit.sts.deny`.
         // Act: exchange with chain at capacity.
-        // Assert: audit reason act_chain_depth_exceeded; act_chain_depth in minted/request metadata per MCP_GATEWAY_PLAN.md.
+        // Assert: audit reason act_chain_depth_exceeded; act_chain_depth in minted/request metadata per the gateway STS telemetry contract.
         unimplemented!("subscribe mcp.audit.sts.deny; assert STS purpose-reject telemetry fields");
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when STS exchange + cache per MCP_GATEWAY_PLAN.md lands"]
+    #[ignore = "scaffold; implement when STS exchange + cache lands"]
     async fn act_chain_loop_detected_rejects_exchange_before_backend_hit() {
         // Arrange: inbound JWT act_chain with duplicate (agent_id, wkl) pair.
         // Act: gateway egress exchange.

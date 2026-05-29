@@ -6,7 +6,7 @@
 //! safety (tool names and per-user identifiers stay off metric labels).
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block G operational section (metrics, `/metrics` export)
+//! - metrics, `/metrics` export
 //! - `docs/identity/otel-wiring.md` (metric catalog, cardinality budget)
 //! - OpenMetrics 1.0 text exposition (`Content-Type: application/openmetrics-text`)
 //! - Prometheus naming and cardinality best practices
@@ -58,7 +58,7 @@ mod requests {
     pub const DECISIONS: &[&str] = &["allow", "deny", "fault"];
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_requests_total_increments_on_allow_forward() {
         // Arrange: gateway allow path for `tools/list`; tenant from JWT/header
         // Act: scrape GET http://{METRICS_LISTEN_ADDR}{METRICS_PATH}
@@ -69,7 +69,7 @@ mod requests {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_requests_total_increments_on_policy_deny() {
         // Arrange: CEL deny before backend fan-out
         // Assert: decision label `deny` (not `error`)
@@ -77,7 +77,7 @@ mod requests {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_requests_total_increments_on_fault() {
         // Arrange: bundle/CEL fault path (`-32101` class)
         // Assert: decision label `fault`
@@ -85,7 +85,7 @@ mod requests {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_requests_total_rejects_unknown_decision_label() {
         // Arrange: in-process registry or scrape parse
         // Assert: only {allow, deny, fault} appear on `decision` label
@@ -109,7 +109,7 @@ mod duration {
     ];
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_request_duration_seconds_observes_allow_path() {
         // Arrange: completed allow forward for `tools/call`
         // Act: scrape histogram
@@ -120,7 +120,7 @@ mod duration {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_request_duration_seconds_bucket_boundaries_are_stable() {
         // Arrange: scrape after synthetic latency injection (or fixture clock)
         // Assert: `le` labels match BUCKET_UPPER_BOUNDS exactly (no drift across releases)
@@ -129,7 +129,7 @@ mod duration {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_request_duration_seconds_uses_method_root_not_full_method() {
         // Arrange: ingress `resources/read`
         // Assert: label method_root="resources_read" (not `resources/read`)
@@ -146,7 +146,7 @@ mod policy {
     pub const LABEL_RULE_ID: &str = "rule_id";
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_policy_rule_fired_total_increments_per_cel_rule_id() {
         // Arrange: bundle with two rules; traffic matches rule `deny-tools-call`
         // Act: scrape counter
@@ -156,7 +156,7 @@ mod policy {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_policy_rule_fired_total_one_series_per_distinct_rule_id() {
         // Arrange: two rules fire on separate requests
         // Assert: two label values on rule_id, no aggregation across rules
@@ -164,7 +164,7 @@ mod policy {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_policy_rule_fired_total_has_no_tenant_label() {
         // Arrange: multi-tenant traffic through same bundle revision
         // Assert: rule_id label only (tenant rollups use mcp_requests_total)
@@ -184,7 +184,7 @@ mod spicedb {
     pub const OUTCOMES: &[&str] = &["permitted", "denied", "error"];
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_spicedb_check_total_permitted_series() {
         // Arrange: CheckBulkPermissions allow with fresh token
         // Assert: outcome="permitted", cache_hit="false"
@@ -193,7 +193,7 @@ mod spicedb {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_spicedb_check_total_denied_series() {
         // Arrange: PDP deny
         // Assert: outcome="denied"
@@ -201,7 +201,7 @@ mod spicedb {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_spicedb_check_total_error_and_cache_hit_labels() {
         // Arrange: gRPC failure; separate request with ZedToken cache hit
         // Assert: outcome="error"; cache_hit="true" on cached path
@@ -221,7 +221,7 @@ mod rate_limit {
     pub const SCOPES: &[&str] = &["tenant", "subject", "method_root", "global"];
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_rate_limit_drops_total_tenant_scope() {
         // Arrange: tenant bucket exhausted (`-32105`)
         // Assert: scope="tenant"
@@ -230,7 +230,7 @@ mod rate_limit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_rate_limit_drops_total_subject_and_method_root_scopes() {
         // Arrange: per-subject and per-method_root caps
         // Assert: scope in {subject, method_root}
@@ -238,7 +238,7 @@ mod rate_limit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_rate_limit_drops_total_global_scope() {
         // Arrange: fleet-wide ingress flood cap
         // Assert: scope="global"
@@ -258,7 +258,7 @@ mod audit {
     pub const OUTCOMES: &[&str] = &["ok", "retry", "fail"];
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_audit_publish_total_ok_on_jetstream_ack() {
         // Arrange: audit publish succeeds
         // Assert: outcome="ok"
@@ -267,7 +267,7 @@ mod audit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_audit_publish_total_retry_on_transient_failure() {
         // Arrange: publish retried before ack
         // Assert: outcome="retry"
@@ -275,7 +275,7 @@ mod audit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn mcp_audit_publish_total_fail_after_exhausted_retries() {
         // Arrange: JetStream publish fails permanently (request path still completes)
         // Assert: outcome="fail"
@@ -289,7 +289,7 @@ mod cardinality {
     use super::harness::{METRICS_LISTEN_ADDR, METRICS_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn tool_name_is_not_a_prometheus_label() {
         // Arrange: `tools/call` with params.name="create_issue"
         // Act: scrape all `mcp_*` series
@@ -299,7 +299,7 @@ mod cardinality {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn per_user_labels_are_not_exposed_on_metrics() {
         // Arrange: distinct JWT subjects under same tenant
         // Assert: no `user`, `user_id`, `subject`, `agent_id`, or `session_id` label keys
@@ -307,7 +307,7 @@ mod cardinality {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn request_id_and_trace_id_are_not_metric_labels() {
         // Arrange: high-volume ingress with unique JSON-RPC ids
         // Assert: scraped series label key set is subset of pinned v1 keys only
@@ -315,7 +315,7 @@ mod cardinality {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn nats_subject_strings_are_not_metric_labels() {
         // Arrange: varying ingress subject suffixes
         // Assert: no `subject` or `subject_in` label on gateway counters/histograms
@@ -328,7 +328,7 @@ mod format {
     use super::harness::{METRICS_LISTEN_ADDR, METRICS_PATH, OPENMETRICS_CONTENT_TYPE};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn metrics_endpoint_returns_openmetrics_content_type() {
         // Arrange: gateway operational listener up
         // Act: GET /metrics
@@ -338,7 +338,7 @@ mod format {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn metrics_body_is_openmetrics_text_exposition() {
         // Arrange: scrape after at least one allow request
         // Assert: HELP/TYPE lines; counter/histogram syntax; `# EOF` trailer if required
@@ -346,7 +346,7 @@ mod format {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when metric surface per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when metric surface lands"]
     async fn metrics_endpoint_exposes_pinned_mcp_series_names() {
         // Arrange: drive allow, deny, rate-limit, and audit paths
         // Assert: body contains mcp_requests_total, mcp_request_duration_seconds,

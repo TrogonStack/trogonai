@@ -8,7 +8,7 @@
 //! Cross-references:
 //! - [0016-multi-region-topology.md](../../../docs/adr/0016-multi-region-topology.md)
 //! - [multi-region.md](../../../docs/identity/multi-region.md)
-//! - [MCP_GATEWAY_PLAN.md](../../../MCP_GATEWAY_PLAN.md) Block G multi-region section
+//! - multi-region section
 //!
 //! Harness types: `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `trogon_mcp_gateway::gateway::GatewaySettings` (see `e2e_nats_forward.rs`).
@@ -125,7 +125,7 @@ mod drain {
         // Arrange: us-east draining; cross-region fallback policy enabled.
         // Act: GET /readyz on us-east gateway.
         // Assert: readiness reports draining; new cross-region work not scheduled locally.
-        unimplemented!("drain readiness semantics per MCP_GATEWAY_PLAN Block G");
+        unimplemented!("drain readiness semantics");
     }
 }
 
@@ -189,7 +189,7 @@ mod tenancy_pin {
         // Arrange: misrouted client to eu-west for us-east-only tenant.
         // Act: tools/call.
         // Assert: stable error code/class (not NATS timeout masquerading as pin failure).
-        unimplemented!("explicit tenancy-pin error surface per MCP_GATEWAY_PLAN Block G");
+        unimplemented!("explicit tenancy-pin error surface");
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@
 //! permitted.
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block G operational section (TLS, mTLS, trust bundles)
+//! - TLS, mTLS, trust bundles
 //! - SPIFFE SVID specification (SAN URI `spiffe://` workload identity)
 //! - Previously merged spire-wiring branch (SPIFFE / SPIRE workload integration)
 //! - `docs/adr/0006-mesh-token-signing-keys.md` (trust-bundle PEM rotation on reload)

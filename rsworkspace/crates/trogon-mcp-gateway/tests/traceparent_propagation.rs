@@ -5,7 +5,7 @@
 //!
 //! Cross-references:
 //! - `docs/identity/reference-audit-envelope.md` (`trace_id`, `span_id` header fields)
-//! - `MCP_GATEWAY_PLAN.md` Wire-Format Pin 7
+//! - `reference-audit-envelope.md`
 //! - W3C Trace Context (`https://www.w3.org/TR/trace-context/`)
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,

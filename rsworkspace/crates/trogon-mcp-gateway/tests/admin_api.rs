@@ -5,7 +5,7 @@
 //! envelopes, feature-flagged mount (`admin_api_enabled`), and optional mTLS on the admin port.
 //!
 //! Cross-references:
-//! - `MCP_GATEWAY_PLAN.md` Block G operational section (admin API, reload, rollback, status)
+//! - admin API, reload, rollback, status
 //! - `tests/e2e_nats_forward.rs` — harness pattern (`GatewaySettings`, `McpPrefix`,
 //!   `trogon_nats::NatsAuth`, `AllowAllPermissionChecker`, `trogon_mcp_gateway::run`)
 //!
@@ -29,7 +29,7 @@ mod harness {
 
     #[allow(dead_code)]
     pub const ADMIN_IGNORE: &str =
-        "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands";
+        "scaffold; implement when admin API lands";
     #[allow(dead_code)]
     pub const ADMIN_LISTEN_ADDR: &str = "127.0.0.1:8081";
     #[allow(dead_code)]
@@ -52,7 +52,7 @@ mod reload {
     use super::harness::{ADMIN_LISTEN_ADDR, RELOAD_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_reload_returns_config_and_bundle_sha256_with_outcome() {
         // Arrange: gateway with admin_api_enabled; valid admin JWT; note current config/bundle hashes.
         // Act: POST http://{ADMIN_LISTEN_ADDR}{RELOAD_PATH}.
@@ -62,7 +62,7 @@ mod reload {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_reload_applies_config_and_bundle_from_pinned_paths() {
         // Arrange: mutate config YAML and bundle KV revision before reload.
         // Act: POST /admin/reload.
@@ -71,7 +71,7 @@ mod reload {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_reload_in_flight_requests_retain_prior_config_until_complete() {
         // Arrange: slow in-flight MCP request; prepare config change visible only after reload.
         // Act: POST /admin/reload while request active.
@@ -80,7 +80,7 @@ mod reload {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_reload_failure_returns_outcome_failure_with_prior_sha256() {
         // Arrange: invalid bundle revision or config validation error staged.
         // Act: POST /admin/reload.
@@ -95,7 +95,7 @@ mod rollback {
     use super::harness::{ADMIN_LISTEN_ADDR, ROLLBACK_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_rollback_returns_previous_and_new_bundle_sha256() {
         // Arrange: gateway with at least two bundle revisions loaded; note current sha.
         // Act: POST http://{ADMIN_LISTEN_ADDR}{ROLLBACK_PATH}.
@@ -105,7 +105,7 @@ mod rollback {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_rollback_restores_prior_policy_evaluation_behavior() {
         // Arrange: bundle N denies tool X; bundle N-1 allows tool X.
         // Act: POST /admin/bundle/rollback after loading bundle N.
@@ -114,7 +114,7 @@ mod rollback {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn post_rollback_without_prior_revision_returns_error_outcome() {
         // Arrange: gateway with only initial bundle revision (no rollback target).
         // Act: POST /admin/bundle/rollback.
@@ -129,7 +129,7 @@ mod status {
     use super::harness::{ADMIN_LISTEN_ADDR, STATUS_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_status_reports_nats_and_spicedb_state() {
         // Arrange: gateway with live NATS; SpiceDB reachable or stubbed.
         // Act: GET http://{ADMIN_LISTEN_ADDR}{STATUS_PATH} with admin JWT.
@@ -139,7 +139,7 @@ mod status {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_status_reports_in_flight_request_count() {
         // Arrange: hold slow backend; start multiple concurrent MCP requests.
         // Act: GET /admin/status during in-flight window.
@@ -148,7 +148,7 @@ mod status {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_status_reports_buffer_depths_per_lane() {
         // Arrange: gateway under load or with configured buffer metrics.
         // Act: GET /admin/status.
@@ -157,7 +157,7 @@ mod status {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_status_reflects_degraded_nats_without_process_exit() {
         // Arrange: sever NATS connection while process stays alive.
         // Act: GET /admin/status.
@@ -172,7 +172,7 @@ mod policy_inspect {
     use super::harness::{ADMIN_LISTEN_ADDR, POLICY_INSPECT_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_policy_inspect_returns_decision_rule_fired_and_trace_id() {
         // Arrange: bundle with known allow/deny rule for subject/method/tool triple.
         // Act: GET /admin/policy/inspect?subject=...&method=tools/call&tool=fixture.
@@ -182,7 +182,7 @@ mod policy_inspect {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_policy_inspect_does_not_publish_request_audit_envelope() {
         // Arrange: JetStream audit subscriber on `{prefix}.audit.>`.
         // Act: GET /admin/policy/inspect with allow scenario.
@@ -191,7 +191,7 @@ mod policy_inspect {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_policy_inspect_missing_required_query_param_returns_400() {
         // Arrange: admin JWT; omit subject or method query param.
         // Act: GET /admin/policy/inspect?method=tools/list (no subject).
@@ -200,7 +200,7 @@ mod policy_inspect {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn get_policy_inspect_tool_query_optional_for_non_tools_call() {
         // Arrange: rule keyed on method tools/list only.
         // Act: GET /admin/policy/inspect?subject=...&method=tools/list (no tool).
@@ -215,7 +215,7 @@ mod role_check {
     use super::harness::{ADMIN_LISTEN_ADDR, ADMIN_ROLE, RELOAD_PATH, STATUS_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn admin_endpoint_without_admin_role_returns_403() {
         // Arrange: JWT with valid sub but roles omitting admin.
         // Act: POST /admin/reload or GET /admin/status without admin role.
@@ -225,7 +225,7 @@ mod role_check {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn admin_endpoint_with_admin_role_succeeds() {
         // Arrange: JWT including roles: ["admin"] (or equivalent claim).
         // Act: GET /admin/status.
@@ -235,7 +235,7 @@ mod role_check {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn missing_jwt_on_admin_endpoint_returns_401_or_403() {
         // Arrange: admin_api_enabled gateway; no Authorization header.
         // Act: POST /admin/reload.
@@ -244,7 +244,7 @@ mod role_check {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn mcp_ingress_jwt_without_admin_role_cannot_call_admin_paths() {
         // Arrange: same JWT accepted on `{prefix}.gateway.request.>` but lacks admin role.
         // Act: reuse token against POST /admin/reload.
@@ -257,7 +257,7 @@ mod audit {
     //! Admin actions emit dedicated `admin.{action}` audit envelopes.
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn reload_emits_admin_reload_audit_envelope() {
         // Arrange: JetStream subscriber on `{prefix}.audit.admin.>` or admin-specific subject.
         // Act: POST /admin/reload with admin JWT.
@@ -266,7 +266,7 @@ mod audit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn rollback_emits_admin_bundle_rollback_audit_envelope() {
         // Arrange: audit capture for admin actions.
         // Act: POST /admin/bundle/rollback.
@@ -275,7 +275,7 @@ mod audit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn admin_audit_separate_from_regular_request_envelopes() {
         // Arrange: concurrent MCP request generating request audit; admin reload in parallel.
         // Act: compare published subjects and schema action fields.
@@ -284,7 +284,7 @@ mod audit {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn policy_inspect_emits_admin_policy_inspect_audit_envelope() {
         // Arrange: audit subscriber; admin JWT.
         // Act: GET /admin/policy/inspect?subject=...&method=...&tool=...
@@ -299,7 +299,7 @@ mod feature_flag {
     use super::harness::{ADMIN_LISTEN_ADDR, RELOAD_PATH, STATUS_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn admin_routes_not_mounted_when_admin_api_disabled() {
         // Arrange: GatewaySettings with admin_api_enabled=false (production default).
         // Act: GET /admin/status, POST /admin/reload against admin listen addr.
@@ -309,7 +309,7 @@ mod feature_flag {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn health_probes_remain_available_when_admin_api_disabled() {
         // Arrange: admin_api_enabled=false; operational listener on :8080 for probes.
         // Act: GET /healthz and /readyz.
@@ -318,7 +318,7 @@ mod feature_flag {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn admin_routes_mounted_when_admin_api_enabled() {
         // Arrange: admin_api_enabled=true; valid admin JWT.
         // Act: GET /admin/status.
@@ -333,7 +333,7 @@ mod mtls {
     use super::harness::{ADMIN_LISTEN_ADDR, RELOAD_PATH};
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn missing_client_cert_returns_401_when_mtls_required() {
         // Arrange: admin_require_mtls=true; plain HTTP client without client cert.
         // Act: POST /admin/reload with valid admin JWT but no TLS client certificate.
@@ -343,7 +343,7 @@ mod mtls {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn valid_client_cert_allows_admin_request_when_mtls_required() {
         // Arrange: admin_require_mtls=true; HTTP client with trusted client cert + admin JWT.
         // Act: GET /admin/status.
@@ -352,7 +352,7 @@ mod mtls {
     }
 
     #[tokio::test]
-    #[ignore = "scaffold; implement when admin API per MCP_GATEWAY_PLAN.md Block G lands"]
+    #[ignore = "scaffold; implement when admin API lands"]
     async fn mtls_not_required_when_admin_require_mtls_false() {
         // Arrange: admin_require_mtls=false (default); admin_api_enabled=true.
         // Act: GET /admin/status over TLS or plain per listener config without client cert.

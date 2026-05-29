@@ -7,7 +7,7 @@
 //! Cross-references:
 //! - `docs/identity/reference-host-abi.md` (host function signatures, capability gating)
 //! - `docs/identity/mcp-policy-wit-sketch.md` (WIT import shapes, `target_wit` pin)
-//! - `MCP_GATEWAY_PLAN.md` Block F (Phase 3 WASM runtime + linker)
+//! - Phase 3 WASM runtime + linker
 //!
 //! Harness pattern: live NATS broker, `mcp_nats::Config`, `McpPrefix`, `trogon_nats::NatsAuth`,
 //! `GatewaySettings`, signed WASM fixture bundle, and gateway ingress request/reply
