@@ -1,0 +1,38 @@
+manifest_version = 1
+
+# Manifest template for registering an MCP gateway instance as a first-class
+# agent in `mcp-agent-registry`. Replace `{tenant}` and `{instance_id}` with
+# real values before signing; pair with the gateway env vars
+# `MCP_GATEWAY_IDENTITY_SUB`, `MCP_GATEWAY_IDENTITY_AGENT_ID`, and
+# `MCP_GATEWAY_IDENTITY_WKL` so the act_chain hop the gateway projects on the
+# `mcp-act-chain` header lines up with this record.
+
+[record]
+agent_id = "trogon/mcp-gateway-{instance_id}"
+agent_version = "0.0.1"
+agent_definition_digest = "sha256:replace-with-build-digest"
+owner_team = "platform-security"
+allowed_workloads = [
+    "spiffe://trogon.local/ns/prod/sa/mcp-gateway",
+]
+allowed_tools = []
+allowed_audiences = [
+    "urn:trogon:mcp:backend:{tenant}:*",
+    "urn:trogon:mcp:client:{tenant}:*",
+]
+allowed_purposes = [
+    "gateway.egress.mint",
+    "gateway.callback.mint",
+]
+mesh_token_ttl_s = 120
+lifecycle_state = "active"
+
+[record.metadata]
+contact = "platform-security@trogon.example"
+description = "MCP gateway instance — mints egress tokens and projects act_chain on ingress."
+repo = "https://github.com/TrogonStack/trogonai"
+
+[signature]
+algorithm = "ed25519"
+key_id = "registry-signer-current"
+value = "REPLACE_WITH_SIGNATURE_FROM_AGCTL_REGISTRY_SIGN"
