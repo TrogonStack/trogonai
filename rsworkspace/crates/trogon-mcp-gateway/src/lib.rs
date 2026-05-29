@@ -9,6 +9,7 @@ pub mod audit;
 pub mod authz;
 pub mod bundle;
 pub mod cel_builtins;
+pub mod context_throttle;
 pub mod chain_resolver;
 pub mod egress;
 pub mod gateway;
