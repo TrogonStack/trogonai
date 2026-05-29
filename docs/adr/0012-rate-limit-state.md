@@ -25,7 +25,7 @@ One storage mechanism cannot satisfy both constraints:
 | Typical trigger | 256 concurrent calls to one `server_id`; 4096 tenant-wide inflight | 100 req / 10 s per caller; opt-in per-tool caps |
 | Failure symptom if wrong store | Gateway CPU saturation, head-of-line blocking | Cross-replica budget drift; unfair tenant/agent abuse |
 
-The normative design spec [rate-limiting.md](../identity/rate-limiting.md) analyzed ingress, post-auth, and per-tool placement layers and concluded a **both-and** model: in-process semaphores for inflight, JetStream KV for cluster-authoritative budgets accessed from CEL. Block C item 5 in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) left the backing-store choice open until this ADR.
+The normative design spec [rate-limiting.md](../identity/rate-limiting.md) analyzed ingress, post-auth, and per-tool placement layers and concluded a **both-and** model: in-process semaphores for inflight, JetStream KV for cluster-authoritative budgets accessed from CEL. The rate-limit backing-store choice remained open until this ADR.
 
 **What breaks if this stays undecided:**
 
@@ -42,7 +42,7 @@ The normative design spec [rate-limiting.md](../identity/rate-limiting.md) analy
 
 ## Decision
 
-**Adopt a two-tier rate-limit state model.** Tier 1 (in-process semaphores) handles inflight caps per `server_id` (default **256**) and per tenant (default **4096**) -- fast path, no NATS round-trip, instance-local. Tier 2 (JetStream KV atomic increment) handles cluster-wide rate budgets accessed via CEL `rate.acquire(scope, key, budget, window)` -- slower but accurate. Per-rule choice of tier and scope. Platform defaults follow Wire-Format Pin 9 in [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md#9-per-target-inflight-cap-and-rate-limit-defaults).
+**Adopt a two-tier rate-limit state model.** Tier 1 (in-process semaphores) handles inflight caps per `server_id` (default **256**) and per tenant (default **4096**) -- fast path, no NATS round-trip, instance-local. Tier 2 (JetStream KV atomic increment) handles cluster-wide rate budgets accessed via CEL `rate.acquire(scope, key, budget, window)` -- slower but accurate. Per-rule choice of tier and scope. Platform defaults follow [reference-rate-defaults.md](../identity/reference-rate-defaults.md).
 
 ### Tier assignment (normative)
 
@@ -247,7 +247,6 @@ Backend forward
 | `-32105` + audit `outcome=rate_limited` | **Partial** | Code constant exists; full wire + audit fields Block E |
 | Migrate `throttle.rs` to token bucket | **Pending** (Block E) | Adaptive-access path; orthogonal scope `purpose` |
 | Metrics + NATS header echo | **Pending** (Block E) | [rate-limiting.md §8](../identity/rate-limiting.md), [reference-rate-defaults.md §4](../identity/reference-rate-defaults.md) |
-| Close `MCP_GATEWAY_PLAN.md` Block C item 5 checkbox | **Pending** | Editorial after ADR acceptance |
 
 ---
 

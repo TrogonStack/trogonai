@@ -10,7 +10,7 @@
 
 ## Context
 
-The MCP gateway is a policy enforcement point on JSON-RPC traffic. TrogonStack-native agents, gateways, STS, registry, SpiceDB, and JetStream audit already run on NATS. Phase 1 proved the substrate: `trogon-mcp-gateway` consumes `{prefix}.gateway.request.>` as a queue group, evaluates CEL and SpiceDB on gated methods, rewrites egress to `{prefix}.server.{server_id}.{method_suffix}`, and publishes audit to JetStream (`MCP_GATEWAY_PLAN.md` Block D).
+The MCP gateway is a policy enforcement point on JSON-RPC traffic. TrogonStack-native agents, gateways, STS, registry, SpiceDB, and JetStream audit already run on NATS. Phase 1 proved the substrate: `trogon-mcp-gateway` consumes `{prefix}.gateway.request.>` as a queue group, evaluates CEL and SpiceDB on gated methods, rewrites egress to `{prefix}.server.{server_id}.{method_suffix}`, and publishes audit to JetStream.
 
 The strategic fork is not whether the gateway exists, but **which transports terminate at the gateway edge** and **how backend MCP servers attach**. The community MCP ecosystem overwhelmingly ships **stdio** or **local HTTP/SSE** for IDE integration. Trogon-native participants are already NATS principals. Choosing a default deployment shape locks operator mental models, SDK ingress contracts, compliance scope (one hot-path transport vs two), and how third-party servers join the mesh.
 
@@ -18,7 +18,7 @@ The strategic fork is not whether the gateway exists, but **which transports ter
 
 **Hybrid** means the gateway retains the on-bus data plane and **additionally** exposes a north-south HTTP listener (Streamable HTTP and/or SSE per the MCP transport specification) so remote third-party MCP servers and browser-adjacent clients can attach without a NATS client library. OAuth resource-server behavior, CORS, per-route rate limits, and HTTP session affinity become shipping criteria—not stretch goals.
 
-`MCP_GATEWAY_PLAN.md` Block A item 2 remained open until this ADR: *which MCP servers must the gateway front—TrogonStack-native only, or the broader third-party ecosystem too?* The design analysis in [on-bus-vs-hybrid.md](../identity/on-bus-vs-hybrid.md) argues the trade-offs (policy surface, audit envelope, trust bundles, load-balancer story, vendor onboarding friction). This ADR records the durable choice; the spec remains the explanation and migration narrative.
+The product positioning question — *which MCP servers must the gateway front—TrogonStack-native only, or the broader third-party ecosystem too?* — remained open until this ADR. The design analysis in [on-bus-vs-hybrid.md](../identity/on-bus-vs-hybrid.md) argues the trade-offs (policy surface, audit envelope, trust bundles, load-balancer story, vendor onboarding friction). This ADR records the durable choice; the spec remains the explanation and migration narrative.
 
 ### Decision drivers
 
@@ -112,7 +112,7 @@ Until triggers fire, mark gateway-embedded HTTP MCP ingress as **proposed / out 
 
 Deploy `trogon-mcp-gateway` with a north-south HTTP/SSE MCP listener as the primary ingress from the first production release, treating NATS as an optimization for Trogon-native agents rather than the default edge.
 
-**Rejected.** Phase 1 already validated policy, SpiceDB, mesh egress minting, and audit on the bus; rebuilding the hot path around HTTP doubles the security test matrix (CORS, CSRF posture, per-IP rate limits, SSE timeouts, OAuth metadata routes) before a paying design partner requires it. HTTP ingress introduces split-brain policy risk—NATS path enforcing mesh mint while HTTP path skips SpiceDB—and concentrates upstream SaaS secrets in the gateway vault instead of isolated sidecars. Audit must gain normative HTTP network metadata (`client_ip`, `user_agent`, `transport`) before SIEM work in Phase 2, forcing schema churn. The product positioning in `MCP_GATEWAY_PLAN.md` § The Take is an MCP-aware feature inside TrogonStack's event-modeling platform, not a generic API gateway; HTTP-first optimizes for ecosystem familiarity at the cost of differentiated mesh identity and NATS-native audit.
+**Rejected.** Phase 1 already validated policy, SpiceDB, mesh egress minting, and audit on the bus; rebuilding the hot path around HTTP doubles the security test matrix (CORS, CSRF posture, per-IP rate limits, SSE timeouts, OAuth metadata routes) before a paying design partner requires it. HTTP ingress introduces split-brain policy risk—NATS path enforcing mesh mint while HTTP path skips SpiceDB—and concentrates upstream SaaS secrets in the gateway vault instead of isolated sidecars. Audit must gain normative HTTP network metadata (`client_ip`, `user_agent`, `transport`) before SIEM work in Phase 2, forcing schema churn. The product positioning is an MCP-aware feature inside TrogonStack's event-modeling platform, not a generic API gateway (see [ADR 0017](0017-product-positioning.md)); HTTP-first optimizes for ecosystem familiarity at the cost of differentiated mesh identity and NATS-native audit.
 
 ### Dual-listener from day one (NATS + HTTP always on)
 
@@ -163,7 +163,7 @@ Hybrid adds HTTP edge validation before the same chain; it does not replace STS 
 
 ### Third-party integration (on-bus path)
 
-Documented Phase 1–2 operator path ([howto-integrate-third-party-mcp.md](../identity/howto-integrate-third-party-mcp.md), `MCP_GATEWAY_PLAN.md` Block H):
+Documented Phase 1–2 operator path ([howto-integrate-third-party-mcp.md](../identity/howto-integrate-third-party-mcp.md)):
 
 1. Register `server_id` in the agent registry with `transport: stdio-sidecar` or `nats-native`.
 2. Run **`mcp-nats-stdio`** (or `trogon-mcp-bridge serve-stdio` when available) subscribed to `{prefix}.server.{server_id}.>`.
@@ -197,14 +197,13 @@ When enabled:
 
 | Item | Status |
 |------|--------|
-| Phase 1 vertical slice (queue group, CEL, SpiceDB, audit) | **Done** (`MCP_GATEWAY_PLAN.md` Block D checkboxes) |
+| Phase 1 vertical slice (queue group, CEL, SpiceDB, audit) | **Done** |
 | [on-bus-vs-hybrid.md](../identity/on-bus-vs-hybrid.md) design paper | **Done** (2026-05-28); distilled by this ADR |
 | [howto-integrate-third-party-mcp.md](../identity/howto-integrate-third-party-mcp.md) | **Draft / in progress** (Block H); aligned with on-bus + `mcp-nats-stdio` |
 | [mcp-gateway-operator-overview.md](../identity/mcp-gateway-operator-overview.md) | **Needs hygiene** — explicit "no HTTP MCP ingress Phase 1–2" callout |
 | [oauth-mcp-integration.md](../identity/oauth-mcp-integration.md) | **Needs hygiene** — HTTP listener sections marked v2/proposed until Phase 3 |
 | Gateway HTTP MCP listener implementation | **Pending** — Phase 3, feature-flagged |
 | `reference-http-route-grammar.md` (proposed) | **Pending** — if hybrid route count warrants |
-| Block A checklist in `MCP_GATEWAY_PLAN.md` | **Unblocks on merge** of this ADR (item 2) |
 
 ## Documentation hygiene (post-acceptance)
 
@@ -214,7 +213,6 @@ When enabled:
 | [oauth-mcp-integration.md](../identity/oauth-mcp-integration.md) | Keep HTTP listener sections as **Phase 3 / proposed** until hybrid ships |
 | [howto-integrate-third-party-mcp.md](../identity/howto-integrate-third-party-mcp.md) | Demote implication that gateway terminates vendor HTTP; elevate `mcp-nats-stdio` |
 | [integration-touchpoints.md](../identity/integration-touchpoints.md) | No HTTP ingress row until Phase 3; footnote to this ADR |
-| `MCP_GATEWAY_PLAN.md` Block A | Check off item 2 when this ADR merges |
 
 Do not delete OAuth or HTTP research—Phase 3 hybrid reuses the existing specs verbatim with implementation tickets.
 

@@ -24,7 +24,7 @@ What remains undecided — and blocks Block F item 5 — is the **runtime contra
 | `trogon:mcp-policy@0.1.0` drift | Forward-incompatible bundles must not brick the gateway |
 | Telemetry and audit on swap | SIEM and on-call cannot correlate promotions without stable metric names |
 
-`MCP_GATEWAY_PLAN.md` Block F item 5 requires a loader that fetches signed bundles, verifies NKey signatures (non-negotiable per ADR 0010), hot-swaps in place, and rolls back via pointer flip. The plan's Hot-swap section states: *atomic version pointer; in-flight messages finish on the old version, new ones start on the new; rollback is a pointer flip.* Control-plane subjects include `mcp.control.bundle.reload` as belt-and-braces with KV watchers as primary (`MCP_GATEWAY_PLAN.md` § Control subjects).
+The bundle loader fetches signed bundles, verifies NKey signatures (non-negotiable per ADR 0010), hot-swaps in place, and rolls back via pointer flip: *atomic version pointer; in-flight messages finish on the old version, new ones start on the new; rollback is a pointer flip.* Control-plane subjects include `mcp.control.bundle.reload` as belt-and-braces with KV watchers as primary.
 
 The acceptance contract lives in `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`: cold start, parse-error retention, fs-watcher hot swap with in-flight drain, `/readyz` digest, atomic pointer flip, operator rollback, NKey signature gate, and load-time CEL compilation. The test `in_flight_request_completes_with_old_bundle_after_reload` explicitly requires in-flight work to complete on the pre-reload digest while subsequent requests observe the new digest.
 
@@ -200,7 +200,7 @@ Request-path audits continue to stamp `policy_bundle_digest` from the pinned sna
 
 ### Positive
 
-- **Zero-downtime policy promotion** — new digest serves new requests without dropping NATS queue-group membership or restarting Wasmtime engine ([MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Hot-swap).
+- **Zero-downtime policy promotion** — new digest serves new requests without dropping NATS queue-group membership or restarting Wasmtime engine.
 - **Fail-closed load path** — invalid bundles never partially activate; aligns with ADR 0024 invariants 6–8.
 - **Deterministic in-flight behavior** — request pin eliminates torn-policy bugs and matches acceptance scaffolds.
 - **Operator-native rollback** — KV pointer revert reuses the same loader; no special-case code path beyond digest selection.
@@ -322,4 +322,4 @@ Cross-test: `admin_api.rs` rollback/reload; `wasm_host_abi.rs` ABI rejection at 
 
 ---
 
-*Contract sources: [MCP_GATEWAY_PLAN.md](../../MCP_GATEWAY_PLAN.md) Block F item 5, § Hot-swap, § Control subjects; [docs/adr/0010-bundle-format.md](0010-bundle-format.md); [docs/adr/0021-bootstrap-day-zero.md](0021-bootstrap-day-zero.md); [docs/adr/0024-failure-mode-matrix.md](0024-failure-mode-matrix.md); [docs/identity/wasm-bundle-format.md](../identity/wasm-bundle-format.md) §8; [docs/identity/howto-write-bundle.md](../identity/howto-write-bundle.md); [docs/identity/hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md) §6; [docs/identity/bootstrap-day-zero.md](../identity/bootstrap-day-zero.md); `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`.*
+*Contract sources: [docs/adr/0010-bundle-format.md](0010-bundle-format.md); [docs/adr/0021-bootstrap-day-zero.md](0021-bootstrap-day-zero.md); [docs/adr/0024-failure-mode-matrix.md](0024-failure-mode-matrix.md); [docs/identity/wasm-bundle-format.md](../identity/wasm-bundle-format.md) §8; [docs/identity/howto-write-bundle.md](../identity/howto-write-bundle.md); [docs/identity/hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md) §6; [docs/identity/bootstrap-day-zero.md](../identity/bootstrap-day-zero.md); `rsworkspace/crates/trogon-mcp-gateway/tests/bundle_load_hot_reload.rs`; `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`.*

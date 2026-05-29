@@ -10,7 +10,7 @@
 
 ## Context
 
-Block G item 2 in `MCP_GATEWAY_PLAN.md` calls for an operator CLI — **`trogon-gateway-ctl`** — that inspects live gateway state, replays policy decisions offline, validates signed bundles before promotion, and rolls up dependency health for CI and runbooks. Phase 1 shipped an in-process `trace::TraceStore` keyed by JSON-RPC request id (`rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`); Phase 2 adds an admin HTTP listener (`admin_api_enabled`, default off) whose acceptance contract is already pinned in `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`.
+The operator CLI — **`trogon-gateway-ctl`** — inspects live gateway state, replays policy decisions offline, validates signed bundles before promotion, and rolls up dependency health for CI and runbooks. Phase 1 shipped an in-process `trace::TraceStore` keyed by JSON-RPC request id (`rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`); Phase 2 adds an admin HTTP listener (`admin_api_enabled`, default off) whose acceptance contract is already pinned in `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`.
 
 Without a stable noun/verb taxonomy now, three downstream surfaces diverge:
 
@@ -294,7 +294,7 @@ Codes `0`–`7` are stable for v0.1.x; `10`–`11` are health-specific. CI SHOUL
 - **Proposed admin routes** (`/admin/config`, `/admin/trace/{id}`, `/admin/cache/stats`) are not in the test scaffold yet.
   - **Mitigation:** Extend `admin_api.rs` in the same PR that implements handlers; until then CLI documents degraded behavior via status fallback.
 - **Queue-group trace lookup** may miss ids on peer replicas.
-  - **Mitigation:** Document `--gateway-instance`; long-term KV export per `MCP_GATEWAY_PLAN.md` Block D trace note.
+  - **Mitigation:** Document `--gateway-instance`; long-term KV export per the gateway tracing design ([ADR 0032](0032-tracing-wasm-boundary.md)).
 - **`serde_yaml` not yet a workspace dependency**.
   - **Mitigation:** Add only to `trogon-gateway-ctl` crate when implemented; v0.1.0 MAY ship json+table first if yaml slips.
 
@@ -313,7 +313,7 @@ Codes `0`–`7` are stable for v0.1.x; `10`–`11` are health-specific. CI SHOUL
 | | |
 |-|-|
 | **Pros** | Single installed binary; `agctl/src/mcp/mod.rs` already exists. |
-| **Cons** | `agctl` serves agent-registry and traffic tooling — mixing gateway admin commands confuses product boundaries; stub tree already returns exit `2` for most MCP commands; name does not match `MCP_GATEWAY_PLAN.md` Block G. |
+| **Cons** | `agctl` serves agent-registry and traffic tooling — mixing gateway admin commands confuses product boundaries; stub tree already returns exit `2` for most MCP commands; name does not match operator-CLI naming convention. |
 | **Verdict** | **Rejected** as canonical surface. `agctl mcp health` may remain as a thin compatibility shim delegating to `trogon-gateway-ctl health`. |
 
 ### Interactive REPL or wizard prompts
@@ -346,7 +346,7 @@ Example: `trogon-gateway-ctl validate-bundle`, `trogon-gateway-ctl explain-polic
 
 ## Open questions
 
-1. **Trace fan-out across queue-group members** — Should `trace request` broadcast to all replicas via NATS `{prefix}.gateway.admin.trace.get` until shared KV export lands (`MCP_GATEWAY_PLAN.md` Block D item on `TraceStore`)?
+1. **Trace fan-out across queue-group members** — Should `trace request` broadcast to all replicas via NATS `{prefix}.gateway.admin.trace.get` until shared KV export lands?
 2. **`GET /admin/config` vs status payload split** — Exact field boundary between `inspect config` and `GET /admin/status` (in-flight gauges belong on status only).
 3. **`bundle dry-run` jsonl schema versioning** — Pin fixture `$schema` URL in a follow-up identity reference doc?
 4. **Filtered-list cache metrics** — Field names depend on ADR 0015 implementation; confirm before freezing `cache stats` json schema.
@@ -420,4 +420,4 @@ Paper rollback is immediate — this ADR introduces no runtime behavior.
 
 ---
 
-*Contract sources: `MCP_GATEWAY_PLAN.md` Block G item 2, `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`, `rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`, `docs/identity/howto-write-bundle.md`, `docs/adr/0010-bundle-format.md`, `docs/adr/0014-bulk-check-zedtoken-cache.md`, `docs/adr/0023-schema-cache-invalidation.md`, `rsworkspace/crates/agctl/src/mcp/mod.rs`, `rsworkspace/Cargo.toml` (clap pin)*
+*Contract sources: `rsworkspace/crates/trogon-mcp-gateway/tests/admin_api.rs`, `rsworkspace/crates/trogon-mcp-gateway/src/trace.rs`, `docs/identity/howto-write-bundle.md`, `docs/adr/0010-bundle-format.md`, `docs/adr/0014-bulk-check-zedtoken-cache.md`, `docs/adr/0023-schema-cache-invalidation.md`, `rsworkspace/crates/agctl/src/mcp/mod.rs`, `rsworkspace/Cargo.toml` (clap pin)*
