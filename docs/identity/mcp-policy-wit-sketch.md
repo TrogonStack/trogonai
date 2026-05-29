@@ -1,6 +1,6 @@
 # MCP policy WIT host ABI sketch (`trogon:mcp-policy@0.1.0`)
 
-**Status:** Block B paper artifact (2026-05-28). Irreversible host ABI sketch for Phase 3 WASM policy bundles. No Wasmtime code ships from this document alone.
+**Status:** Block B paper artifact (2026-05-28). **Canonical WIT:** [`rsworkspace/crates/trogon-mcp-gateway/wit/trogon-mcp-policy.wit`](../../rsworkspace/crates/trogon-mcp-gateway/wit/trogon-mcp-policy.wit) and [`wit/README.md`](../../rsworkspace/crates/trogon-mcp-gateway/wit/README.md) (Block F item 1, 2026-05-29). This document remains the design rationale; implement against the in-tree WIT package.
 
 **Document type:** Diátaxis **reference** (stable identifiers, WIT surface, error mapping) with short **explanation** prose where design intent matters.
 
