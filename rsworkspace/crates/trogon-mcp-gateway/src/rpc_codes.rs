@@ -1,4 +1,4 @@
-//! Trogon JSON-RPC application error codes (`-32100` … `-32199` per `MCP_GATEWAY_PLAN.md`).
+//! Trogon JSON-RPC application error codes (`-32100` … `-32199`; see `docs/identity/reference-error-codes.md`).
 
 pub const POLICY_DENY: i32 = -32_100;
 pub const BACKEND_TIMEOUT: i32 = -32_102;
