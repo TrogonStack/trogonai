@@ -1725,7 +1725,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     };
 
                     let result = if !allowed {
-                        format!("Permission denied: user refused to run tool `{name}`")
+                        format!("Permission denied: tool `{name}` was not allowed (by the current mode, a rule, or user)")
                     } else {
                     match name.as_str() {
                         "ask_user" => {
