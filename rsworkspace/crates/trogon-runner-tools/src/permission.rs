@@ -348,8 +348,8 @@ fn is_plan_denied_tool(tool_name: &str) -> bool {
 ///
 /// | Mode | Behavior |
 /// |------|----------|
-/// | `default` | Auto-allow read-only tools; TROGON.md rules + prompt for bash, edits, MCP |
-/// | `acceptEdits` | Auto-allow file edits; prompt bash, MCP, and other tools |
+/// | `default` | Auto-allow read-only tools + read-only bash; TROGON.md rules + prompt for write-bash, edits, MCP |
+/// | `acceptEdits` | Auto-allow read-only tools + read-only bash + file edits; prompt write-bash, MCP, other tools |
 /// | `dontAsk` | Auto-allow all (audit only) |
 /// | `plan` | Deny write/bash tools |
 /// | `bypassPermissions` | Not installed — caller skips checker entirely |
@@ -371,11 +371,13 @@ impl PermissionChecker for ModePermissionChecker {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
-            "default" if is_read_only_tool(tool_name) => {
+            // `acceptEdits` is a superset of `default`: it inherits the read-only
+            // auto-allows and additionally auto-allows edits below.
+            "default" | "acceptEdits" if is_read_only_tool(tool_name) => {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
-            "default"
+            "default" | "acceptEdits"
                 if normalize_tool_name(tool_name) == "bash" && is_read_only_bash_command(tool_input) =>
             {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -695,7 +697,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mode_checker_accept_edits_prompts_bash_via_channel() {
+    async fn mode_checker_accept_edits_prompts_write_bash_via_channel() {
+        // A write/side-effect bash command (not read-only) still prompts.
         let (tx, mut rx) = mpsc::channel(1);
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
@@ -708,30 +711,40 @@ mod tests {
         });
         assert!(
             checker
-                .check("tc-ab", "bash", &serde_json::json!({"command": "pwd"}))
+                .check("tc-ab", "bash", &serde_json::json!({"command": "touch out.txt"}))
                 .await
         );
     }
 
     #[tokio::test]
-    async fn mode_checker_accept_edits_prompts_read_without_rules() {
-        let (tx, mut rx) = mpsc::channel(1);
+    async fn mode_checker_accept_edits_auto_allows_read() {
+        // acceptEdits inherits default's read-only auto-allow. Dropping the
+        // receiver means any attempt to prompt would close the channel and deny,
+        // so a `true` result proves read_file was auto-allowed without prompting.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
         };
-        tokio::spawn(async move {
-            if let Some(req) = rx.recv().await {
-                let _ = req.response_tx.send(true);
-            }
-        });
         assert!(
             checker
-                .check(
-                    "tc-ar",
-                    "read_file",
-                    &serde_json::json!({"path": "src/main.rs"}),
-                )
+                .check("tc-ar", "read_file", &serde_json::json!({"path": "src/main.rs"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn mode_checker_accept_edits_auto_allows_read_only_bash() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = ModePermissionChecker {
+            mode: "acceptEdits".to_string(),
+            inner: make_rules_checker("", tx),
+        };
+        assert!(
+            checker
+                .check("tc-arb", "bash", &serde_json::json!({"command": "ls"}))
                 .await
         );
     }
