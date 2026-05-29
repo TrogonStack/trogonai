@@ -72,14 +72,17 @@ mod tests {
 
     #[test]
     fn unknown_event_type_captures_event_type() {
-        let error = EventPayloadError::<std::io::Error>::unknown_event_type("trogon.cron.jobs.v1.Unknown");
+        let error = EventPayloadError::<std::io::Error>::unknown_event_type("trogonai.scheduler.schedules.v1.Unknown");
 
         assert!(matches!(
             &error,
             EventPayloadError::UnknownEventType { event_type }
-                if event_type == "trogon.cron.jobs.v1.Unknown"
+                if event_type == "trogonai.scheduler.schedules.v1.Unknown"
         ));
-        assert_eq!(error.to_string(), "unknown event type 'trogon.cron.jobs.v1.Unknown'");
+        assert_eq!(
+            error.to_string(),
+            "unknown event type 'trogonai.scheduler.schedules.v1.Unknown'"
+        );
         assert!(error.source().is_none());
     }
 }

@@ -50,7 +50,8 @@ coverage-*.xml
 
 # Misc
 tmp
-.claude/\n.claire/
-
 .claude/
 .claire/
+
+# Python
+__pycache__

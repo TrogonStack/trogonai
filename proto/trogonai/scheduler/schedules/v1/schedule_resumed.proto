@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+// ScheduleResumed records the desired lifecycle state as scheduled.
+message ScheduleResumed {
+  // Stable NATS token for the schedule stream being resumed.
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
