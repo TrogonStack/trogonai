@@ -481,6 +481,9 @@ fn permission_key_to_outcome(key: PermissionKey) -> Option<RequestPermissionOutc
 async fn handle_exit_plan_mode_permission(
     coordinator: Arc<PermissionCoordinator>,
 ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+    // Pause the streaming-input reader so it doesn't steal the choice keypress.
+    let _prompt_guard = crate::stream_input::TtyPromptGuard::new();
+
     let options = exit_plan_mode_options(allow_bypass());
     eprint!("\r\x1b[2K");
     eprintln!();
@@ -536,6 +539,9 @@ async fn handle_tool_permission(
         );
         return cancelled_outcome();
     }
+
+    // Pause the streaming-input reader so it doesn't steal/echo the a/w/r keypress.
+    let _prompt_guard = crate::stream_input::TtyPromptGuard::new();
 
     let summary = format_tool_summary(req);
     reset_display();
