@@ -24,6 +24,19 @@ impl Default for CompactionSettings {
     }
 }
 
+impl CompactionSettings {
+    /// Derive settings from a model's context window: reserve ~8 %, keep ~25 %.
+    /// Used per-request so small-window models (e.g. 8k) get coherent thresholds
+    /// instead of the fixed 20k/16k defaults.
+    pub fn from_context_window(context_window: usize) -> Self {
+        Self {
+            context_window,
+            reserve_tokens: context_window * 8 / 100,
+            keep_recent_tokens: context_window * 25 / 100,
+        }
+    }
+}
+
 /// Returns `true` when the conversation is too close to the context window limit.
 pub fn should_compact(messages: &[Message], settings: &CompactionSettings) -> bool {
     let tokens = estimate_total_tokens(messages);
@@ -95,6 +108,25 @@ mod tests {
                 content: "result".into(),
             }],
         }
+    }
+
+    #[test]
+    fn from_context_window_derives_proportional_settings() {
+        // reserve ~8 %, keep_recent ~25 % of the window.
+        let s = CompactionSettings::from_context_window(200_000);
+        assert_eq!(s.context_window, 200_000);
+        assert_eq!(s.reserve_tokens, 16_000); // 8 %
+        assert_eq!(s.keep_recent_tokens, 50_000); // 25 %
+    }
+
+    #[test]
+    fn from_context_window_handles_small_window() {
+        // A small model (e.g. 8k) gets coherent thresholds, not the fixed 20k/16k.
+        let s = CompactionSettings::from_context_window(8_192);
+        assert_eq!(s.reserve_tokens, 655); // 8 %
+        assert_eq!(s.keep_recent_tokens, 2_048); // 25 %
+        // keep_recent + reserve must stay below the window (unlike the fixed defaults).
+        assert!(s.keep_recent_tokens + s.reserve_tokens < s.context_window);
     }
 
     #[test]

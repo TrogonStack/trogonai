@@ -34,9 +34,33 @@ pub mod types;
 
 pub use detector::CompactionSettings;
 pub use error::CompactorError;
-pub use summarizer::{AnthropicLlmProvider, AuthStyle, LlmConfig};
+pub use summarizer::{AnthropicLlmProvider, AuthStyle, LlmConfig, OpenAICompatLlmProvider};
 pub use traits::LlmProvider;
 pub use types::{ContentBlock, Message};
+
+/// Provider chosen per-request by the service: Anthropic (`/v1/messages`) or
+/// OpenAI-compatible (`/chat/completions`, used for xAI / OpenRouter).
+pub enum DynLlmProvider {
+    Anthropic(AnthropicLlmProvider),
+    OpenAiCompat(OpenAICompatLlmProvider),
+}
+
+impl LlmProvider for DynLlmProvider {
+    fn generate_summary<'a>(
+        &'a self,
+        messages: &'a [Message],
+        previous_summary: Option<&'a str>,
+    ) -> impl std::future::Future<Output = Result<String, CompactorError>> + Send + 'a {
+        async move {
+            match self {
+                DynLlmProvider::Anthropic(p) => p.generate_summary(messages, previous_summary).await,
+                DynLlmProvider::OpenAiCompat(p) => {
+                    p.generate_summary(messages, previous_summary).await
+                }
+            }
+        }
+    }
+}
 
 /// Convenience constructor that injects a pre-built [`reqwest::Client`].
 /// Primarily intended for integration tests that point the client at a mock server.
@@ -79,16 +103,32 @@ impl<L: LlmProvider> Compactor<L> {
         &self,
         messages: Vec<Message>,
     ) -> Result<Vec<Message>, CompactorError> {
+        Ok(self.compact_if_needed_counted(messages).await?.0)
+    }
+
+    /// Like [`compact_if_needed`], but also returns `kept_count`: the number of
+    /// trailing messages preserved verbatim. When no compaction happens this is
+    /// `messages.len()`. When compaction happens it is the length of the kept
+    /// tail (NOT counting the prepended summary + ack). Used by stateless
+    /// runners (e.g. openrouter) to reuse their own original tail messages
+    /// instead of converting the compacted ones back.
+    pub async fn compact_if_needed_counted(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<(Vec<Message>, usize), CompactorError> {
         if !detector::should_compact(&messages, &self.settings) {
-            return Ok(messages);
+            let n = messages.len();
+            return Ok((messages, n));
         }
 
         let Some(cut_point) = detector::find_cut_point(&messages, self.settings.keep_recent_tokens)
         else {
-            return Ok(messages);
+            let n = messages.len();
+            return Ok((messages, n));
         };
 
         let (to_summarize, to_keep) = messages.split_at(cut_point);
+        let kept_count = to_keep.len();
 
         // If the first message is already a compaction summary, extract it so
         // the LLM can update it incrementally rather than regenerate from scratch.
@@ -105,7 +145,7 @@ impl<L: LlmProvider> Compactor<L> {
         info!(
             cut_point,
             messages_to_summarize = messages_for_summary.len(),
-            messages_to_keep = to_keep.len(),
+            messages_to_keep = kept_count,
             incremental = previous_summary.is_some(),
             "compacting conversation history",
         );
@@ -115,7 +155,7 @@ impl<L: LlmProvider> Compactor<L> {
             .generate_summary(messages_for_summary, previous_summary)
             .await?;
 
-        Ok(build_compacted_history(summary, to_keep))
+        Ok((build_compacted_history(summary, to_keep), kept_count))
     }
 }
 
@@ -296,6 +336,54 @@ mod tests {
         assert!(text.contains("<context-summary>"));
         assert!(text.contains("## Goal"));
         assert_eq!(result[1].role, "assistant");
+    }
+
+    #[tokio::test]
+    async fn counted_reports_full_len_when_not_compacted() {
+        let compactor = Compactor::with_provider(
+            CompactionSettings::default(),
+            MockLlmProvider { summary: String::new() },
+        );
+        let messages = msgs(&[("user", "hi"), ("assistant", "hello")]);
+        let (out, kept) = compactor
+            .compact_if_needed_counted(messages)
+            .await
+            .unwrap();
+        // Not compacted → everything is kept verbatim.
+        assert_eq!(kept, 2);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn counted_reports_kept_tail_len_when_compacted() {
+        let settings = CompactionSettings {
+            context_window: 100,
+            reserve_tokens: 0,
+            keep_recent_tokens: 10,
+        };
+        let compactor = Compactor::with_provider(
+            settings,
+            MockLlmProvider { summary: "## Goal\nTest".into() },
+        );
+        // 4 big messages; the cut keeps a tail and summarizes the rest.
+        let big = "x".repeat(200);
+        let messages = vec![
+            Message::user(format!("q1 {big}")),
+            Message::assistant(format!("a1 {big}")),
+            Message::user(format!("q2 {big}")),
+            Message::assistant(format!("a2 {big}")),
+        ];
+        let (out, kept) = compactor
+            .compact_if_needed_counted(messages)
+            .await
+            .unwrap();
+        // kept_count must equal the verbatim tail length (NOT counting the
+        // prepended summary + ack). Output = summary + ack + kept tail.
+        assert!(kept >= 1, "must keep at least the most recent turn");
+        assert_eq!(out.len(), 2 + kept, "output = summary + ack + kept tail");
+        // First two are the prepended summary/ack.
+        assert_eq!(out[0].role, "user");
+        assert_eq!(out[1].role, "assistant");
     }
 
     #[tokio::test]

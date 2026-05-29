@@ -1202,7 +1202,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
                 history = xai_history_from_wire(compacted);
                 pre_turn_compacted = true;
             }
@@ -2103,7 +2103,7 @@ async fn compact_or_trim_xai_history(
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct).await {
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
             *history = xai_history_from_wire(compacted);
             return;
         }

@@ -38,6 +38,9 @@ impl std::error::Error for CompactError {}
 #[derive(Serialize)]
 struct CompactReq<'a> {
     messages: &'a [Message],
+    /// Which provider the compactor should summarize with (e.g. "xai",
+    /// "openrouter", "anthropic") so each runner compacts via its own provider.
+    provider: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -92,12 +95,13 @@ pub async fn maybe_compact(
     messages: &[Message],
     token_budget: usize,
     threshold_pct: u8,
+    provider: &str,
 ) -> Result<Option<Vec<Message>>, CompactError> {
     if !over_threshold(messages, token_budget, threshold_pct) {
         return Ok(None);
     }
 
-    let payload = serde_json::to_vec(&CompactReq { messages })
+    let payload = serde_json::to_vec(&CompactReq { messages, provider })
         .map_err(|e| CompactError::Serialize(e.to_string()))?;
 
     let reply = tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into()))
