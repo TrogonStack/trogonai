@@ -1,3 +1,4 @@
+pub mod app;
 pub mod client_supervisor;
 pub mod doctor;
 pub mod env_local;
