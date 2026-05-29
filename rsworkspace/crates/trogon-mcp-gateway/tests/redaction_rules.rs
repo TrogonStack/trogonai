@@ -12,7 +12,8 @@
 //! - fail-closed `-32104` / `schema_unknown` when the schema cache misses
 
 use trogon_mcp_gateway::redaction::{
-    JsonPath, RedactionAction, RedactionRule, RedactionRuleset, redact,
+    JsonPath, RedactionAction, RedactionApplyResult, RedactionDirection, RedactionRegistry,
+    RedactionRule, RedactionRuleset, RewriteEntry, SchemaRedactionContext, apply_schema_redaction, redact,
 };
 
 /// Touch scaffold redaction types so the integration file compiles before the gateway wires them.
@@ -25,7 +26,180 @@ fn touch_scaffold_redaction_types() {
     };
     let ruleset = RedactionRuleset::builder().rule(rule).build();
     let mut doc = serde_json::json!({ "params": { "token": "secret" } });
-    redact(&mut doc, &ruleset);
+    let _ = redact(&mut doc, &ruleset);
+}
+
+mod unit {
+    use super::*;
+
+    fn hash_rule(path: &str) -> RedactionRule {
+        RedactionRule {
+            path: JsonPath::parse(path).expect("valid path"),
+            action: RedactionAction::Hash,
+        }
+    }
+
+    fn mask_rule(path: &str) -> RedactionRule {
+        RedactionRule {
+            path: JsonPath::parse(path).expect("valid path"),
+            action: RedactionAction::Mask,
+        }
+    }
+
+    fn drop_rule(path: &str) -> RedactionRule {
+        RedactionRule {
+            path: JsonPath::parse(path).expect("valid path"),
+            action: RedactionAction::Drop,
+        }
+    }
+
+    #[test]
+    fn hash_replaces_token_before_backend_egress() {
+        let mut doc = serde_json::json!({ "params": { "token": "sk-live-secret" } });
+        let ruleset = RedactionRuleset::builder()
+            .rule(hash_rule("$.params.token"))
+            .build();
+
+        let outcome = redact(&mut doc, &ruleset);
+
+        assert_ne!(doc["params"]["token"], "sk-live-secret");
+        assert!(doc["params"]["token"].as_str().unwrap().starts_with("sha256:"));
+        assert_eq!(
+            outcome.rewrites,
+            vec![RewriteEntry::new("$.params.token", "hash")]
+        );
+    }
+
+    #[test]
+    fn hash_is_deterministic_for_identical_input() {
+        let ruleset = RedactionRuleset::builder()
+            .rule(hash_rule("$.params.token"))
+            .build();
+        let mut first = serde_json::json!({ "params": { "token": "same" } });
+        let mut second = serde_json::json!({ "params": { "token": "same" } });
+
+        let _ = redact(&mut first, &ruleset);
+        let _ = redact(&mut second, &ruleset);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn drop_removes_field_from_backend_egress_payload() {
+        let mut doc = serde_json::json!({ "params": { "internal_note": "secret", "keep": true } });
+        let ruleset = RedactionRuleset::builder()
+            .rule(drop_rule("$.params.internal_note"))
+            .build();
+
+        let _ = redact(&mut doc, &ruleset);
+
+        assert!(doc["params"].get("internal_note").is_none());
+        assert_eq!(doc["params"]["keep"], true);
+    }
+
+    #[test]
+    fn drop_does_not_emit_null_placeholder() {
+        let mut doc = serde_json::json!({ "params": { "internal_note": "x" } });
+        let ruleset = RedactionRuleset::builder()
+            .rule(drop_rule("$.params.internal_note"))
+            .build();
+
+        let _ = redact(&mut doc, &ruleset);
+
+        assert!(!doc["params"].as_object().unwrap().contains_key("internal_note"));
+    }
+
+    #[test]
+    fn mask_replaces_field_with_literal_stars() {
+        let mut doc = serde_json::json!({ "params": { "api_key": "plain" } });
+        let ruleset = RedactionRuleset::builder()
+            .rule(mask_rule("$.params.api_key"))
+            .build();
+
+        let _ = redact(&mut doc, &ruleset);
+
+        assert_eq!(doc["params"]["api_key"], "***");
+    }
+
+    #[test]
+    fn nested_path_masks_deep_email_field() {
+        let mut doc = serde_json::json!({
+            "params": { "user": { "email": "alice@acme.com", "name": "Alice" } }
+        });
+        let ruleset = RedactionRuleset::builder()
+            .rule(mask_rule("$.params.user.email"))
+            .build();
+
+        let _ = redact(&mut doc, &ruleset);
+
+        assert_eq!(doc["params"]["user"]["email"], "***");
+        assert_eq!(doc["params"]["user"]["name"], "Alice");
+    }
+
+    #[test]
+    fn multi_rule_application_order_is_stable_across_requests() {
+        let ruleset = RedactionRuleset::builder()
+            .rule(mask_rule("$.params.a"))
+            .rule(hash_rule("$.params.b"))
+            .rule(drop_rule("$.params.c"))
+            .build();
+        let mut first = serde_json::json!({ "params": { "a": "1", "b": "2", "c": "3" } });
+        let mut second = serde_json::json!({ "params": { "a": "1", "b": "2", "c": "3" } });
+
+        let first_outcome = redact(&mut first, &ruleset);
+        let second_outcome = redact(&mut second, &ruleset);
+
+        assert_eq!(first, second);
+        assert_eq!(first_outcome.rewrites, second_outcome.rewrites);
+        assert_eq!(first_outcome.rewrites.len(), 3);
+    }
+
+    #[test]
+    fn audit_rewrites_omits_rules_that_did_not_match() {
+        let mut doc = serde_json::json!({ "params": { "token": "x" } });
+        let ruleset = RedactionRuleset::builder()
+            .rule(mask_rule("$.params.missing"))
+            .rule(hash_rule("$.params.token"))
+            .build();
+
+        let outcome = redact(&mut doc, &ruleset);
+
+        assert_eq!(outcome.rewrites.len(), 1);
+        assert_eq!(outcome.rewrites[0].path, "$.params.token");
+    }
+
+    #[tokio::test]
+    async fn schema_cache_miss_passes_payload_through() {
+        let registry = RedactionRegistry::new();
+        registry.register(
+            "github",
+            "create_issue",
+            RedactionDirection::Request,
+            RedactionRuleset::builder()
+                .rule(hash_rule("$.params.token"))
+                .build(),
+        );
+        let runtime = trogon_mcp_gateway::schema_cache::SchemaCacheRuntime::new(
+            trogon_mcp_gateway::schema_cache::SchemaCacheConfig::default(),
+        );
+        let mut doc = serde_json::json!({ "params": { "token": "plain" } });
+
+        let result = apply_schema_redaction(
+            Some(&runtime),
+            Some(&registry),
+            SchemaRedactionContext {
+                server_id: "github",
+                tool_name: "create_issue",
+                direction: RedactionDirection::Request,
+                hash_salt: Some("tenant"),
+            },
+            &mut doc,
+        )
+        .await;
+
+        assert!(matches!(result, RedactionApplyResult::Skipped { .. }));
+        assert_eq!(doc["params"]["token"], "plain");
+    }
 }
 
 mod hash_redaction {
