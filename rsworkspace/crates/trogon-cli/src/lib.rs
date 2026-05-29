@@ -11,6 +11,7 @@ pub mod runtime;
 pub mod session;
 pub mod session_store;
 pub mod stdio_mcp_bridge;
+pub mod stream_input;
 pub mod tool_update;
 pub mod terminal;
 pub mod tui_client;
