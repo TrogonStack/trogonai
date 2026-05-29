@@ -3,7 +3,7 @@
 Reference: https://www.uber.com/us/en/blog/solving-the-agent-identity-crisis/
 Companion to: `MCP_GATEWAY_PLAN.md`
 
-**Status: closed.** Every planned block landed on `yordis/agentgateway`. The decisions, contracts, and shipped surfaces below are now the authoritative references; this file no longer tracks open work other than the operational follow-ups at the bottom.
+**Status: closed except for the two items in "Open work" below.** Every planned block landed on `yordis/agentgateway`; the residual ADR open-questions are resolved in "Decisions log" rather than parked.
 
 ## Binding decisions
 
@@ -31,15 +31,17 @@ Companion to: `MCP_GATEWAY_PLAN.md`
 
 First-deploy gate: every onboarded caller passes shadow-mode without `aud_mismatch` / `agent_id_missing` / `act_chain_depth_overflow` events across acceptance traffic, and STS P99 < 40 ms over the same window. When real traffic begins to accumulate, escalate to the original bar — zero shadow-mode events for 7 consecutive days — before flipping `MCP_GATEWAY_AGENT_IDENTITY=enforce`. Rollback: set `MCP_GATEWAY_AGENT_IDENTITY=shadow`, drain mesh-token cache.
 
-## Operational follow-ups (decide as conditions warrant — none block execution)
+## Decisions log (former operational follow-ups)
 
-- Gateway's own identity: SPIFFE ID + privileged role today; promote to a registered `agent_id` if/when policy needs to gate on it.
-- Batch / non-interactive originators in `act_chain`: use sentinel `wkl:sentinel:batch` with `auth_method: "service-account"` as originator entry.
-- Maximum `act_chain` depth: 8 (configurable per bundle). Revisit if real workflows hit the cap.
-- `purpose` refinement audit: STS records before/after `purpose` on every exchange in `mcp.audit.sts.{outcome}`.
-- STS exposure to user clients: mesh-internal only in v1; HTTP facade per ADR 0004 lands when a user-facing client needs it.
-- Offline dev without SPIRE: file-based SVIDs + `sentinel:human` fallback (ADR 0002 + ADR 0006 dev profile).
-- `trogon-decider` placement: STS stateless in v1 with JetStream audit; reconsider event-sourced STS if replay/consistency proves valuable (ADR 0004 open question 2).
-- Multi-region: regional STS instances with local registry cache, default. Trust-bundle replication SLA TBD with first multi-region deployment (ADR 0006 §6).
-- OAuth-MCP composition (`MCP_GATEWAY_PLAN.md:67`): OAuth access token enters as `subject_token` to STS — same TTL / `aud` rules apply (ADR 0005 §OQ6).
-- Backfill hook: if a non-greenfield deployment ever needs bulk import, add an `agctl registry backfill` subcommand that consumes a TOML inventory and emits signed manifests via the existing controller path.
+- **`act_chain` depth = 8**, per-bundle override allowed. Shipped; revisit only if a real workflow saturates the cap.
+- **STS exposure to user clients = mesh-internal only in v1.** Wire contract is transport-agnostic (ADR 0004), so the HTTP facade is a future PR triggered by a user-facing caller, not a planning gap.
+- **Offline dev path = file PEM SVIDs + `sentinel:human` fallback** per ADR 0002 + ADR 0006 dev profile. Shipped.
+- **STS placement = stateless service + JetStream audit.** Not event-sourced. ADR 0004 OQ2 is closed at this verdict; reopening requires a concrete replay-or-consistency requirement.
+- **Multi-region = single-region in v1; regional STS instances with local registry cache when expanding.** Trust-bundle replication SLA is set at first multi-region deploy (no SLA without a region pair).
+- **Purpose refinement audit = no-op in v1.** STS validates `purpose ∈ allowed_purposes` without transforming it; there is no before/after to record. If a refinement step is ever introduced, that PR adds `purpose_requested` / `purpose_resolved` to the STS audit envelope at the same time.
+- **OAuth-MCP composition = deferred until first OAuth-fronted MCP client.** ADR 0005 §OQ6 already pins the semantics (OAuth access token enters STS as `subject_token`); the multi-issuer config is a same-day add when the first caller arrives, not standing work.
+
+## Open work
+
+1. **Gateway as registered agent.** `rsworkspace/crates/trogon-mcp-gateway/src/act_chain.rs:86` appends a gateway entry with `agent_id: None, wkl: None`. Register each gateway instance as `agent:trogon/gateway-{instance_id}`, plumb its agent_id + SPIFFE `wkl` into the appended entry, and ship a default manifest under `examples/agent-registry/gateway.toml`. Why: uniform model — every act_chain hop names a registered agent; audit + traffic-view stop carrying anonymous infra hops.
+2. **Batch-originator example.** `docs/identity/act-chain.md` documents the sentinel envelope (`wkl:sentinel:batch` + `auth_method:"service-account"`) for non-interactive originators per ADR 0002, but lacks a copy-pasteable originator entry. Add one block with the full `ActChainEntry` shape so operators don't re-derive the encoding.
