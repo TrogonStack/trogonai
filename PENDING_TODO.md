@@ -151,7 +151,7 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 - [ ] Agent-traffic view v1 implementation (spec + skeleton landed as `trogon-traffic-view`; `docs/identity/agent-traffic.md` covers schema, projector, OCSF export, `agctl traffic` CLI surface).
 - [x] Gateway-ingress-side act-chain registry resolution (STS receipt resolution already landed).
 - [x] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
-- [ ] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
+- [x] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
 - [x] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
 - [ ] A2A SDK TypeScript + Python tracks.
 
@@ -196,8 +196,8 @@ Spec at `docs/identity/registry.md` is the accepted contract. Implementation tas
 Attestation model is fixed by ADR 0002 (sentinel `wkl` namespace for non-SPIFFE, SPIFFE URI for service workloads). Implementation tasks:
 
 - [x] **Attestation source — decided.** SPIRE server for production; file-based SVIDs for dev/CI. Cloud IMDS-based attestation is an optional add-on after SPIRE is in.
-- [ ] **Trust handshake implementation.** At STS: client presents SVID (mTLS or JWT-SVID in the exchange request); STS validates against trust bundle. Trust-bundle distribution via NATS KV `mcp-trust-bundles`, refreshed every N minutes.
-- [ ] **SVID → `wkl` mapping implementation.** Map SPIFFE ID (e.g. `spiffe://acme.local/ns/prod/sa/oncall-agent`) to JWT claim `wkl` + `wkl_attested_at` at STS mint time.
+- [x] **Trust handshake implementation.** At STS: client presents SVID (mTLS or JWT-SVID in the exchange request); STS validates against trust bundle. Trust-bundle distribution via NATS KV `mcp-trust-bundles`, refreshed every N minutes.
+- [x] **SVID → `wkl` mapping implementation.** Map SPIFFE ID (e.g. `spiffe://acme.local/ns/prod/sa/oncall-agent`) to JWT claim `wkl` + `wkl_attested_at` at STS mint time.
 - [x] **Non-SPIFFE fallback — decided.** Sentinel `wkl` values: `sentinel:human` (+ `auth_method: "oidc"` / `"mtls"` / `"api-key"`), `sentinel:batch`, `sentinel:api-key`. See ADR 0002.
 
 **Acceptance:** STS refuses to mint a mesh token without a valid SVID (or explicit non-SPIFFE auth-method in a documented allow-list).
