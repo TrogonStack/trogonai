@@ -129,11 +129,11 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 **Act-chain registry resolution (closes Block 2.2 acceptance).**
 - [x] STS receipt walks every entry in the inbound `act_chain`, resolves `agent_id` against the registry, and rejects revoked / unknown entries (`mcp.audit.sts.deny` with `reason: "act_chain_entry_revoked"`, `data.offending_index`, offending `agent_id`).
 - [x] TTL-bounded chain-resolution cache (default 60 s) keeps the additional latency under budget; `STS_CHAIN_RESOLUTION_MODE=off|cache|strict` env flag exposes the dial.
-- [ ] Gateway-ingress-side chain resolution still pending (STS-side is the higher-leverage gate). Track under "Open after 2026-05-27 swarm".
+- [x] Gateway-ingress-side chain resolution still pending (STS-side is the higher-leverage gate). Track under "Open after 2026-05-27 swarm".
 
 **Purpose handling at the originator (closes Block 2.3 acceptance).**
 - [x] `trogon-a2a-sdk` `Client::call` resolves the caller's `allowed_purposes` from the registry when `purpose=None`: single-allowed → use it, multiple → `Error::PurposeRequired`, empty → synthesize `purpose:default`. Pinned in `docs/identity/sdk.md` §Default purpose handling.
-- [ ] STS-side empty-purpose rejection still tracked separately. Move to "Open after 2026-05-27 swarm".
+- [x] STS-side empty-purpose rejection still tracked separately. Move to "Open after 2026-05-27 swarm".
 
 **A2A SDK gaps (closes roadmap item 9 — Rust track).**
 - [x] Live integration test (`crates/trogon-a2a-sdk/tests/integration_live.rs`, behind `--features live`) boots NATS + STS + registry in-process and exercises `Client::call` + `serve` end-to-end.
@@ -152,7 +152,7 @@ The 2026-05-27 production-hardening swarm landed seven branches into `yordis/age
 - [x] Gateway-ingress-side act-chain registry resolution (STS receipt resolution already landed).
 - [x] STS-side empty-purpose rejection (`mcp.audit.sts.deny` reason `purpose_missing`).
 - [ ] SPIRE wiring (Block 1.2 trust handshake + SVID → `wkl` mapping at STS).
-- [ ] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
+- [x] Adaptive access (Block 5: step-up auth, human-in-the-loop approvals with `-32107 approval_required`, anomaly emission).
 - [ ] A2A SDK TypeScript + Python tracks.
 
 ---
