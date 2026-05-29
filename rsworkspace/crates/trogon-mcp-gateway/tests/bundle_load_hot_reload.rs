@@ -11,22 +11,20 @@
 //! - `MCP_GATEWAY_PLAN.md` Block F item 5 (gateway runtime wiring)
 //!
 //! The `loader_api` module exercises `trogon_mcp_gateway::bundle::load_bundle` directly.
-//! Gateway integration cases remain `#[ignore]` until Block F item 5 lands.
+//! The `kv_loader_api` module exercises `BundleKvLoader` without gateway HTTP wiring.
+//! Gateway integration cases remain `#[ignore]` until runtime wiring lands.
 
 mod loader_api {
     //! ADR 0010 bundle loader API (no gateway runtime).
 
+    use nkeys::KeyPair;
     use trogon_mcp_gateway::bundle::{
-        build_tar, extract_archive, hash_member, load_bundle, resolve_manifest, validate_members,
-        BundleArchive, BundleLoadError, BundleManifest, TrustedKeys, HOST_TARGET_WIT,
-        MANIFEST_FILENAME, SIGNATURE_PATH,
+        build_tar, extract_archive, hash_member, load_bundle, manifest_digest_bytes, resolve_manifest,
+        signature_path, validate_members, BundleArchive, BundleLoadError, BundleManifest, TrustedKeys,
+        HOST_TARGET_WIT, MANIFEST_FILENAME,
     };
 
-    fn trusted_keys() -> TrustedKeys {
-        TrustedKeys::from_allowlist(["UABTRUSTED"])
-    }
-
-    fn manifest_toml(cel_hash: &str) -> String {
+    fn manifest_toml(nkey_pub: &str, cel_hash: &str) -> String {
         format!(
             r#"
 name = "acme/github-create-issue-gate"
@@ -41,7 +39,7 @@ description = "demo bundle"
 imports = ["host.spicedb-check"]
 
 [signing]
-nkey_pub = "UABTRUSTED"
+nkey_pub = "{nkey_pub}"
 
 [[programs]]
 id = "allow-create-issue"
@@ -54,18 +52,22 @@ priority = 100
         )
     }
 
-    fn signed_tar(cel_body: &[u8]) -> Vec<u8> {
+    fn signed_tar(kp: &KeyPair, cel_body: &[u8]) -> Vec<u8> {
         let hash = hash_member(cel_body);
+        let manifest = manifest_toml(&kp.public_key(), &hash);
+        let manifest_bytes = manifest.into_bytes();
+        let sig = kp.sign(&manifest_digest_bytes(&manifest_bytes)).expect("sign");
         let mut archive = BundleArchive::default();
-        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert(MANIFEST_FILENAME, manifest_bytes);
         archive.insert("policies/allow-create-issue.cel", cel_body.to_vec());
-        archive.insert(SIGNATURE_PATH, vec![0u8; 64]);
+        archive.insert(signature_path(), sig);
         build_tar(&archive)
     }
 
     #[test]
     fn manifest_parse_round_trip_via_loader_fixture() {
-        let tar = signed_tar(b"true");
+        let kp = KeyPair::new_user();
+        let tar = signed_tar(&kp, b"true");
         let archive = extract_archive(&tar).expect("extract");
         let (_, manifest_bytes) = resolve_manifest(&archive).expect("manifest");
         let parsed = BundleManifest::parse(manifest_bytes).expect("parse");
@@ -76,11 +78,15 @@ priority = 100
 
     #[test]
     fn content_hash_mismatch_rejected() {
+        let kp = KeyPair::new_user();
         let mut archive = BundleArchive::default();
         archive.insert(
             MANIFEST_FILENAME,
-            manifest_toml("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-                .into_bytes(),
+            manifest_toml(
+                &kp.public_key(),
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            )
+            .into_bytes(),
         );
         archive.insert("policies/allow-create-issue.cel", b"tampered".to_vec());
         let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
@@ -94,10 +100,11 @@ priority = 100
 
     #[test]
     fn unknown_member_rejected() {
+        let kp = KeyPair::new_user();
         let cel = b"true";
         let hash = hash_member(cel);
         let mut archive = BundleArchive::default();
-        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert(MANIFEST_FILENAME, manifest_toml(&kp.public_key(), &hash).into_bytes());
         archive.insert("policies/allow-create-issue.cel", cel.to_vec());
         archive.insert("policies/unlisted.cel", b"false".to_vec());
         let manifest = BundleManifest::parse(archive.get(MANIFEST_FILENAME).expect("manifest"))
@@ -107,33 +114,229 @@ priority = 100
     }
 
     #[test]
-    fn signature_verification_reports_nkeys_dependency_gap() {
-        let tar = signed_tar(b"true");
-        let error = load_bundle(&tar, &trusted_keys()).expect_err("nkeys gap");
-        assert!(matches!(
-            error,
-            BundleLoadError::SignatureVerificationUnavailable { reason } if reason.contains("nkeys")
-        ));
+    fn valid_nkey_signature_activates_bundle_via_loader() {
+        let kp = KeyPair::new_user();
+        let tar = signed_tar(&kp, b"true");
+        let trusted = TrustedKeys::from_allowlist([kp.public_key()]);
+        load_bundle(&tar, &trusted).expect("signed bundle loads");
     }
 
     #[test]
     fn untrusted_signer_rejected() {
-        let tar = signed_tar(b"true");
-        let trusted = TrustedKeys::from_allowlist(["UABOTHER"]);
+        let kp = KeyPair::new_user();
+        let tar = signed_tar(&kp, b"true");
+        let other = KeyPair::new_user();
+        let trusted = TrustedKeys::from_allowlist([other.public_key()]);
         let error = load_bundle(&tar, &trusted).expect_err("untrusted");
         assert!(matches!(error, BundleLoadError::UntrustedSigner { .. }));
     }
 
     #[test]
     fn unsigned_bundle_rejected_when_signature_missing() {
+        let kp = KeyPair::new_user();
         let cel = b"true";
         let hash = hash_member(cel);
         let mut archive = BundleArchive::default();
-        archive.insert(MANIFEST_FILENAME, manifest_toml(&hash).into_bytes());
+        archive.insert(MANIFEST_FILENAME, manifest_toml(&kp.public_key(), &hash).into_bytes());
         archive.insert("policies/allow-create-issue.cel", cel.to_vec());
         let tar = build_tar(&archive);
-        let error = load_bundle(&tar, &trusted_keys()).expect_err("unsigned");
+        let trusted = TrustedKeys::from_allowlist([kp.public_key()]);
+        let error = load_bundle(&tar, &trusted).expect_err("unsigned");
         assert!(matches!(error, BundleLoadError::SignatureMissing));
+    }
+}
+
+mod kv_loader_api {
+    use nkeys::KeyPair;
+    use trogon_mcp_gateway::bundle::fake_kv::{FakeBundleKv, FakeKvSource};
+    use trogon_mcp_gateway::bundle::{
+        build_tar, extract_archive, hash_member, manifest_digest_bytes, signature_path, BundleArchive,
+        BundleAuditPublisher, BundleKvLoader, BundleKvLoaderOpts, BundleLoadError, TrustedKeys,
+        EVENT_HOT_SWAPPED, EVENT_LOAD_FAILED, EVENT_LOAD_SUCCEEDED, EVENT_ROLLED_BACK, HOST_TARGET_WIT,
+        MANIFEST_FILENAME,
+    };
+
+    fn manifest_toml(nkey_pub: &str, cel_hash: &str, version: &str) -> String {
+        format!(
+            r#"
+name = "acme/github-create-issue-gate"
+version = "{version}"
+target_wit = "{HOST_TARGET_WIT}"
+min_gateway_version = "0.0.1"
+author = "platform-identity"
+created_at = "2026-05-28T14:00:00Z"
+description = "demo bundle"
+
+[signing]
+nkey_pub = "{nkey_pub}"
+
+[[programs]]
+id = "allow-create-issue"
+path = "policies/allow-create-issue.cel"
+sha256 = "{cel_hash}"
+class = "ingress_gate"
+effect = "allow"
+priority = 100
+"#
+        )
+    }
+
+    fn signed_tar(kp: &KeyPair, cel_body: &[u8], version: &str) -> Vec<u8> {
+        let hash = hash_member(cel_body);
+        let manifest = manifest_toml(&kp.public_key(), &hash, version);
+        let manifest_bytes = manifest.into_bytes();
+        let sig = kp.sign(&manifest_digest_bytes(&manifest_bytes)).expect("sign");
+        let mut archive = BundleArchive::default();
+        archive.insert(MANIFEST_FILENAME, manifest_bytes);
+        archive.insert("policies/allow-create-issue.cel", cel_body.to_vec());
+        archive.insert(signature_path(), sig);
+        build_tar(&archive)
+    }
+
+    fn trusted(kp: &KeyPair) -> TrustedKeys {
+        TrustedKeys::from_allowlist([kp.public_key()])
+    }
+
+    #[tokio::test]
+    async fn kv_cold_start_fails_fast_when_bucket_empty() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        let (audit, _) = BundleAuditPublisher::recording();
+        let loader = BundleKvLoader::new(
+            FakeKvSource::new(kv, key),
+            trusted(&kp),
+            BundleKvLoaderOpts::new(key, key, audit),
+        );
+        assert!(matches!(
+            loader.start().await,
+            Err(BundleLoadError::KvEmpty { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn kv_update_activates_new_bundle_for_subsequent_reads() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        kv.put(key, signed_tar(&kp, b"v1", "1.0.0")).await;
+        let (audit, _) = BundleAuditPublisher::recording();
+        let mut opts = BundleKvLoaderOpts::new(key, key, audit);
+        opts.debounce_ms = 10;
+        let handle = BundleKvLoader::new(FakeKvSource::new(kv.clone(), key), trusted(&kp), opts)
+            .start()
+            .await
+            .expect("cold load");
+        assert_eq!(handle.current().expect("v1").manifest.version, "1.0.0");
+        kv.put(key, signed_tar(&kp, b"v2", "2.0.0")).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        assert_eq!(handle.current().expect("v2").manifest.version, "2.0.0");
+    }
+
+    #[tokio::test]
+    async fn invalid_manifest_keeps_last_good_bundle() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        kv.put(key, signed_tar(&kp, b"true", "1.0.0")).await;
+        let (audit, records) = BundleAuditPublisher::recording();
+        let mut opts = BundleKvLoaderOpts::new(key, key, audit);
+        opts.debounce_ms = 5;
+        let handle = BundleKvLoader::new(FakeKvSource::new(kv.clone(), key), trusted(&kp), opts)
+            .start()
+            .await
+            .expect("cold load");
+        let digest_v1 = handle.status().expect("status").digest_hex;
+        kv.put(key, b"not-a-valid-tar-archive".to_vec()).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
+        assert_eq!(handle.status().expect("status").digest_hex, digest_v1);
+        let events = records.lock().await;
+        assert!(events.iter().any(|e| e.event == EVENT_LOAD_FAILED));
+    }
+
+    #[tokio::test]
+    async fn failed_reload_leaves_prior_digest() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        kv.put(key, signed_tar(&kp, b"v1", "1.0.0")).await;
+        let (audit, _) = BundleAuditPublisher::recording();
+        let mut opts = BundleKvLoaderOpts::new(key, key, audit);
+        opts.debounce_ms = 5;
+        let handle = BundleKvLoader::new(FakeKvSource::new(kv.clone(), key), trusted(&kp), opts)
+            .start()
+            .await
+            .expect("cold load");
+        let digest_v1 = handle.status().expect("status").digest_hex;
+        let mut archive = extract_archive(&signed_tar(&kp, b"v2", "2.0.0")).expect("extract");
+        archive.insert(
+            MANIFEST_FILENAME,
+            manifest_toml(
+                &kp.public_key(),
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "2.0.0",
+            )
+            .into_bytes(),
+        );
+        kv.put(key, build_tar(&archive)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
+        assert_eq!(handle.status().expect("status").digest_hex, digest_v1);
+    }
+
+    #[tokio::test]
+    async fn rollback_emits_audit_with_old_and_new_digests() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        let rev1 = kv.put(key, signed_tar(&kp, b"v1", "1.0.0")).await;
+        let (audit, records) = BundleAuditPublisher::recording();
+        let mut opts = BundleKvLoaderOpts::new(key, key, audit);
+        opts.debounce_ms = 5;
+        let handle = BundleKvLoader::new(FakeKvSource::new(kv.clone(), key), trusted(&kp), opts)
+            .start()
+            .await
+            .expect("cold load");
+        kv.put(key, signed_tar(&kp, b"v2", "2.0.0")).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
+        let digest_v2 = handle.status().expect("status").digest_hex;
+        handle.rollback(rev1).await.expect("rollback");
+        let digest_v1 = handle.status().expect("status").digest_hex;
+        let events = records.lock().await;
+        let rolled = events
+            .iter()
+            .find(|e| e.event == EVENT_ROLLED_BACK)
+            .expect("rollback audit");
+        assert_eq!(
+            rolled.fields.previous_digest.as_deref(),
+            Some(digest_v2.as_str())
+        );
+        assert_eq!(
+            rolled.fields.policy_bundle_digest.as_deref(),
+            Some(digest_v1.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn digest_tracks_active_bundle_after_hot_reload() {
+        let kp = KeyPair::new_user();
+        let kv = FakeBundleKv::default();
+        let key = "acme/github-create-issue-gate";
+        kv.put(key, signed_tar(&kp, b"v1", "1.0.0")).await;
+        let (audit, records) = BundleAuditPublisher::recording();
+        let mut opts = BundleKvLoaderOpts::new(key, key, audit);
+        opts.debounce_ms = 10;
+        let handle = BundleKvLoader::new(FakeKvSource::new(kv.clone(), key), trusted(&kp), opts)
+            .start()
+            .await
+            .expect("cold load");
+        let digest_v1 = handle.status().expect("status").digest_hex;
+        kv.put(key, signed_tar(&kp, b"v2", "2.0.0")).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let digest_v2 = handle.status().expect("status").digest_hex;
+        assert_ne!(digest_v1, digest_v2);
+        let events = records.lock().await;
+        assert!(events.iter().any(|e| e.event == EVENT_LOAD_SUCCEEDED));
+        assert!(events.iter().any(|e| e.event == EVENT_HOT_SWAPPED));
     }
 }
 
