@@ -11,6 +11,7 @@ pub mod cel_builtins;
 pub mod egress;
 pub mod gateway;
 pub mod ingress;
+pub mod observability;
 pub mod jwt;
 pub mod plugin;
 pub mod policy;
