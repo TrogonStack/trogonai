@@ -14,8 +14,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::client_supervisor::AcpClientSupervisor;
+use crate::stream_input::{StreamInputEvent, StreamInputReader};
 use crate::terminal::{print_tool_output, reset_display};
 use crate::tui_client::PermissionCoordinator;
+use std::collections::VecDeque;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_tools::fs::{resolve_directory_target, resolve_path};
 
@@ -259,13 +261,26 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // prompt the user submitted is stashed here and pre-filled into the next
     // readline so they can edit and resend it instead of retyping it.
     let mut pending_input: Option<String> = None;
+    // Messages typed while a response was streaming. Auto-submitted in order
+    // (one per turn) once the current turn finishes.
+    let mut queued_prompts: VecDeque<String> = VecDeque::new();
 
     loop {
         permission_coordinator.cancel_pending();
-        let read = match pending_input.take() {
-            Some(text) => rl.readline_with_initial("> ", (&text, "")),
-            None => rl.readline("> "),
-        };
+        // A queued message (typed during the previous turn) is submitted before
+        // reading new input. `from_queue` skips the readline-echo erase below,
+        // since there's no readline echo line to overwrite.
+        let (read, from_queue): (rustyline::Result<String>, bool) =
+            match queued_prompts.pop_front() {
+                Some(q) => (Ok(q), true),
+                None => {
+                    let r = match pending_input.take() {
+                        Some(text) => rl.readline_with_initial("> ", (&text, "")),
+                        None => rl.readline("> "),
+                    };
+                    (r, false)
+                }
+            };
         match read {
             Ok(raw_line) => {
                 let line = join_continuation(&raw_line).trim().to_string();
@@ -273,8 +288,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     continue;
                 }
 
-                // Erase the readline echo line and replace with a styled user block
-                eprint!("\x1b[1A\r\x1b[2K\x1b[1;35m┃\x1b[0m {line}\n");
+                if from_queue {
+                    // No readline echo to erase — just print the styled user block.
+                    eprintln!("\x1b[1;35m┃\x1b[0m {line}");
+                } else {
+                    // Erase the readline echo line and replace with a styled user block
+                    eprint!("\x1b[1A\r\x1b[2K\x1b[1;35m┃\x1b[0m {line}\n");
+                }
 
                 if line == "cd" || line.starts_with("cd ") {
                     let arg = line.strip_prefix("cd").unwrap_or("").trim();
@@ -718,6 +738,17 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         // true after the first text token — reset_display called only once per response
                         let mut text_started = false;
 
+                        // Capture input typed during this turn: plain lines are queued
+                        // and auto-submitted when the turn ends; Ctrl+G starts a side
+                        // question answered in a scratch session. The reader restores
+                        // the terminal when it drops at the end of this block.
+                        let (_input_reader, mut input_rx) = match StreamInputReader::start() {
+                            Some((r, rx)) => (Some(r), Some(rx)),
+                            None => (None, None),
+                        };
+                        let mut queued: Vec<String> = Vec::new();
+                        let mut interrupted = false;
+
                         loop {
                             tokio::select! {
                                 biased;
@@ -728,7 +759,24 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // Claude-style: restore the interrupted prompt so the
                                     // next readline is pre-filled with it, ready to edit/resend.
                                     pending_input = Some(line.clone());
+                                    interrupted = true;
                                     break;
+                                }
+                                ev = next_stream_input(&mut input_rx) => {
+                                    match ev {
+                                        Some(StreamInputEvent::Queued(msg)) => {
+                                            reset_display();
+                                            eprintln!("\x1b[2m⏳ queued: {msg}\x1b[0m");
+                                            queued.push(msg);
+                                        }
+                                        Some(StreamInputEvent::SideQuestion(q)) => {
+                                            let model = session.current_model();
+                                            let qcwd = cwd.clone();
+                                            run_side_question(&factory, &prefix, &model, &qcwd, &q).await;
+                                        }
+                                        // Reader stopped — stop polling it to avoid spinning.
+                                        None => { input_rx = None; }
+                                    }
                                 }
                                 event = rx.recv() => {
                                     match event {
@@ -858,6 +906,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 }
                             }
                         }
+                        // Auto-submit messages queued during this turn, in order.
+                        // If the user interrupted (Ctrl+C), discard the queue since
+                        // they're likely changing direction. `_input_reader` drops at
+                        // the end of this block, restoring the terminal before readline.
+                        if !interrupted {
+                            queued_prompts.extend(queued);
+                        }
                     }
                 }
             }
@@ -887,6 +942,65 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     let _ = rl.save_history(&history_path);
     Ok(())
+}
+
+/// Await the next input event from the streaming-time reader. If the reader
+/// isn't running (not a real terminal), this never resolves, so the `select!`
+/// branch using it simply stays dormant.
+async fn next_stream_input(
+    rx: &mut Option<tokio::sync::mpsc::UnboundedReceiver<StreamInputEvent>>,
+) -> Option<StreamInputEvent> {
+    match rx {
+        Some(r) => r.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Answer a side question in a throwaway session on the same runner/model, so the
+/// main conversation is untouched. The main turn keeps running on the backend
+/// while this is handled (its output is just paused until we return).
+async fn run_side_question<SF: SessionFactory>(
+    factory: &SF,
+    prefix: &str,
+    model: &str,
+    cwd: &Path,
+    question: &str,
+) {
+    reset_display();
+    eprintln!("\x1b[2m┆ side question — scratch session (main task untouched)\x1b[0m");
+    let eph = match factory.create_session(prefix, cwd.to_path_buf(), vec![]).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("\x1b[31mside question failed: {e}\x1b[0m");
+            return;
+        }
+    };
+    let _ = eph.set_model(model).await;
+    let mut answer = String::new();
+    match eph.prompt(question).await {
+        Err(e) => eprintln!("\x1b[31mside question failed: {e}\x1b[0m"),
+        Ok(mut rx) => {
+            while let Some(ev) = rx.recv().await {
+                match ev {
+                    StreamEvent::Text(t) => answer.push_str(&t),
+                    StreamEvent::Error(m) => {
+                        eprintln!("\x1b[31m{m}\x1b[0m");
+                        break;
+                    }
+                    StreamEvent::Done(_) => break,
+                    _ => {}
+                }
+            }
+        }
+    }
+    if !answer.is_empty() {
+        reset_display();
+        print!("{}", crate::markdown::render(&answer));
+        let _ = std::io::stdout().flush();
+        println!();
+    }
+    eph.close().await;
+    eprintln!("\x1b[2m┆ resuming main response…\x1b[0m");
 }
 
 async fn start_session<SF: SessionFactory>(
