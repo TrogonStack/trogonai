@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-29) -- Option A: feature inside TrogonStack |
 | **Date** | 2026-05-29 |
 | **Deciders** | Yordis Prieto (engineering owner exercising decision authority in absence of separate product DRI) |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block A item 1 (product positioning: feature inside TrogonStack vs. standalone security product); gates Block A item 2 (on-bus vs hybrid), Block G items 3--4 (K8s controller, xDS), bundle distribution defaults, OSS envelope, and public naming |
-| **Related** | [Agent identity overview](../identity/overview.md); [MCP gateway operator overview](../identity/mcp-gateway-operator-overview.md); [MCP gateway plan](../../MCP_GATEWAY_PLAN.md) (The Take, Block A); [ADR 0007](0007-on-bus-vs-hybrid.md); [ADR 0010](0010-bundle-format.md); [ADR 0011](0011-nats-auth-callout.md); [ADR 0012](0012-rate-limit-state.md) |
+| **Blocks** | Product positioning (feature inside TrogonStack vs. standalone security product); gates on-bus vs hybrid, K8s controller, xDS, bundle distribution defaults, OSS envelope, and public naming |
+| **Related** | [Agent identity overview](../identity/overview.md); [MCP gateway operator overview](../identity/mcp-gateway-operator-overview.md); [ADR 0007](0007-on-bus-vs-hybrid.md); [ADR 0010](0010-bundle-format.md); [ADR 0011](0011-nats-auth-callout.md); [ADR 0012](0012-rate-limit-state.md) |
 
 ## Context
 

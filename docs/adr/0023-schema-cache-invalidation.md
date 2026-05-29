@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block C item 3 (Schema cache + invalidation); unblocks Block E item 4 (Schema cache populated by sniffing `tools/list` replies; invalidation wired) and Block E item 5 (Schema-driven redaction) |
-| **Related** | `docs/identity/tools-list-filtering.md` (schema cache interaction; no dedicated schema-cache paper spec yet); `MCP_GATEWAY_PLAN.md` Block C item 3, Block E items 4--5, §7 Guardrails / Redaction, §10 What Agentgateway Has That We Will Need to Build, control-plane subject `mcp.control.cache.invalidate.{server_id}`; `rsworkspace/crates/trogon-mcp-gateway/tests/schema_cache_invalidation.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/schema_cache/`; ADR 0015 (tools/list filtering + sniff hook); ADR 0014 (shared `list_changed` invalidation path); ADR 0001 (tenancy / KV namespace) |
+| **Blocks** | Schema cache + invalidation; unblocks schema cache populated by sniffing `tools/list` replies (invalidation wired) and schema-driven redaction |
+| **Related** | `docs/identity/tools-list-filtering.md` (schema cache interaction; no dedicated schema-cache paper spec yet); control-plane subject `mcp.control.cache.invalidate.{server_id}`; `rsworkspace/crates/trogon-mcp-gateway/tests/schema_cache_invalidation.rs`; `rsworkspace/crates/trogon-mcp-gateway/src/schema_cache/`; ADR 0015 (tools/list filtering + sniff hook); ADR 0014 (shared `list_changed` invalidation path); ADR 0001 (tenancy / KV namespace) |
 
 ## Context
 

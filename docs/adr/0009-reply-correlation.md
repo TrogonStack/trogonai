@@ -5,8 +5,8 @@
 | **Status** | Accepted (2026-05-28) |
 | **Date** | 2026-05-28 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block B item 2 (Reply correlation mechanism); Phase 2 gateway implementation in `trogon-mcp-gateway` |
-| **Related** | `docs/identity/reply-correlation.md`, `docs/identity/reference-reply-inboxes.md`, `docs/identity/reference-queue-groups.md`, `MCP_GATEWAY_PLAN.md` Block B item 2, § Reply inbox naming, § Wire-Format Pins |
+| **Blocks** | Reply correlation mechanism; Phase 2 gateway implementation in `trogon-mcp-gateway` |
+| **Related** | `docs/identity/reply-correlation.md`, `docs/identity/reference-reply-inboxes.md`, `docs/identity/reference-queue-groups.md` |
 
 ## Context
 

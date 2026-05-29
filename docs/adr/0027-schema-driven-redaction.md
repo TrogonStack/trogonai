@@ -5,7 +5,7 @@
 | **Status** | Accepted (2026-05-29) |
 | **Date** | 2026-05-29 |
 | **Deciders** | *(platform security / mcp gateway -- TBD)* |
-| **Blocks** | `MCP_GATEWAY_PLAN.md` Block E item 5 (Schema-driven redaction); unblocks native Tier-1 redaction on `tools/call` / `resources/read` forward and callback paths, audit `rewrites` attestation (Pin 7), and acceptance tests in `redaction_rules.rs` |
+| **Blocks** | Schema-driven redaction; unblocks native Tier-1 redaction on `tools/call` / `resources/read` forward and callback paths, audit `rewrites` attestation (audit envelope schema), and acceptance tests in `redaction_rules.rs` |
 | **Related** | ADR 0023 (schema cache source) · ADR 0013 (hierarchical policy merge) · ADR 0015 (`tools/list` descriptor redaction) · ADR 0020 (bidirectional enforcement) · [reference-audit-envelope.md](../identity/reference-audit-envelope.md) · [tools-list-filtering.md](../identity/tools-list-filtering.md) §5 · [hierarchical-policy-merge.md](../identity/hierarchical-policy-merge.md) · `rsworkspace/crates/trogon-mcp-gateway/tests/redaction_rules.rs` · `rsworkspace/crates/trogon-mcp-gateway/src/redaction/` |
 
 ## Context
