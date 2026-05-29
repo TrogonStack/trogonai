@@ -1,0 +1,26 @@
+[package]
+name = "trogon-gateway-ctl"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-gateway-ctl"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true }
+cel-interpreter = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+toml = { workspace = true }
+trogon-mcp-gateway = { path = "../trogon-mcp-gateway" }
+
+[dev-dependencies]
+nkeys = { workspace = true }
+tempfile = { workspace = true }
