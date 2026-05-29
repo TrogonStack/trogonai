@@ -158,6 +158,9 @@ where
         request: &StsExchangeRequest,
     ) -> Result<(StsExchangeResponse, MintedClaimsSummary, String, Option<String>, bool), StsError> {
         validate_wire_request(request)?;
+        if self.require_purpose {
+            validate_purpose(Some(&request.purpose))?;
+        }
 
         let iss_hint = peek_token_iss(&request.subject_token)?;
         let (iss, jwks) = if iss_hint == self.mesh_issuer {
@@ -168,7 +171,9 @@ where
 
         let subject = verify_subject_token(&request.subject_token, &iss, &jwks)?;
         let is_bootstrap = iss != self.mesh_issuer;
-        assert_purpose_required(self.require_purpose, request, Some((&subject, is_bootstrap)))?;
+        if self.require_purpose {
+            assert_bootstrap_purpose_required(Some((&subject, is_bootstrap)))?;
+        }
 
         self.spicedb.authorize_exchange().await?;
 
@@ -274,25 +279,19 @@ where
     }
 }
 
-fn assert_purpose_required(
-    require: bool,
-    request: &StsExchangeRequest,
+/// Rejects missing or whitespace-only exchange `purpose` values.
+pub fn validate_purpose(purpose: Option<&str>) -> Result<&str, StsError> {
+    purpose
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or(StsError::PurposeMissing)
+}
+
+fn assert_bootstrap_purpose_required(
     bootstrap_subject: Option<(&crate::types::VerifiedSubjectClaims, bool)>,
 ) -> Result<(), StsError> {
-    if !require {
-        return Ok(());
-    }
-    if request.purpose.trim().is_empty() {
-        return Err(StsError::PurposeMissing);
-    }
     if let Some((subject, true)) = bootstrap_subject {
-        let claim_ok = subject
-            .purpose
-            .as_deref()
-            .is_some_and(|p| !p.trim().is_empty());
-        if !claim_ok {
-            return Err(StsError::PurposeMissing);
-        }
+        validate_purpose(subject.purpose.as_deref())?;
     }
     Ok(())
 }
@@ -417,6 +416,36 @@ fn now_unix() -> i64 {
 
 pub fn default_bootstrap_issuer() -> String {
     "https://id.trogon.ai/callout".to_string()
+}
+
+#[cfg(test)]
+mod validate_purpose_tests {
+    use super::validate_purpose;
+    use crate::error::StsError;
+
+    #[test]
+    fn accepts_non_empty_purpose() {
+        assert_eq!(
+            validate_purpose(Some("order_processing")).expect("valid"),
+            "order_processing"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_purpose() {
+        assert_eq!(validate_purpose(Some("")), Err(StsError::PurposeMissing));
+    }
+
+    #[test]
+    fn rejects_whitespace_only_purpose() {
+        assert_eq!(validate_purpose(Some(" ")), Err(StsError::PurposeMissing));
+        assert_eq!(validate_purpose(Some("\t")), Err(StsError::PurposeMissing));
+    }
+
+    #[test]
+    fn rejects_missing_purpose() {
+        assert_eq!(validate_purpose(None), Err(StsError::PurposeMissing));
+    }
 }
 
 #[cfg(test)]
