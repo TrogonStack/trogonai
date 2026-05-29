@@ -42,7 +42,7 @@ Open work only. Strategic / technical paper decisions (ADRs 0001-0032), Phase 1 
 Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gateway/tests/`.
 
 - [x] CEL builtins per host-ABI sketch (`spicedb.check`, `cache.get/set`, `jsonpath.*`, `audit.emit`, `time.now`, `rate.acquire`) — contract: `tests/cel_authz_gate.rs`.
-- [ ] `tools/list` filtering via CEL re-evaluation → **ADR 0015**; contract: `tests/tools_list_filter.rs`.
+- [x] `tools/list` filtering via CEL re-evaluation → **ADR 0015**; contract: `tests/tools_list_filter.rs`.
 - [x] `BulkCheckPermission` + ZedToken cache → **ADR 0014**; contract: `tests/bulk_check_zedtoken_cache.rs`.
 - [x] Schema cache populated by sniffing `tools/list` → **ADR 0023**; contract: `tests/schema_cache_invalidation.rs`.
 - [x] Schema-driven redaction → **ADR 0027**; contract: `tests/redaction_rules.rs`.
@@ -51,10 +51,10 @@ Every item has a test-scaffold contract under `rsworkspace/crates/trogon-mcp-gat
 
 ### Block F — Phase 3 (WASM components + bundles + multi-protocol) — CODE PENDING
 
-- [ ] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3 — sketch: `docs/identity/mcp-policy-wit-sketch.md`.
+- [x] WIT interface (`trogon:mcp-policy@0.1.0`) finalized; pinned to WASI 0.3 — sketch: `docs/identity/mcp-policy-wit-sketch.md`.
 - [ ] Wasmtime integration with component pooling per bundle version → **ADR 0025**.
 - [ ] Tracing across the WASM boundary; span context as part of `request-ctx` → **ADR 0032**.
-- [ ] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010**; contract: `tests/bundle_load_hot_reload.rs`.
+- [x] Bundle format (manifest + CEL + WASM components); NKey signature verification → **ADR 0010**; contract: `tests/bundle_load_hot_reload.rs`.
 - [ ] Bundle loader from NATS KV with hot-swap and rollback → **ADR 0026**.
 - [ ] First-party `mcp-pack` bundle (resource-tuple derivation, catalog shaping, schema-learner WASM component, default audit envelope) → **ADR 0028**.
 - [ ] NATS-callout plugin tier (Tier 2.5) on `mcp.plugin.{plugin_name}` → **ADR 0011**.
