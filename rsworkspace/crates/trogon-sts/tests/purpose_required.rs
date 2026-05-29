@@ -25,7 +25,7 @@ async fn empty_request_purpose_rejected_when_required() {
     let mut request = sample_exchange_request(&subject);
     request.purpose = "   ".into();
     let err = service.handle(request, None).await.expect_err("deny");
-    assert_eq!(err.error, "access_denied");
+    assert_eq!(err.error, "invalid_request");
     assert!(err.error_description.contains("purpose_missing"));
 }
 
@@ -43,6 +43,7 @@ async fn empty_bootstrap_purpose_claim_rejected_when_required() {
     let subject = mint_bootstrap_token(keys, claims);
     let request = sample_exchange_request(&subject);
     let err = service.handle(request, None).await.expect_err("deny");
+    assert_eq!(err.error, "invalid_request");
     assert!(err.error_description.contains("purpose_missing"));
 }
 
@@ -87,7 +88,8 @@ async fn purpose_missing_emits_deny_audit_reason() {
     let subject = mint_bootstrap_token(keys, bootstrap_claims(keys));
     let mut request = sample_exchange_request(&subject);
     request.purpose.clear();
-    let _ = service.handle(request, None).await;
+    let err = service.handle(request, None).await.expect_err("deny");
+    assert_eq!(err.error, "invalid_request");
     let deny = audit
         .take_events()
         .into_iter()
