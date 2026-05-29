@@ -98,7 +98,8 @@ impl StreamAppend<str> for EventStore {
 impl<Payload> SnapshotRead<Payload, str> for EventStore
 where
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = SchedulerError;
 
@@ -113,7 +114,8 @@ where
 impl<Payload> SnapshotWrite<Payload, str> for EventStore
 where
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
-    Payload::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
+    <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = SchedulerError;
 

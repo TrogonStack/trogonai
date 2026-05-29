@@ -258,11 +258,12 @@ impl From<MessageHeadersError> for ScheduleSpecError {
     }
 }
 
-impl<PayloadError> From<SnapshotStoreError<PayloadError>> for SchedulerError
+impl<PayloadError, SnapshotTypeError> From<SnapshotStoreError<PayloadError, SnapshotTypeError>> for SchedulerError
 where
     PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError: std::error::Error + Send + Sync + 'static,
 {
-    fn from(value: SnapshotStoreError<PayloadError>) -> Self {
+    fn from(value: SnapshotStoreError<PayloadError, SnapshotTypeError>) -> Self {
         match value {
             SnapshotStoreError::Kv(source) => Self::kv_source("failed to access stream snapshot storage", source),
             SnapshotStoreError::Codec(source) => {
@@ -271,19 +272,21 @@ where
             SnapshotStoreError::InvalidSnapshotKey { key } => {
                 Self::event_source("failed to decode stream snapshot key", std::io::Error::other(key))
             }
-            SnapshotStoreError::MissingCheckpointName { key_prefix } => Self::event_source(
+            SnapshotStoreError::MissingCheckpointName { snapshot_type } => Self::event_source(
                 "failed to resolve stream snapshot checkpoint key",
-                std::io::Error::other(key_prefix),
+                std::io::Error::other(snapshot_type.to_string()),
             ),
         }
     }
 }
 
-impl<SnapshotPayloadError> From<JetStreamStoreError<SchedulerError, SnapshotPayloadError>> for SchedulerError
+impl<SnapshotPayloadError, SnapshotTypeError>
+    From<JetStreamStoreError<SchedulerError, SnapshotPayloadError, SnapshotTypeError>> for SchedulerError
 where
     SnapshotPayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError: std::error::Error + Send + Sync + 'static,
 {
-    fn from(value: JetStreamStoreError<SchedulerError, SnapshotPayloadError>) -> Self {
+    fn from(value: JetStreamStoreError<SchedulerError, SnapshotPayloadError, SnapshotTypeError>) -> Self {
         match value {
             JetStreamStoreError::ResolveSubject(source) => source,
             JetStreamStoreError::ReadStream(source) => {
