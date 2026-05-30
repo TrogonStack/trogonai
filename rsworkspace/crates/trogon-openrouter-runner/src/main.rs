@@ -88,7 +88,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         cfg.default_model,
         cfg.api_key.unwrap_or_default(),
     );
-    agent = agent.with_execution_backend(nats.clone(), registry_for_agent);
+    agent = agent
+        .with_execution_backend(nats.clone(), registry_for_agent)
+        .with_runner_config(acp_nats::Config::new(
+            acp_prefix.clone(),
+            trogon_nats::NatsConfig {
+                servers: vec![cfg.nats_url.clone()],
+                auth: trogon_nats::NatsAuth::None,
+            },
+        ));
 
     {
         let js = js_ctx;

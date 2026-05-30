@@ -3162,7 +3162,7 @@ async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
     local
         .run_until(async {
             let store = NatsSessionStore::open(&js).await.unwrap();
-            let spawn_tool = SpawnAgentTool::new(nats.clone(), prefix);
+            let spawn_tool = SpawnAgentTool::new(nats.clone(), prefix, "");
             let (dispatch_name, orig_name, client) = spawn_tool.into_dispatch();
 
             let mut agent = make_agent(&server.base_url());

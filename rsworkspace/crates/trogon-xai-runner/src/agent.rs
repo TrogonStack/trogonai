@@ -109,6 +109,9 @@ struct XaiSession {
     /// None → compaction uses the session model (or the agent default).
     #[serde(default)]
     compactor_model: Option<String>,
+    /// `spawn_agent` nesting depth; sub-sessions inherit parent+1 (bounds recursion).
+    #[serde(default)]
+    spawn_depth: u32,
     /// API key bound to this session at `new_session` time.
     /// Falls back to the agent-wide `global_api_key` if None.
     // MED-25: never serialize the API key — session/get_state would otherwise
@@ -235,6 +238,9 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to the bash execution helper when a wasm-runtime is available.
     execution_nats: Option<async_nats::Client>,
+    /// The runner's own ACP config, used by the `spawn_agent` interceptor to build
+    /// a Bridge for sub-agent sessions. `None` disables spawning.
+    runner_config: Option<acp_nats::Config>,
     /// HTTP client used by trogon-tools (fetch_url and similar web tools).
     tool_http_client: reqwest::Client,
     /// Permission gate channel — forwards requests to the ACP client via NATS.
@@ -369,6 +375,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             tenant_id,
             registry: None,
             execution_nats: None,
+            runner_config: None,
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
@@ -413,6 +420,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            runner_config: self.runner_config,
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
@@ -474,6 +482,13 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         self
     }
 
+    /// Provide the runner's own ACP config so the `spawn_agent` tool can build a
+    /// Bridge for sub-agent sessions. Without this, `spawn_agent` returns an error.
+    pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
+        self.runner_config = Some(config);
+        self
+    }
+
     /// Restore a session from the KV snapshot store into the in-memory map.
     /// Returns `true` if the session was found and restored.
     /// `cwd` is used as the restored session's working directory; pass an empty
@@ -519,6 +534,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd,
                 model: snap.model.clone(),
                 compactor_model: snap.compactor_model.clone(),
+                spawn_depth: 0,
                 api_key: self.global_api_key.clone(),
                 history,
                 last_response_id: None,
@@ -846,6 +862,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 cwd,
                 model: session_model_override,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
@@ -988,6 +1005,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 cwd,
                 model: inherited_model.clone(),
                 compactor_model: inherited_compactor_model.clone(),
+                spawn_depth: 0,
                 api_key: inherited_key,
                 history,
                 // Forks start without a response ID — xAI's server cache is per-response,
@@ -1401,6 +1419,33 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                     parameters: def.input_schema,
                 });
             }
+        }
+
+        // Advertise the spawn_agent tool when a runner_config is set (enables the
+        // model to delegate a subtask to an isolated sub-agent in a worktree).
+        if self.runner_config.is_some() {
+            call_tools.push(ToolSpec::Function {
+                name: "spawn_agent".to_string(),
+                description: "Spawn a specialised sub-agent and return its output. The \
+                              sub-agent runs a full tool-use loop in an isolated git \
+                              worktree, so it can read and edit files without affecting \
+                              your working tree."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "capability": {
+                            "type": "string",
+                            "description": "Agent capability to use, e.g. 'explore' or 'plan'"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The task or question to send to the sub-agent"
+                        }
+                    },
+                    "required": ["capability", "prompt"]
+                }),
+            });
         }
 
         // Connect to this session's MCP servers and advertise their tools.
@@ -1846,6 +1891,134 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                                 execute_bash_via_nats(nats, wasm, &session_id, &arguments, &cwd).await
                             } else {
                                 "bash not available: no execution backend configured".to_string()
+                            }
+                        }
+                        "spawn_agent" => {
+                            let task = tool_input["prompt"].as_str().unwrap_or("").to_string();
+                            // Read parent context; lock released before any await.
+                            let (parent_cwd, depth, parent_mode) = {
+                                let sessions = self.sessions.lock().await;
+                                match sessions.get(&session_id) {
+                                    Some(s) => (s.cwd.clone(), s.spawn_depth, s.mode.clone()),
+                                    None => (cwd.clone(), 0, default_session_mode()),
+                                }
+                            };
+                            const MAX_SPAWN_DEPTH: u32 = 3;
+                            if depth >= MAX_SPAWN_DEPTH {
+                                "spawn_agent: max nesting depth reached".to_string()
+                            } else if let (Some(nats), Some(runner_cfg)) =
+                                (self.execution_nats.as_ref(), self.runner_config.clone())
+                            {
+                                let worktree =
+                                    trogon_runner_tools::worktree::create_worktree(&parent_cwd).await;
+                                let sub_cwd: String = worktree
+                                    .as_ref()
+                                    .map(|w| w.path.clone())
+                                    .unwrap_or_else(|| parent_cwd.clone());
+
+                                // Dummy notif channel: the Bridge publishes to a JetStream
+                                // subject the xai-runner doesn't use; we observe via plain NATS below.
+                                let (notif_tx, _unused) =
+                                    tokio::sync::mpsc::channel::<SessionNotification>(1);
+                                drop(_unused);
+                                let acp_prefix_str = runner_cfg.acp_prefix().to_string();
+                                let bridge = acp_nats::Bridge::new(
+                                    nats.clone(),
+                                    acp_nats::NatsJetStreamClient::new(
+                                        async_nats::jetstream::new(nats.clone()),
+                                    ),
+                                    trogon_std::time::SystemClock,
+                                    &opentelemetry::global::meter("trogon-xai-runner"),
+                                    runner_cfg,
+                                    notif_tx,
+                                );
+
+                                match trogon_runner_tools::spawn_session::create_sub_session(
+                                    &bridge, &sub_cwd, &parent_mode, None,
+                                )
+                                .await
+                                {
+                                    Err(e) => {
+                                        drop(worktree);
+                                        format!("spawn_agent error: {e}")
+                                    }
+                                    Ok(sub_sid) => {
+                                        if let Some(s) =
+                                            self.sessions.lock().await.get_mut(&sub_sid)
+                                        {
+                                            s.spawn_depth = depth + 1;
+                                        }
+                                        // Observe the sub-session's streamed text via plain NATS,
+                                        // accumulate it, and forward each chunk to the parent client.
+                                        let notif_subject = format!(
+                                            "{}.session.{}.client.session.update",
+                                            acp_prefix_str, &sub_sid
+                                        );
+                                        let text_result =
+                                            std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+                                        let text_clone = text_result.clone();
+                                        let notifier_fwd = self.notifier.clone();
+                                        let parent_sid_fwd = session_id.clone();
+                                        let nats_for_notif = nats.clone();
+                                        let (stop_tx, mut stop_rx) =
+                                            tokio::sync::oneshot::channel::<()>();
+                                        let notif_handle = tokio::task::spawn_local(async move {
+                                            use futures_util::StreamExt as _;
+                                            let Ok(mut sub) =
+                                                nats_for_notif.subscribe(notif_subject).await
+                                            else {
+                                                return;
+                                            };
+                                            loop {
+                                                tokio::select! {
+                                                    biased;
+                                                    msg = sub.next() => {
+                                                        let Some(msg) = msg else { break; };
+                                                        if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&msg.payload) {
+                                                            if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
+                                                                && let ContentBlock::Text(ref t) = chunk.content
+                                                            {
+                                                                text_clone.lock().await.push_str(&t.text);
+                                                            }
+                                                            let mut fwd = notif;
+                                                            fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                            notifier_fwd.notify(fwd).await;
+                                                        }
+                                                    }
+                                                    _ = &mut stop_rx => break,
+                                                }
+                                            }
+                                        });
+
+                                        let run_result =
+                                            trogon_runner_tools::spawn_session::run_sub_session(
+                                                &bridge,
+                                                &sub_sid,
+                                                &task,
+                                                std::time::Duration::from_secs(3600),
+                                            )
+                                            .await;
+
+                                        let _ = stop_tx.send(());
+                                        let _ = notif_handle.await;
+                                        drop(worktree);
+
+                                        let accumulated = text_result.lock().await.clone();
+                                        match run_result {
+                                            Ok(()) => {
+                                                if accumulated.is_empty() {
+                                                    "Sub-agent completed.".to_string()
+                                                } else {
+                                                    accumulated
+                                                }
+                                            }
+                                            Err(e) => format!("spawn_agent error: {e}"),
+                                        }
+                                    }
+                                }
+                            } else {
+                                "spawn_agent: not available (no execution backend or runner_config)"
+                                    .to_string()
                             }
                         }
                         _ => {
@@ -2342,6 +2515,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2366,6 +2540,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2443,6 +2618,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd: cwd.to_string(),
                 model,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: response_id,
@@ -2467,6 +2643,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key: None,
                 history: Vec::new(),
                 last_response_id: None,
@@ -2491,6 +2668,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 cwd: cwd.to_string(),
                 model: None,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key: Some("test-key".to_string()),
                 history,
                 last_response_id: None,
