@@ -245,6 +245,10 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     let mut session_used_tokens: u64 = 0;
     let mut session_context_size: u64 = 0;
+    // Tracks the per-session compaction model override selected via /compact-model.
+    // None means "default" (compaction uses the session model). Reset on /clear and
+    // cross-runner /model switches, which start a fresh session.
+    let mut compactor_model_sel: Option<String> = None;
     let mut session_mode = if skip_permissions {
         "bypassPermissions".to_string()
     } else {
@@ -342,6 +346,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 session = s;
                                 session_used_tokens = 0;
                                 session_context_size = 0;
+                                compactor_model_sel = None;
                                 if skip_permissions {
                                     if let Err(e) = session.set_mode("bypassPermissions").await {
                                         eprintln!("warning: could not set bypassPermissions: {e}");
@@ -382,6 +387,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     session = s;
                                     session_used_tokens = 0;
                                     session_context_size = 0;
+                                    compactor_model_sel = None;
                                     if let Some(ref sup) = client_supervisor {
                                         sup.set_session(session.session_id());
                                     }
@@ -524,6 +530,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     prefix = outcome.new_prefix.clone();
                                     session_used_tokens = 0;
                                     session_context_size = 0;
+                                    compactor_model_sel = None;
                                     // B5: the cross-runner session was created with NO
                                     // mcp_servers, so MCP tools would be missing. Rebind MCP
                                     // for the new session (shutdown + spawn_pending +
@@ -623,6 +630,43 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 }
                             }
                             Err(e) => eprintln!("error triggering compaction: {e}"),
+                        }
+                    } else if cmd == "/compact-model" {
+                        let cm_arg = arg.trim();
+                        if cm_arg.is_empty() {
+                            // Show the current compaction model plus only the models
+                            // advertised by THIS runner (same provider) — those are the
+                            // only valid choices, with the same ids as /model.
+                            match format_compactor_models(
+                                &registry,
+                                &prefix,
+                                compactor_model_sel.as_deref(),
+                            )
+                            .await
+                            {
+                                Ok(text) => println!("{text}"),
+                                Err(e) => eprintln!("error listing models: {e}"),
+                            }
+                        } else {
+                            // Resolve aliases (haiku → claude-haiku-4-5-20251001) just
+                            // like /model, so the runner stores a valid model id. "default"
+                            // is passed through verbatim to clear the override.
+                            let resolved = if cm_arg == "default" {
+                                "default".to_string()
+                            } else {
+                                resolve_model_alias(cm_arg)
+                            };
+                            match do_compact_model(&session, &resolved).await {
+                                Ok(msg) => {
+                                    println!("{msg}");
+                                    compactor_model_sel = if resolved == "default" {
+                                        None
+                                    } else {
+                                        Some(resolved)
+                                    };
+                                }
+                                Err(e) => eprintln!("error: {e}"),
+                            }
                         }
                     } else if cmd == "/mcp" {
                         handle_mcp_command(
@@ -1120,6 +1164,35 @@ pub(crate) async fn apply_model_switch<SW: RunnerSwitcher>(
     })
 }
 
+/// Handle `/compact-model [<model_id>|default]`.
+///
+/// - No argument   → show current compaction model override (if any)
+/// - `default`     → clear the override; compaction uses the session model
+/// - `<model_id>`  → set the compaction model (must be same provider as current runner)
+pub(crate) async fn do_compact_model<S: Session>(
+    session: &S,
+    arg: &str,
+) -> Result<String, String> {
+    if arg.is_empty() {
+        return Ok(
+            "compaction model: default (same as session model)\n\
+             change with: /compact-model <model-id>\n\
+             reset with:  /compact-model default"
+                .to_string(),
+        );
+    }
+    let value = if arg == "default" { "" } else { arg };
+    session
+        .set_session_config_option("compactor_model", value)
+        .await
+        .map_err(|e| e.to_string())?;
+    if value.is_empty() {
+        Ok("compaction model reset to default (same as session model)".to_string())
+    } else {
+        Ok(format!("compaction model set to: {value}"))
+    }
+}
+
 fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -1144,6 +1217,7 @@ Commands:
   {m}/resume{r} <id>        resume a session by id on the current runner
   {m}/mcp{r} list|add|remove  manage MCP server bridges
   {m}/compact{r}            force context compaction now
+  {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
@@ -1288,6 +1362,81 @@ fn runner_display_name(prefix: &str, agent_type: &str) -> String {
     }
 }
 
+/// Short alias for a model id, shown in `/model` and `/compact-model` listings.
+fn model_alias(id: &str) -> Option<&'static str> {
+    match id {
+        "claude-sonnet-4-6" => Some("sonnet"),
+        "claude-opus-4-7" => Some("opus"),
+        "claude-haiku-4-5-20251001" => Some("haiku"),
+        "grok-3" => Some("grok"),
+        "grok-3-mini" => Some("grok-mini"),
+        "o4-mini" => Some("o4-mini"),
+        "o3" => Some("o3"),
+        "gpt-4o" => Some("gpt-4o"),
+        "anthropic/claude-sonnet-4" => Some("op-claude"),
+        "openai/gpt-4o" => Some("op-gpt"),
+        "google/gemini-2.5-pro" => Some("op-gemini"),
+        _ => None,
+    }
+}
+
+/// Lists the models advertised by the runner at `current_prefix` — the only
+/// valid choices for the compaction-model override (the compactor summarizes
+/// with the session's own provider, so cross-provider ids would fail). Marks the
+/// current selection.
+pub(crate) async fn format_compactor_models<RS: RegistryStore>(
+    registry: &Registry<RS>,
+    current_prefix: &str,
+    current_compactor_model: Option<&str>,
+) -> Result<String, String> {
+    let all = registry.list_all().await.map_err(|e| e.to_string())?;
+    // Aggregate models across ALL registry entries for this prefix (there may be
+    // more than one, e.g. a stale entry alongside a fresh one) and dedupe, mirroring
+    // how `format_model_catalog` merges them. Using `.find()` could hit an empty one.
+    let mut models: Vec<String> = Vec::new();
+    for cap in all {
+        let cap_prefix = cap
+            .metadata
+            .get("acp_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&cap.agent_type);
+        if cap_prefix != current_prefix {
+            continue;
+        }
+        if let Some(arr) = cap.metadata.get("models").and_then(|v| v.as_array()) {
+            for id in arr.iter().filter_map(|m| m.as_str()) {
+                if !models.iter().any(|m| m == id) {
+                    models.push(id.to_string());
+                }
+            }
+        }
+    }
+
+    let current = current_compactor_model.unwrap_or("default (same as session model)");
+    let mut out = String::new();
+    out.push_str(&format!("Compaction model: \x1b[35m{current}\x1b[0m\n"));
+    out.push_str(
+        "Set with \x1b[35m/compact-model <id>\x1b[0m  |  reset with \x1b[35m/compact-model default\x1b[0m\n\n",
+    );
+    if models.is_empty() {
+        out.push_str("(the current runner advertises no models)");
+    } else {
+        out.push_str("Available compaction models (same provider as this session):\n");
+        for id in models {
+            let marker = if Some(id.as_str()) == current_compactor_model {
+                "  (current)"
+            } else {
+                ""
+            };
+            match model_alias(&id) {
+                Some(a) => out.push_str(&format!("  {a:<10} → {id}{marker}\n")),
+                None => out.push_str(&format!("  {id}{marker}\n")),
+            }
+        }
+    }
+    Ok(out.trim_end().to_string())
+}
+
 pub(crate) async fn format_model_catalog<RS: RegistryStore>(
     registry: &Registry<RS>,
     current_prefix: &str,
@@ -1327,21 +1476,7 @@ pub(crate) async fn format_model_catalog<RS: RegistryStore>(
         out.push_str(&group);
         out.push('\n');
         for (id, _) in models {
-            let alias = match id.as_str() {
-                "claude-sonnet-4-6" => Some("sonnet"),
-                "claude-opus-4-7" => Some("opus"),
-                "claude-haiku-4-5-20251001" => Some("haiku"),
-                "grok-3" => Some("grok"),
-                "grok-3-mini" => Some("grok-mini"),
-                "o4-mini" => Some("o4-mini"),
-                "o3" => Some("o3"),
-                "gpt-4o" => Some("gpt-4o"),
-                "anthropic/claude-sonnet-4" => Some("op-claude"),
-                "openai/gpt-4o" => Some("op-gpt"),
-                "google/gemini-2.5-pro" => Some("op-gemini"),
-                _ => None,
-            };
-            if let Some(a) = alias {
+            if let Some(a) = model_alias(&id) {
                 out.push_str(&format!("  {a:<10} → {id}\n"));
             } else {
                 out.push_str(&format!("  {id}\n"));

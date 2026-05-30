@@ -105,6 +105,10 @@ struct XaiSession {
     cwd: String,
     /// Per-session model override. None means use the agent default.
     model: Option<String>,
+    /// Same-provider model override used only for context compaction.
+    /// None → compaction uses the session model (or the agent default).
+    #[serde(default)]
+    compactor_model: Option<String>,
     /// API key bound to this session at `new_session` time.
     /// Falls back to the agent-wide `global_api_key` if None.
     // MED-25: never serialize the API key — session/get_state would otherwise
@@ -514,6 +518,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd,
                 model: snap.model.clone(),
+                compactor_model: snap.compactor_model.clone(),
                 api_key: self.global_api_key.clone(),
                 history,
                 last_response_id: None,
@@ -585,6 +590,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                     .clone()
                     .unwrap_or_else(|| self.default_model.clone()),
             ),
+            compactor_model: session.compactor_model.clone(),
             tools: session.enabled_tools.clone(),
             memory_path: None,
             messages,
@@ -661,6 +667,31 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
                 Self::tool_config_option(id, label, enabled)
             })
             .collect()
+    }
+
+    /// Build the `compactor_model` select option for this session.
+    /// Shows "Default (same as session model)" plus all configured xAI models.
+    /// Using `available_models` enforces same-provider naturally — all options are xAI models.
+    /// Independent of the execution backend. Mirrors `trogon-acp-runner`'s compaction override.
+    fn compactor_model_config_option(
+        current: Option<&str>,
+        available_models: &[ModelInfo],
+    ) -> SessionConfigOption {
+        let mut opts = vec![SessionConfigSelectOption::new(
+            "",
+            "Default (same as session model)",
+        )];
+        opts.extend(
+            available_models
+                .iter()
+                .map(|m| SessionConfigSelectOption::new(m.model_id.to_string(), m.name.as_str())),
+        );
+        SessionConfigOption::select(
+            "compactor_model".to_string(),
+            "Compaction Model".to_string(),
+            current.unwrap_or("").to_string(),
+            opts,
+        )
     }
 }
 
@@ -814,6 +845,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: session_model_override,
+                compactor_model: None,
                 api_key,
                 history: Vec::new(),
                 last_response_id: None,
@@ -914,13 +946,14 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let source_id = req.session_id.to_string();
         let cwd = req.cwd.to_string_lossy().into_owned();
 
-        let (inherited_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode, inherited_mcp_servers) = {
+        let (inherited_model, inherited_compactor_model, inherited_key, mut history, inherited_tools, inherited_system_prompt, inherited_mode, inherited_mcp_servers) = {
             let sessions = self.sessions.lock().await;
             let s = sessions
                 .get(&source_id)
                 .ok_or_else(|| not_found(format!("session {source_id} not found")))?;
             (
                 s.model.clone(),
+                s.compactor_model.clone(),
                 s.api_key.clone(),
                 s.history.clone(),
                 s.enabled_tools.clone(),
@@ -954,6 +987,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             XaiSession {
                 cwd,
                 model: inherited_model.clone(),
+                compactor_model: inherited_compactor_model.clone(),
                 api_key: inherited_key,
                 history,
                 // Forks start without a response ID — xAI's server cache is per-response,
@@ -1095,6 +1129,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         // Apply the toggle (if applicable) and read back the session's enabled tools
         // under a single lock so the returned config_options reflect the new state.
+        let mut persist_snapshot: Option<SessionSnapshot> = None;
         let config_options = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
@@ -1121,12 +1156,30 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                         }
                     }
                 }
+            } else if config_id == "compactor_model" {
+                if let SessionConfigOptionValue::ValueId { value } = &req.value {
+                    let val = value.to_string();
+                    s.compactor_model = if val.is_empty() { None } else { Some(val) };
+                    info!(session_id, "xai: session compactor_model updated");
+                }
+                if self.session_store.is_some() {
+                    persist_snapshot = Some(self.build_snapshot(&session_id, s));
+                }
             } else {
                 warn!(config_id = %config_id, "xai: set_session_config_option called for unknown option — ignored");
             }
             // ACP spec: response must include the full set of config options and their current values.
-            Self::all_tool_config_options(&s.enabled_tools)
+            let mut opts = Self::all_tool_config_options(&s.enabled_tools);
+            opts.push(Self::compactor_model_config_option(
+                s.compactor_model.as_deref(),
+                &self.available_models,
+            ));
+            opts
         };
+
+        if let (Some(store), Some(snapshot)) = (&self.session_store, persist_snapshot) {
+            store.save(&snapshot).await;
+        }
 
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
@@ -1172,7 +1225,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !self.sessions.lock().await.contains_key(&session_id) {
             self.try_restore_from_kv(&session_id, String::new()).await;
         }
-        let (model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
+        let (model, compactor_model, api_key, mut history, last_response_id, enabled_tools, session_system_prompt, mut cwd, session_mode, session_tool_policies, session_mcp_servers) = {
             let mut sessions = self.sessions.lock().await;
             let s = sessions
                 .get_mut(&session_id)
@@ -1182,6 +1235,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             s.last_used_at = Instant::now();
             (
                 s.model.clone(),
+                s.compactor_model.clone(),
                 s.api_key.clone(),
                 s.history.clone(),
                 s.last_response_id.clone(),
@@ -1193,6 +1247,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 s.mcp_servers.clone(),
             )
         };
+        // Session model resolved to a concrete id, used both for the API call and
+        // to tell the compactor which model to summarize with.
+        let resolved_model = model.clone().unwrap_or_else(|| self.default_model.clone());
 
         // MED-7: turn-scoped audit buffer shared across this turn's permission
         // checks; drained into session_audit once the turn finishes.
@@ -1202,7 +1259,17 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
+            if let Ok(Some(compacted)) = maybe_compact(
+                nats,
+                &wire,
+                token_budget,
+                threshold_pct,
+                "xai",
+                &resolved_model,
+                compactor_model.as_deref(),
+            )
+            .await
+            {
                 history = xai_history_from_wire(compacted);
                 pre_turn_compacted = true;
             }
@@ -1908,13 +1975,25 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             };
 
             if let Some(mut compacted) = history_for_compaction {
-                compact_or_trim_xai_history(&self.execution_nats, &mut compacted, self.max_history)
-                    .await;
+                let did_compact = compact_or_trim_xai_history(
+                    &self.execution_nats,
+                    &mut compacted,
+                    self.max_history,
+                    &resolved_model,
+                    compactor_model.as_deref(),
+                )
+                .await;
                 let snapshot = {
                     let mut sessions = self.sessions.lock().await;
                     match sessions.get_mut(&session_id) {
                         Some(s) => {
                             s.history = compacted;
+                            // xAI is stateful: when the compactor replaced the history,
+                            // clear last_response_id so the next turn re-sends the
+                            // compacted history (otherwise the server keeps stale context).
+                            if did_compact {
+                                s.last_response_id = None;
+                            }
                             self.session_store
                                 .as_ref()
                                 .map(|_| self.build_snapshot(&session_id, s))
@@ -2095,20 +2174,30 @@ fn xai_history_from_wire(wire: Vec<WireMessage>) -> Vec<Message> {
 }
 
 /// Try NATS compaction when over token budget; fall back to message-count trim.
+/// Compacts `history` via `trogon-compactor` when over threshold, else trims it.
+/// Returns `true` only when the compactor actually replaced the history — xAI is
+/// stateful, so the caller must then clear `last_response_id` to force the next
+/// turn to re-send the compacted history.
 async fn compact_or_trim_xai_history(
     nats: &Option<async_nats::Client>,
     history: &mut Vec<Message>,
     max: usize,
-) {
+    model: &str,
+    compactor_model: Option<&str>,
+) -> bool {
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
+        if let Ok(Some(compacted)) =
+            maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", model, compactor_model)
+                .await
+        {
             *history = xai_history_from_wire(compacted);
-            return;
+            return true;
         }
     }
     trim_history(history, max);
+    false
 }
 
 /// Trim `history` in-place so it contains at most `max` messages.
@@ -2252,6 +2341,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2275,6 +2365,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: None,
@@ -2298,6 +2389,14 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             .await
             .get(id)
             .and_then(|s| s.model.clone())
+    }
+
+    pub async fn test_session_compactor_model(&self, id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|s| s.compactor_model.clone())
     }
 
     pub async fn test_session_cwd(&self, id: &str) -> Option<String> {
@@ -2343,6 +2442,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history: Vec::new(),
                 last_response_id: response_id,
@@ -2366,6 +2466,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: None,
                 history: Vec::new(),
                 last_response_id: None,
@@ -2389,6 +2490,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             XaiSession {
                 cwd: cwd.to_string(),
                 model: None,
+                compactor_model: None,
                 api_key: Some("test-key".to_string()),
                 history,
                 last_response_id: None,
@@ -2626,6 +2728,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Test".to_string(),
             model: Some("grok-3".to_string()),
+            compactor_model: None,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -2679,6 +2782,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Test".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec!["web_search".to_string()],
             memory_path: None,
             agent_id: None,
@@ -2737,6 +2841,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Old".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -2785,6 +2890,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "History test".to_string(),
             model: None,
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -2843,6 +2949,7 @@ mod tests {
             tenant_id: "default".to_string(),
             name: "Model test".to_string(),
             model: Some("grok-3-mini".to_string()),
+            compactor_model: None,
             tools: vec![],
             memory_path: None,
             agent_id: None,
@@ -3288,8 +3395,46 @@ mod tests {
             .unwrap();
         assert_eq!(
             resp.config_options.len(),
-            AVAILABLE_TOOLS.len(),
-            "response must include all known config options even for unknown option ids"
+            AVAILABLE_TOOLS.len() + 1,
+            "response must include all known config options (tools + compactor_model) even for unknown option ids"
+        );
+        assert!(
+            resp.config_options.iter().any(|o| o.id.to_string() == "compactor_model"),
+            "compactor_model option must be advertised"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_session_config_option_compactor_model_is_stored_and_cleared() {
+        let agent = make_agent();
+        agent.test_insert_session("cfg-cm", "/tmp", None).await;
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "cfg-cm",
+                "compactor_model",
+                "grok-3-mini",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            agent.test_session_compactor_model("cfg-cm").await,
+            Some("grok-3-mini".to_string()),
+            "compactor_model override must be stored on the session"
+        );
+
+        // Empty value resets to default.
+        agent
+            .set_session_config_option(SetSessionConfigOptionRequest::new(
+                "cfg-cm",
+                "compactor_model",
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            agent.test_session_compactor_model("cfg-cm").await,
+            None,
+            "empty value clears the compactor_model override"
         );
     }
 

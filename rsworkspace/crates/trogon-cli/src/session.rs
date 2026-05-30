@@ -256,6 +256,13 @@ pub trait Session: Send + Sync + 'static {
         mode: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
 
+    /// Set a per-session config option on the runner (e.g. `compactor_model`).
+    fn set_session_config_option(
+        &self,
+        config_id: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_;
+
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
 
@@ -675,6 +682,49 @@ impl<N: NatsClient> Session for TrogonSession<N> {
             let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
             if v.get("stopReason").is_none() && v.get("code").is_some() {
                 let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("mode update failed");
+                return Err(anyhow::anyhow!("{}", msg));
+            }
+            Ok(())
+        }
+    }
+
+    fn set_session_config_option(
+        &self,
+        config_id: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+    {
+        let config_id = config_id.to_string();
+        let value = value.to_string();
+        let prefix = self.prefix.clone();
+        let session_id = self.session_id.clone();
+        let nats = &self.nats;
+        async move {
+            let req_id = Uuid::now_v7().to_string();
+            let subject = format!("{prefix}.session.{session_id}.agent.set_config_option");
+            let resp_subject = format!("{prefix}.session.{session_id}.agent.response.{req_id}");
+            let mut resp_rx = nats
+                .subscribe_bytes(resp_subject)
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "sessionId": session_id,
+                "configId": config_id,
+                "value": value,
+            }))?;
+            nats.publish_with_req_id_bytes(subject, req_id, payload.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS error: {e}"))?;
+            let bytes = tokio::time::timeout(Duration::from_secs(5), resp_rx.recv())
+                .await
+                .map_err(|_| anyhow::anyhow!("timed out waiting for config option update"))?
+                .ok_or_else(|| anyhow::anyhow!("runner closed connection before responding"))?;
+            let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            if v.get("stopReason").is_none() && v.get("code").is_some() {
+                let msg = v
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("config option update failed");
                 return Err(anyhow::anyhow!("{}", msg));
             }
             Ok(())
@@ -1199,6 +1249,15 @@ pub mod mock {
             async move { Ok(()) }
         }
 
+        #[allow(clippy::manual_async_fn)]
+        fn set_session_config_option(
+            &self,
+            _config_id: &str,
+            _value: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_ {
+            async move { Ok(()) }
+        }
+
         async fn close(&self) {
             *self.closed.lock().unwrap() += 1;
         }
@@ -1271,6 +1330,15 @@ pub mod mock {
         ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
         {
             (**self).set_mode(mode)
+        }
+
+        fn set_session_config_option(
+            &self,
+            config_id: &str,
+            value: &str,
+        ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + '_
+        {
+            (**self).set_session_config_option(config_id, value)
         }
 
         fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_ {
