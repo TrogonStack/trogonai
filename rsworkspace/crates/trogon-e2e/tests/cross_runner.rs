@@ -27,10 +27,57 @@ use trogon_openrouter_runner::{
     AssembledToolCall, Message as OrMessage, MockOpenRouterHttpClient,
     MockSessionNotifier as OrMockNotifier, OpenRouterAgent,
 };
-use trogon_runner_tools::portable_session::PortableBlock;
+use trogon_runner_tools::portable_session::{
+    EXPORT_VERSION_V2, PortableBlock, PortableExportV2, PortableMessageV2,
+};
 
 fn local() -> tokio::task::LocalSet {
     tokio::task::LocalSet::new()
+}
+
+// ── export inspection helpers ─────────────────────────────────────────────────
+//
+// `session/export` produces two on-the-wire shapes:
+//   * V1 (text-only history): a bare JSON array `[PortableMessage, ...]`.
+//   * V2 (history with tool blocks): a wrapper object
+//     `{"version":2,"messages":[PortableMessageV2, ...]}`.
+// These helpers parse via `parse_export_json` so inspection code works for both.
+
+/// A message from an export, normalized to `(role, blocks)` regardless of V1/V2.
+struct InspectMessage {
+    role: String,
+    blocks: Vec<trogon_runner_tools::portable_session::PortableBlock>,
+}
+
+/// Parse an export JSON into normalized `(role, blocks)` messages, handling both
+/// the V1 array form and the V2 `{version, messages}` wrapper form.
+fn export_messages(json: &str) -> Vec<InspectMessage> {
+    use trogon_runner_tools::portable_session::{ParsedExport, parse_export_json};
+    match parse_export_json(json).expect("export should be valid portable JSON") {
+        ParsedExport::V2(exp) => exp
+            .messages
+            .into_iter()
+            .map(|m| InspectMessage {
+                role: m.role,
+                blocks: m.blocks,
+            })
+            .collect(),
+        ParsedExport::V1(msgs) => msgs
+            .into_iter()
+            .map(|m| InspectMessage {
+                role: m.role,
+                blocks: m.blocks,
+            })
+            .collect(),
+    }
+}
+
+/// Collect all `PortableBlock`s from an export JSON (handles V1 array and V2 wrapper).
+fn export_blocks(json: &str) -> Vec<trogon_runner_tools::portable_session::PortableBlock> {
+    export_messages(json)
+        .into_iter()
+        .flat_map(|m| m.blocks)
+        .collect()
 }
 
 // ── acp helpers ───────────────────────────────────────────────────────────────
@@ -378,17 +425,16 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
                 .expect("openrouter session/export should succeed");
 
             let exported_json = or_export.0.get().to_string();
-            let or_portable: Vec<PortableMessage> =
-                serde_json::from_str(&exported_json).expect("openrouter export should be valid JSON");
 
-            // Sanity-check: openrouter exports tool results with role:"tool"
-            let or_tool_msg = or_portable
-                .iter()
+            // ours exports tool-result messages with role:"user" (the Anthropic
+            // convention used throughout the portable format), not OpenAI's "tool".
+            let or_tool_msg = export_messages(&exported_json)
+                .into_iter()
                 .find(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })))
                 .expect("OR export must contain a ToolResult block");
             assert_eq!(
-                or_tool_msg.role, "tool",
-                "OR must export tool results with role:'tool' (OpenAI convention)"
+                or_tool_msg.role, "user",
+                "ours exports tool results with role:'user' (Anthropic convention)"
             );
 
             // ── 3. Import into acp-runner ─────────────────────────────────────────
@@ -416,17 +462,13 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
                 .await
                 .expect("acp session/export should succeed");
 
-            let acp_portable: Vec<PortableMessage> =
-                serde_json::from_str(acp_export.0.get())
-                    .expect("acp export should be valid JSON");
-
-            let acp_tool_msg = acp_portable
-                .iter()
+            let acp_tool_msg = export_messages(acp_export.0.get())
+                .into_iter()
                 .find(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })))
                 .expect("ACP export must contain a ToolResult block");
             assert_eq!(
                 acp_tool_msg.role, "user",
-                "Fix 3: OR role:'tool' must be normalized to role:'user' after ACP import; got: '{}'",
+                "ACP must export tool-result messages with role:'user' (Anthropic convention); got: '{}'",
                 acp_tool_msg.role
             );
         })
@@ -434,8 +476,8 @@ async fn cross_runner_openrouter_export_into_acp_import_normalizes_tool_role() {
 }
 
 /// Export a session from acp-runner (which has PortableBlock::ToolUse for tool_use
-/// blocks) and import it into xai-runner.  Verifies that xai-runner converts
-/// ToolUse blocks to "[called: {name}]" text (xai is text-only, stateful server-side).
+/// blocks) and import it into xai-runner.  Verifies that xai-runner (text-only) DROPS ToolUse blocks from the
+/// converted text (per MED-18) while preserving tool-result content and text.
 #[tokio::test]
 async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
     let (_c, port) = start_nats_js().await;
@@ -484,13 +526,11 @@ async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
                 .expect("acp session/export should succeed");
 
             let exported_json = acp_export.0.get().to_string();
-            let acp_portable: Vec<PortableMessage> =
-                serde_json::from_str(&exported_json).expect("acp export should be valid JSON");
 
             // Sanity-check: acp exports ToolUse as PortableBlock::ToolUse
-            let has_tool_call = acp_portable
+            let has_tool_call = export_blocks(&exported_json)
                 .iter()
-                .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolUse { .. })));
+                .any(|b| matches!(b, PortableBlock::ToolUse { .. }));
             assert!(has_tool_call, "ACP export must contain PortableBlock::ToolUse");
 
             // ── 3. Import into xai-runner ─────────────────────────────────────────
@@ -527,13 +567,23 @@ async fn cross_runner_acp_export_into_xai_import_converts_tool_calls_to_text() {
                 serde_json::from_str(xai_export.0.get())
                     .expect("xai export should be valid JSON");
 
-            let tool_text_msg = xai_portable
-                .iter()
-                .find(|m| m.text.contains("[called: read_file]"))
-                .expect("XAI export must contain '[called: read_file]' text for the ToolCall block");
-            assert_eq!(
-                tool_text_msg.role, "assistant",
-                "tool call converted message must have role 'assistant'"
+            // ours (xai_history_from_wire / MED-18) DROPS the tool_use block from the
+            // text-only xai history — a bare tool name as prose corrupts the message.
+            // The tool name must not leak into the re-exported text.
+            let joined: String =
+                xai_portable.iter().map(|m| m.text.as_str()).collect::<Vec<_>>().join("\n");
+            assert!(
+                !joined.contains("read_file"),
+                "xai (text-only) drops the tool call; the tool name must not leak into text; got: {joined:?}"
+            );
+            // The tool result content and the assistant's text survive the round-trip.
+            assert!(
+                joined.contains("file contents"),
+                "tool result content must be preserved after import; got: {joined:?}"
+            );
+            assert!(
+                joined.contains("I read the file."),
+                "assistant text must be preserved after import; got: {joined:?}"
             );
         })
         .await;
@@ -608,25 +658,24 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
                 .expect("OR session/export should succeed");
 
             let exported_json = or_export.0.get().to_string();
-            let or_portable: Vec<PortableMessage> =
-                serde_json::from_str(&exported_json).expect("OR export should be valid JSON");
+            let or_blocks = export_blocks(&exported_json);
 
             // Must have a ToolCall block (from the assistant's tool_calls message)
-            let has_tool_call = or_portable
+            let has_tool_call = or_blocks
                 .iter()
-                .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolUse { .. })));
+                .any(|b| matches!(b, PortableBlock::ToolUse { .. }));
             assert!(
                 has_tool_call,
-                "OR export after real prompt must contain PortableBlock::ToolUse; got: {or_portable:?}"
+                "OR export after real prompt must contain PortableBlock::ToolUse; got: {or_blocks:?}"
             );
 
             // Must have a ToolResult block (from the role:"tool" result message)
-            let has_tool_result = or_portable
+            let has_tool_result = or_blocks
                 .iter()
-                .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })));
+                .any(|b| matches!(b, PortableBlock::ToolResult { .. }));
             assert!(
                 has_tool_result,
-                "OR export after real prompt must contain PortableBlock::ToolResult; got: {or_portable:?}"
+                "OR export after real prompt must contain PortableBlock::ToolResult; got: {or_blocks:?}"
             );
 
             // ── 3. Import into acp-runner ─────────────────────────────────────────
@@ -654,21 +703,19 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
                 .await
                 .expect("acp session/export should succeed");
 
-            let acp_portable: Vec<PortableMessage> =
-                serde_json::from_str(acp_export.0.get())
-                    .expect("acp export should be valid JSON");
+            let acp_messages = export_messages(acp_export.0.get());
 
             // ACP export must contain ToolCall block (re-exported from imported blocks)
-            let acp_has_tool_call = acp_portable
+            let acp_has_tool_call = acp_messages
                 .iter()
                 .any(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolUse { .. })));
             assert!(
                 acp_has_tool_call,
-                "ACP export after import must preserve PortableBlock::ToolUse; got: {acp_portable:?}"
+                "ACP export after import must preserve PortableBlock::ToolUse"
             );
 
             // Fix 3: the ToolResult message must have role:"user" (not "tool")
-            let acp_tool_result_msg = acp_portable
+            let acp_tool_result_msg = acp_messages
                 .iter()
                 .find(|m| m.blocks.iter().any(|b| matches!(b, PortableBlock::ToolResult { .. })))
                 .expect("ACP export must contain a ToolResult block");
@@ -692,28 +739,41 @@ async fn cross_runner_or_real_tool_cycle_then_import_into_acp_preserves_tool_blo
 async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text() {
     local()
         .run_until(async move {
-            let messages = vec![
-                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
-                PortableMessage {
-                    role: "assistant".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolUse {
-                        id: "c1".to_string(),
-                        name: "str_replace".to_string(),
-                        input_summary: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}).to_string(),
-                    }],
-                },
-                PortableMessage {
-                    role: "user".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolResult {
-                        id: "c1".to_string(),
-                        output_summary: "edit-applied".to_string(),
-                    }],
-                },
-                PortableMessage { role: "assistant".to_string(), text: "done".to_string(), blocks: vec![] },
-            ];
-            let exported_json = serde_json::to_string(&messages).unwrap();
+            // A realistic codex-style export of a session WITH tool blocks is the
+            // versioned V2 wrapper (a bare V1 array always has empty `blocks`).
+            let export = PortableExportV2 {
+                version: EXPORT_VERSION_V2,
+                messages: vec![
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "user".to_string(),
+                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "assistant".to_string(),
+                        blocks: vec![PortableBlock::ToolUse {
+                            id: "c1".to_string(),
+                            name: "str_replace".to_string(),
+                            input_summary: serde_json::json!({"path": "f.rs", "old_str": "a", "new_str": "b"}).to_string(),
+                        }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "user".to_string(),
+                        blocks: vec![PortableBlock::ToolResult {
+                            id: "c1".to_string(),
+                            output_summary: "edit-applied".to_string(),
+                        }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "assistant".to_string(),
+                        blocks: vec![PortableBlock::Text { text: "done".to_string() }],
+                    },
+                ],
+            };
+            let exported_json = serde_json::to_string(&export).unwrap();
 
             let xai_http = Arc::new(MockXaiHttpClient::new());
             let xai_notifier = Arc::new(XaiMockNotifier::new());
@@ -748,14 +808,15 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
                 serde_json::from_str(xai_export.0.get())
                     .expect("xai export must be valid JSON");
 
-            let has_tool_call_text = xai_portable
-                .iter()
-                .any(|m| m.text.contains("[called: str_replace]"));
+            // ours drops the tool_use block in the text-only xai history; the tool
+            // name must not leak into the re-exported text.
+            let leaks_tool_name = xai_portable.iter().any(|m| m.text.contains("str_replace"));
             assert!(
-                has_tool_call_text,
-                "XAI must convert ToolCall block to '[called: str_replace]' text; got: {xai_portable:?}"
+                !leaks_tool_name,
+                "xai (text-only) drops the tool call; the tool name must not leak into text; got: {xai_portable:?}"
             );
 
+            // ToolResult content is preserved.
             let has_tool_result_text = xai_portable
                 .iter()
                 .any(|m| m.text.contains("edit-applied"));
@@ -777,29 +838,40 @@ async fn cross_runner_codex_style_export_into_xai_import_converts_blocks_to_text
 async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to_text() {
     local()
         .run_until(async move {
-            // OR-style: role:"tool" for ToolResult messages.
-            let messages = vec![
-                PortableMessage { role: "user".to_string(), text: "use a tool".to_string(), blocks: vec![] },
-                PortableMessage {
-                    role: "assistant".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolUse {
-                        id: "c1".to_string(),
-                        name: "glob".to_string(),
-                        input_summary: serde_json::json!({"pattern": "**/*.rs"}).to_string(),
-                    }],
-                },
-                PortableMessage {
-                    role: "tool".to_string(),
-                    text: String::new(),
-                    blocks: vec![PortableBlock::ToolResult {
-                        id: "c1".to_string(),
-                        output_summary: "found: main.rs".to_string(),
-                    }],
-                },
-                PortableMessage { role: "assistant".to_string(), text: "found it".to_string(), blocks: vec![] },
-            ];
-            let exported_json = serde_json::to_string(&messages).unwrap();
+            // OR-style V2 export: role:"tool" for the ToolResult message.
+            let export = PortableExportV2 {
+                version: EXPORT_VERSION_V2,
+                messages: vec![
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "user".to_string(),
+                        blocks: vec![PortableBlock::Text { text: "use a tool".to_string() }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "assistant".to_string(),
+                        blocks: vec![PortableBlock::ToolUse {
+                            id: "c1".to_string(),
+                            name: "glob".to_string(),
+                            input_summary: serde_json::json!({"pattern": "**/*.rs"}).to_string(),
+                        }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "tool".to_string(),
+                        blocks: vec![PortableBlock::ToolResult {
+                            id: "c1".to_string(),
+                            output_summary: "found: main.rs".to_string(),
+                        }],
+                    },
+                    PortableMessageV2 {
+                        version: EXPORT_VERSION_V2,
+                        role: "assistant".to_string(),
+                        blocks: vec![PortableBlock::Text { text: "found it".to_string() }],
+                    },
+                ],
+            };
+            let exported_json = serde_json::to_string(&export).unwrap();
 
             let xai_http = Arc::new(MockXaiHttpClient::new());
             let xai_notifier = Arc::new(XaiMockNotifier::new());
@@ -834,14 +906,15 @@ async fn cross_runner_openrouter_style_export_into_xai_import_converts_blocks_to
                 serde_json::from_str(xai_export.0.get())
                     .expect("xai export must be valid JSON");
 
-            let has_tool_call_text = xai_portable
-                .iter()
-                .any(|m| m.text.contains("[called: glob]"));
+            // ours drops the tool_use block in the text-only xai history; the tool
+            // name must not leak into the re-exported text.
+            let leaks_tool_name = xai_portable.iter().any(|m| m.text.contains("glob"));
             assert!(
-                has_tool_call_text,
-                "XAI must convert OR ToolCall block to '[called: glob]' text; got: {xai_portable:?}"
+                !leaks_tool_name,
+                "xai (text-only) drops the tool call; the tool name must not leak into text; got: {xai_portable:?}"
             );
 
+            // ToolResult content is preserved.
             let has_tool_result_text = xai_portable
                 .iter()
                 .any(|m| m.text.contains("found: main.rs"));
