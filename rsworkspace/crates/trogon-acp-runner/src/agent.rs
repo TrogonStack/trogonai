@@ -1628,6 +1628,211 @@ mod tests {
         assert_eq!(portable[1].text, "world");
     }
 
+    // ── session/export of non-text blocks → versioned V2 wrapper ──────────────
+    //
+    // A message containing any block that is not plain Text/Image (ToolUse,
+    // ToolResult, Thinking) is exported as the versioned V2 wrapper, which
+    // preserves the block structurally instead of flattening it to prose. These
+    // tests exercise the acp-runner `session/export` ext_method handler and parse
+    // the result with `parse_export_json` (which handles both V1 and V2 shapes).
+
+    /// Build a `TrogonAgent` over a `MemorySessionStore` for ext_method tests.
+    #[cfg(feature = "test-helpers")]
+    fn make_export_test_agent(
+        store: trogon_runner_tools::session_store::mock::MemorySessionStore,
+    ) -> TrogonAgent<
+        trogon_runner_tools::session_store::mock::MemorySessionStore,
+        crate::agent_runner::mock::MockAgentRunner,
+        crate::session_notifier::mock::MockSessionNotifier,
+    > {
+        TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            crate::agent_runner::mock::MockAgentRunner::new("claude-3-5-sonnet-20241022"),
+            "test-prefix",
+            "claude-3-5-sonnet-20241022",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        )
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_represents_tool_use_as_v2_block() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::ToolUse {
+                    id: "call-x".to_string(),
+                    name: "read_file".to_string(),
+                    input: serde_json::json!({"path": "/tmp/foo"}),
+                    parent_tool_use_id: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tu1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tu1")))
+            .await
+            .unwrap();
+
+        // A tool_use message exports as V2 with the call preserved as a structured
+        // ToolUse block — the bare tool name is never emitted as prose (MED-18).
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "assistant");
+                assert!(
+                    exp.messages[0].blocks.iter().any(
+                        |b| matches!(b, PortableBlock::ToolUse { name, .. } if name == "read_file")
+                    ),
+                    "export must preserve the tool_use as a ToolUse block; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a tool_use message must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_preserves_tool_result_content_v2() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![AgentContentBlock::ToolResult {
+                    tool_use_id: "call-1".to_string(),
+                    content: "tool output here".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tr1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr1")))
+            .await
+            .unwrap();
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "user");
+                assert!(
+                    exp.messages[0].blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::ToolResult { output_summary, .. }
+                            if output_summary == "tool output here"
+                    )),
+                    "export must preserve the tool result content; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a tool_result message must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_mixed_text_and_tool_result_v2() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![
+                    AgentContentBlock::Text { text: "before".to_string() },
+                    AgentContentBlock::ToolResult {
+                        tool_use_id: "c2".to_string(),
+                        content: "result".to_string(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("tr2", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("tr2")))
+            .await
+            .unwrap();
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                let blocks = &exp.messages[0].blocks;
+                assert!(
+                    blocks.iter().any(|b| matches!(b, PortableBlock::Text { text } if text == "before")),
+                    "text block must be preserved; got: {blocks:?}"
+                );
+                assert!(
+                    blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::ToolResult { output_summary, .. } if output_summary == "result"
+                    )),
+                    "tool result must be preserved alongside the text; got: {blocks:?}"
+                );
+            }
+            ParsedExport::V1(_) => panic!("a message with a tool_result must export as V2"),
+        }
+    }
+
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn ext_method_export_represents_thinking_as_v2_block() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let state = SessionState {
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: vec![AgentContentBlock::Thinking {
+                    thinking: "internal reasoning".to_string(),
+                }],
+            }],
+            ..Default::default()
+        };
+        store.clone().save("th1", &state).await.unwrap();
+        let agent = make_export_test_agent(store);
+
+        let resp = agent
+            .ext_method(ExtRequest::new("session/export", make_export_params("th1")))
+            .await
+            .unwrap();
+
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    exp.messages[0].blocks.iter().any(|b| matches!(
+                        b,
+                        PortableBlock::Thinking { text } if text == "internal reasoning"
+                    )),
+                    "thinking must be preserved as a structured Thinking block; got: {:?}",
+                    exp.messages[0].blocks
+                );
+            }
+            ParsedExport::V1(_) => panic!("a thinking message must export as V2"),
+        }
+    }
+
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
     async fn ext_method_import_saves_to_store() {
