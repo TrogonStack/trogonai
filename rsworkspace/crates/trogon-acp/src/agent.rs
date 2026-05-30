@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    AvailableCommand, AvailableCommandsUpdate, CancelNotification, ConfigOptionUpdate,
+    AvailableCommand, AvailableCommandsUpdate, CancelNotification, CloseSessionRequest,
+    CloseSessionResponse, ConfigOptionUpdate,
     ContentBlock, ContentChunk, CurrentModeUpdate, Diff, Error, ErrorCode, ExtNotification,
     ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
     InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
@@ -1170,9 +1171,12 @@ where
             egress_policy: src_state.egress_policy.clone(),
             audit_log: vec![],
             terminal_id: None,
+            terminal_cwd: None,
             token_budget: src_state.token_budget,
             todos: src_state.todos.clone(),
             permission_rules_text: src_state.permission_rules_text.clone(),
+            compactor_model: src_state.compactor_model.clone(),
+            spawn_depth: src_state.spawn_depth,
         };
         if let Err(e) = self.store.save(&new_id, &new_state).await {
             Self::warn_save_forked_session_failed(&new_id, &e);
@@ -1290,6 +1294,11 @@ where
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
         ))
+    }
+
+    async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        self.close_session_impl(&args.session_id.0).await;
+        Ok(CloseSessionResponse::default())
     }
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
@@ -5132,7 +5141,7 @@ mod tests {
             root_info
                 .meta
                 .as_ref()
-                .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                .is_none_or(|m| !m.contains_key("branchedAtIndex")),
             "root session must not have branchedAtIndex in _meta"
         );
     }

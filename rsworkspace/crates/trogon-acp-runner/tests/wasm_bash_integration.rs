@@ -672,7 +672,7 @@ fn wasm_bash_tool_def_has_correct_shape() {
     assert!(
         required
             .as_array()
-            .map_or(false, |arr| arr.iter().any(|v| v.as_str() == Some("command"))),
+            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some("command"))),
         "input_schema must list 'command' as required, got: {}",
         def.input_schema
     );
