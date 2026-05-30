@@ -2058,8 +2058,10 @@ async fn runner_calls_compactor_and_uses_compacted_history() {
             .await;
 
             // Set token_budget = 1 so any non-empty message triggers the 85% threshold.
-            let mut seed_state = trogon_acp_runner::SessionState::default();
-            seed_state.token_budget = 1;
+            let seed_state = trogon_acp_runner::SessionState {
+                token_budget: 1,
+                ..Default::default()
+            };
             store.save(session_id, &seed_state).await.unwrap();
 
             let (mut notif_sub, mut resp_sub) =

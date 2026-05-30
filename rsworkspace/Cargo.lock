@@ -5320,7 +5320,10 @@ dependencies = [
  "trogon-agent-core",
  "trogon-cli",
  "trogon-nats",
+ "trogon-registry",
+ "trogon-runner-tools",
  "trogon-std",
+ "trogon-tools",
  "uuid",
 ]
 

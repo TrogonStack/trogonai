@@ -465,7 +465,7 @@ async fn list_sessions_includes_branched_at_index_in_meta_with_real_store() {
                 root_info
                     .meta
                     .as_ref()
-                    .map_or(true, |m| !m.contains_key("branchedAtIndex")),
+                    .is_none_or(|m| !m.contains_key("branchedAtIndex")),
                 "root session must not have branchedAtIndex in _meta"
             );
         })

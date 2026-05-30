@@ -864,10 +864,10 @@ async fn ext_method_routes_to_agent_and_returns_response() {
         ))
         .unwrap();
     tokio::spawn(async move {
-        if let Some(msg) = agent_sub.next().await {
-            if let Some(reply) = msg.reply {
-                nats2.publish(reply, resp_payload.into()).await.unwrap();
-            }
+        if let Some(msg) = agent_sub.next().await
+            && let Some(reply) = msg.reply
+        {
+            nats2.publish(reply, resp_payload.into()).await.unwrap();
         }
     });
 
