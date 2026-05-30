@@ -51,7 +51,7 @@ async fn spawn_agent_tool_returns_responder_output() {
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let tool = SpawnAgentTool::new(nats, prefix);
+    let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -90,7 +90,7 @@ async fn spawn_agent_tool_forwards_capability_and_prompt_in_payload() {
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
-    let tool = SpawnAgentTool::new(nats, prefix);
+    let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -111,7 +111,7 @@ async fn spawn_agent_tool_times_out_when_no_responder() {
 
     // SpawnAgentTool has a 120 s timeout — too long for a test.
     // We verify it returns Err when NATS has no subscriber (no-responder error).
-    let tool = SpawnAgentTool::new(nats, prefix);
+    let tool = SpawnAgentTool::new(nats, prefix, "");
     let result = tool
         .call_tool(
             "spawn_agent",

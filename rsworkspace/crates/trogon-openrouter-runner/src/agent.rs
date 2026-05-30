@@ -14,7 +14,7 @@ use agent_client_protocol::{
     SessionCloseCapabilities, SessionConfigOption, SessionConfigOptionValue,
     SessionConfigSelectOption, SessionForkCapabilities, SessionId, SessionInfo,
     SessionListCapabilities, SessionMode, SessionModeState, SessionModelState,
-    SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
+    SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     SetSessionModelRequest, SetSessionModelResponse, StopReason, ToolCall, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
@@ -151,6 +151,9 @@ struct OpenRouterSession {
     /// None → compaction uses the session model (or the agent default).
     #[serde(default)]
     compactor_model: Option<String>,
+    /// `spawn_agent` nesting depth; sub-sessions inherit parent+1 (bounds recursion).
+    #[serde(default)]
+    spawn_depth: u32,
     // MED-25: never serialize the API key — session/get_state would otherwise
     // return it in plaintext to any ACP client, and it would be persisted to KV.
     // A restored/forked session falls back to the agent-wide global key.
@@ -202,6 +205,9 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     tenant_id: String,
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     execution_nats: Option<async_nats::Client>,
+    /// The runner's own ACP config, used by `spawn_agent` to build a Bridge for
+    /// sub-agent sessions. `None` disables spawning.
+    runner_config: Option<acp_nats::Config>,
     tool_http_client: reqwest::Client,
     permission_tx: Option<PermissionTx>,
     permission_store: AllowedToolsSessionStore,
@@ -323,6 +329,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             tenant_id,
             registry: None,
             execution_nats: None,
+            runner_config: None,
             tool_http_client: reqwest::Client::new(),
             permission_tx: None,
             permission_store: AllowedToolsSessionStore::new(),
@@ -357,6 +364,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             tenant_id: self.tenant_id,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            runner_config: self.runner_config,
             tool_http_client: self.tool_http_client,
             permission_tx: self.permission_tx,
             permission_store: self.permission_store,
@@ -420,6 +428,13 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
     ) -> Self {
         self.execution_nats = Some(nats);
         self.registry = Some(Arc::new(registry));
+        self
+    }
+
+    /// Provide the runner's own ACP config so `spawn_agent` can build a Bridge for
+    /// sub-agent sessions. Without this, `spawn_agent` returns an error.
+    pub fn with_runner_config(mut self, config: acp_nats::Config) -> Self {
+        self.runner_config = Some(config);
         self
     }
 
@@ -870,6 +885,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 cwd,
                 model: session_model_override,
                 compactor_model: None,
+                spawn_depth: 0,
                 api_key,
                 history: Vec::new(),
                 system_prompt,
@@ -966,6 +982,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         cwd,
                         model,
                         compactor_model,
+                        spawn_depth: 0,
                         api_key,
                         history,
                         system_prompt,
@@ -1068,6 +1085,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                 cwd,
                 model: inherited_model.clone(),
                 compactor_model: inherited_compactor_model.clone(),
+                spawn_depth: 0,
                 api_key: inherited_key,
                 history,
                 system_prompt: inherited_system_prompt,
@@ -1363,6 +1381,33 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         }
                     },
                     "required": ["command"]
+                }),
+            });
+        }
+
+        // Advertise spawn_agent when a runner_config is set (delegate a subtask to an
+        // isolated sub-agent running a full tool-use loop in its own git worktree).
+        if self.runner_config.is_some() {
+            tool_defs.push(ToolDef {
+                name: "spawn_agent".to_string(),
+                description: "Spawn a specialised sub-agent and return its output. The \
+                              sub-agent runs a full tool-use loop in an isolated git \
+                              worktree, so it can read and edit files without affecting \
+                              your working tree."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "capability": {
+                            "type": "string",
+                            "description": "Agent capability to use, e.g. 'explore' or 'plan'"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The task or question to send to the sub-agent"
+                        }
+                    },
+                    "required": ["capability", "prompt"]
                 }),
             });
         }
@@ -1691,6 +1736,121 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     } else {
                         trogon_tools::dispatch_tool(&ctx, &call.name, &tool_input).await
                     }
+                } else if call.name == "spawn_agent" {
+                    let task = tool_input["prompt"].as_str().unwrap_or("").to_string();
+                    let (parent_cwd, depth, parent_mode) = {
+                        let sessions = self.sessions.lock().await;
+                        match sessions.get(&session_id) {
+                            Some(s) => (s.cwd.clone(), s.spawn_depth, s.mode.clone()),
+                            None => (cwd.clone(), 0, default_session_mode()),
+                        }
+                    };
+                    const MAX_SPAWN_DEPTH: u32 = 3;
+                    if depth >= MAX_SPAWN_DEPTH {
+                        "spawn_agent: max nesting depth reached".to_string()
+                    } else if let (Some(nats), Some(runner_cfg)) =
+                        (self.execution_nats.as_ref(), self.runner_config.clone())
+                    {
+                        let worktree =
+                            trogon_runner_tools::worktree::create_worktree(&parent_cwd).await;
+                        let sub_cwd: String = worktree
+                            .as_ref()
+                            .map(|w| w.path.clone())
+                            .unwrap_or_else(|| parent_cwd.clone());
+                        let (notif_tx, _unused) =
+                            tokio::sync::mpsc::channel::<SessionNotification>(1);
+                        drop(_unused);
+                        let acp_prefix_str = runner_cfg.acp_prefix().to_string();
+                        let bridge = acp_nats::Bridge::new(
+                            nats.clone(),
+                            acp_nats::NatsJetStreamClient::new(async_nats::jetstream::new(
+                                nats.clone(),
+                            )),
+                            trogon_std::time::SystemClock,
+                            &opentelemetry::global::meter("trogon-openrouter-runner"),
+                            runner_cfg,
+                            notif_tx,
+                        );
+                        match trogon_runner_tools::spawn_session::create_sub_session(
+                            &bridge, &sub_cwd, &parent_mode, None,
+                        )
+                        .await
+                        {
+                            Err(e) => {
+                                drop(worktree);
+                                format!("spawn_agent error: {e}")
+                            }
+                            Ok(sub_sid) => {
+                                if let Some(s) = self.sessions.lock().await.get_mut(&sub_sid) {
+                                    s.spawn_depth = depth + 1;
+                                }
+                                let notif_subject = format!(
+                                    "{}.session.{}.client.session.update",
+                                    acp_prefix_str, &sub_sid
+                                );
+                                let text_result =
+                                    std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+                                let text_clone = text_result.clone();
+                                let notifier_fwd = self.notifier.clone();
+                                let parent_sid_fwd = session_id.clone();
+                                let nats_for_notif = nats.clone();
+                                let (stop_tx, mut stop_rx) =
+                                    tokio::sync::oneshot::channel::<()>();
+                                let notif_handle = tokio::task::spawn_local(async move {
+                                    use futures_util::StreamExt as _;
+                                    let Ok(mut sub) =
+                                        nats_for_notif.subscribe(notif_subject).await
+                                    else {
+                                        return;
+                                    };
+                                    loop {
+                                        tokio::select! {
+                                            biased;
+                                            msg = sub.next() => {
+                                                let Some(msg) = msg else { break; };
+                                                if let Ok(notif) = serde_json::from_slice::<SessionNotification>(&msg.payload) {
+                                                    if let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
+                                                        && let ContentBlock::Text(ref t) = chunk.content
+                                                    {
+                                                        text_clone.lock().await.push_str(&t.text);
+                                                    }
+                                                    let mut fwd = notif;
+                                                    fwd.session_id = agent_client_protocol::SessionId::new(parent_sid_fwd.clone());
+                                                    notifier_fwd.notify(fwd).await;
+                                                }
+                                            }
+                                            _ = &mut stop_rx => break,
+                                        }
+                                    }
+                                });
+                                let run_result =
+                                    trogon_runner_tools::spawn_session::run_sub_session(
+                                        &bridge,
+                                        &sub_sid,
+                                        &task,
+                                        std::time::Duration::from_secs(3600),
+                                    )
+                                    .await;
+                                let _ = stop_tx.send(());
+                                let _ = notif_handle.await;
+                                drop(worktree);
+                                let accumulated = text_result.lock().await.clone();
+                                match run_result {
+                                    Ok(()) => {
+                                        if accumulated.is_empty() {
+                                            "Sub-agent completed.".to_string()
+                                        } else {
+                                            accumulated
+                                        }
+                                    }
+                                    Err(e) => format!("spawn_agent error: {e}"),
+                                }
+                            }
+                        }
+                    } else {
+                        "spawn_agent: not available (no execution backend or runner_config)"
+                            .to_string()
+                    }
                 } else if let Some((_, original_name, mcp_client)) =
                     mcp_dispatch.iter().find(|(prefixed, _, _)| prefixed == &call.name)
                 {
@@ -1983,6 +2143,7 @@ impl OpenRouterAgent<crate::http_client::mock::MockOpenRouterHttpClient, crate::
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
+            spawn_depth: 0,
             api_key: None,
             history,
             system_prompt: None,
@@ -2201,6 +2362,7 @@ mod tests {
             cwd: "/tmp".to_string(),
             model: None,
             compactor_model: None,
+            spawn_depth: 0,
             api_key: None,
             history: vec![],
             system_prompt: None,

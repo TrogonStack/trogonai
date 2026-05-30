@@ -29,8 +29,10 @@ serde       = { version = "1.0", features = ["derive"] }
 serde_json  = "1.0"
 tokio       = { version = "1", features = ["full"] }
 tracing     = "0.1"
+uuid        = { workspace = true }
 
 acp-nats     = { workspace = true }
+trogon-std   = { workspace = true }
 trogon-mcp   = { path = "../trogon-mcp" }
 trogon-nats  = { workspace = true }
 trogon-tools = { path = "../trogon-tools" }
@@ -40,10 +42,13 @@ async-nats             = { workspace = true }
 bytes                  = { workspace = true }
 futures-util           = { version = "0.3", default-features = false, features = ["std"] }
 httpmock               = "0.7"
+opentelemetry          = { workspace = true }
 serde_json             = "1.0"
+tempfile               = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio                  = { version = "1", features = ["full"] }
 trogon-nats            = { workspace = true, features = ["test-support"] }
+trogon-std             = { workspace = true, features = ["test-support"] }
 
 [features]
 test-helpers = []

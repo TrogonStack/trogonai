@@ -35,7 +35,7 @@ async fn into_dispatch_returns_correct_names() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let (server_name, tool_name, _handler) = tool.into_dispatch();
 
     assert_eq!(server_name, "spawn_agent");
@@ -48,7 +48,7 @@ async fn into_dispatch_handler_is_arc_mcp_call_tool() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let (_server_name, _tool_name, handler) = tool.into_dispatch();
 
     // Arc<dyn McpCallTool> — just confirm we hold a valid Arc (strong count = 1).
@@ -89,7 +89,7 @@ async fn call_tool_delivers_request_and_returns_reply() {
         }
     });
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -129,7 +129,7 @@ async fn call_tool_uses_correct_subject_prefix() {
     // Give NATS time to propagate the subscription before the request fires.
     tokio::task::yield_now().await;
 
-    let tool = SpawnAgentTool::new(client, "myteam");
+    let tool = SpawnAgentTool::new(client, "myteam", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -170,7 +170,7 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
         }
     });
 
-    let tool = SpawnAgentTool::new(client, "t");
+    let tool = SpawnAgentTool::new(client, "t", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -189,7 +189,7 @@ async fn call_tool_errors_on_missing_capability() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -210,7 +210,7 @@ async fn call_tool_errors_on_missing_prompt() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -231,7 +231,7 @@ async fn call_tool_errors_on_empty_arguments() {
     let (_container, port) = start_nats().await;
     let client = nats_client(port).await;
 
-    let tool = SpawnAgentTool::new(client, "trogon");
+    let tool = SpawnAgentTool::new(client, "trogon", "");
     let result = tool
         .call_tool("spawn_agent", &serde_json::json!({}))
         .await;
@@ -255,7 +255,7 @@ async fn call_tool_returns_error_when_no_subscriber_responds() {
     let client = nats_client(port).await;
 
     // No subscriber on this subject — NATS will return "no responders" immediately.
-    let tool = SpawnAgentTool::new(client, "ghost");
+    let tool = SpawnAgentTool::new(client, "ghost", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -302,7 +302,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
         }
     });
 
-    let tool = SpawnAgentTool::new(client, "ns");
+    let tool = SpawnAgentTool::new(client, "ns", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -334,7 +334,7 @@ async fn call_tool_handles_multiline_registry_reply() {
         }
     });
 
-    let tool = SpawnAgentTool::new(client, "ns2");
+    let tool = SpawnAgentTool::new(client, "ns2", "");
     let result = tool
         .call_tool(
             "spawn_agent",
@@ -377,7 +377,7 @@ async fn call_tool_handles_concurrent_requests() {
         let client = nats_client(port).await;
         let cap = cap.to_string();
         handles.push(tokio::spawn(async move {
-            let tool = SpawnAgentTool::new(client, "cc");
+            let tool = SpawnAgentTool::new(client, "cc", "");
             tool.call_tool(
                 "spawn_agent",
                 &serde_json::json!({ "capability": cap, "prompt": "do it" }),

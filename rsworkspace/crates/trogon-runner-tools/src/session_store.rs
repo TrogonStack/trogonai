@@ -147,6 +147,10 @@ pub struct SessionState {
     /// `None` → compaction uses the session model (or the provider default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compactor_model: Option<String>,
+    /// Nesting depth for `spawn_agent`. Root sessions are 0; a spawned sub-agent
+    /// inherits parent+1. Used to bound recursion (see `MAX_SPAWN_DEPTH`).
+    #[serde(default)]
+    pub spawn_depth: u32,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -192,6 +196,7 @@ impl Default for SessionState {
             permission_rules_text: None,
             token_budget: default_token_budget(),
             compactor_model: None,
+            spawn_depth: 0,
         }
     }
 }

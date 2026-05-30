@@ -5814,6 +5814,7 @@ dependencies = [
  "futures",
  "futures-util",
  "httpmock",
+ "opentelemetry",
  "reqwest",
  "serde",
  "serde_json",
@@ -5824,6 +5825,7 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-std",
  "trogon-tools",
  "uuid",
 ]
@@ -5954,15 +5956,19 @@ dependencies = [
  "futures-util",
  "globset",
  "httpmock",
+ "opentelemetry",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "testcontainers-modules",
  "tokio",
  "tracing",
  "trogon-mcp",
  "trogon-nats",
+ "trogon-std",
  "trogon-tools",
+ "uuid",
 ]
 
 [[package]]
@@ -6203,6 +6209,7 @@ dependencies = [
  "futures",
  "futures-util",
  "httpmock",
+ "opentelemetry",
  "reqwest",
  "serde",
  "serde_json",
@@ -6215,6 +6222,7 @@ dependencies = [
  "trogon-nats",
  "trogon-registry",
  "trogon-runner-tools",
+ "trogon-std",
  "trogon-tools",
  "uuid",
 ]
