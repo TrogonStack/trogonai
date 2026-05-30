@@ -143,6 +143,10 @@ pub struct SessionState {
     /// Compaction triggers at 85 % of this value. Default: 200 000.
     #[serde(default = "default_token_budget", skip_serializing_if = "is_default_token_budget")]
     pub token_budget: u64,
+    /// Same-provider model override used only for context compaction.
+    /// `None` → compaction uses the session model (or the provider default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactor_model: Option<String>,
 }
 
 /// Append new audit entries to the log, trimming oldest entries if over cap.
@@ -187,6 +191,7 @@ impl Default for SessionState {
             todos: Vec::new(),
             permission_rules_text: None,
             token_budget: default_token_budget(),
+            compactor_model: None,
         }
     }
 }
