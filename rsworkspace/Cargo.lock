@@ -7648,6 +7648,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-source-telegram"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-std"
 version = "0.1.0"
 dependencies = [

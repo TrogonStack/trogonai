@@ -433,6 +433,7 @@ mod gateway_e2e {
             jwt: trogon_mcp_gateway::jwt::JwtValidator::disabled().expect("jwt off"),
             egress: None,
             chain_resolver: None,
+            rate_limit: None,
         };
 
         let gateway_client = Arc::new(connect(&nats_conf, Duration::from_secs(15)).await.expect("gateway nats"));
