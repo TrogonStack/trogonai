@@ -1,8 +1,8 @@
-use std::{num::NonZeroU64, str::FromStr};
+use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use trogon_nats::DottedNatsToken;
-use trogonai_proto::convert::PROTOBUF_DURATION_MAX_SECONDS;
+use trogonai_proto::convert::{PROTOBUF_DURATION_MAX_SECONDS, ProtobufDurationSeconds};
 
 use crate::error::ScheduleSpecError;
 
@@ -82,23 +82,30 @@ impl Schedule {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EverySeconds(NonZeroU64);
+pub struct EverySeconds(ProtobufDurationSeconds);
 
 impl EverySeconds {
     pub fn new(every_sec: u64) -> Result<Self, ScheduleSpecError> {
-        let every_sec = NonZeroU64::new(every_sec).ok_or(ScheduleSpecError::EverySecondsMustBePositive)?;
-        if every_sec.get() > PROTOBUF_DURATION_MAX_SECONDS {
+        if every_sec == 0 {
+            return Err(ScheduleSpecError::EverySecondsMustBePositive);
+        }
+
+        let Some(every_sec) = ProtobufDurationSeconds::new(every_sec) else {
             return Err(ScheduleSpecError::EverySecondsTooLarge {
                 max: PROTOBUF_DURATION_MAX_SECONDS,
-                actual: every_sec.get(),
+                actual: every_sec,
             });
-        }
+        };
 
         Ok(Self(every_sec))
     }
 
     pub fn as_u64(self) -> u64 {
-        self.0.get()
+        self.0.as_u64()
+    }
+
+    pub fn as_protobuf_duration_seconds(self) -> ProtobufDurationSeconds {
+        self.0
     }
 }
 
@@ -515,23 +522,30 @@ impl TryFrom<&str> for SamplingSubject {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TtlSeconds(NonZeroU64);
+pub struct TtlSeconds(ProtobufDurationSeconds);
 
 impl TtlSeconds {
     pub fn new(ttl_sec: u64) -> Result<Self, ScheduleSpecError> {
-        let ttl_sec = NonZeroU64::new(ttl_sec).ok_or(ScheduleSpecError::TtlMustBePositive)?;
-        if ttl_sec.get() > PROTOBUF_DURATION_MAX_SECONDS {
+        if ttl_sec == 0 {
+            return Err(ScheduleSpecError::TtlMustBePositive);
+        }
+
+        let Some(ttl_sec) = ProtobufDurationSeconds::new(ttl_sec) else {
             return Err(ScheduleSpecError::TtlSecondsTooLarge {
                 max: PROTOBUF_DURATION_MAX_SECONDS,
-                actual: ttl_sec.get(),
+                actual: ttl_sec,
             });
-        }
+        };
 
         Ok(Self(ttl_sec))
     }
 
     pub fn as_u64(self) -> u64 {
-        self.0.get()
+        self.0.as_u64()
+    }
+
+    pub fn as_protobuf_duration_seconds(self) -> ProtobufDurationSeconds {
+        self.0
     }
 }
 
@@ -848,6 +862,7 @@ mod tests {
         assert_eq!(subject.as_str(), "agent.events");
         assert_eq!(subject_ref.as_str(), "agent.replay");
         assert_eq!(ttl.as_u64(), 60);
+        assert_eq!(ttl.as_protobuf_duration_seconds().as_u64(), 60);
         assert!(TtlSeconds::try_from(0).is_err());
         assert!(TtlSeconds::try_from(PROTOBUF_DURATION_MAX_SECONDS + 1).is_err());
         assert_eq!(source.subject().as_str(), "agent.events");

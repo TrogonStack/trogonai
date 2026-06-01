@@ -25,7 +25,7 @@ impl From<&ScheduleEventDelivery> for v1::Delivery {
                     v1::delivery::NatsMessage {
                         subject: subject.as_str().to_string(),
                         ttl: ttl_sec
-                            .map(|secs| MessageField::some(duration_from_seconds(secs.as_u64())))
+                            .map(|secs| MessageField::some(duration_from_seconds(secs.as_protobuf_duration_seconds())))
                             .unwrap_or_else(MessageField::none),
                         source: source
                             .as_ref()

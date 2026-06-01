@@ -33,7 +33,7 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
             }
             .into(),
             ScheduleEventSchedule::Every { every_sec } => v1::schedule::Every {
-                every: MessageField::some(duration_from_seconds(every_sec.as_u64())),
+                every: MessageField::some(duration_from_seconds(every_sec.as_protobuf_duration_seconds())),
             }
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
