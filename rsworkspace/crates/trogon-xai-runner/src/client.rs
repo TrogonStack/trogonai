@@ -736,18 +736,17 @@ fn process_sse_line(
         // `TextComplete` (not `TextDelta`) so the agent can skip it when
         // streaming deltas were already received for this turn.
         "response.output_item.done" => {
-            if val["item"]["type"].as_str() == Some("message") {
-                if let Some(content) = val["item"]["content"].as_array() {
-                    for block in content {
-                        if block["type"].as_str() == Some("output_text") {
-                            if let Some(text) = block["text"].as_str() {
-                                if !text.is_empty() {
-                                    pending.push_back(XaiEvent::TextComplete {
-                                        text: text.to_string(),
-                                    });
-                                }
-                            }
-                        }
+            if val["item"]["type"].as_str() == Some("message")
+                && let Some(content) = val["item"]["content"].as_array()
+            {
+                for block in content {
+                    if block["type"].as_str() == Some("output_text")
+                        && let Some(text) = block["text"].as_str()
+                        && !text.is_empty()
+                    {
+                        pending.push_back(XaiEvent::TextComplete {
+                            text: text.to_string(),
+                        });
                     }
                 }
             }

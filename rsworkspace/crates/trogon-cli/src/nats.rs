@@ -67,21 +67,11 @@ impl NatsClient for async_nats::Client {
         Ok(self.publish(subject, payload).await?)
     }
 
-    async fn publish_with_reply_bytes(
-        &self,
-        subject: String,
-        reply: String,
-        payload: Bytes,
-    ) -> anyhow::Result<()> {
+    async fn publish_with_reply_bytes(&self, subject: String, reply: String, payload: Bytes) -> anyhow::Result<()> {
         Ok(self.publish_with_reply(subject, reply, payload).await?)
     }
 
-    async fn publish_with_req_id_bytes(
-        &self,
-        subject: String,
-        req_id: String,
-        payload: Bytes,
-    ) -> anyhow::Result<()> {
+    async fn publish_with_req_id_bytes(&self, subject: String, req_id: String, payload: Bytes) -> anyhow::Result<()> {
         let mut headers = HeaderMap::new();
         headers.insert(REQ_ID_HEADER, req_id.as_str());
         Ok(self.publish_with_headers(subject, headers, payload).await?)

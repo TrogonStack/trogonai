@@ -4,30 +4,29 @@ pub mod doctor;
 pub mod env_local;
 pub mod fs;
 pub mod markdown;
-pub mod nats;
 pub mod mcp;
 pub mod mcp_oauth;
 pub mod mcp_prompts;
+pub mod nats;
 pub mod print;
 pub mod repl;
 pub mod runtime;
 pub mod session;
 pub mod session_store;
 pub mod settings;
-pub mod subagents;
 pub mod stdio_mcp_bridge;
 pub mod stream_input;
-pub mod tool_update;
 pub mod terminal;
+pub mod tool_update;
 pub mod tui_client;
 
 pub use fs::{Fs, RealFs};
+pub use mcp::{McpConfig, McpManager, McpServerConfig, McpTransport};
 pub use nats::NatsClient;
 pub use print::{OutputFormat, PrintExitCode, PrintOptions};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionInit, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
 pub use settings::{PermissionsSettings, Settings};
-pub use mcp::{McpConfig, McpManager, McpServerConfig, McpTransport};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;
@@ -82,10 +81,7 @@ fn is_loopback_target(url: &str) -> bool {
     // Strip an optional scheme (`nats://`, `tls://`, …).
     let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     // Drop any path / query (NATS URLs normally have none, but be defensive).
-    let authority = after_scheme
-        .split(['/', '?'])
-        .next()
-        .unwrap_or(after_scheme);
+    let authority = after_scheme.split(['/', '?']).next().unwrap_or(after_scheme);
     // Drop userinfo (`user:pass@host`).
     let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
 

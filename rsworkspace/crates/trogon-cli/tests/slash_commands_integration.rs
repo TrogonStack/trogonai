@@ -11,12 +11,12 @@
 
 use std::time::Duration;
 
+use agent_client_protocol::ExtResponse;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
-use agent_client_protocol::ExtResponse;
-use trogon_cli::session::{CompactResult, NatsSessionFactory, SessionFactory, StreamEvent, TrogonSession};
 use trogon_cli::Session as _;
+use trogon_cli::session::{CompactResult, NatsSessionFactory, SessionFactory, StreamEvent, TrogonSession};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -129,7 +129,8 @@ async fn clear_creates_session_with_different_id() {
         .unwrap();
 
     assert_ne!(
-        session1.session_id(), session2.session_id(),
+        session1.session_id(),
+        session2.session_id(),
         "new session after /clear must have a distinct session_id"
     );
     assert_eq!(session1.session_id(), "sess-clear-1");
@@ -156,8 +157,18 @@ async fn new_session_after_clear_can_prompt() {
     let rx1 = session1.prompt("hello from session 1").await.unwrap();
     let msg1 = tokio::time::timeout(TIMEOUT, sub1.next()).await.unwrap().unwrap();
     // prompt() uses X-Req-Id header; derive the response subject from it.
-    let req_id1 = msg1.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
-    let done_subj1 = format!("{PREFIX}.session.{}.agent.prompt.response.{req_id1}", session1.session_id());
+    let req_id1 = msg1
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
+    let done_subj1 = format!(
+        "{PREFIX}.session.{}.agent.prompt.response.{req_id1}",
+        session1.session_id()
+    );
     send_done(&nats, done_subj1).await;
     drain_until_done(rx1).await;
 
@@ -178,8 +189,18 @@ async fn new_session_after_clear_can_prompt() {
         "prompt must be routed to new session, got: {payload}"
     );
 
-    let req_id2 = msg2.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
-    let done_subj2 = format!("{PREFIX}.session.{}.agent.prompt.response.{req_id2}", session2.session_id());
+    let req_id2 = msg2
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
+    let done_subj2 = format!(
+        "{PREFIX}.session.{}.agent.prompt.response.{req_id2}",
+        session2.session_id()
+    );
     send_done(&nats, done_subj2).await;
     drain_until_done(rx2).await;
 }
@@ -215,8 +236,18 @@ async fn new_session_starts_with_no_usage_events() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let req_id1 = msg1.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
-    let done_subj1 = format!("{PREFIX}.session.{}.agent.prompt.response.{req_id1}", session1.session_id());
+    let req_id1 = msg1
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
+    let done_subj1 = format!(
+        "{PREFIX}.session.{}.agent.prompt.response.{req_id1}",
+        session1.session_id()
+    );
     send_done(&nats, done_subj1).await;
     drain_until_done(rx1).await;
 
@@ -230,8 +261,18 @@ async fn new_session_starts_with_no_usage_events() {
     let mut rx2 = session2.prompt("after clear").await.unwrap();
     let msg2 = tokio::time::timeout(TIMEOUT, sub2.next()).await.unwrap().unwrap();
     // No usage notifications for the new session — just close the turn.
-    let req_id2 = msg2.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
-    let done_subj2 = format!("{PREFIX}.session.{}.agent.prompt.response.{req_id2}", session2.session_id());
+    let req_id2 = msg2
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
+    let done_subj2 = format!(
+        "{PREFIX}.session.{}.agent.prompt.response.{req_id2}",
+        session2.session_id()
+    );
     send_done(&nats, done_subj2).await;
 
     // Collect events: must not contain any Usage event.
@@ -297,8 +338,14 @@ async fn nats_factory_successive_creates_return_distinct_ids() {
     spawn_fake_runner_multi(nats.clone(), "factory-multi", 2).await;
 
     let factory = NatsSessionFactory::new(nats);
-    let s1 = factory.create_session(PREFIX, std::env::current_dir().unwrap(), vec![]).await.unwrap();
-    let s2 = factory.create_session(PREFIX, std::env::current_dir().unwrap(), vec![]).await.unwrap();
+    let s1 = factory
+        .create_session(PREFIX, std::env::current_dir().unwrap(), vec![])
+        .await
+        .unwrap();
+    let s2 = factory
+        .create_session(PREFIX, std::env::current_dir().unwrap(), vec![])
+        .await
+        .unwrap();
 
     assert_ne!(s1.session_id(), s2.session_id());
     assert_eq!(s1.session_id(), "factory-multi-1");
@@ -328,12 +375,7 @@ async fn compact_export_compactor_import_round_trip() {
         br#"{"messages":[{"role":"user","content":[{"type":"text","text":"summary"}]}],"compacted":true,"tokens_before":500,"tokens_after":100}"#.to_vec(),
     )
     .await;
-    mock_responder(
-        nats_bg.clone(),
-        "test.agent.ext.session/import",
-        ext_response("{}"),
-    )
-    .await;
+    mock_responder(nats_bg.clone(), "test.agent.ext.session/import", ext_response("{}")).await;
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -386,15 +428,9 @@ async fn compact_on_attached_session_uses_correct_session_id() {
     // carried in the NATS subject), so the payload IS the params object directly —
     // sessionId is at the top level, not nested under a "params" key.
     let export_req: serde_json::Value = serde_json::from_slice(&export_msg.payload).unwrap();
-    assert_eq!(
-        export_req["sessionId"].as_str().unwrap(),
-        "attached-for-compact"
-    );
+    assert_eq!(export_req["sessionId"].as_str().unwrap(), "attached-for-compact");
     if let Some(reply) = export_msg.reply {
-        nats_bg
-            .publish(reply, ext_response("[]").into())
-            .await
-            .unwrap();
+        nats_bg.publish(reply, ext_response("[]").into()).await.unwrap();
     }
 
     let result = compact_handle.await.unwrap();

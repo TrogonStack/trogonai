@@ -11,15 +11,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::{
+    Json, Router,
     extract::{Form, Query, State},
     response::{IntoResponse, Redirect},
     routing::{get, post},
-    Json, Router,
 };
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 
-use trogon_cli::mcp_oauth::{ensure_token, login_with, OAuthStore};
+use trogon_cli::mcp_oauth::{OAuthStore, ensure_token, login_with};
 
 struct AsState {
     base: String,
@@ -47,10 +47,7 @@ async fn register() -> impl IntoResponse {
     Json(serde_json::json!({ "client_id": "test-client" }))
 }
 
-async fn authorize(
-    State(s): State<Arc<AsState>>,
-    Query(q): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
+async fn authorize(State(s): State<Arc<AsState>>, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
     // Capture PKCE challenge to verify at /token; auto-consent by redirecting back.
     *s.challenge.lock().unwrap() = q.get("code_challenge").cloned();
     let redirect_uri = q.get("redirect_uri").cloned().unwrap_or_default();
@@ -58,10 +55,7 @@ async fn authorize(
     Redirect::to(&format!("{redirect_uri}?code=authcode-123&state={state}"))
 }
 
-async fn token(
-    State(s): State<Arc<AsState>>,
-    Form(form): Form<HashMap<String, String>>,
-) -> impl IntoResponse {
+async fn token(State(s): State<Arc<AsState>>, Form(form): Form<HashMap<String, String>>) -> impl IntoResponse {
     match form.get("grant_type").map(String::as_str) {
         Some("authorization_code") => {
             // Verify PKCE: base64url(sha256(verifier)) must equal the stored challenge.

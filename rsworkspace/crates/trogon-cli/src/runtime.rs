@@ -15,8 +15,8 @@ use crate::repl;
 use crate::session::SessionFactory;
 use crate::tui_client::{ActiveClientState, TuiClient};
 
-pub use crate::tui_client::PermissionCoordinator;
 use crate::RunnerSwitcher;
+pub use crate::tui_client::PermissionCoordinator;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
 /// Resolve the startup session mode from the CLI flags.
@@ -62,8 +62,20 @@ where
     let local = tokio::task::LocalSet::new();
     local
         .run_until(run_interactive_inner(
-            factory, prefix, cwd, fs, switcher, registry, nats, nats_url, stream, resume,
-            skip_permissions, plan, session_init, name,
+            factory,
+            prefix,
+            cwd,
+            fs,
+            switcher,
+            registry,
+            nats,
+            nats_url,
+            stream,
+            resume,
+            skip_permissions,
+            plan,
+            session_init,
+            name,
         ))
         .await
 }
@@ -92,9 +104,7 @@ where
     RS: trogon_registry::RegistryStore,
 {
     let (notification_tx, mut notification_rx) = mpsc::channel::<SessionNotification>(64);
-    tokio::task::spawn_local(async move {
-        while notification_rx.recv().await.is_some() {}
-    });
+    tokio::task::spawn_local(async move { while notification_rx.recv().await.is_some() {} });
 
     let js = async_nats::jetstream::new(nats.clone());
     let js_client = NatsJetStreamClient::new(js);
@@ -105,10 +115,7 @@ where
         allowed_tools: Vec::new(),
     }));
     let permission_coordinator = PermissionCoordinator::new();
-    let tui_client = Rc::new(TuiClient::new(
-        client_state.clone(),
-        permission_coordinator.clone(),
-    ));
+    let tui_client = Rc::new(TuiClient::new(client_state.clone(), permission_coordinator.clone()));
 
     let supervisor = Rc::new(AcpClientSupervisor::new(
         client_state,

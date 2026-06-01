@@ -128,11 +128,7 @@ impl Settings {
         push("allow_commands", &allow_commands);
         push("deny_paths", &deny_paths);
         push("deny_commands", &deny_commands);
-        if lines.is_empty() {
-            None
-        } else {
-            Some(lines.join("\n"))
-        }
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
     }
 }
 
@@ -156,9 +152,7 @@ fn translate_rule(entry: &str) -> Option<(RuleKind, String)> {
     }
     match tool {
         "Bash" => Some((RuleKind::Command, arg.to_string())),
-        "Read" | "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => {
-            Some((RuleKind::Path, arg.to_string()))
-        }
+        "Read" | "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => Some((RuleKind::Path, arg.to_string())),
         _ => None,
     }
 }
@@ -244,7 +238,8 @@ mod tests {
     #[test]
     fn invalid_json_layer_is_ignored() {
         let fs = MockFs::new();
-        fs.write(Path::new("/proj/.claude/settings.json"), b"{not json").unwrap();
+        fs.write(Path::new("/proj/.claude/settings.json"), b"{not json")
+            .unwrap();
         // Should not panic; returns defaults.
         let s = Settings::load(&fs, Path::new("/proj"));
         assert_eq!(s, Settings::default());

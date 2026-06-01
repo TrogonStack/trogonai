@@ -295,6 +295,7 @@ async fn main() -> anyhow::Result<()> {
 
                         let task = req["prompt"].as_str().unwrap_or("").to_string();
                         let session_id = req["session_id"].as_str().unwrap_or("").to_string();
+                        let agent_name = req["agent"].as_str().unwrap_or("").to_string();
 
                         if session_id.is_empty() {
                             nats.publish(reply, "spawn_agent: missing session_id".into()).await.ok();
@@ -308,6 +309,25 @@ async fn main() -> anyhow::Result<()> {
                                 continue;
                             }
                         };
+
+                        // Resolve a named custom subagent (.claude/agents/) from the
+                        // parent project dir → its system prompt + model for the sub-session.
+                        let subagent = if agent_name.is_empty() {
+                            None
+                        } else {
+                            match trogon_runner_tools::load_subagent(
+                                std::path::Path::new(&parent_state.cwd),
+                                &agent_name,
+                            ) {
+                                Some(def) => Some(def),
+                                None => {
+                                    nats.publish(reply, format!("spawn_agent: no subagent named `{agent_name}` in .claude/agents/").into()).await.ok();
+                                    continue;
+                                }
+                            }
+                        };
+                        let sub_system_prompt = subagent.as_ref().map(|d| d.system_prompt.as_str());
+                        let sub_model = subagent.as_ref().and_then(|d| d.model.as_deref());
 
                         const MAX_SPAWN_DEPTH: u32 = 3;
                         if parent_state.spawn_depth >= MAX_SPAWN_DEPTH {
@@ -343,6 +363,8 @@ async fn main() -> anyhow::Result<()> {
                             &sub_cwd,
                             &parent_state.mode,
                             parent_state.permission_rules_text.as_deref(),
+                            sub_system_prompt,
+                            sub_model,
                         ).await {
                             Ok(sid) => sid,
                             Err(e) => {

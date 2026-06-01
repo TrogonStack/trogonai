@@ -74,8 +74,7 @@ mod tests {
 
     #[test]
     fn key_value_args_collected() {
-        let inv =
-            parse_mcp_prompt_command("/mcp__linear__create_issue title=\"Fix bug\" team=ENG").unwrap();
+        let inv = parse_mcp_prompt_command("/mcp__linear__create_issue title=\"Fix bug\" team=ENG").unwrap();
         assert_eq!(inv.server, "linear");
         assert_eq!(inv.prompt, "create_issue");
         assert_eq!(inv.arguments, json!({"title": "Fix bug", "team": "ENG"}));

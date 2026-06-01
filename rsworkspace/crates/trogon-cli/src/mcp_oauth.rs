@@ -179,10 +179,7 @@ impl OAuthStore {
 // ── HTTP steps (httpmock-testable) ────────────────────────────────────────────
 
 /// Discover the authorization server metadata for an MCP server `mcp_url`.
-pub async fn discover(
-    http: &reqwest::Client,
-    mcp_url: &str,
-) -> Result<AuthServerMetadata, String> {
+pub async fn discover(http: &reqwest::Client, mcp_url: &str) -> Result<AuthServerMetadata, String> {
     let origin = origin_of(mcp_url);
     // Protected-resource metadata points at the authorization server(s); if it is
     // absent, fall back to treating the MCP origin as the authorization server.
@@ -222,9 +219,7 @@ pub async fn register_client(
     redirect_uri: &str,
 ) -> Result<(String, Option<String>), String> {
     let Some(reg) = &meta.registration_endpoint else {
-        return Err(
-            "server has no registration endpoint; a pre-registered client_id is required".into(),
-        );
+        return Err("server has no registration endpoint; a pre-registered client_id is required".into());
     };
     let body = serde_json::json!({
         "client_name": "Trogon CLI",
@@ -348,10 +343,7 @@ impl CallbackServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| format!("could not bind callback listener: {e}"))?;
-        let port = listener
-            .local_addr()
-            .map_err(|e| e.to_string())?
-            .port();
+        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         Ok(Self {
             listener,
             redirect_uri: format!("http://127.0.0.1:{port}/callback"),
@@ -360,7 +352,7 @@ impl CallbackServer {
 
     /// Serve until the OAuth redirect hits `/callback`, returning the auth code.
     pub async fn wait(self, expected_state: &str) -> Result<String, String> {
-        use axum::{extract::Query, routing::get, Router};
+        use axum::{Router, extract::Query, routing::get};
         use std::sync::{Arc, Mutex};
         use tokio::sync::oneshot;
 
@@ -459,14 +451,7 @@ pub async fn login_with<O: FnOnce(&str)>(
     let (client_id, client_secret) = register_client(http, &meta, &redirect_uri).await?;
     let pkce = generate_pkce();
     let state = random_state();
-    let authorize_url = build_authorize_url(
-        &meta,
-        &client_id,
-        &redirect_uri,
-        &pkce.challenge,
-        &state,
-        mcp_url,
-    )?;
+    let authorize_url = build_authorize_url(&meta, &client_id, &redirect_uri, &pkce.challenge, &state, mcp_url)?;
 
     open(&authorize_url);
 
@@ -545,7 +530,10 @@ mod tests {
 
     #[test]
     fn origin_strips_path_and_userinfo() {
-        assert_eq!(origin_of("https://u:p@mcp.example.com:8443/mcp?x=1"), "https://mcp.example.com:8443");
+        assert_eq!(
+            origin_of("https://u:p@mcp.example.com:8443/mcp?x=1"),
+            "https://mcp.example.com:8443"
+        );
         assert_eq!(origin_of("http://localhost:3000/sse"), "http://localhost:3000");
     }
 

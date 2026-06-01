@@ -13,8 +13,8 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
-use trogon_cli::session::{StreamEvent, TrogonSession};
 use trogon_cli::Session as _;
+use trogon_cli::session::{StreamEvent, TrogonSession};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,9 +56,7 @@ async fn spawn_fake_runner(nats: async_nats::Client, session_id: String) {
 }
 
 /// Collect all StreamEvents from `rx` until Done, with a timeout.
-async fn collect_events(
-    mut rx: tokio::sync::mpsc::Receiver<StreamEvent>,
-) -> Vec<StreamEvent> {
+async fn collect_events(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) -> Vec<StreamEvent> {
     let mut events = Vec::new();
     let deadline = tokio::time::sleep(TIMEOUT);
     tokio::pin!(deadline);
@@ -96,9 +94,7 @@ async fn usage_update_notification_emits_usage_event() {
     // (no reply needed — the channel closes on notif_sub drain).
     // Instead we drive the test by publishing notifications directly.
 
-    let notif_subject = format!(
-        "{PREFIX}.session.{session_id}.client.session.update"
-    );
+    let notif_subject = format!("{PREFIX}.session.{session_id}.client.session.update");
     let resp_subject = format!("{PREFIX}.session.{session_id}.agent.prompt");
 
     // Subscribe to catch the prompt publish so we know the inbox reply subject.
@@ -111,7 +107,14 @@ async fn usage_update_notification_emits_usage_event() {
         .await
         .expect("timeout waiting for prompt")
         .expect("prompt message");
-    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let req_id = prompt_msg
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
     let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     // Publish a UsageUpdate notification.
@@ -123,12 +126,9 @@ async fn usage_update_notification_emits_usage_event() {
             "size": 200000
         }
     });
-    nats.publish(
-        notif_subject.clone(),
-        serde_json::to_vec(&usage_notif).unwrap().into(),
-    )
-    .await
-    .unwrap();
+    nats.publish(notif_subject.clone(), serde_json::to_vec(&usage_notif).unwrap().into())
+        .await
+        .unwrap();
 
     // Give the session task time to receive and process the notification before
     // we publish the Done reply — the select! is biased toward resp_sub so if
@@ -145,7 +145,11 @@ async fn usage_update_notification_emits_usage_event() {
 
     let usage = events.iter().find(|e| matches!(e, StreamEvent::Usage { .. }));
     assert!(usage.is_some(), "expected Usage event, got: {events:?}");
-    if let Some(StreamEvent::Usage { used_tokens, context_size }) = usage {
+    if let Some(StreamEvent::Usage {
+        used_tokens,
+        context_size,
+    }) = usage
+    {
         assert_eq!(*used_tokens, 42000);
         assert_eq!(*context_size, 200000);
     }
@@ -174,7 +178,14 @@ async fn tool_call_edit_emits_tool_call_and_diff_events() {
         .await
         .expect("timeout")
         .expect("prompt msg");
-    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let req_id = prompt_msg
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
     let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
@@ -202,13 +213,22 @@ async fn tool_call_edit_emits_tool_call_and_diff_events() {
 
     let events = collect_events(rx).await;
 
-    let tool_call = events.iter().find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Edit"));
+    let tool_call = events
+        .iter()
+        .find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Edit"));
     assert!(tool_call.is_some(), "expected ToolCall(Edit), got: {events:?}");
 
     let diff = events.iter().find_map(|e| {
-        if let StreamEvent::Diff(d) = e { Some(d.as_str()) } else { None }
+        if let StreamEvent::Diff(d) = e {
+            Some(d.as_str())
+        } else {
+            None
+        }
     });
-    assert!(diff.is_some(), "expected Diff event after ToolCall(Edit), got: {events:?}");
+    assert!(
+        diff.is_some(),
+        "expected Diff event after ToolCall(Edit), got: {events:?}"
+    );
     let diff = diff.unwrap();
     assert!(diff.contains("src/main.rs"), "diff must contain file path");
     assert!(diff.contains("-foo"), "diff must contain removed line");
@@ -233,8 +253,18 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
     let mut prompt_sub = nats.subscribe(resp_subject).await.unwrap();
 
     let rx = session.prompt("write a file").await.unwrap();
-    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next())
+        .await
+        .expect("timeout")
+        .expect("msg");
+    let req_id = prompt_msg
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
     let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
@@ -249,17 +279,32 @@ async fn tool_call_write_emits_tool_call_and_write_summary() {
             }
         }
     });
-    nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into()).await.unwrap();
+    nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into())
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(
+        done_subj,
+        serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"}))
+            .unwrap()
+            .into(),
+    )
+    .await
+    .unwrap();
 
     let events = collect_events(rx).await;
 
-    let tc = events.iter().find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Write"));
+    let tc = events
+        .iter()
+        .find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Write"));
     assert!(tc.is_some(), "expected ToolCall(Write), got: {events:?}");
 
     let diff = events.iter().find_map(|e| {
-        if let StreamEvent::Diff(d) = e { Some(d.as_str()) } else { None }
+        if let StreamEvent::Diff(d) = e {
+            Some(d.as_str())
+        } else {
+            None
+        }
     });
     assert!(diff.is_some(), "expected Diff event for Write, got: {events:?}");
     let diff = diff.unwrap();
@@ -287,8 +332,18 @@ async fn tool_call_bash_emits_tool_call_and_diff_preview() {
     let mut prompt_sub = nats.subscribe(resp_subject).await.unwrap();
 
     let rx = session.prompt("run bash").await.unwrap();
-    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next())
+        .await
+        .expect("timeout")
+        .expect("msg");
+    let req_id = prompt_msg
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
     let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     let tool_notif = serde_json::json!({
@@ -300,17 +355,32 @@ async fn tool_call_bash_emits_tool_call_and_diff_preview() {
             "rawInput": { "command": "ls -la" }
         }
     });
-    nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into()).await.unwrap();
+    nats.publish(notif_subject, serde_json::to_vec(&tool_notif).unwrap().into())
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(
+        done_subj,
+        serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"}))
+            .unwrap()
+            .into(),
+    )
+    .await
+    .unwrap();
 
     let events = collect_events(rx).await;
 
-    let tc = events.iter().find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Bash"));
+    let tc = events
+        .iter()
+        .find(|e| matches!(e, StreamEvent::ToolCall(n) if n == "Bash"));
     assert!(tc.is_some(), "expected ToolCall(Bash), got: {events:?}");
 
     let diff = events.iter().find_map(|e| {
-        if let StreamEvent::Diff(d) = e { Some(d.as_str()) } else { None }
+        if let StreamEvent::Diff(d) = e {
+            Some(d.as_str())
+        } else {
+            None
+        }
     });
     let diff = diff.expect("Bash tool should emit a [bash: <cmd>] Diff preview");
     assert!(diff.contains("bash:"), "diff should contain bash preview, got: {diff}");
@@ -341,7 +411,11 @@ async fn cancel_publishes_to_cancel_subject() {
         .expect("cancel message");
 
     let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("cancel payload must be valid JSON");
-    assert_eq!(payload["sessionId"].as_str(), Some(session_id.as_str()), "cancel payload must contain sessionId");
+    assert_eq!(
+        payload["sessionId"].as_str(),
+        Some(session_id.as_str()),
+        "cancel payload must contain sessionId"
+    );
 }
 
 /// AgentMessageChunk notification → StreamEvent::Text
@@ -362,8 +436,18 @@ async fn agent_message_chunk_emits_text_event() {
     let mut prompt_sub = nats.subscribe(resp_subject).await.unwrap();
 
     let rx = session.prompt("say hello").await.unwrap();
-    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next()).await.expect("timeout").expect("msg");
-    let req_id = prompt_msg.headers.as_ref().unwrap().get(REQ_ID_HEADER).unwrap().as_str().to_string();
+    let prompt_msg = tokio::time::timeout(TIMEOUT, prompt_sub.next())
+        .await
+        .expect("timeout")
+        .expect("msg");
+    let req_id = prompt_msg
+        .headers
+        .as_ref()
+        .unwrap()
+        .get(REQ_ID_HEADER)
+        .unwrap()
+        .as_str()
+        .to_string();
     let done_subj = format!("{PREFIX}.session.{session_id}.agent.prompt.response.{req_id}");
 
     // Publish two text chunks then done.
@@ -380,13 +464,31 @@ async fn agent_message_chunk_emits_text_event() {
             .unwrap();
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
-    nats.publish(done_subj, serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"})).unwrap().into()).await.unwrap();
+    nats.publish(
+        done_subj,
+        serde_json::to_vec(&serde_json::json!({"stopReason":"end_turn"}))
+            .unwrap()
+            .into(),
+    )
+    .await
+    .unwrap();
 
     let events = collect_events(rx).await;
 
-    let texts: Vec<&str> = events.iter().filter_map(|e| {
-        if let StreamEvent::Text(t) = e { Some(t.as_str()) } else { None }
-    }).collect();
+    let texts: Vec<&str> = events
+        .iter()
+        .filter_map(|e| {
+            if let StreamEvent::Text(t) = e {
+                Some(t.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    assert_eq!(texts, vec!["Hello", ", world!"], "text chunks must arrive in order: {events:?}");
+    assert_eq!(
+        texts,
+        vec!["Hello", ", world!"],
+        "text chunks must arrive in order: {events:?}"
+    );
 }
