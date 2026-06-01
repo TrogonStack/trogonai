@@ -28,7 +28,8 @@ pub use elicitation::{
 pub use mcp::{build_session_mcp, convert_mcp_servers};
 pub use permission::{
     build_mode_permission_checker, check_tool_permission, ChannelPermissionChecker,
-    ModePermissionChecker, PermissionReq, PermissionTx, RulesPermissionChecker,
+    ClassifierVerdict, ModePermissionChecker, PermissionExtras, PermissionReq, PermissionTx,
+    RulesPermissionChecker, SafetyClassifier,
 };
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{

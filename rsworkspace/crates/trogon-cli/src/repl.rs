@@ -646,6 +646,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 ("default", "auto-allow reads; prompt for edits, bash, MCP"),
                                 ("acceptEdits", "default, plus auto-allow file edits"),
                                 ("plan", "read-only exploration; deny writes & bash"),
+                                ("auto", "auto-allow reads; LLM safety classifier decides the rest"),
                                 ("dontAsk", "auto-allow everything (still audited)"),
                                 ("bypassPermissions", "no permission checks at all"),
                             ];
