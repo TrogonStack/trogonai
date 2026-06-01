@@ -1,3 +1,5 @@
 pub mod commands;
 
-pub use commands::{CreateSchedule, CreateScheduleDecideError};
+pub use commands::{
+    CreateSchedule, CreateScheduleDecideError, PauseSchedule, PauseScheduleError, ResumeSchedule, ResumeScheduleError,
+};
