@@ -454,6 +454,7 @@ pub fn run_with_risk(
 
 #[must_use]
 pub fn risk_gate_response(
+    prefix: &str,
     mesh_config: &MeshGatewayConfig,
     ctx: &CallContext,
     outcome: &PolicyOutcome,
@@ -463,6 +464,7 @@ pub fn risk_gate_response(
     let approval_data = match &outcome.risk {
         RiskDecision::StepUp { scope } => RequestId::new(&ctx.request_id).ok().map(|request_id| {
             build_approval_required_step_up(
+                prefix,
                 &request_id,
                 scope,
                 mesh_config.approval_ttl_secs,
@@ -472,6 +474,7 @@ pub fn risk_gate_response(
         RiskDecision::RequireApproval { reason, ttl_s } => {
             RequestId::new(&ctx.request_id).ok().map(|request_id| {
                 build_approval_required(
+                    prefix,
                     &request_id,
                     reason,
                     *ttl_s,
@@ -709,7 +712,7 @@ mod tests {
             requires_spicedb: true,
             risk: evaluate_risk(&ctx, &mesh),
         };
-        let response = risk_gate_response(&mesh, &ctx, &outcome);
+        let response = risk_gate_response("mcp", &mesh, &ctx, &outcome);
         let data = response.approval_data.expect("approval data");
         assert_eq!(data["approval_subject"], "mcp.approvals.step-up.req-policy-test");
     }

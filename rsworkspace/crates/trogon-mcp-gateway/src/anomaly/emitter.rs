@@ -9,8 +9,8 @@ use super::features::AnomalyFeatures;
 use super::novelty::NoveltyTracker;
 use super::rate::RateTracker;
 
-pub fn subject_for_tenant(tenant_id: &str) -> String {
-    format!("mcp.anomaly.features.{tenant_id}")
+pub fn subject_for_tenant(prefix: &str, tenant_id: &str) -> String {
+    format!("{prefix}.anomaly.features.{tenant_id}")
 }
 
 /// Publishes anomaly feature vectors to NATS (best-effort from ingress).
@@ -23,6 +23,7 @@ pub trait AnomalyEmit: Send + Sync {
 
 #[derive(Clone)]
 pub struct AnomalyEmitter {
+    prefix: Arc<str>,
     client: Client,
     novelty: Arc<Mutex<NoveltyTracker>>,
     rate: Arc<Mutex<RateTracker>>,
@@ -30,8 +31,9 @@ pub struct AnomalyEmitter {
 
 impl AnomalyEmitter {
     #[must_use]
-    pub fn new(client: Client) -> Self {
+    pub fn new(prefix: impl Into<Arc<str>>, client: Client) -> Self {
         Self {
+            prefix: prefix.into(),
             client,
             novelty: Arc::new(Mutex::new(NoveltyTracker::default())),
             rate: Arc::new(Mutex::new(RateTracker::default())),
@@ -62,7 +64,7 @@ impl AnomalyEmit for AnomalyEmitter {
     }
 
     async fn emit(&self, features: &AnomalyFeatures) -> Result<(), AnomalyError> {
-        let subject = subject_for_tenant(&features.tenant_id);
+        let subject = subject_for_tenant(self.prefix.as_ref(), &features.tenant_id);
         let payload =
             serde_json::to_vec(features).map_err(AnomalyError::SerializeFailed)?;
         self.client

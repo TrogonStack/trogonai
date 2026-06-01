@@ -452,6 +452,7 @@ async fn handle_ingress_inner(
             return Ok(());
         };
         let approval_request = ApprovalRequest::new(
+            settings.mcp.prefix_str(),
             approval_request_id.clone(),
             Duration::from_secs(ttl_s),
             None,
@@ -1068,6 +1069,7 @@ pub async fn evaluate_step_up(
                     });
                 };
                 let data = build_approval_required_step_up(
+                    settings.mcp.prefix_str(),
                     &request_id_typed,
                     reason.as_str(),
                     DEFAULT_STEPUP_APPROVAL_TTL_SECS,
@@ -1591,7 +1593,7 @@ async fn finish_ingress_approval_required(params: FinishIngressApprovalRequiredP
     let prefix = params.mcp.prefix_str();
     let approval_data = build_approval_required_with_subject(
         &params.approval_request_id,
-        &ApprovalSubject::for_request(&params.approval_request_id),
+        &ApprovalSubject::for_request(prefix, &params.approval_request_id),
         &params.reason,
         params.ttl_s,
         params.approval_base_url.as_str(),
