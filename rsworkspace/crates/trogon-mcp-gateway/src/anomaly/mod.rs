@@ -1,18 +1,21 @@
 //! Per-request anomaly feature vectors for downstream scoring.
 //!
-//! Future wiring: after hierarchical policy + SpiceDB authorization succeed in
-//! `gateway::handle_ingress_inner` (immediately before mesh egress minting around
-//! `gateway.rs` line 476), derive [`AnomalyFeatures`] from the audit identity fields
-//! (`agent_id`, `purpose`, `tenant`, `act_chain`, backend `target`) and call
-//! [`AnomalyEmitter::emit`] best-effort without blocking egress.
+//! Wired from `gateway::handle_ingress_inner` after hierarchical policy + SpiceDB
+//! authorization (immediately before mesh egress minting): derive [`AnomalyFeatures`]
+//! from audit identity fields (`agent_id`, `purpose`, `tenant`, `act_chain`, backend
+//! `target`) and call [`AnomalyEmit::emit`] best-effort without blocking egress.
 
+mod build;
 mod emitter;
 mod errors;
+mod fake;
 mod features;
 mod novelty;
 mod rate;
 
-pub use emitter::{AnomalyEmitter, subject_for_tenant};
+pub use build::{AnomalyIngressContext, AnomalyIngressSnapshot};
+pub use emitter::{AnomalyEmit, AnomalyEmitter, subject_for_tenant};
+pub use fake::FakeAnomalyEmitter;
 pub use errors::AnomalyError;
 pub use features::AnomalyFeatures;
 pub use novelty::NoveltyTracker;

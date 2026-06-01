@@ -8,11 +8,12 @@ use async_nats::jetstream;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
 use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
+use crate::anomaly::{AnomalyEmit, AnomalyIngressContext};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
@@ -71,6 +72,8 @@ pub struct GatewaySettings {
     pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
     /// When `None`, Pin 9 defaults apply via in-process limiter (Tier 2 KV sync TODO per ADR 0012).
     pub rate_limit: Option<Arc<RateLimiter>>,
+    /// When `None`, ingress does not publish anomaly feature vectors.
+    pub anomaly_emitter: Option<Arc<dyn AnomalyEmit>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -472,6 +475,31 @@ async fn handle_ingress_inner(
         .unwrap_or("unknown");
     let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
     let scope = scope_for_tools_call(server_id, tool_call.as_deref());
+
+    if let Some(emitter) = settings.anomaly_emitter.as_ref() {
+        let agent_id = jwt_claims
+            .agent_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .unwrap_or(caller_sub);
+        let purpose = jwt_claims.purpose.as_deref().unwrap_or("");
+        let request_id_str = anomaly_request_id_str(request_id.as_ref());
+        let snapshot = AnomalyIngressContext {
+            tenant_id: tenant,
+            agent_id,
+            purpose,
+            server_id,
+            act_chain: act_chain_entries,
+            request_id: request_id_str.as_deref(),
+        }
+        .to_snapshot();
+        let emitter = Arc::clone(emitter);
+        tokio::spawn(async move {
+            if let Err(err) = emitter.emit_ingress(&snapshot).await {
+                debug!(error = %err, "anomaly feature emit failed");
+            }
+        });
+    }
 
     let mesh_token = if let Some(egress) = settings.egress.as_ref() {
         match egress
@@ -1190,6 +1218,13 @@ async fn finish_ingress_blocked(params: FinishIngressBlockedParams<'_>) {
 fn jsonrpc_method(payload: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
     Some(value.get("method")?.as_str()?.to_string())
+}
+
+fn anomaly_request_id_str(request_id: Option<&serde_json::Value>) -> Option<String> {
+    request_id.map(|id| match id {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    })
 }
 
 fn jsonrpc_request_id(payload: &[u8]) -> Option<serde_json::Value> {

@@ -134,6 +134,7 @@ async fn main() -> Result<(), BoxError> {
         egress,
         chain_resolver,
         rate_limit: None,
+        anomaly_emitter: None,
     };
 
     info!(
