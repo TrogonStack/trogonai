@@ -71,7 +71,7 @@ async fn gateway_forwards_tools_list_request_reply() {
         egress: None,
         chain_resolver: None,
         rate_limit: None,
-        context_throttle: None,
+        anomaly_emitter: None,
     };
 
     let gateway_client = Arc::new(connect(&nats_conf, connect_timeout).await.expect("gateway nats"));
