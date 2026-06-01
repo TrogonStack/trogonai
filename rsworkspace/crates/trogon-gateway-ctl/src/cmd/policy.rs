@@ -90,6 +90,7 @@ pub fn run(policy_path: &Path, input_path: &Path, pretty: bool) -> Result<(), Po
         wkl: input.claims.wkl.clone(),
         wkl_attested_at: None,
         auth_method: None,
+        auth_time: None,
         act_chain: if input.act_chain.is_empty() {
             None
         } else {

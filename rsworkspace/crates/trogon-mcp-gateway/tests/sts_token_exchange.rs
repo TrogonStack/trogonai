@@ -64,7 +64,9 @@ impl StsExchangeHarness {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
-            anomaly_emitter: None,
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
         };
         Self {
             nats_conf,

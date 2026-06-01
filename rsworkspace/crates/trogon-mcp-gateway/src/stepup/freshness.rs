@@ -1,10 +1,21 @@
 //! Injectable clock for `auth_time` freshness checks.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Wall-clock source for step-up freshness (swap in tests).
-pub trait FreshnessClock {
+pub trait FreshnessClock: Send + Sync {
     fn now_unix(&self) -> i64;
+}
+
+/// Fixed unix timestamp for tests (`FreshnessClock` stub).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TestFreshnessClock(pub i64);
+
+impl FreshnessClock for TestFreshnessClock {
+    fn now_unix(&self) -> i64 {
+        self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -16,6 +27,12 @@ impl FreshnessClock for SystemFreshnessClock {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
+    }
+}
+
+impl FreshnessClock for Arc<dyn FreshnessClock> {
+    fn now_unix(&self) -> i64 {
+        self.as_ref().now_unix()
     }
 }
 

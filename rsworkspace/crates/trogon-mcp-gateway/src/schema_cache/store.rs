@@ -9,6 +9,7 @@ use super::config::SchemaCacheConfig;
 use super::entry::CachedSchema;
 use super::errors::SchemaCacheError;
 use super::key::{SchemaCacheKey, SchemaHash, ServerId};
+use crate::stepup::ToolAnnotations;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct ToolIndexKey {
@@ -36,6 +37,19 @@ pub trait SchemaCache: Send + Sync {
 
     async fn lookup_tool(&self, server_id: &ServerId, tool_name: &str) -> Result<Option<CachedSchema>, SchemaCacheError>;
 
+    async fn lookup_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<ToolAnnotations, SchemaCacheError>;
+
+    async fn put_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+        annotations: ToolAnnotations,
+    ) -> Result<(), SchemaCacheError>;
+
     async fn entry_count(&self) -> usize;
 }
 
@@ -43,6 +57,7 @@ pub struct InMemorySchemaCache {
     config: SchemaCacheConfig,
     entries: RwLock<HashMap<SchemaCacheKey, CacheEntry>>,
     tool_index: RwLock<HashMap<ToolIndexKey, SchemaHash>>,
+    tool_annotations: RwLock<HashMap<ToolIndexKey, ToolAnnotations>>,
     lru: RwLock<VecDeque<SchemaCacheKey>>,
 }
 
@@ -52,6 +67,7 @@ impl InMemorySchemaCache {
             config,
             entries: RwLock::new(HashMap::new()),
             tool_index: RwLock::new(HashMap::new()),
+            tool_annotations: RwLock::new(HashMap::new()),
             lru: RwLock::new(VecDeque::new()),
         }
     }
@@ -84,6 +100,33 @@ impl InMemorySchemaCache {
             !(tool_key.server_id == key.server_id && *hash == key.schema_hash)
         });
         self.lru.write().await.retain(|existing| existing != key);
+    }
+
+    async fn insert_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+        annotations: ToolAnnotations,
+    ) {
+        self.tool_annotations.write().await.insert(
+            ToolIndexKey {
+                server_id: server_id.clone(),
+                tool_name: tool_name.to_string(),
+            },
+            annotations,
+        );
+    }
+
+    async fn tool_annotations_for(&self, server_id: &ServerId, tool_name: &str) -> ToolAnnotations {
+        self.tool_annotations
+            .read()
+            .await
+            .get(&ToolIndexKey {
+                server_id: server_id.clone(),
+                tool_name: tool_name.to_string(),
+            })
+            .copied()
+            .unwrap_or_default()
     }
 
     async fn evict_if_needed(&self) {
@@ -173,6 +216,10 @@ impl SchemaCache for InMemorySchemaCache {
             .write()
             .await
             .retain(|key, _| key.server_id != *server_id);
+        self.tool_annotations
+            .write()
+            .await
+            .retain(|key, _| key.server_id != *server_id);
         Ok(())
     }
 
@@ -193,6 +240,24 @@ impl SchemaCache for InMemorySchemaCache {
             schema_hash,
         })
         .await
+    }
+
+    async fn lookup_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<ToolAnnotations, SchemaCacheError> {
+        Ok(self.tool_annotations_for(server_id, tool_name).await)
+    }
+
+    async fn put_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+        annotations: ToolAnnotations,
+    ) -> Result<(), SchemaCacheError> {
+        self.insert_tool_annotations(server_id, tool_name, annotations).await;
+        Ok(())
     }
 
     async fn entry_count(&self) -> usize {
@@ -221,6 +286,25 @@ impl SchemaCache for Arc<InMemorySchemaCache> {
 
     async fn lookup_tool(&self, server_id: &ServerId, tool_name: &str) -> Result<Option<CachedSchema>, SchemaCacheError> {
         self.as_ref().lookup_tool(server_id, tool_name).await
+    }
+
+    async fn lookup_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+    ) -> Result<ToolAnnotations, SchemaCacheError> {
+        self.as_ref().lookup_tool_annotations(server_id, tool_name).await
+    }
+
+    async fn put_tool_annotations(
+        &self,
+        server_id: &ServerId,
+        tool_name: &str,
+        annotations: ToolAnnotations,
+    ) -> Result<(), SchemaCacheError> {
+        self.as_ref()
+            .put_tool_annotations(server_id, tool_name, annotations)
+            .await
     }
 
     async fn entry_count(&self) -> usize {
