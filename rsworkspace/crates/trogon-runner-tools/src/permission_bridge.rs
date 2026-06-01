@@ -83,6 +83,15 @@ pub async fn handle_permission_request_nats<S, N>(
                     "allow" | "allow_always" | "acceptEdits" | "default" | "bypassPermissions"
                 );
                 let is_always = id == "allow_always";
+                // On an ExitPlanMode approval the proceed id IS the mode the user
+                // wants to switch into. Record it so the runner can apply it to the
+                // session once the tool call finishes (the bridge can't persist it
+                // itself — the turn re-saves the session at the end).
+                if req.tool_name == "ExitPlanMode"
+                    && matches!(id, "acceptEdits" | "default" | "bypassPermissions")
+                {
+                    *req.exit_plan_mode.lock().unwrap() = Some(id.to_string());
+                }
                 (is_allowed, is_always)
             }
             RequestPermissionOutcome::Cancelled => (false, false),
@@ -142,6 +151,7 @@ mod tests {
             response_tx: tx,
             started_tx,
             always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
+            exit_plan_mode: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         (req, rx)
     }
@@ -238,6 +248,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exit_plan_mode_records_selected_mode_in_cell() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response(SUBJECT, selected("acceptEdits"));
+        let store = MemorySessionStore::new();
+        store.save(SESSION, &SessionState::default()).await.unwrap();
+
+        let (req, _rx) = make_req("ExitPlanMode");
+        let cell = req.exit_plan_mode.clone();
+        handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
+
+        assert_eq!(cell.lock().unwrap().as_deref(), Some("acceptEdits"));
+    }
+
+    #[tokio::test]
+    async fn exit_plan_mode_keep_planning_leaves_cell_empty() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response(SUBJECT, selected("plan"));
+        let store = MemorySessionStore::new();
+        store.save(SESSION, &SessionState::default()).await.unwrap();
+
+        let (req, _rx) = make_req("ExitPlanMode");
+        let cell = req.exit_plan_mode.clone();
+        handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
+
+        assert!(cell.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn non_exit_plan_tool_never_writes_mode_cell() {
+        let nats = AdvancedMockNatsClient::new();
+        nats.set_response(SUBJECT, selected("allow"));
+        let store = MemorySessionStore::new();
+        store.save(SESSION, &SessionState::default()).await.unwrap();
+
+        let (req, _rx) = make_req("Bash");
+        let cell = req.exit_plan_mode.clone();
+        handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
+
+        assert!(cell.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn allow_always_does_not_duplicate_in_allowed_tools() {
         let nats = AdvancedMockNatsClient::new();
         nats.set_response(SUBJECT, selected("allow_always"));
@@ -275,6 +327,7 @@ mod tests {
             response_tx: tx,
             started_tx,
             always_allowed: std::sync::Arc::new(std::sync::Mutex::new(vec![])),
+            exit_plan_mode: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         handle_permission_request_nats(req, nats, AcpPrefix::new("acp").unwrap(), &store).await;
         assert!(!rx.await.unwrap());

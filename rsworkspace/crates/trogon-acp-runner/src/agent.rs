@@ -23,7 +23,7 @@ use bytes::Bytes;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{error, info, warn};
 use trogon_agent_core::agent_loop::{AgentEvent, ContentBlock as AgentContentBlock, ImageSource, Message};
-use trogon_agent_core::tools::{ToolDef, all_tool_defs};
+use trogon_agent_core::tools::{ToolDef, all_tool_defs, exit_plan_mode_tool_def};
 
 use crate::agent_runner::AgentRunner;
 use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
@@ -464,13 +464,23 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         }
 
         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(32);
-        let tools: Vec<ToolDef> = all_tool_defs();
+        let mut tools: Vec<ToolDef> = all_tool_defs();
+        // In plan mode, offer ExitPlanMode so the model can signal it has finished
+        // planning and request approval to leave plan mode.
+        if state.mode == "plan" {
+            tools.push(exit_plan_mode_tool_def());
+        }
         let needs_perm = self.permission_tx.is_some() && state.mode != "bypassPermissions";
         let gateway = self.gateway_config.read().await.clone();
 
         let needs_elic = self.elicitation_tx.is_some();
 
         let audit_buf: AuditBuf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<AuditEntry>::new()));
+        // Shared cell: the permission bridge writes the chosen follow-up mode here
+        // when the user approves an ExitPlanMode request; read after the tool call
+        // finishes to update the in-memory session mode.
+        let exit_plan_mode_cell: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
 
         let agent: Arc<A> = {
             let needs_clone = state.model.is_some()
@@ -553,6 +563,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         Arc::new(rules),
                         state.tool_policies.clone(),
                         audit_buf.clone(),
+                        exit_plan_mode_cell.clone(),
                     ) {
                         a.set_permission_checker(checker);
                     }
@@ -635,12 +646,21 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut converter = PromptEventConverter::new(session_id.clone());
         let mut final_messages: Option<Vec<Message>> = None;
         let mut cancelled = false;
-        // Tier-1 cancel-commit: accumulate streamed assistant text so an
-        // interrupted turn can still be persisted (user prompt + partial reply)
-        // instead of being discarded. Tool blocks are intentionally NOT captured
-        // here — pairing tool_use/tool_result and preserving role alternation on
-        // resume is deferred to a follow-up; text-only keeps the transcript valid.
+        // Cancel-commit: accumulate the assistant's streamed output so an
+        // interrupted turn is persisted (user prompt + partial reply) instead of
+        // being discarded. We capture text, tool_use blocks, and the results of
+        // tools that finished before the interrupt. On cancel, every captured
+        // tool_use is paired with a tool_result (its real output, or a synthesized
+        // "interrupted" marker for tools still in flight) — the Anthropic API
+        // rejects a tool_use with no matching tool_result, so this pairing is
+        // mandatory for the transcript to be resumable. Thinking blocks are
+        // intentionally NOT captured: streamed thinking has no signature and would
+        // be rejected on resume.
         let mut partial_text = String::new();
+        // tool_use blocks in the order the model emitted them.
+        let mut partial_tool_uses: Vec<AgentContentBlock> = Vec::new();
+        // tool_use id → finished output, for tools that completed pre-cancel.
+        let mut partial_results: HashMap<String, String> = HashMap::new();
         let mut last_input_tokens: u32 = 0;
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
@@ -668,13 +688,24 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                 AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
                                 AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
                                     tool_name_by_id.insert(id.clone(), name.clone());
+                                    partial_tool_uses.push(AgentContentBlock::ToolUse {
+                                        id: id.clone(),
+                                        name: name.clone(),
+                                        input: input.clone(),
+                                        parent_tool_use_id: parent_tool_use_id.clone(),
+                                    });
                                     PromptEvent::ToolCallStarted { id, name, input, parent_tool_use_id }
                                 }
                                 AgentEvent::ToolCallFinished { id, output, exit_code, signal } => {
+                                    partial_results.insert(id.clone(), output.clone());
                                     let tool_name = tool_name_by_id.get(&id).cloned();
                                     let is_enter_plan = tool_name
                                         .as_deref()
                                         .map(|n| n == "EnterPlanMode")
+                                        .unwrap_or(false);
+                                    let is_exit_plan = tool_name
+                                        .as_deref()
+                                        .map(|n| n == "ExitPlanMode")
                                         .unwrap_or(false);
                                     let is_cd = tool_name
                                         .as_deref()
@@ -699,6 +730,32 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                             &mut converter,
                                             PromptEvent::ModeChanged {
                                                 mode: "plan".to_string(),
+                                                model: current_model.clone(),
+                                            },
+                                        )
+                                        .await;
+                                    }
+                                    // ExitPlanMode was approved: the bridge recorded the chosen
+                                    // follow-up mode in the shared cell. Apply it to the in-memory
+                                    // session so it persists at turn end and gates the next turn.
+                                    // (The new mode takes effect on the next turn; the current
+                                    // turn's permission checker was built with plan mode.)
+                                    // Take the value out before the await so the
+                                    // MutexGuard is dropped (clippy::await_holding_lock).
+                                    // Only drain the cell for ExitPlanMode, preserving
+                                    // the original short-circuit semantics.
+                                    let exit_mode = if is_exit_plan {
+                                        exit_plan_mode_cell.lock().unwrap().take()
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(new_mode) = exit_mode {
+                                        state.mode = new_mode.clone();
+                                        publish_via_converter(
+                                            prompt_client,
+                                            &mut converter,
+                                            PromptEvent::ModeChanged {
+                                                mode: new_mode,
                                                 model: current_model.clone(),
                                             },
                                         )
@@ -782,12 +839,22 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     info!(session_id, "agent: cancel received");
                     cancelled = true;
                     agent_fut.abort();
-                    // Drain any text deltas already buffered between the model
-                    // emitting them and the cancel firing, so the persisted
-                    // partial reply is as complete as possible.
+                    // Drain events already buffered between the model emitting them
+                    // and the cancel firing, so the persisted partial turn is as
+                    // complete as possible (text, tool_use blocks, finished results).
                     while let Ok(event) = event_rx.try_recv() {
-                        if let AgentEvent::TextDelta { text } = event {
-                            partial_text.push_str(&text);
+                        match event {
+                            AgentEvent::TextDelta { text } => partial_text.push_str(&text),
+                            AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
+                                tool_name_by_id.insert(id.clone(), name.clone());
+                                partial_tool_uses.push(AgentContentBlock::ToolUse {
+                                    id, name, input, parent_tool_use_id,
+                                });
+                            }
+                            AgentEvent::ToolCallFinished { id, output, .. } => {
+                                partial_results.insert(id, output);
+                            }
+                            _ => {}
                         }
                     }
                     break;
@@ -795,19 +862,47 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
         }
 
-        // Tier-1 cancel-commit: persist the user prompt plus whatever assistant
-        // text streamed before the interrupt, so a cancelled turn is remembered
-        // on the next prompt instead of vanishing. `state.messages` already holds
-        // the user message (it was never moved into the streaming task); append a
-        // single assistant text block. With no trailing tool_use blocks the
-        // transcript stays valid (user → assistant) for resume. If nothing
-        // streamed, leave history untouched (avoids a dangling user turn).
-        if cancelled && !partial_text.is_empty() {
-            let mut updated = state.messages.clone();
-            updated.push(Message::assistant(vec![AgentContentBlock::Text {
-                text: std::mem::take(&mut partial_text),
-            }]));
-            final_messages = Some(updated);
+        // Cancel-commit: persist the user prompt plus whatever the assistant
+        // produced before the interrupt, so a cancelled turn is remembered on the
+        // next prompt instead of vanishing. `state.messages` already holds the user
+        // message (it was never moved into the streaming task). We append:
+        //   1. an assistant message: streamed text (if any) followed by the
+        //      tool_use blocks the model emitted, and
+        //   2. a user message of tool_results — one per tool_use, using the real
+        //      output when the tool finished or a synthesized "interrupted" marker
+        //      otherwise, so every tool_use is paired (the API requires this).
+        // A transcript ending in user(tool_results) is fine: the next prompt's user
+        // message is combined with it by the API. If nothing was produced, history
+        // is left untouched (avoids a dangling user turn).
+        if cancelled {
+            let mut assistant_content: Vec<AgentContentBlock> = Vec::new();
+            if !partial_text.is_empty() {
+                assistant_content
+                    .push(AgentContentBlock::Text { text: std::mem::take(&mut partial_text) });
+            }
+            // Pair every tool_use with a result before moving the blocks out.
+            let tool_results: Vec<AgentContentBlock> = partial_tool_uses
+                .iter()
+                .filter_map(|b| match b {
+                    AgentContentBlock::ToolUse { id, .. } => Some(AgentContentBlock::ToolResult {
+                        tool_use_id: id.clone(),
+                        content: partial_results.get(id).cloned().unwrap_or_else(|| {
+                            "Tool call interrupted by the user before it completed.".to_string()
+                        }),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            assistant_content.append(&mut partial_tool_uses);
+
+            if !assistant_content.is_empty() {
+                let mut updated = state.messages.clone();
+                updated.push(Message::assistant(assistant_content));
+                if !tool_results.is_empty() {
+                    updated.push(Message { role: "user".to_string(), content: tool_results });
+                }
+                final_messages = Some(updated);
+            }
         }
 
         if let Some(updated) = final_messages {
@@ -1733,6 +1828,112 @@ mod tests {
         match &state.messages[1].content[0] {
             AgentContentBlock::Text { text } => assert_eq!(text, "partial answer"),
             other => panic!("expected assistant Text block, got {other:?}"),
+        }
+    }
+
+    /// A turn cancelled mid-tool-cycle must persist the tool_use blocks paired
+    /// with tool_results: the real output for tools that finished before the
+    /// interrupt, and a synthesized "interrupted" marker for tools still in flight
+    /// (the API rejects a tool_use with no matching tool_result).
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn cancel_commits_tool_uses_with_paired_results() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        store_clone.save("cancel-2", &SessionState::default()).await.unwrap();
+
+        // t1 finishes (real output); t2 starts but never finishes (interrupted).
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_events(vec![
+                AgentEvent::TextDelta { text: "let me check".into() },
+                AgentEvent::ToolCallStarted {
+                    id: "t1".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "ls"}),
+                    parent_tool_use_id: None,
+                },
+                AgentEvent::ToolCallFinished {
+                    id: "t1".into(),
+                    output: "result-1".into(),
+                    exit_code: Some(0),
+                    signal: None,
+                },
+                AgentEvent::ToolCallStarted {
+                    id: "t2".into(),
+                    name: "read_file".into(),
+                    input: serde_json::json!({"path": "/tmp/x"}),
+                    parent_tool_use_id: None,
+                },
+            ])
+            .with_steer_wait()
+            .with_started_notify(started.clone());
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_steer_tx, steer_rx) = tokio::sync::mpsc::channel::<String>(1);
+        let req = PromptRequest::new("cancel-2", vec![]);
+        let prompt_client = agent.notifier.make_prompt_client(
+            AcpSessionId::new("cancel-2").unwrap(),
+            AcpPrefix::new("test-prefix").unwrap(),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let canceller = async {
+                    started.notified().await;
+                    let _ = cancel_tx.send(());
+                };
+                let (resp, ()) = tokio::join!(
+                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    canceller,
+                );
+                assert!(matches!(
+                    resp.unwrap().stop_reason,
+                    StopReason::Cancelled
+                ));
+            })
+            .await;
+
+        let state = store_clone.load("cancel-2").await.unwrap();
+        // [user(""), assistant(text + 2 tool_use), user(2 tool_result)]
+        assert_eq!(state.messages.len(), 3);
+
+        let assistant = &state.messages[1];
+        assert_eq!(assistant.role, "assistant");
+        assert!(matches!(&assistant.content[0],
+            AgentContentBlock::Text { text } if text == "let me check"));
+        assert!(matches!(&assistant.content[1],
+            AgentContentBlock::ToolUse { id, name, .. } if id == "t1" && name == "bash"));
+        assert!(matches!(&assistant.content[2],
+            AgentContentBlock::ToolUse { id, name, .. } if id == "t2" && name == "read_file"));
+
+        let results = &state.messages[2];
+        assert_eq!(results.role, "user");
+        assert!(matches!(&results.content[0],
+            AgentContentBlock::ToolResult { tool_use_id, content }
+            if tool_use_id == "t1" && content == "result-1"),
+            "finished tool keeps its real output, got {:?}", results.content[0]);
+        match &results.content[1] {
+            AgentContentBlock::ToolResult { tool_use_id, content } => {
+                assert_eq!(tool_use_id, "t2");
+                assert!(content.contains("interrupted"),
+                    "in-flight tool gets a synthesized interrupt result, got {content:?}");
+            }
+            other => panic!("expected ToolResult for t2, got {other:?}"),
         }
     }
 

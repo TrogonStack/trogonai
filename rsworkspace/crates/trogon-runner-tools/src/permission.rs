@@ -33,6 +33,12 @@ pub struct PermissionReq {
     /// the tool name here when the user picks "Always Allow" so subsequent
     /// calls in the same turn are auto-approved without another round-trip.
     pub always_allowed: Arc<Mutex<Vec<String>>>,
+    /// Shared with the originating checker. On an `ExitPlanMode` approval the
+    /// bridge writes the chosen mode id (e.g. "acceptEdits") here so the runner
+    /// can apply it to the in-memory session state once the tool call finishes.
+    /// (The bridge cannot persist the mode itself: the turn re-saves the session
+    /// at the end and would clobber it.)
+    pub exit_plan_mode: Arc<Mutex<Option<String>>>,
 }
 
 /// Sender half — given to the Runner so it can forward permission requests.
@@ -95,6 +101,9 @@ pub struct ChannelPermissionChecker {
     /// effect immediately without waiting for the next turn's store reload.
     pub allowed_tools: Arc<Mutex<Vec<String>>>,
     pub audit_buf: AuditBuf,
+    /// Shared cell the bridge writes the chosen mode into on `ExitPlanMode`
+    /// approval; read by the runner after the tool call finishes.
+    pub exit_plan_mode: Arc<Mutex<Option<String>>>,
 }
 
 impl PermissionChecker for ChannelPermissionChecker {
@@ -120,6 +129,7 @@ impl PermissionChecker for ChannelPermissionChecker {
         let tx = self.tx.clone();
         let audit_buf = self.audit_buf.clone();
         let always_allowed = Arc::clone(&self.allowed_tools);
+        let exit_plan_mode = Arc::clone(&self.exit_plan_mode);
 
         Box::pin(async move {
             push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::RequiredApproval);
@@ -133,6 +143,7 @@ impl PermissionChecker for ChannelPermissionChecker {
                 response_tx: resp_tx,
                 started_tx,
                 always_allowed,
+                exit_plan_mode,
             };
             if tx.send(req).await.is_err() {
                 push_audit(&audit_buf, &tool_name, &tool_input, AuditOutcome::DeniedByUser);
@@ -423,6 +434,7 @@ impl PermissionChecker for ModePermissionChecker {
 }
 
 /// Build a mode-aware permission checker, or `None` when mode is `bypassPermissions`.
+#[allow(clippy::too_many_arguments)]
 pub fn build_mode_permission_checker(
     mode: &str,
     session_id: &str,
@@ -431,6 +443,7 @@ pub fn build_mode_permission_checker(
     rules: Arc<PermissionRules>,
     tool_policies: Vec<ToolPolicy>,
     audit_buf: AuditBuf,
+    exit_plan_mode: Arc<Mutex<Option<String>>>,
 ) -> Option<Arc<dyn PermissionChecker>> {
     if mode == "bypassPermissions" {
         return None;
@@ -440,6 +453,7 @@ pub fn build_mode_permission_checker(
         tx: perm_tx.clone(),
         allowed_tools: Arc::new(Mutex::new(allowed_tools)),
         audit_buf,
+        exit_plan_mode,
     };
     let rules_checker = RulesPermissionChecker {
         rules,
@@ -485,6 +499,8 @@ pub async fn check_tool_permission(
         Arc::new(rules),
         tool_policies.to_vec(),
         audit_buf,
+        // One-shot gate (xai/openrouter): no ExitPlanMode handling, so a throwaway cell.
+        Arc::new(Mutex::new(None)),
     ) else {
         return true;
     };
@@ -504,6 +520,7 @@ mod tests {
             tx,
             allowed_tools: Arc::new(Mutex::new(allowed_tools)),
             audit_buf: Arc::new(Mutex::new(vec![])),
+            exit_plan_mode: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -517,6 +534,7 @@ mod tests {
             tx,
             allowed_tools: Arc::new(Mutex::new(allowed_tools)),
             audit_buf: buf,
+            exit_plan_mode: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -895,6 +913,7 @@ mod tests {
             Arc::new(PermissionRules::default()),
             vec![],
             Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(None)),
         );
         assert!(checker.is_none());
     }

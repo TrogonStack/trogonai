@@ -281,6 +281,27 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
     defs
 }
 
+/// Tool offered only while the session is in plan mode. The model calls it to
+/// present its plan and request to leave plan mode. Approval — and which mode to
+/// switch into — is handled by the permission layer / exit-plan dialog, not by
+/// the tool dispatch itself.
+pub fn exit_plan_mode_tool_def() -> ToolDef {
+    tool_def(
+        "ExitPlanMode",
+        "Call this when you have finished researching and have a complete plan, and are ready to start making changes. Provide the plan you intend to carry out. This asks the user to approve leaving plan mode. Do NOT make any edits or run state-changing commands before calling this and getting approval.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "string",
+                    "description": "The plan you intend to execute, in markdown. Concise but complete."
+                }
+            },
+            "required": ["plan"]
+        }),
+    )
+}
+
 pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> String {
     match name {
         "read_file"        => fs::read_file(ctx, input).await,
@@ -301,6 +322,10 @@ pub async fn dispatch_tool(ctx: &ToolContext, name: &str, input: &Value) -> Stri
         "search_files"     => search::search_files(ctx, input).await,
         "todo_write"       => todo::todo_write(ctx, input).await,
         "todo_read"        => todo::todo_read(ctx, input).await,
+        // Reached only when the user approved leaving plan mode (a denial / "keep
+        // planning" never dispatches). The actual mode switch is applied by the
+        // runner from the exit-plan dialog selection.
+        "ExitPlanMode"     => "Plan approved by the user. Plan mode is now exited; proceed with the approved plan.".to_string(),
         "change_directory" => {
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             match fs::resolve_directory_target(&ctx.cwd, path) {
@@ -347,6 +372,21 @@ mod tests {
         for d in &defs[..defs.len() - 1] {
             assert!(d.cache_control.is_none());
         }
+    }
+
+    #[test]
+    fn exit_plan_mode_tool_def_shape() {
+        let t = exit_plan_mode_tool_def();
+        assert_eq!(t.name, "ExitPlanMode");
+        let required = t.input_schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "plan"));
+        assert!(t.input_schema["properties"].get("plan").is_some());
+    }
+
+    #[test]
+    fn exit_plan_mode_not_in_default_tool_list() {
+        // It is offered only in plan mode (added by the runner), never by default.
+        assert!(all_tool_defs().iter().all(|d| d.name != "ExitPlanMode"));
     }
 
     #[test]
