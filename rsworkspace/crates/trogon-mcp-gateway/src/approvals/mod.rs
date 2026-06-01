@@ -1,9 +1,9 @@
 //! Human-in-the-loop approval flow for policy decisions requiring human consent.
 //!
-//! **Gateway wiring (future PR):** After CEL evaluation in `gateway::handle_ingress_inner`
-//! (post-`evaluate_hierarchical_policy`), when a rule emits the approval-required sentinel,
-//! call `ApprovalGate::request_approval`, emit `-32107 approval_required` via `envelope`
-//! helpers, and resume or deny based on `ApprovalCoordinator` / `ApprovalNatsListener`.
+//! After CEL evaluation in `gateway::handle_ingress_inner` (post-`evaluate_hierarchical_policy`),
+//! when risk evaluation emits `RequireApproval`, call `ApprovalGate::request_approval`, emit
+//! `-32107 approval_required` via `envelope` helpers, and resume or deny based on
+//! `ApprovalCoordinator` / `ApprovalNatsListener`.
 
 pub mod audit_sink;
 pub mod client;

@@ -134,6 +134,8 @@ async fn main() -> Result<(), BoxError> {
         egress,
         chain_resolver,
         rate_limit: None,
+        approval_gate: None,
+        mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
     };
 
     info!(
