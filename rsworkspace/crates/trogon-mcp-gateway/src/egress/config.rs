@@ -14,10 +14,11 @@ pub struct EgressMintConfig {
     pub cache_max_entries: u64,
     pub actor_token: String,
     pub clock_skew_secs: i64,
+    pub prefix: String,
 }
 
 impl EgressMintConfig {
-    pub fn from_env<E: trogon_std::env::ReadEnv>(env: &E) -> Result<Self, String> {
+    pub fn from_env<E: trogon_std::env::ReadEnv>(env: &E, prefix: impl Into<String>) -> Result<Self, String> {
         let mesh_token_ttl_secs = env
             .var(ENV_MESH_TOKEN_TTL_SECS)
             .ok()
@@ -37,6 +38,7 @@ impl EgressMintConfig {
             cache_max_entries,
             actor_token,
             clock_skew_secs: DEFAULT_CLOCK_SKEW_SECS,
+            prefix: prefix.into(),
         })
     }
 

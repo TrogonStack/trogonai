@@ -2,7 +2,7 @@
 
 use trogon_mcp_gateway::audience_shadow::{
     AudienceCheckContext, AudienceShadowChecker, AudienceShadowMode, AudienceShadowOutcome, ClaimAud,
-    RecordingAuditSink, AUD_MISMATCH_AUDIT_SUBJECT, compute_expected_aud,
+    RecordingAuditSink, aud_mismatch_audit_subject, compute_expected_aud,
 };
 
 #[test]
@@ -39,5 +39,6 @@ fn shadow_mismatch_emits_aud_mismatch_envelope() {
     assert!(envelope.ts_unix_ms > 0);
 
     // Subject is fixed for JetStream wiring in a follow-up PR.
-    assert_eq!(AUD_MISMATCH_AUDIT_SUBJECT, "mcp.audit.gateway.aud_mismatch");
+    assert_eq!(aud_mismatch_audit_subject("mcp"), "mcp.audit.gateway.aud_mismatch");
+    assert_eq!(aud_mismatch_audit_subject("acme.mcp"), "acme.mcp.audit.gateway.aud_mismatch");
 }

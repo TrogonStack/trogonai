@@ -199,6 +199,7 @@ async fn backend_receives_mesh_token_not_inbound_bootstrap() {
             cache_max_entries: 100,
             actor_token: gateway_wkl.into(),
             clock_skew_secs: 30,
+            prefix: "mcp".into(),
         },
         None,
     );
@@ -304,6 +305,7 @@ async fn sts_timeout_returns_structured_error() {
             cache_max_entries: 100,
             actor_token: "spiffe://acme.local/ns/prod/sa/mcp-gateway".into(),
             clock_skew_secs: 30,
+            prefix: "mcp".into(),
         },
         None,
     );

@@ -1,7 +1,10 @@
 use serde_json::Value;
 use tracing::warn;
 
-pub const METRICS_AUD_MISMATCH_SHADOW_SUBJECT: &str = "mcp.metrics.gateway.aud_mismatch_shadow";
+#[must_use]
+pub fn metrics_aud_mismatch_shadow_subject(prefix: &str) -> String {
+    format!("{prefix}.metrics.gateway.aud_mismatch_shadow")
+}
 
 #[must_use]
 pub fn backend_target_aud(tenant: &str, server_id: &str) -> String {
@@ -65,6 +68,7 @@ pub fn record_shadow_aud_mismatch(
 
 pub async fn publish_shadow_aud_mismatch_metric<C>(
     client: &C,
+    prefix: &str,
     expected_aud: &str,
     presented_aud: &str,
     tenant: &str,
@@ -80,9 +84,10 @@ pub async fn publish_shadow_aud_mismatch_metric<C>(
         "caller_sub": caller_sub,
         "count": 1,
     });
+    let subject = metrics_aud_mismatch_shadow_subject(prefix);
     let _ = trogon_nats::messaging::publish(
         client,
-        METRICS_AUD_MISMATCH_SHADOW_SUBJECT,
+        subject.as_str(),
         &payload,
         trogon_nats::messaging::PublishOptions::simple(),
     )
