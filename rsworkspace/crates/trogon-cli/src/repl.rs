@@ -7,9 +7,13 @@ use crate::RunnerSwitcher;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
+use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::{Context, Editor, Helper};
+use rustyline::{
+    Cmd, ConditionalEventHandler, Context, Editor, EventContext, EventHandler, Helper, KeyCode,
+    KeyEvent, Modifiers,
+};
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -28,11 +32,23 @@ const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
 struct FileAtHelper {
     cwd: PathBuf,
+    /// Fish-style autosuggestion from history: dims the most recent matching
+    /// entry after the cursor; accepted with Tab (see [`TabHandler`]) or →.
+    history_hinter: HistoryHinter,
 }
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self { cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")) }
+        Self {
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            history_hinter: HistoryHinter::new(),
+        }
+    }
+}
+
+impl FileAtHelper {
+    fn new(cwd: PathBuf) -> Self {
+        Self { cwd, history_hinter: HistoryHinter::new() }
     }
 }
 
@@ -79,12 +95,67 @@ impl Completer for FileAtHelper {
 
 impl Hinter for FileAtHelper {
     type Hint = String;
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-        None
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        // Delegate to the history hinter (only fires at end-of-line on a
+        // prefix match), so a dimmed completion of a prior command appears.
+        self.history_hinter.hint(line, pos, ctx)
     }
 }
 
-impl Highlighter for FileAtHelper {}
+impl Highlighter for FileAtHelper {
+    /// Render the autosuggestion dimmed so it's visibly distinct from typed text.
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Owned(format!("\x1b[90m{hint}\x1b[0m"))
+    }
+}
+
+/// What Tab should do given the current input state.
+#[derive(Debug, PartialEq, Eq)]
+enum TabChoice {
+    /// Accept the showing history autosuggestion.
+    CompleteHint,
+    /// Run `@`-file completion.
+    Complete,
+    /// Fall through to rustyline's default Tab handling.
+    Default,
+}
+
+/// Decide Tab's action. An active `@`-mention token always takes precedence so
+/// Tab keeps completing file paths even when a history hint exists; otherwise a
+/// showing hint at end-of-line is accepted; otherwise default.
+fn tab_choice(line: &str, pos: usize, has_hint: bool) -> TabChoice {
+    let in_at_mention = line[..pos]
+        .rsplit(char::is_whitespace)
+        .next()
+        .is_some_and(|word| word.starts_with('@'));
+    if in_at_mention {
+        TabChoice::Complete
+    } else if has_hint && pos == line.len() {
+        TabChoice::CompleteHint
+    } else {
+        TabChoice::Default
+    }
+}
+
+/// Tab handler: accept the autosuggestion when one is showing, otherwise fall
+/// back to `@`-file completion (see [`tab_choice`]).
+struct TabHandler;
+
+impl ConditionalEventHandler for TabHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        match tab_choice(ctx.line(), ctx.pos(), ctx.has_hint()) {
+            TabChoice::Complete => Some(Cmd::Complete),
+            TabChoice::CompleteHint => Some(Cmd::CompleteHint),
+            TabChoice::Default => None,
+        }
+    }
+}
 
 impl Validator for FileAtHelper {
     fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
@@ -265,7 +336,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     }
 
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
-    rl.set_helper(Some(FileAtHelper { cwd: cwd.clone() }));
+    rl.set_helper(Some(FileAtHelper::new(cwd.clone())));
+    // Tab accepts the dimmed history autosuggestion when one is showing; falls
+    // back to `@`-file completion otherwise (see TabHandler).
+    rl.bind_sequence(
+        KeyEvent(KeyCode::Tab, Modifiers::NONE),
+        EventHandler::Conditional(Box::new(TabHandler)),
+    );
     let _ = rl.load_history(&history_path);
 
     let mut session_used_tokens: u64 = 0;
@@ -1944,7 +2021,7 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = FileAtHelper::new(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("hello world", 5, &ctx).unwrap();
@@ -1953,7 +2030,7 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_at_with_space_returns_empty() {
-        let helper = FileAtHelper { cwd: std::env::temp_dir() };
+        let helper = FileAtHelper::new(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@ hello", 7, &ctx).unwrap();
@@ -1969,7 +2046,7 @@ mod tests {
         std::fs::write(dir.join("alpha2.txt"), "").unwrap();
         std::fs::write(dir.join("beta.txt"), "").unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
@@ -1989,7 +2066,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&sub).unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@my", 3, &ctx).unwrap();
@@ -2008,7 +2085,7 @@ mod tests {
             std::fs::write(dir.join(name), "").unwrap();
         }
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@", 1, &ctx).unwrap();
@@ -2065,6 +2142,37 @@ mod tests {
             dir.path().join("marker.txt").exists(),
             "command must execute in the provided working directory"
         );
+    }
+
+    // ── tab_choice (Tab autosuggestion vs @-completion) ───────────────────────
+
+    #[test]
+    fn tab_accepts_hint_at_end_of_line() {
+        assert_eq!(tab_choice("git st", 6, true), TabChoice::CompleteHint);
+    }
+
+    #[test]
+    fn tab_at_mention_completes_files_even_with_hint() {
+        // Cursor inside an @-mention → file completion wins over any history hint.
+        assert_eq!(tab_choice("read @src/ma", 12, true), TabChoice::Complete);
+        assert_eq!(tab_choice("@", 1, true), TabChoice::Complete);
+    }
+
+    #[test]
+    fn tab_without_hint_is_default() {
+        assert_eq!(tab_choice("plain text", 10, false), TabChoice::Default);
+    }
+
+    #[test]
+    fn tab_does_not_accept_hint_when_cursor_not_at_end() {
+        // Hint only applies at end-of-line; mid-line Tab falls through.
+        assert_eq!(tab_choice("git status", 3, true), TabChoice::Default);
+    }
+
+    #[test]
+    fn tab_after_completed_mention_can_accept_hint() {
+        // Trailing space ends the @-token, so a hint may be accepted again.
+        assert_eq!(tab_choice("@src/main.rs ", 13, true), TabChoice::CompleteHint);
     }
 
     // ── input_needs_continuation ──────────────────────────────────────────────
