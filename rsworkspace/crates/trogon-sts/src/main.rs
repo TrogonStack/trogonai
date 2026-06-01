@@ -71,6 +71,10 @@ struct Args {
     /// Queue group for horizontal scale.
     #[arg(long, default_value = DEFAULT_QUEUE_GROUP, env = "MCP_STS_QUEUE_GROUP")]
     queue_group: String,
+
+    /// MCP subject prefix; must match the gateway's `MCP_GATEWAY_MCP_PREFIX`.
+    #[arg(long, default_value = "mcp", env = "MCP_STS_PREFIX")]
+    mcp_prefix: String,
 }
 
 #[tokio::main]
@@ -120,7 +124,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let chain_mode = ChainResolutionMode::from_env();
     let require_purpose = trogon_sts::exchange::require_purpose_from_env();
 
-    let audit = Arc::new(NatsAuditPublisher::new(nats.clone()));
+    let audit = Arc::new(NatsAuditPublisher::new(nats.clone(), args.mcp_prefix.as_str()));
     let service = Arc::new(ExchangeService::new(
         args.mesh_issuer.clone(),
         default_bootstrap_issuer(),
