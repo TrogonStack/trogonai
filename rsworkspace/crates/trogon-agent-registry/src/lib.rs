@@ -4,7 +4,10 @@ mod consumer;
 mod store;
 mod types;
 
-pub use audit::{AUDIT_DELETE, AUDIT_LOOKUP_FOUND, AUDIT_LOOKUP_NOTFOUND, AUDIT_LOOKUP_REVOKED, AUDIT_PUT};
+pub use audit::{
+    audit_delete_subject, audit_lookup_found_subject, audit_lookup_notfound_subject, audit_lookup_revoked_subject,
+    audit_put_subject,
+};
 pub use cache::RegistryCache;
 pub use consumer::{ConsumerError, LOOKUP_SUBJECT, QUEUE_GROUP, lookup, resolve_lookup, run_lookup_consumer};
 pub use store::{
