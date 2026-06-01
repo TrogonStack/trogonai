@@ -2,23 +2,28 @@ use buffa::MessageField;
 use trogon_decider_runtime::{Decider, Decision, WritePrecondition};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
-use super::domain::{Job, ScheduleDetails, ScheduleId};
+use super::domain::{
+    Delivery, JobMessage, JobStatus, MessageEnvelope, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
+    ScheduleEventStatus, ScheduleId,
+};
 
-fn schedule_created_from_job(job: &Job) -> v1::ScheduleCreated {
-    let details = ScheduleDetails::from(job);
-
+fn schedule_created_from_command(command: &CreateScheduleCommand) -> v1::ScheduleCreated {
     v1::ScheduleCreated {
-        schedule_id: job.id.as_str().to_string(),
-        status: MessageField::some(v1::ScheduleStatus::from(details.status)),
-        schedule: MessageField::some(v1::Schedule::from(&details.schedule)),
-        delivery: MessageField::some(v1::Delivery::from(&details.delivery)),
-        message: MessageField::some(v1::Message::from(&details.message)),
+        schedule_id: command.id.as_str().to_string(),
+        status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::from(command.status))),
+        schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(&command.schedule))),
+        delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(&command.delivery))),
+        message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CreateScheduleCommand {
-    pub job: Job,
+    pub id: ScheduleId,
+    pub status: JobStatus,
+    pub schedule: Schedule,
+    pub delivery: Delivery,
+    pub message: JobMessage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,17 +36,16 @@ pub enum CreateScheduleDecideError {
 
 impl std::fmt::Display for CreateScheduleDecideError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{self:?}")
+        match self {
+            Self::AlreadyExists { id } => write!(formatter, "schedule '{id}' already exists"),
+            Self::JobDeleted { id } => write!(formatter, "schedule '{id}' was deleted"),
+            Self::MissingStateValue => formatter.write_str("state value is missing"),
+            Self::UnknownStateValue { value } => write!(formatter, "unknown state value: {value}"),
+        }
     }
 }
 
 impl std::error::Error for CreateScheduleDecideError {}
-
-impl CreateScheduleCommand {
-    pub fn new(job: Job) -> Self {
-        Self { job }
-    }
-}
 
 impl Decider for CreateScheduleCommand {
     type StreamId = str;
@@ -53,7 +57,7 @@ impl Decider for CreateScheduleCommand {
     const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.job.id.as_str()
+        self.id.as_str()
     }
 
     fn initial_state() -> Self::State {
@@ -73,16 +77,14 @@ impl Decider for CreateScheduleCommand {
         };
         match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => Ok(Decision::event(v1::ScheduleEvent {
-                event: Some(schedule_created_from_job(&command.job).into()),
+                event: Some(schedule_created_from_command(command).into()),
             })),
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
-                Err(CreateScheduleDecideError::AlreadyExists {
-                    id: command.job.id.clone(),
-                })
+                Err(CreateScheduleDecideError::AlreadyExists { id: command.id.clone() })
             }
-            state_v1::StateValue::STATE_VALUE_DELETED => Err(CreateScheduleDecideError::JobDeleted {
-                id: command.job.id.clone(),
-            }),
+            state_v1::StateValue::STATE_VALUE_DELETED => {
+                Err(CreateScheduleDecideError::JobDeleted { id: command.id.clone() })
+            }
             state_v1::StateValue::STATE_VALUE_UNSPECIFIED => {
                 Err(CreateScheduleDecideError::UnknownStateValue { value: 0 })
             }
@@ -99,22 +101,18 @@ mod tests {
         Delivery, JobHeaders, JobMessage, JobStatus, MessageContent, Schedule as DomainSchedule,
     };
 
-    fn job_id(id: &str) -> ScheduleId {
+    fn schedule_id(id: &str) -> ScheduleId {
         ScheduleId::parse(id).unwrap()
     }
 
-    fn create_job_command(id: &str) -> CreateScheduleCommand {
-        CreateScheduleCommand::new(job(id))
-    }
-
-    fn job(id: &str) -> Job {
-        Job {
-            id: job_id(id),
+    fn create_schedule_command(id: &str) -> CreateScheduleCommand {
+        CreateScheduleCommand {
+            id: schedule_id(id),
             status: JobStatus::Enabled,
             schedule: DomainSchedule::every(30).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: JobMessage {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+                content: MessageContent::json(r#"{"kind":"heartbeat"}"#),
                 headers: JobHeaders::default(),
             },
         }
@@ -122,7 +120,7 @@ mod tests {
 
     fn added(id: &str) -> v1::ScheduleEvent {
         v1::ScheduleEvent {
-            event: Some(schedule_created_from_job(&job(id)).into()),
+            event: Some(schedule_created_from_command(&create_schedule_command(id)).into()),
         }
     }
 
@@ -141,7 +139,7 @@ mod tests {
     fn given_when_then_supports_register_job_decider() {
         TestCase::<CreateScheduleCommand>::new()
             .given_no_history()
-            .when(create_job_command("backup"))
+            .when(create_schedule_command("backup"))
             .then([added("backup")]);
     }
 
@@ -149,7 +147,7 @@ mod tests {
     fn given_when_then_supports_register_job_failures() {
         TestCase::<CreateScheduleCommand>::new()
             .given([added("backup")])
-            .when(create_job_command("backup"))
+            .when(create_schedule_command("backup"))
             .then_error(CreateScheduleDecideError::AlreadyExists {
                 id: ScheduleId::parse("backup").unwrap(),
             });
@@ -160,7 +158,7 @@ mod tests {
         TestCase::<CreateScheduleCommand>::new()
             .given([added("backup")])
             .given([removed()])
-            .when(create_job_command("backup"))
+            .when(create_schedule_command("backup"))
             .then_error(CreateScheduleDecideError::JobDeleted {
                 id: ScheduleId::parse("backup").unwrap(),
             });

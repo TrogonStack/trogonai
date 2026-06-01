@@ -1,28 +1,17 @@
 use std::{num::NonZeroU64, str::FromStr};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use trogon_nats::DottedNatsToken;
+use trogonai_proto::convert::PROTOBUF_DURATION_MAX_SECONDS;
 
 use crate::error::ScheduleSpecError;
 
 use super::{
-    MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError, ScheduleDetails, ScheduleEventDelivery,
-    ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId,
+    MessageContent, MessageEnvelope, MessageHeader, MessageHeaders, MessageHeadersError, ScheduleEventDelivery,
+    ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Job {
-    pub id: ScheduleId,
-    #[serde(default, rename = "state")]
-    pub status: JobStatus,
-    pub schedule: Schedule,
-    pub delivery: Delivery,
-    pub message: JobMessage,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JobStatus {
     #[default]
     Enabled,
@@ -42,8 +31,7 @@ impl JobStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Schedule {
     At {
         at: DateTime<Utc>,
@@ -53,18 +41,13 @@ pub enum Schedule {
     },
     Cron {
         expr: CronExpression,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         timezone: Option<ScheduleTimezone>,
     },
-    #[serde(rename = "rrule")]
     RRule {
         dtstart: RRuleDateTime,
         rrule: RRuleExpression,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         timezone: Option<RRuleTimezone>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rdate: Vec<RRuleDateTime>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         exdate: Vec<RRuleDateTime>,
     },
 }
@@ -103,9 +86,15 @@ pub struct EverySeconds(NonZeroU64);
 
 impl EverySeconds {
     pub fn new(every_sec: u64) -> Result<Self, ScheduleSpecError> {
-        NonZeroU64::new(every_sec)
-            .map(Self)
-            .ok_or(ScheduleSpecError::EverySecondsMustBePositive)
+        let every_sec = NonZeroU64::new(every_sec).ok_or(ScheduleSpecError::EverySecondsMustBePositive)?;
+        if every_sec.get() > PROTOBUF_DURATION_MAX_SECONDS {
+            return Err(ScheduleSpecError::EverySecondsTooLarge {
+                max: PROTOBUF_DURATION_MAX_SECONDS,
+                actual: every_sec.get(),
+            });
+        }
+
+        Ok(Self(every_sec))
     }
 
     pub fn as_u64(self) -> u64 {
@@ -118,25 +107,6 @@ impl TryFrom<u64> for EverySeconds {
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Self::new(value)
-    }
-}
-
-impl Serialize for EverySeconds {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u64(self.as_u64())
-    }
-}
-
-impl<'de> Deserialize<'de> for EverySeconds {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let every_sec = u64::deserialize(deserializer)?;
-        Self::new(every_sec).map_err(D::Error::custom)
     }
 }
 
@@ -178,25 +148,6 @@ impl TryFrom<&str> for CronExpression {
     }
 }
 
-impl Serialize for CronExpression {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for CronExpression {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let expr = String::deserialize(deserializer)?;
-        Self::new(expr).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleExpression(String);
 
@@ -232,25 +183,6 @@ impl TryFrom<&str> for RRuleExpression {
     }
 }
 
-impl Serialize for RRuleExpression {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RRuleExpression {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let rrule = String::deserialize(deserializer)?;
-        Self::new(rrule).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleDateTime(String);
 
@@ -277,25 +209,6 @@ impl RRuleDateTime {
         DateTime::parse_from_rfc3339(&self.0)
             .expect("RRuleDateTime was validated as RFC3339 on construction")
             .with_timezone(&Utc)
-    }
-}
-
-impl Serialize for RRuleDateTime {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RRuleDateTime {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::new("date", value).map_err(D::Error::custom)
     }
 }
 
@@ -374,110 +287,49 @@ fn validate_rrule_expression(rrule: &str) -> Result<(), ScheduleSpecError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleTimezone(String);
 
-impl ScheduleTimezone {
-    pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
-        Ok(Self(validate_timezone_token(timezone.into())?))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}
-
-impl TryFrom<String> for ScheduleTimezone {
-    type Error = ScheduleSpecError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl TryFrom<&str> for ScheduleTimezone {
-    type Error = ScheduleSpecError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl Serialize for ScheduleTimezone {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ScheduleTimezone {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let timezone = String::deserialize(deserializer)?;
-        Self::new(timezone).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleTimezone(String);
 
-impl RRuleTimezone {
-    pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
-        let timezone = validate_timezone_token(timezone.into())?;
-        chrono_tz::Tz::from_str(&timezone).map_err(|_| ScheduleSpecError::InvalidTimezone {
-            timezone: timezone.clone(),
-        })?;
-        Ok(Self(timezone))
-    }
+macro_rules! impl_timezone_type {
+    ($type:ty) => {
+        impl $type {
+            pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+                let timezone = validate_timezone_token(timezone.into())?;
+                chrono_tz::Tz::from_str(&timezone).map_err(|_| ScheduleSpecError::InvalidTimezone {
+                    timezone: timezone.clone(),
+                })?;
+                Ok(Self(timezone))
+            }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
 
-    pub fn into_string(self) -> String {
-        self.0
-    }
+            pub fn into_string(self) -> String {
+                self.0
+            }
+        }
+
+        impl TryFrom<String> for $type {
+            type Error = ScheduleSpecError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::new(value)
+            }
+        }
+
+        impl TryFrom<&str> for $type {
+            type Error = ScheduleSpecError;
+
+            fn try_from(value: &str) -> Result<Self, Self::Error> {
+                Self::new(value)
+            }
+        }
+    };
 }
 
-impl TryFrom<String> for RRuleTimezone {
-    type Error = ScheduleSpecError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl TryFrom<&str> for RRuleTimezone {
-    type Error = ScheduleSpecError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl Serialize for RRuleTimezone {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for RRuleTimezone {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let timezone = String::deserialize(deserializer)?;
-        Self::new(timezone).map_err(D::Error::custom)
-    }
-}
+impl_timezone_type!(ScheduleTimezone);
+impl_timezone_type!(RRuleTimezone);
 
 fn validate_timezone_token(timezone: String) -> Result<String, ScheduleSpecError> {
     let trimmed = timezone.trim();
@@ -506,7 +358,7 @@ impl JobHeaders {
         self.0.is_empty()
     }
 
-    pub fn as_slice(&self) -> &[(String, String)] {
+    pub fn as_slice(&self) -> &[MessageHeader] {
         self.0.as_slice()
     }
 
@@ -531,35 +383,15 @@ impl TryFrom<MessageHeaders> for JobHeaders {
     }
 }
 
-impl Serialize for JobHeaders {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for JobHeaders {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let headers = MessageHeaders::deserialize(deserializer)?;
-        Self::try_from(headers).map_err(D::Error::custom)
-    }
-}
-
 impl From<JobHeaders> for MessageHeaders {
     fn from(value: JobHeaders) -> Self {
         value.0
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JobMessage {
     pub content: MessageContent,
-    #[serde(default, skip_serializing_if = "JobHeaders::is_empty")]
     pub headers: JobHeaders,
 }
 
@@ -602,25 +434,6 @@ impl TryFrom<&str> for DeliveryRoute {
     }
 }
 
-impl Serialize for DeliveryRoute {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for DeliveryRoute {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let route = String::deserialize(deserializer)?;
-        Self::new(route).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SamplingSubject(DottedNatsToken);
 
@@ -656,33 +469,20 @@ impl TryFrom<&str> for SamplingSubject {
     }
 }
 
-impl Serialize for SamplingSubject {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for SamplingSubject {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let subject = String::deserialize(deserializer)?;
-        Self::new(subject).map_err(D::Error::custom)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TtlSeconds(NonZeroU64);
 
 impl TtlSeconds {
     pub fn new(ttl_sec: u64) -> Result<Self, ScheduleSpecError> {
-        NonZeroU64::new(ttl_sec)
-            .map(Self)
-            .ok_or(ScheduleSpecError::TtlMustBePositive)
+        let ttl_sec = NonZeroU64::new(ttl_sec).ok_or(ScheduleSpecError::TtlMustBePositive)?;
+        if ttl_sec.get() > PROTOBUF_DURATION_MAX_SECONDS {
+            return Err(ScheduleSpecError::TtlSecondsTooLarge {
+                max: PROTOBUF_DURATION_MAX_SECONDS,
+                actual: ttl_sec.get(),
+            });
+        }
+
+        Ok(Self(ttl_sec))
     }
 
     pub fn as_u64(self) -> u64 {
@@ -698,27 +498,7 @@ impl TryFrom<u64> for TtlSeconds {
     }
 }
 
-impl Serialize for TtlSeconds {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u64(self.as_u64())
-    }
-}
-
-impl<'de> Deserialize<'de> for TtlSeconds {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let ttl_sec = u64::deserialize(deserializer)?;
-        Self::new(ttl_sec).map_err(D::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SamplingSource {
     LatestFromSubject { subject: SamplingSubject },
 }
@@ -737,14 +517,11 @@ impl SamplingSource {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivery {
     NatsEvent {
         route: DeliveryRoute,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         ttl_sec: Option<TtlSeconds>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         source: Option<SamplingSource>,
     },
 }
@@ -767,13 +544,14 @@ const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     "Nats-Schedule-TTL",
 ];
 
-fn validate_reserved_scheduler_headers(headers: &[(String, String)]) -> Result<(), ScheduleSpecError> {
-    for (name, _) in headers {
+fn validate_reserved_scheduler_headers(headers: &[MessageHeader]) -> Result<(), ScheduleSpecError> {
+    for header in headers {
+        let name = header.name().as_str();
         if RESERVED_SCHEDULE_HEADERS
             .iter()
             .any(|reserved| reserved.eq_ignore_ascii_case(name))
         {
-            return Err(ScheduleSpecError::ReservedHeaderName { name: name.clone() });
+            return Err(ScheduleSpecError::ReservedHeaderName { name: name.to_string() });
         }
     }
 
@@ -840,7 +618,7 @@ impl From<&SamplingSource> for ScheduleEventSamplingSource {
     fn from(value: &SamplingSource) -> Self {
         match value {
             SamplingSource::LatestFromSubject { subject } => Self::LatestFromSubject {
-                subject: subject.as_str().to_string(),
+                subject: subject.clone(),
             },
         }
     }
@@ -860,28 +638,6 @@ impl From<&Delivery> for ScheduleEventDelivery {
                 ttl_sec: *ttl_sec,
                 source: source.as_ref().map(Into::into),
             },
-        }
-    }
-}
-
-impl From<Job> for ScheduleDetails {
-    fn from(job: Job) -> Self {
-        Self {
-            status: job.status.into(),
-            schedule: job.schedule.into(),
-            delivery: job.delivery.into(),
-            message: job.message.into(),
-        }
-    }
-}
-
-impl From<&Job> for ScheduleDetails {
-    fn from(job: &Job) -> Self {
-        Self {
-            status: job.status.into(),
-            schedule: (&job.schedule).into(),
-            delivery: (&job.delivery).into(),
-            message: (&job.message).into(),
         }
     }
 }
@@ -907,311 +663,6 @@ impl From<&JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn job_id(id: &str) -> ScheduleId {
-        ScheduleId::parse(id).unwrap()
-    }
-
-    fn route(value: &str) -> DeliveryRoute {
-        DeliveryRoute::new(value).unwrap()
-    }
-
-    fn ttl(value: u64) -> TtlSeconds {
-        TtlSeconds::new(value).unwrap()
-    }
-
-    fn source(value: &str) -> SamplingSource {
-        SamplingSource::latest_from_subject(value).unwrap()
-    }
-
-    #[test]
-    fn job_status_defaults_to_enabled() {
-        let raw = r#"{
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }"#;
-
-        let job: Job = serde_json::from_str(raw).unwrap();
-
-        assert_eq!(job.status, JobStatus::Enabled);
-    }
-
-    #[test]
-    fn job_round_trips() {
-        let job = Job {
-            id: job_id("compact"),
-            status: JobStatus::Enabled,
-            schedule: Schedule::cron("0 */5 * * * *", Some("UTC".to_string())).unwrap(),
-            delivery: Delivery::NatsEvent {
-                route: route("workflow.compact"),
-                ttl_sec: Some(ttl(30)),
-                source: Some(source("sensors.latest")),
-            },
-            message: JobMessage {
-                content: MessageContent::from_static(r#"{"workflow":"compact"}"#),
-                headers: JobHeaders::new([("owner", "ops")]).unwrap(),
-            },
-        };
-
-        let json = serde_json::to_string(&job).unwrap();
-        let decoded: Job = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, job);
-    }
-
-    #[test]
-    fn empty_headers_are_omitted() {
-        let job = Job {
-            id: job_id("compact"),
-            status: JobStatus::Enabled,
-            schedule: Schedule::every(30).unwrap(),
-            delivery: Delivery::NatsEvent {
-                route: route("agent.run"),
-                ttl_sec: None,
-                source: None,
-            },
-            message: JobMessage {
-                content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: JobHeaders::default(),
-            },
-        };
-
-        let json = serde_json::to_string(&job).unwrap();
-
-        assert!(!json.contains("\"headers\""));
-        assert!(json.contains("\"state\":\"enabled\""));
-    }
-
-    #[test]
-    fn invalid_route_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": { "type": "nats_event", "route": "agent.>" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("route"));
-    }
-
-    #[test]
-    fn invalid_sampling_source_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": {
-                "type": "nats_event",
-                "route": "agent.run",
-                "source": {
-                    "type": "latest_from_subject",
-                    "subject": "jobs.>"
-                }
-            },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("sampling source"));
-    }
-
-    #[test]
-    fn zero_ttl_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": {
-                "type": "nats_event",
-                "route": "agent.run",
-                "ttl_sec": 0
-            },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("ttl_sec"));
-    }
-
-    #[test]
-    fn zero_every_seconds_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 0 },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("every_sec"));
-    }
-
-    #[test]
-    fn invalid_cron_expression_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "cron", "expr": "not-a-cron" },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("cron expression"));
-    }
-
-    #[test]
-    fn rrule_schedule_round_trips_with_canonical_rule_text() {
-        let job = Job {
-            id: job_id("compact"),
-            status: JobStatus::Enabled,
-            schedule: Schedule::RRule {
-                dtstart: RRuleDateTime::new("dtstart", "2026-05-24T09:00:00+00:00").unwrap(),
-                rrule: RRuleExpression::new("rrule:freq=weekly;byday=mo").unwrap(),
-                timezone: Some(RRuleTimezone::new("UTC").unwrap()),
-                rdate: vec![RRuleDateTime::new("rdate", "2026-05-26T09:00:00+00:00").unwrap()],
-                exdate: vec![RRuleDateTime::new("exdate", "2026-06-01T09:00:00+00:00").unwrap()],
-            },
-            delivery: Delivery::NatsEvent {
-                route: route("workflow.compact"),
-                ttl_sec: Some(ttl(30)),
-                source: None,
-            },
-            message: JobMessage {
-                content: MessageContent::from_static(r#"{"workflow":"compact"}"#),
-                headers: JobHeaders::default(),
-            },
-        };
-
-        let json = serde_json::to_string(&job).unwrap();
-        let decoded: Job = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, job);
-        match decoded.schedule {
-            Schedule::RRule { rrule, .. } => assert_eq!(rrule.as_str(), "FREQ=WEEKLY;BYDAY=MO"),
-            other => panic!("expected RRULE schedule, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn invalid_rrule_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": {
-                "type": "rrule",
-                "dtstart": "2026-05-24T09:00:00+00:00",
-                "rrule": "FREQ=DAILY;COUNT=2;UNTIL=20260526T090000Z"
-            },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("RRULE"));
-    }
-
-    #[test]
-    fn invalid_rrule_datetime_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": {
-                "type": "rrule",
-                "dtstart": "not-a-date",
-                "rrule": "FREQ=DAILY;COUNT=2"
-            },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("timestamp"));
-    }
-
-    #[test]
-    fn invalid_rrule_timezone_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": {
-                "type": "rrule",
-                "dtstart": "2026-05-24T09:00:00+00:00",
-                "rrule": "FREQ=DAILY;COUNT=2",
-                "timezone": "Mars/Base"
-            },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("timezone"));
-    }
-
-    #[test]
-    fn invalid_timezone_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": {
-                "type": "cron",
-                "expr": "0 */5 * * * *",
-                "timezone": " America/New_York "
-            },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("timezone"));
-    }
-
-    #[test]
-    fn reserved_header_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "headers": [["Nats-Schedule-Target", "scheduler.fire.evil.target"]],
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("reserved"));
-    }
-
-    #[test]
-    fn invalid_header_value_is_rejected_during_deserialization() {
-        let error = serde_json::from_value::<Job>(serde_json::json!({
-            "id": "heartbeat",
-            "schedule": { "type": "every", "every_sec": 30 },
-            "delivery": { "type": "nats_event", "route": "agent.run" },
-            "message": {
-                "headers": [["x-kind", "bad\nvalue"]],
-                "content": "{\"kind\":\"heartbeat\"}"
-            }
-        }))
-        .unwrap_err();
-
-        assert!(error.to_string().contains("invalid value"));
-    }
 
     #[test]
     fn job_status_helpers_work() {
@@ -1219,6 +670,186 @@ mod tests {
         assert_eq!(JobStatus::Enabled.as_str(), "enabled");
         assert!(!JobStatus::Disabled.is_enabled());
         assert_eq!(JobStatus::Disabled.as_str(), "disabled");
+    }
+
+    #[test]
+    fn schedule_constructors_validate_and_preserve_values() {
+        let cron = Schedule::cron("0 0 * * * *", Some("UTC".to_string())).unwrap();
+        let rrule = Schedule::rrule(
+            "2026-01-01T00:00:00Z",
+            "RRULE:FREQ=DAILY;COUNT=2",
+            Some("America/New_York".to_string()),
+        )
+        .unwrap();
+
+        assert!(matches!(cron, Schedule::Cron { .. }));
+        assert!(matches!(rrule, Schedule::RRule { .. }));
+        assert!(Schedule::every(0).is_err());
+        assert!(Schedule::cron("not a cron", None).is_err());
+        assert!(Schedule::rrule("tomorrow", "FREQ=DAILY;COUNT=2", None).is_err());
+        assert!(
+            Schedule::rrule(
+                "2026-01-01T00:00:00Z",
+                "FREQ=DAILY;COUNT=2",
+                Some("Nope/Zone".to_string())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn value_objects_cover_success_error_and_conversion_paths() {
+        let every = EverySeconds::try_from(30).unwrap();
+        let cron = CronExpression::try_from("0 0 * * * *".to_string()).unwrap();
+        let rrule = RRuleExpression::try_from("freq=daily;count=2").unwrap();
+        let dtstart = RRuleDateTime::new("dtstart", "2026-01-01T00:00:00Z").unwrap();
+        let schedule_timezone = ScheduleTimezone::try_from("UTC").unwrap();
+        let rrule_timezone = RRuleTimezone::try_from("UTC".to_string()).unwrap();
+
+        assert_eq!(every.as_u64(), 30);
+        assert!(EverySeconds::try_from(0).is_err());
+        assert!(EverySeconds::try_from(PROTOBUF_DURATION_MAX_SECONDS + 1).is_err());
+        assert_eq!(CronExpression::try_from("0 0 * * * *").unwrap().as_str(), "0 0 * * * *");
+        assert_eq!(cron.as_str(), "0 0 * * * *");
+        assert_eq!(cron.into_string(), "0 0 * * * *");
+        assert_eq!(
+            RRuleExpression::try_from("FREQ=DAILY;COUNT=2".to_string())
+                .unwrap()
+                .as_str(),
+            "FREQ=DAILY;COUNT=2"
+        );
+        assert_eq!(rrule.as_str(), "FREQ=DAILY;COUNT=2");
+        assert_eq!(rrule.into_string(), "FREQ=DAILY;COUNT=2");
+        assert_eq!(dtstart.as_str(), "2026-01-01T00:00:00Z");
+        assert_eq!(
+            dtstart.to_datetime(),
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z").unwrap()
+        );
+        assert_eq!(dtstart.into_string(), "2026-01-01T00:00:00Z");
+        assert_eq!(schedule_timezone.as_str(), "UTC");
+        assert_eq!(schedule_timezone.into_string(), "UTC");
+        assert_eq!(rrule_timezone.as_str(), "UTC");
+        assert_eq!(rrule_timezone.into_string(), "UTC");
+        assert!(ScheduleTimezone::try_from("UTC\n").is_err());
+        assert!(RRuleTimezone::try_from("Nope/Zone").is_err());
+    }
+
+    #[test]
+    fn rrule_validation_covers_invalid_shapes() {
+        for raw in [
+            "",
+            "RRULE:",
+            "FREQ=DAILY\nCOUNT=2",
+            "FREQDAILY",
+            "FREQ=DAILY;COUNT=2;UNTIL=20260101T000000Z",
+            "FREQ=DAILY;EXRULE=FREQ=WEEKLY",
+            "FREQ=DAILY;RSCALE=GREGORIAN",
+            "FREQ=DAILY;SKIP=OMIT",
+            "FREQ=NOPE;COUNT=2",
+        ] {
+            assert!(RRuleExpression::new(raw).is_err(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn job_headers_cover_helpers_and_reserved_names() {
+        let headers = JobHeaders::new([("x-kind", "heartbeat")]).unwrap();
+        let message_headers = MessageHeaders::new([("x-kind", "heartbeat")]).unwrap();
+        let from_message_headers = JobHeaders::try_from(message_headers).unwrap();
+
+        assert!(!headers.is_empty());
+        assert_eq!(headers.as_slice()[0].name().as_str(), "x-kind");
+        assert_eq!(headers.clone().into_message_headers().as_slice().len(), 1);
+        assert_eq!(MessageHeaders::from(from_message_headers).as_slice().len(), 1);
+        assert!(JobHeaders::new([("Nats-Schedule", "value")]).is_err());
+        assert!(JobHeaders::new([("bad name", "value")]).is_err());
+        assert!(JobHeaders::new([("x-kind", "bad\nvalue")]).is_err());
+    }
+
+    #[test]
+    fn route_sampling_and_delivery_cover_conversions() {
+        let route = DeliveryRoute::try_from("agent.run".to_string()).unwrap();
+        let route_ref = DeliveryRoute::try_from("agent.reply").unwrap();
+        let subject = SamplingSubject::try_from("agent.events".to_string()).unwrap();
+        let subject_ref = SamplingSubject::try_from("agent.replay").unwrap();
+        let ttl = TtlSeconds::try_from(60).unwrap();
+        let source = SamplingSource::latest_from_subject("agent.events").unwrap();
+        let delivery = Delivery::NatsEvent {
+            route: route.clone(),
+            ttl_sec: Some(ttl),
+            source: Some(source.clone()),
+        };
+
+        assert_eq!(route.as_str(), "agent.run");
+        assert_eq!(route.as_token().as_str(), "agent.run");
+        assert_eq!(route_ref.as_str(), "agent.reply");
+        assert_eq!(subject.as_str(), "agent.events");
+        assert_eq!(subject_ref.as_str(), "agent.replay");
+        assert_eq!(ttl.as_u64(), 60);
+        assert!(TtlSeconds::try_from(0).is_err());
+        assert!(TtlSeconds::try_from(PROTOBUF_DURATION_MAX_SECONDS + 1).is_err());
+        assert_eq!(source.subject().as_str(), "agent.events");
+        assert!(DeliveryRoute::try_from("bad*route").is_err());
+        assert!(SamplingSubject::try_from("bad>subject").is_err());
+        assert!(matches!(
+            Delivery::nats_event("agent.run").unwrap(),
+            Delivery::NatsEvent { .. }
+        ));
+        assert!(matches!(
+            ScheduleEventSamplingSource::from(source),
+            ScheduleEventSamplingSource::LatestFromSubject { .. }
+        ));
+        assert!(matches!(
+            ScheduleEventDelivery::from(delivery),
+            ScheduleEventDelivery::NatsMessage {
+                ttl_sec: Some(_),
+                source: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn schedule_and_message_conversions_cover_all_variants() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let rrule_dt = RRuleDateTime::new("dtstart", "2026-01-01T00:00:00Z").unwrap();
+        let schedules = [
+            Schedule::At { at },
+            Schedule::every(30).unwrap(),
+            Schedule::cron("0 0 * * * *", Some("UTC".to_string())).unwrap(),
+            Schedule::RRule {
+                dtstart: rrule_dt.clone(),
+                rrule: RRuleExpression::new("FREQ=DAILY;COUNT=2").unwrap(),
+                timezone: Some(RRuleTimezone::new("UTC").unwrap()),
+                rdate: vec![rrule_dt.clone()],
+                exdate: vec![rrule_dt],
+            },
+        ];
+
+        for schedule in schedules {
+            let event_schedule = ScheduleEventSchedule::from(&schedule);
+            let owned_event_schedule = ScheduleEventSchedule::from(schedule);
+            assert_eq!(format!("{event_schedule:?}"), format!("{owned_event_schedule:?}"));
+        }
+
+        assert_eq!(JobStatus::from(ScheduleEventStatus::Scheduled), JobStatus::Enabled);
+        assert_eq!(JobStatus::from(ScheduleEventStatus::Paused), JobStatus::Disabled);
+        assert!(matches!(
+            ScheduleEventStatus::from(JobStatus::Disabled),
+            ScheduleEventStatus::Paused
+        ));
+
+        let message = JobMessage {
+            content: MessageContent::json("{}"),
+            headers: JobHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+        };
+        assert_eq!(MessageEnvelope::from(&message).headers.as_slice().len(), 1);
+        assert_eq!(
+            MessageEnvelope::from(message).content.content_type().as_str(),
+            "application/json"
+        );
     }
 
     mod proptests {
@@ -1237,13 +868,13 @@ mod tests {
 
         proptest! {
             #[test]
-            fn every_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
+            fn every_seconds_accepts_any_positive_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
                 let every = EverySeconds::new(n).unwrap();
                 prop_assert_eq!(every.as_u64(), n);
             }
 
             #[test]
-            fn ttl_seconds_accepts_any_positive_and_round_trips(n in 1u64..) {
+            fn ttl_seconds_accepts_any_positive_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
                 let ttl = TtlSeconds::new(n).unwrap();
                 prop_assert_eq!(ttl.as_u64(), n);
             }
@@ -1299,7 +930,7 @@ mod tests {
 
             #[test]
             fn schedule_timezone_accepts_any_non_whitespace_non_control_string(
-                s in "[A-Za-z][A-Za-z0-9/_+-]{0,31}",
+                s in prop_oneof![Just("UTC".to_string()), Just("America/New_York".to_string()), Just("Europe/London".to_string())],
             ) {
                 let tz = ScheduleTimezone::new(&s).unwrap();
                 prop_assert_eq!(tz.as_str(), s.as_str());
@@ -1340,12 +971,12 @@ mod tests {
                 let headers = JobHeaders::new([(name.clone(), value.clone())]).unwrap();
                 let slice = headers.as_slice();
                 prop_assert_eq!(slice.len(), 1);
-                prop_assert_eq!(slice[0].0.as_str(), name.as_str());
-                prop_assert_eq!(slice[0].1.as_str(), value.as_str());
+                prop_assert_eq!(slice[0].name().as_str(), name.as_str());
+                prop_assert_eq!(slice[0].value().as_str(), value.as_str());
             }
 
             #[test]
-            fn schedule_every_constructor_matches_value_object(n in 1u64..) {
+            fn schedule_every_constructor_matches_value_object(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
                 let schedule = Schedule::every(n).unwrap();
                 match schedule {
                     Schedule::Every { every_sec } => prop_assert_eq!(every_sec.as_u64(), n),

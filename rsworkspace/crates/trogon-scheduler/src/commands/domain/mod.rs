@@ -1,18 +1,19 @@
 mod message;
 mod schedule;
-mod schedule_details;
 mod schedule_event_delivery;
 mod schedule_event_sampling_source;
 mod schedule_event_schedule;
 mod schedule_event_status;
 mod schedule_id;
 
-pub use message::{MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError};
+pub use message::{
+    HeaderName, HeaderValue, MessageContent, MessageContentType, MessageEnvelope, MessageHeader, MessageHeaders,
+    MessageHeadersError,
+};
 pub use schedule::{
-    CronExpression, Delivery, DeliveryRoute, EverySeconds, Job, JobHeaders, JobMessage, JobStatus, RRuleDateTime,
+    CronExpression, Delivery, DeliveryRoute, EverySeconds, JobHeaders, JobMessage, JobStatus, RRuleDateTime,
     RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
 };
-pub use schedule_details::ScheduleDetails;
 pub use schedule_event_delivery::ScheduleEventDelivery;
 pub use schedule_event_sampling_source::ScheduleEventSamplingSource;
 pub use schedule_event_schedule::ScheduleEventSchedule;

@@ -1,8 +1,6 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 const MAX_LENGTH: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,25 +59,6 @@ impl FromStr for ScheduleId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s)
-    }
-}
-
-impl Serialize for ScheduleId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ScheduleId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -175,6 +154,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn supports_standard_string_conversions_and_display() {
+        let id = ScheduleId::parse("backup").unwrap();
+
+        assert_eq!(id.as_ref(), "backup");
+        assert_eq!("backup".parse::<ScheduleId>().unwrap().as_str(), "backup");
+        assert_eq!(id.to_string(), "backup");
+        assert_eq!(ScheduleIdViolation::Empty.to_string(), "must not be empty");
+        assert_eq!(
+            ScheduleIdViolation::TooLong { max: 256, actual: 257 }.to_string(),
+            "must be at most 256 characters, got 257"
+        );
+        assert_eq!(
+            ScheduleIdViolation::SurroundingWhitespace.to_string(),
+            "must not have leading or trailing whitespace"
+        );
+        assert_eq!(
+            ScheduleId::parse("").unwrap_err().to_string(),
+            "schedule id '' is invalid: must not be empty"
+        );
+    }
+
     mod proptests {
         use super::*;
         use proptest::prelude::*;
@@ -184,14 +185,6 @@ mod tests {
             fn accepts_any_non_empty_bounded_value(s in "[a-zA-Z0-9._:@/-]{1,256}") {
                 let id = ScheduleId::parse(&s).unwrap();
                 prop_assert_eq!(id.as_str(), s.as_str());
-            }
-
-            #[test]
-            fn serde_round_trips(s in "[a-zA-Z0-9._:@/-]{1,64}") {
-                let id = ScheduleId::parse(&s).unwrap();
-                let json = serde_json::to_string(&id).unwrap();
-                let decoded: ScheduleId = serde_json::from_str(&json).unwrap();
-                prop_assert_eq!(decoded, id);
             }
         }
     }

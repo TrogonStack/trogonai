@@ -1,5 +1,4 @@
 use buffa::MessageField;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::v1;
 
@@ -21,7 +20,112 @@ impl std::fmt::Display for MessageHeadersError {
 impl std::error::Error for MessageHeadersError {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MessageHeaders(Vec<(String, String)>);
+pub struct MessageHeaders(Vec<MessageHeader>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageHeader {
+    name: HeaderName,
+    value: HeaderValue,
+}
+
+impl MessageHeader {
+    pub fn name(&self) -> &HeaderName {
+        &self.name
+    }
+
+    pub fn value(&self) -> &HeaderValue {
+        &self.value
+    }
+
+    pub fn into_pair(self) -> (HeaderName, HeaderValue) {
+        (self.name, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderName(String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderNameError {
+    name: String,
+}
+
+impl HeaderName {
+    pub fn new(name: impl Into<String>) -> Result<Self, HeaderNameError> {
+        let name = name.into();
+        if name.trim().is_empty() || name.contains(':') || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+        {
+            return Err(HeaderNameError { name });
+        }
+
+        Ok(Self(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for HeaderName {
+    type Error = HeaderNameError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for HeaderName {
+    type Error = HeaderNameError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderValue(String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderValueError;
+
+impl HeaderValue {
+    pub fn new(value: impl Into<String>) -> Result<Self, HeaderValueError> {
+        let value = value.into();
+        if value.chars().any(|ch| ch == '\r' || ch == '\n' || ch == '\0') {
+            return Err(HeaderValueError);
+        }
+
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl TryFrom<String> for HeaderValue {
+    type Error = HeaderValueError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for HeaderValue {
+    type Error = HeaderValueError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
 
 impl MessageHeaders {
     pub fn new<I, N, V>(input: I) -> Result<Self, MessageHeadersError>
@@ -30,20 +134,16 @@ impl MessageHeaders {
         N: Into<String>,
         V: Into<String>,
     {
-        let mut headers: Vec<(String, String)> = Vec::new();
+        let mut headers: Vec<MessageHeader> = Vec::new();
         for (name, value) in input {
             let name: String = name.into();
             let value: String = value.into();
-            if name.trim().is_empty()
-                || name.contains(':')
-                || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-            {
-                return Err(MessageHeadersError::InvalidName { name });
-            }
-            if value.chars().any(|ch| ch == '\r' || ch == '\n' || ch == '\0') {
-                return Err(MessageHeadersError::InvalidValue { name });
-            }
-            headers.push((name, value));
+            let name =
+                HeaderName::new(name).map_err(|source| MessageHeadersError::InvalidName { name: source.name })?;
+            let value = HeaderValue::new(value).map_err(|_| MessageHeadersError::InvalidValue {
+                name: name.as_str().to_string(),
+            })?;
+            headers.push(MessageHeader { name, value });
         }
 
         Ok(Self(headers))
@@ -53,11 +153,11 @@ impl MessageHeaders {
         self.0.is_empty()
     }
 
-    pub fn as_slice(&self) -> &[(String, String)] {
+    pub fn as_slice(&self) -> &[MessageHeader] {
         &self.0
     }
 
-    pub fn into_vec(self) -> Vec<(String, String)> {
+    pub fn into_vec(self) -> Vec<MessageHeader> {
         self.0
     }
 }
@@ -70,66 +170,86 @@ impl TryFrom<Vec<(String, String)>> for MessageHeaders {
     }
 }
 
-impl Serialize for MessageHeaders {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for MessageHeaders {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let headers = Vec::<(String, String)>::deserialize(deserializer)?;
-        Self::new(headers).map_err(D::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageEnvelope {
     pub content: MessageContent,
-    #[serde(default, skip_serializing_if = "MessageHeaders::is_empty")]
     pub headers: MessageHeaders,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct MessageContent(String);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageContent {
+    content_type: MessageContentType,
+    data: String,
+}
 
-impl MessageContent {
-    pub fn new(content: impl Into<String>) -> Self {
-        Self(content.into())
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageContentType(String);
+
+impl Default for MessageContentType {
+    fn default() -> Self {
+        Self("application/octet-stream".to_string())
     }
+}
 
-    pub fn from_static(content: &'static str) -> Self {
-        Self(content.to_string())
+impl MessageContentType {
+    pub fn new(content_type: impl Into<String>) -> Self {
+        Self(content_type.into())
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+impl MessageContent {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            content_type: MessageContentType::default(),
+            data: content.into(),
+        }
+    }
+
+    pub fn with_content_type(content: impl Into<String>, content_type: impl Into<String>) -> Self {
+        Self {
+            content_type: MessageContentType::new(content_type),
+            data: content.into(),
+        }
+    }
+
+    pub fn json(content: impl Into<String>) -> Self {
+        Self::with_content_type(content, "application/json")
+    }
+
+    pub fn from_static(content: &'static str) -> Self {
+        Self::new(content)
+    }
+
+    pub fn content_type(&self) -> &MessageContentType {
+        &self.content_type
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.data
+    }
 
     pub fn as_slice(&self) -> &[u8] {
-        self.0.as_bytes()
+        self.data.as_bytes()
     }
 
     pub fn into_string(self) -> String {
-        self.0
+        self.data
     }
 }
 
 impl From<String> for MessageContent {
     fn from(value: String) -> Self {
-        Self(value)
+        Self::new(value)
     }
 }
 
 impl From<&str> for MessageContent {
     fn from(value: &str) -> Self {
-        Self(value.to_string())
+        Self::new(value)
     }
 }
 
@@ -143,16 +263,16 @@ impl From<&MessageEnvelope> for v1::Message {
     fn from(value: &MessageEnvelope) -> Self {
         v1::Message {
             content: MessageField::some(content_v1alpha1::Content {
-                content_type: "application/json".to_string(),
+                content_type: value.content.content_type().as_str().to_string(),
                 data: value.content.as_slice().to_vec(),
             }),
             headers: value
                 .headers
                 .as_slice()
                 .iter()
-                .map(|(name, value)| v1::Header {
-                    name: name.clone(),
-                    value: value.clone(),
+                .map(|header| v1::Header {
+                    name: header.name().as_str().to_string(),
+                    value: header.value().as_str().to_string(),
                 })
                 .collect(),
         }
@@ -168,12 +288,12 @@ mod tests {
         let headers = MessageHeaders::new([("x-kind", "heartbeat"), ("x-kind", "retry"), ("x-owner", "ops")]).unwrap();
 
         assert_eq!(
-            headers.as_slice(),
-            &[
-                ("x-kind".to_string(), "heartbeat".to_string()),
-                ("x-kind".to_string(), "retry".to_string()),
-                ("x-owner".to_string(), "ops".to_string()),
-            ]
+            headers
+                .as_slice()
+                .iter()
+                .map(|header| (header.name().as_str(), header.value().as_str()))
+                .collect::<Vec<_>>(),
+            vec![("x-kind", "heartbeat"), ("x-kind", "retry"), ("x-owner", "ops")]
         );
     }
 
@@ -181,6 +301,92 @@ mod tests {
     fn invalid_header_name_is_rejected() {
         let error = MessageHeaders::new([("bad name", "value")]).unwrap_err();
         assert!(error.to_string().contains("invalid"));
+    }
+
+    #[test]
+    fn message_conversion_uses_content_type_from_message_content() {
+        let message = v1::Message::from(&MessageEnvelope {
+            content: MessageContent::with_content_type("plain text", "text/plain"),
+            headers: MessageHeaders::default(),
+        });
+
+        assert_eq!(message.content.as_option().unwrap().content_type, "text/plain");
+    }
+
+    #[test]
+    fn header_value_objects_cover_conversions_and_accessors() {
+        let name = HeaderName::try_from("x-kind".to_string()).unwrap();
+        let value = HeaderValue::try_from("heartbeat".to_string()).unwrap();
+        let header = MessageHeader {
+            name: name.clone(),
+            value: value.clone(),
+        };
+
+        assert_eq!(name.as_str(), "x-kind");
+        assert_eq!(name.into_string(), "x-kind");
+        assert_eq!(value.as_str(), "heartbeat");
+        assert_eq!(value.into_string(), "heartbeat");
+        assert_eq!(
+            header.into_pair(),
+            (
+                HeaderName::new("x-kind").unwrap(),
+                HeaderValue::new("heartbeat").unwrap()
+            )
+        );
+        assert!(HeaderName::try_from("bad name").is_err());
+        assert!(HeaderValue::try_from("bad\nvalue").is_err());
+    }
+
+    #[test]
+    fn message_headers_cover_collection_helpers_and_errors() {
+        let headers = MessageHeaders::try_from(vec![("x-kind".to_string(), "heartbeat".to_string())]).unwrap();
+        let header_vec = headers.clone().into_vec();
+
+        assert!(!headers.is_empty());
+        assert_eq!(header_vec.len(), 1);
+        assert_eq!(
+            MessageHeadersError::InvalidName {
+                name: "bad name".to_string()
+            }
+            .to_string(),
+            "header name 'bad name' is invalid"
+        );
+        assert_eq!(
+            MessageHeaders::new([("x-kind", "bad\rvalue")]).unwrap_err().to_string(),
+            "header 'x-kind' contains an invalid value"
+        );
+    }
+
+    #[test]
+    fn message_content_covers_constructors_and_byte_access() {
+        let octets = MessageContent::from_static("raw");
+        let plain = MessageContent::with_content_type("plain", "text/plain");
+        let json = MessageContent::json("{}");
+        let from_string = MessageContent::from("owned".to_string());
+        let from_str = MessageContent::from("borrowed");
+
+        assert_eq!(octets.content_type().as_str(), "application/octet-stream");
+        assert_eq!(octets.as_ref(), b"raw");
+        assert_eq!(plain.content_type().as_str(), "text/plain");
+        assert_eq!(plain.as_str(), "plain");
+        assert_eq!(json.content_type().as_str(), "application/json");
+        assert_eq!(from_string.into_string(), "owned");
+        assert_eq!(from_str.as_slice(), b"borrowed");
+    }
+
+    #[test]
+    fn message_conversion_includes_content_and_headers() {
+        let message = v1::Message::from(&MessageEnvelope {
+            content: MessageContent::json(r#"{"ok":true}"#),
+            headers: MessageHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+        });
+
+        let content = message.content.as_option().unwrap();
+        assert_eq!(content.content_type, "application/json");
+        assert_eq!(content.data, br#"{"ok":true}"#);
+        assert_eq!(message.headers.len(), 1);
+        assert_eq!(message.headers[0].name, "x-kind");
+        assert_eq!(message.headers[0].value, "heartbeat");
     }
 
     mod proptests {
@@ -196,8 +402,8 @@ mod tests {
                 let headers = MessageHeaders::new([(name.as_str(), value.as_str())]).unwrap();
                 let slice = headers.as_slice();
                 prop_assert_eq!(slice.len(), 1);
-                prop_assert_eq!(slice[0].0.as_str(), name.as_str());
-                prop_assert_eq!(slice[0].1.as_str(), value.as_str());
+                prop_assert_eq!(slice[0].name().as_str(), name.as_str());
+                prop_assert_eq!(slice[0].value().as_str(), value.as_str());
             }
 
             #[test]
