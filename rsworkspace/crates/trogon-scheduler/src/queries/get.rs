@@ -5,17 +5,17 @@ use crate::{error::SchedulerError, read_model::Schedule};
 use super::ScheduleId;
 
 #[derive(Debug, Clone)]
-pub struct GetScheduleCommand {
+pub struct GetSchedule {
     pub id: ScheduleId,
 }
 
-impl GetScheduleCommand {
+impl GetSchedule {
     pub const fn new(id: ScheduleId) -> Self {
         Self { id }
     }
 }
 
-pub async fn run(store: &kv::Store, command: GetScheduleCommand) -> Result<Option<Schedule>, SchedulerError> {
+pub async fn run(store: &kv::Store, command: GetSchedule) -> Result<Option<Schedule>, SchedulerError> {
     let Some(entry) = store
         .entry(command.id.as_str())
         .await

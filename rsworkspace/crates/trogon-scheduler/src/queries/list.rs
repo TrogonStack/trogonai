@@ -5,9 +5,9 @@ use async_nats::jetstream::kv;
 use crate::{error::SchedulerError, kv::SCHEDULES_CHECKPOINT_KEY, read_model::Schedule};
 
 #[derive(Debug, Clone, Default)]
-pub struct ListSchedulesCommand;
+pub struct ListSchedules;
 
-pub async fn run(store: &kv::Store, _command: ListSchedulesCommand) -> Result<Vec<Schedule>, SchedulerError> {
+pub async fn run(store: &kv::Store, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError> {
     let mut keys = store
         .keys()
         .await

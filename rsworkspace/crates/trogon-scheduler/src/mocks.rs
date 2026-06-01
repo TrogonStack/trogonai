@@ -21,7 +21,7 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    DeliveryKind, GetScheduleCommand, ListSchedulesCommand, ResolvedSchedule, ScheduleEventCase, ScheduleKind,
+    DeliveryKind, GetSchedule, ListSchedules, ResolvedSchedule, ScheduleEventCase, ScheduleKind,
     ScheduleStatusKind, SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
     error::SchedulerError,
@@ -236,11 +236,11 @@ impl MockSchedulerStore {
             .transpose()
     }
 
-    pub async fn get_schedule(&self, command: GetScheduleCommand) -> Result<Option<Schedule>, SchedulerError> {
+    pub async fn get_schedule(&self, command: GetSchedule) -> Result<Option<Schedule>, SchedulerError> {
         Ok(self.schedules.lock().unwrap().get(command.id.as_str()).cloned())
     }
 
-    pub async fn list_schedules(&self, _command: ListSchedulesCommand) -> Result<Vec<Schedule>, SchedulerError> {
+    pub async fn list_schedules(&self, _command: ListSchedules) -> Result<Vec<Schedule>, SchedulerError> {
         Ok(self.schedules.lock().unwrap().values().cloned().collect())
     }
 
@@ -682,8 +682,8 @@ mod tests {
     use super::*;
     use crate::commands::domain as command_domain;
     use crate::{
-        CreateScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope,
-        MessageHeaders, PauseScheduleCommand, RemoveScheduleCommand, ResumeScheduleCommand, Schedule,
+        CreateSchedule, GetSchedule, ListSchedules, MessageContent, MessageEnvelope,
+        MessageHeaders, PauseSchedule, RemoveSchedule, ResumeSchedule, Schedule,
         ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
     };
 
@@ -788,26 +788,26 @@ mod tests {
         store.seed_schedule(base_schedule("seeded"));
 
         let seeded = store
-            .get_schedule(GetScheduleCommand::new(ScheduleId::parse("seeded").unwrap()))
+            .get_schedule(GetSchedule::new(ScheduleId::parse("seeded").unwrap()))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(seeded, expected_schedule("seeded"));
 
-        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
+        CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
         let alpha = store
-            .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
+            .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(alpha, expected_schedule("alpha"));
 
-        CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("alpha")))
+        CommandExecution::new(&store, &PauseSchedule::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -815,7 +815,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
+                .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
                 .await
                 .unwrap()
                 .unwrap()
@@ -823,7 +823,7 @@ mod tests {
             ScheduleEventStatus::Paused
         );
 
-        let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
+        let listed = store.list_schedules(ListSchedules).await.unwrap();
         assert_eq!(listed.len(), 2);
 
         let (watch_jobs, mut watcher) = store.load_and_watch_schedules().await.unwrap();
@@ -834,7 +834,7 @@ mod tests {
                 .is_err()
         );
 
-        CommandExecution::new(&store, &RemoveScheduleCommand::new(command_schedule_id("alpha")))
+        CommandExecution::new(&store, &RemoveSchedule::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -842,13 +842,13 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .get_schedule(GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap()))
+                .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
                 .await
                 .unwrap()
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
+        let deleted_error = CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -876,13 +876,13 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
+        CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
-        let same_state_error = CommandExecution::new(&store, &ResumeScheduleCommand::new(command_schedule_id("alpha")))
+        let same_state_error = CommandExecution::new(&store, &ResumeSchedule::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -893,7 +893,7 @@ mod tests {
             CommandError::Decide(crate::ResumeScheduleError::AlreadyActive { .. })
         ));
 
-        let missing_error = CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("missing")))
+        let missing_error = CommandExecution::new(&store, &PauseSchedule::new(command_schedule_id("missing")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()

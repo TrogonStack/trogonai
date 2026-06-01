@@ -121,8 +121,8 @@ mod tests {
         create_schedule(id)
     }
 
-    fn pause_job_command(id: &str) -> PauseScheduleCommand {
-        PauseScheduleCommand::new(ScheduleId::parse(id).unwrap())
+    fn pause_job_command(id: &str) -> PauseSchedule {
+        PauseSchedule::new(ScheduleId::parse(id).unwrap())
     }
 
     fn added(id: &str) -> v1::ScheduleEvent {
