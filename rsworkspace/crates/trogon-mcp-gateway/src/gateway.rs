@@ -2,6 +2,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_nats::Message;
 use async_nats::jetstream;
@@ -16,14 +17,19 @@ use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
+use crate::approvals::{
+    ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
+    build_approval_required_with_subject, jsonrpc_error_with_approval_data,
+};
 use crate::egress::{
-    EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
-    strip_inbound_credentials,
+    EgressMinter, EgressTarget, apply_mesh_egress_headers, backend_target_aud, scope_for_tools_call,
+    session_id_from_headers, strip_inbound_credentials,
 };
 use crate::ingress::{IngressChainResolve, spawn_schema_cache_invalidation};
 use crate::jwt::JwtValidator;
 use crate::policy::SpicedbGatePolicy;
 use crate::policy::hierarchical::{self, MergeRequestContext};
+use crate::policy::{CallContext, MeshGatewayConfig, RiskDecision, evaluate_risk};
 use crate::policy::list_filter::{self, ListFilterParams, ToolCandidate};
 use crate::redaction::{
     RedactionApplyResult, RedactionDirection, RedactionOutcome, RedactionRegistry, RewriteEntry, SchemaRedactionContext,
@@ -71,6 +77,10 @@ pub struct GatewaySettings {
     pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
     /// When `None`, Pin 9 defaults apply via in-process limiter (Tier 2 KV sync TODO per ADR 0012).
     pub rate_limit: Option<Arc<RateLimiter>>,
+    /// When `None`, HITL approval is not engaged on the ingress path.
+    pub approval_gate: Option<Arc<dyn ApprovalGate>>,
+    /// Risk thresholds and approval envelope defaults for adaptive-access evaluation.
+    pub mesh_config: MeshGatewayConfig,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -370,6 +380,91 @@ async fn handle_ingress_inner(
         })
         .await;
         return Ok(());
+    }
+
+    if let Some(gate) = settings.approval_gate.as_ref()
+        && let Some((reason, ttl_s)) = hitl_approval_requirement(
+            &settings.mesh_config,
+            &gateway_identity,
+            &jwt_claims,
+            tenant_for_rate,
+            server_id,
+            &jsonrpc_method,
+            tool_call.as_deref(),
+            msg.payload.as_ref(),
+            &request_id,
+        )
+    {
+        let correlation_id = approval_correlation_id(&request_id);
+        let Ok(approval_request_id) = RequestId::new(correlation_id) else {
+            finish_ingress_blocked(FinishIngressBlockedParams {
+                client,
+                jetstream,
+                mcp: &settings.mcp,
+                msg: &msg,
+                backend_subject: &backend_subject,
+                jsonrpc_method: &jsonrpc_method,
+                gateway_identity: gateway_identity.clone(),
+                request_id: request_id.clone(),
+                requires_spicedb,
+                spicedb_allowed: None,
+                traces,
+                audit_outcome: "error",
+                jsonrpc_code: rpc_codes::POLICY_DENY,
+                jsonrpc_message: "invalid_approval_request_id".to_string(),
+            })
+            .await;
+            return Ok(());
+        };
+        let approval_request = ApprovalRequest::new(
+            approval_request_id.clone(),
+            Duration::from_secs(ttl_s),
+            None,
+        );
+        match gate.request_approval(&approval_request).await {
+            Ok(ApprovalDecision::Granted { .. }) => {}
+            Ok(ApprovalDecision::Denied { reason, .. }) => {
+                finish_ingress_blocked(FinishIngressBlockedParams {
+                    client,
+                    jetstream,
+                    mcp: &settings.mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    gateway_identity: gateway_identity.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed: None,
+                    traces,
+                    audit_outcome: "deny",
+                    jsonrpc_code: rpc_codes::POLICY_DENY,
+                    jsonrpc_message: reason,
+                })
+                .await;
+                return Ok(());
+            }
+            Err(ApprovalError::Timeout) | Err(ApprovalError::ChannelClosed) | Err(ApprovalError::MalformedDecision) => {
+                finish_ingress_approval_required(FinishIngressApprovalRequiredParams {
+                    client,
+                    jetstream,
+                    mcp: &settings.mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    gateway_identity: gateway_identity.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed: None,
+                    traces,
+                    approval_request_id,
+                    reason,
+                    ttl_s,
+                    approval_base_url: settings.mesh_config.approval_base_url.clone(),
+                })
+                .await;
+                return Ok(());
+            }
+        }
     }
 
     let requires_spicedb = merged_requires_spicedb(
@@ -856,6 +951,86 @@ fn evaluate_hierarchical_policy(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn hitl_approval_requirement(
+    mesh_config: &MeshGatewayConfig,
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+    payload: &[u8],
+    request_id: &Option<serde_json::Value>,
+) -> Option<(String, u64)> {
+    let ctx = policy_call_context(
+        gateway_identity,
+        jwt_claims,
+        tenant,
+        server_id,
+        jsonrpc_method,
+        tool_name,
+        payload,
+        request_id,
+    );
+    match evaluate_risk(&ctx, mesh_config) {
+        RiskDecision::RequireApproval { reason, ttl_s } => Some((reason, ttl_s)),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn policy_call_context(
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    tenant: &str,
+    server_id: &str,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+    payload: &[u8],
+    request_id: &Option<serde_json::Value>,
+) -> CallContext {
+    let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
+    CallContext {
+        tenant: tenant.to_string(),
+        agent_id: jwt_claims
+            .agent_id
+            .clone()
+            .unwrap_or_else(|| caller_sub.to_string()),
+        purpose: jwt_claims.purpose.clone().unwrap_or_default(),
+        target_aud: backend_target_aud(tenant, server_id),
+        scope_fingerprint: scope_for_tools_call(server_id, tool_name).unwrap_or_default(),
+        jsonrpc_method: jsonrpc_method.to_string(),
+        tool_name: tool_name.map(str::to_string),
+        recent_denials_60s: 0,
+        args: jsonrpc_params(payload),
+        request_id: approval_correlation_id(request_id),
+    }
+}
+
+fn approval_correlation_id(request_id: &Option<serde_json::Value>) -> String {
+    match request_id {
+        Some(value) if !value.is_null() => value
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| value.to_string()),
+        _ => format!(
+            "{:032x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ),
+    }
+}
+
+fn jsonrpc_params(payload: &[u8]) -> serde_json::Value {
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|value| value.get("params").cloned())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
 fn merged_requires_spicedb(
     fallback: &SpicedbGatePolicy,
     _settings: &GatewaySettings,
@@ -1076,6 +1251,70 @@ struct FinishIngressBlockedParams<'a> {
     audit_outcome: &'static str,
     jsonrpc_code: i32,
     jsonrpc_message: String,
+}
+
+struct FinishIngressApprovalRequiredParams<'a> {
+    client: &'a async_nats::Client,
+    jetstream: &'a jetstream::Context,
+    mcp: &'a Config,
+    msg: &'a Message,
+    backend_subject: &'a str,
+    jsonrpc_method: &'a str,
+    gateway_identity: GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+    requires_spicedb: bool,
+    spicedb_allowed: Option<bool>,
+    traces: &'a TraceStore,
+    approval_request_id: RequestId,
+    reason: String,
+    ttl_s: u64,
+    approval_base_url: String,
+}
+
+async fn finish_ingress_approval_required(params: FinishIngressApprovalRequiredParams<'_>) {
+    let prefix = params.mcp.prefix_str();
+    let approval_data = build_approval_required_with_subject(
+        &params.approval_request_id,
+        &ApprovalSubject::for_request(&params.approval_request_id),
+        &params.reason,
+        params.ttl_s,
+        params.approval_base_url.as_str(),
+    );
+    if params.msg.reply.is_some() {
+        reply_with_approval_required_error(params.client, params.msg, params.request_id.clone(), approval_data).await;
+    }
+    let envelope = AuditEnvelope::new(
+        params.msg.subject.to_string(),
+        params.backend_subject.to_string(),
+        "deny",
+        "request",
+        params.jsonrpc_method.to_string(),
+        params.gateway_identity.tenant.clone(),
+        params.gateway_identity.caller_sub.clone(),
+        params.gateway_identity.issuer.clone(),
+        params.gateway_identity.source,
+        params.request_id.clone(),
+        None,
+    );
+    let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
+    let subject = audit::audit_publish_subject(prefix, "deny", "request", &method_root);
+    audit::publish_audit(params.jetstream, subject, &envelope, std::time::Duration::from_secs(5)).await;
+
+    if let Some(id) = params.request_id {
+        params.traces.insert(
+            id.to_string(),
+            DecisionTrace {
+                subject_in: params.msg.subject.to_string(),
+                subject_out: params.backend_subject.to_string(),
+                jsonrpc_method: params.jsonrpc_method.to_string(),
+                cel_requires_spicedb: params.requires_spicedb,
+                spicedb_allowed: params.spicedb_allowed,
+                tenant: params.gateway_identity.tenant,
+                caller_sub: params.gateway_identity.caller_sub,
+                identity_source: params.gateway_identity.source,
+            },
+        );
+    }
 }
 
 async fn finish_ingress_rate_limited(params: FinishIngressRateLimitedParams<'_>) {
@@ -1501,6 +1740,28 @@ async fn reply_with_jsonrpc_error(
     }
 }
 
+async fn reply_with_approval_required_error(
+    client: &async_nats::Client,
+    ingress: &Message,
+    id: Option<serde_json::Value>,
+    data: serde_json::Value,
+) {
+    let body = Bytes::from(jsonrpc_error_with_approval_data(id, data).to_string());
+    let Some(reply) = ingress.reply.clone() else {
+        warn!("cannot send JSON-RPC approval_required: ingress message has no reply subject");
+        return;
+    };
+    if let Err(e) = client
+        .publish_with_headers(reply.to_string(), async_nats::HeaderMap::new(), body)
+        .await
+    {
+        warn!(error = %e, "failed to publish approval_required JSON-RPC to reply subject");
+    }
+    if let Err(e) = client.flush().await {
+        warn!(error = %e, "flush after approval_required JSON-RPC failed");
+    }
+}
+
 fn jsonrpc_error_bytes(id: Option<serde_json::Value>, code: i32, message: String) -> Bytes {
     let value = serde_json::json!({
         "jsonrpc": "2.0",
@@ -1589,5 +1850,43 @@ mod tests {
         assert_eq!(value["error"]["data"]["scope"], "caller");
         assert_eq!(value["error"]["data"]["retry_after_ms"], 750);
         assert_eq!(value["error"]["data"]["trace_id"], "abc123");
+    }
+
+    #[test]
+    fn hitl_requirement_detects_risk_sentinel() {
+        use crate::authz::IdentitySource;
+        use crate::jwt::VerifiedJwtClaims;
+        use crate::policy::{MeshGatewayConfig, RiskThresholds};
+
+        let identity = GatewayIdentity {
+            tenant: Some("acme".into()),
+            caller_sub: Some("alice".into()),
+            issuer: None,
+            jti: None,
+            source: IdentitySource::Jwt,
+        };
+        let claims = VerifiedJwtClaims::default();
+        let payload = br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"deploy"}}"#;
+        let mesh = MeshGatewayConfig {
+            risk: RiskThresholds {
+                approval_score: 0,
+                deny_score: 10_000,
+                step_up_purposes: Vec::new(),
+                approval_denials_60s: 10_000,
+            },
+            ..MeshGatewayConfig::default()
+        };
+        let requirement = hitl_approval_requirement(
+            &mesh,
+            &identity,
+            &claims,
+            "acme",
+            "fixture",
+            "tools/call",
+            Some("deploy"),
+            payload,
+            &Some(serde_json::json!(7)),
+        );
+        assert!(requirement.is_some());
     }
 }
