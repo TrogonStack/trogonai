@@ -3116,7 +3116,7 @@ async fn runner_todo_read_returns_pre_populated_active_todos() {
 // ── Spawn agent ───────────────────────────────────────────────────────────────
 
 /// Agent calls `spawn_agent` → `SpawnAgentTool` sends a NATS request on
-/// `{prefix}.agent.spawn` → a mock responder replies → the response lands in
+/// `{prefix}.spawn` → a mock responder replies → the response lands in
 /// the second Anthropic call as a tool result → end_turn.
 #[tokio::test]
 async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
@@ -3128,7 +3128,7 @@ async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
     let spawn_nats = nats.clone();
     let spawn_prefix = prefix.to_string();
     tokio::spawn(async move {
-        let subject = format!("{spawn_prefix}.agent.spawn");
+        let subject = format!("{spawn_prefix}.spawn");
         let mut sub = spawn_nats.subscribe(subject).await.unwrap();
         if let Some(msg) = sub.next().await {
             spawn_nats

@@ -10,6 +10,7 @@ pub trait TrogonMdLoading {
 }
 
 /// Production implementation — reads real files from disk.
+#[derive(Clone)]
 pub struct FsTrogonMdLoader;
 
 #[async_trait(?Send)]
