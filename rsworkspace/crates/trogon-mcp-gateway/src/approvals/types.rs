@@ -40,12 +40,12 @@ impl RequestId {
 pub struct ApprovalSubject(String);
 
 impl ApprovalSubject {
-    pub fn for_request(id: &RequestId) -> Self {
-        Self(format!("mcp.approvals.{}", id.as_str()))
+    pub fn for_request(prefix: &str, id: &RequestId) -> Self {
+        Self(format!("{}.approvals.{}", prefix, id.as_str()))
     }
 
-    pub fn for_step_up(id: &RequestId) -> Self {
-        Self(format!("mcp.approvals.step-up.{}", id.as_str()))
+    pub fn for_step_up(prefix: &str, id: &RequestId) -> Self {
+        Self(format!("{}.approvals.step-up.{}", prefix, id.as_str()))
     }
 
     #[must_use]
@@ -64,11 +64,12 @@ pub struct ApprovalRequest {
 
 impl ApprovalRequest {
     pub fn new(
+        prefix: &str,
         request_id: RequestId,
         ttl: Duration,
         approval_url: Option<String>,
     ) -> Self {
-        let approval_subject = ApprovalSubject::for_request(&request_id);
+        let approval_subject = ApprovalSubject::for_request(prefix, &request_id);
         Self {
             request_id,
             ttl,

@@ -404,6 +404,127 @@ async fn handle_ingress_inner(
         return Ok(());
     }
 
+    if let Some(gate) = settings.approval_gate.as_ref()
+        && let Some((reason, ttl_s)) = hitl_approval_requirement(
+            &settings.mesh_config,
+            &gateway_identity,
+            &jwt_claims,
+            tenant_for_rate,
+            server_id,
+            &jsonrpc_method,
+            tool_call.as_deref(),
+            msg.payload.as_ref(),
+            &request_id,
+        )
+    {
+        let correlation_id = approval_correlation_id(&request_id);
+        let Ok(approval_request_id) = RequestId::new(correlation_id) else {
+            finish_ingress_blocked(FinishIngressBlockedParams {
+                client,
+                jetstream,
+                mcp: &settings.mcp,
+                msg: &msg,
+                backend_subject: &backend_subject,
+                jsonrpc_method: &jsonrpc_method,
+                gateway_identity: gateway_identity.clone(),
+                request_id: request_id.clone(),
+                requires_spicedb,
+                spicedb_allowed: None,
+                traces,
+                audit_outcome: "error",
+                jsonrpc_code: rpc_codes::POLICY_DENY,
+                jsonrpc_message: "invalid_approval_request_id".to_string(),
+            })
+            .await;
+            return Ok(());
+        };
+        let approval_request = ApprovalRequest::new(
+            settings.mcp.prefix_str(),
+            approval_request_id.clone(),
+            Duration::from_secs(ttl_s),
+            None,
+        );
+        match gate.request_approval(&approval_request).await {
+            Ok(ApprovalDecision::Granted { .. }) => {}
+            Ok(ApprovalDecision::Denied { reason, .. }) => {
+                finish_ingress_blocked(FinishIngressBlockedParams {
+                    client,
+                    jetstream,
+                    mcp: &settings.mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    gateway_identity: gateway_identity.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed: None,
+                    traces,
+                    audit_outcome: "deny",
+                    jsonrpc_code: rpc_codes::POLICY_DENY,
+                    jsonrpc_message: reason,
+                })
+                .await;
+                return Ok(());
+            }
+            Err(ApprovalError::Timeout) | Err(ApprovalError::ChannelClosed) | Err(ApprovalError::MalformedDecision) => {
+                finish_ingress_approval_required(FinishIngressApprovalRequiredParams {
+                    client,
+                    jetstream,
+                    mcp: &settings.mcp,
+                    msg: &msg,
+                    backend_subject: &backend_subject,
+                    jsonrpc_method: &jsonrpc_method,
+                    gateway_identity: gateway_identity.clone(),
+                    request_id: request_id.clone(),
+                    requires_spicedb,
+                    spicedb_allowed: None,
+                    traces,
+                    approval_request_id,
+                    reason,
+                    ttl_s,
+                    approval_base_url: settings.mesh_config.approval_base_url.clone(),
+                })
+                .await;
+                return Ok(());
+            }
+        }
+    }
+
+    if let Some(throttle) = settings.context_throttle.as_ref() {
+        match context_throttle_key(&gateway_identity, &jwt_claims, legacy_tenant_hdr.as_deref()) {
+            Some(key) => match throttle.acquire(&key, 1) {
+                Ok(ContextThrottleOutcome::Allowed) => {}
+                Ok(ContextThrottleOutcome::Throttled { retry_after_ms }) => {
+                    finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+                        client,
+                        jetstream,
+                        mcp: &settings.mcp,
+                        msg: &msg,
+                        backend_subject: &backend_subject,
+                        jsonrpc_method: &jsonrpc_method,
+                        gateway_identity: gateway_identity.clone(),
+                        request_id: request_id.clone(),
+                        requires_spicedb,
+                        spicedb_allowed: None,
+                        traces,
+                        deny: RateLimitDeny {
+                            scope: RateLimitScope::Purpose,
+                            retry_after_ms,
+                        },
+                    })
+                    .await;
+                    return Ok(());
+                }
+                Err(err) => {
+                    debug!(error = %err, key = %key, "context throttle acquire failed; continuing");
+                }
+            },
+            None => {
+                debug!("context throttle skipped: incomplete tenant_id, agent_id, or purpose");
+            }
+        }
+    }
+
     if let Some(block) = evaluate_step_up(
         settings,
         &jsonrpc_method,
@@ -935,6 +1056,7 @@ pub async fn evaluate_step_up(
                     });
                 };
                 let data = build_approval_required_step_up(
+                    settings.mcp.prefix_str(),
                     &request_id_typed,
                     reason.as_str(),
                     DEFAULT_STEPUP_APPROVAL_TTL_SECS,
@@ -1378,7 +1500,7 @@ async fn finish_ingress_approval_required(params: FinishIngressApprovalRequiredP
     let prefix = params.mcp.prefix_str();
     let approval_data = build_approval_required_with_subject(
         &params.approval_request_id,
-        &ApprovalSubject::for_request(&params.approval_request_id),
+        &ApprovalSubject::for_request(prefix, &params.approval_request_id),
         &params.reason,
         params.ttl_s,
         params.approval_base_url.as_str(),
