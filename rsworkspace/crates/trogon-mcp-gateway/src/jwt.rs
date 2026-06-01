@@ -25,6 +25,7 @@ pub struct VerifiedJwtClaims {
     pub wkl: Option<String>,
     pub wkl_attested_at: Option<i64>,
     pub auth_method: Option<String>,
+    pub auth_time: Option<i64>,
     pub act_chain: Option<Vec<ActChainEntry>>,
     pub purpose: Option<String>,
     pub session_id: Option<String>,

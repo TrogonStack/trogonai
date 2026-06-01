@@ -134,6 +134,9 @@ async fn main() -> Result<(), BoxError> {
         egress,
         chain_resolver,
         rate_limit: None,
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
     };
 
     info!(
