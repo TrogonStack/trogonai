@@ -176,6 +176,28 @@ mod tests {
         }
     }
 
+    fn paused(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::SchedulePaused {
+                    schedule_id: id.to_string(),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn resumed(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleResumed {
+                    schedule_id: id.to_string(),
+                }
+                .into(),
+            ),
+        }
+    }
+
     #[test]
     fn given_when_then_supports_create_schedule_decider() {
         TestCase::<CreateSchedule>::new()
@@ -188,6 +210,26 @@ mod tests {
     fn given_when_then_supports_create_schedule_failures() {
         TestCase::<CreateSchedule>::new()
             .given([added("backup")])
+            .when(create_schedule("backup"))
+            .then_error(CreateScheduleDecideError::AlreadyExists {
+                id: ScheduleId::parse("backup").unwrap(),
+            });
+    }
+
+    #[test]
+    fn replaying_lifecycle_events_rejects_existing_schedule_ids() {
+        TestCase::<CreateSchedule>::new()
+            .given([added("backup")])
+            .given([paused("backup")])
+            .when(create_schedule("backup"))
+            .then_error(CreateScheduleDecideError::AlreadyExists {
+                id: ScheduleId::parse("backup").unwrap(),
+            });
+
+        TestCase::<CreateSchedule>::new()
+            .given([added("backup")])
+            .given([paused("backup")])
+            .given([resumed("backup")])
             .when(create_schedule("backup"))
             .then_error(CreateScheduleDecideError::AlreadyExists {
                 id: ScheduleId::parse("backup").unwrap(),

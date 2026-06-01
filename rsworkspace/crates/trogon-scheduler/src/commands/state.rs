@@ -58,8 +58,21 @@ pub(super) fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Resul
             }
         }
         Some(ScheduleEventCase::ScheduleRemoved(_)) => state_v1::StateValue::STATE_VALUE_DELETED,
+        Some(ScheduleEventCase::SchedulePaused(_)) => {
+            if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
+                state_v1::StateValue::STATE_VALUE_DELETED
+            } else {
+                state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
+            }
+        }
+        Some(ScheduleEventCase::ScheduleResumed(_)) => {
+            if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
+                state_v1::StateValue::STATE_VALUE_DELETED
+            } else {
+                state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED
+            }
+        }
         None => return Err(EvolveError::UnsupportedEvent),
-        Some(_) => return Err(EvolveError::UnsupportedEvent),
     };
 
     Ok(state_v1::State {
@@ -89,6 +102,28 @@ mod tests {
                     schedule: MessageField::default(),
                     delivery: MessageField::default(),
                     message: MessageField::default(),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn paused() -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::SchedulePaused {
+                    schedule_id: "backup".to_string(),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn resumed() -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::ScheduleResumed {
+                    schedule_id: "backup".to_string(),
                 }
                 .into(),
             ),
@@ -131,6 +166,42 @@ mod tests {
     }
 
     #[test]
+    fn evolve_lifecycle_events_track_enabled_and_disabled_status() {
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED), &paused())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
+        );
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED), &resumed())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_MISSING), &paused())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED)
+        );
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_MISSING), &resumed())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
+        );
+    }
+
+    #[test]
     fn evolve_removed_and_deleted_state_are_terminal() {
         let removed = v1::ScheduleEvent {
             event: Some(
@@ -160,6 +231,22 @@ mod tests {
                 .as_known(),
             Some(state_v1::StateValue::STATE_VALUE_DELETED)
         );
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_DELETED), &paused())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_DELETED)
+        );
+        assert_eq!(
+            evolve(state(state_v1::StateValue::STATE_VALUE_DELETED), &resumed())
+                .unwrap()
+                .state
+                .unwrap()
+                .as_known(),
+            Some(state_v1::StateValue::STATE_VALUE_DELETED)
+        );
     }
 
     #[test]
@@ -180,21 +267,6 @@ mod tests {
             evolve(
                 state(state_v1::StateValue::STATE_VALUE_MISSING),
                 &v1::ScheduleEvent { event: None }
-            )
-            .unwrap_err(),
-            EvolveError::UnsupportedEvent
-        );
-        assert_eq!(
-            evolve(
-                state(state_v1::StateValue::STATE_VALUE_MISSING),
-                &v1::ScheduleEvent {
-                    event: Some(
-                        v1::SchedulePaused {
-                            schedule_id: "backup".to_string(),
-                        }
-                        .into()
-                    ),
-                }
             )
             .unwrap_err(),
             EvolveError::UnsupportedEvent
