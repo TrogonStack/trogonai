@@ -45,7 +45,7 @@ impl ZedTokenCacheHarness {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
-            context_throttle: None,
+            anomaly_emitter: None,
         };
         Self {
             nats_conf,
