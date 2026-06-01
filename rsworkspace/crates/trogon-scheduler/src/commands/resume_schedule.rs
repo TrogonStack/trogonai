@@ -4,57 +4,57 @@ use trogonai_proto::scheduler::schedules::{state_v1, v1};
 use super::domain::ScheduleId;
 
 #[derive(Debug, Clone)]
-pub struct PauseSchedule {
+pub struct ResumeSchedule {
     pub id: ScheduleId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PauseScheduleError {
+pub enum ResumeScheduleError {
     ScheduleNotFound { id: ScheduleId },
     ScheduleDeleted { id: ScheduleId },
-    AlreadyPaused { id: ScheduleId },
+    AlreadyActive { id: ScheduleId },
     MissingStateValue,
     UnknownStateValue { value: i32 },
 }
 
-impl std::fmt::Display for PauseScheduleError {
+impl std::fmt::Display for ResumeScheduleError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ScheduleNotFound { id } => write!(formatter, "schedule '{id}' does not exist"),
             Self::ScheduleDeleted { id } => write!(formatter, "schedule '{id}' was deleted"),
-            Self::AlreadyPaused { id } => write!(formatter, "schedule '{id}' is already paused"),
+            Self::AlreadyActive { id } => write!(formatter, "schedule '{id}' is already active"),
             Self::MissingStateValue => formatter.write_str("state value is missing"),
             Self::UnknownStateValue { value } => write!(formatter, "unknown state value: {value}"),
         }
     }
 }
 
-impl std::error::Error for PauseScheduleError {}
+impl std::error::Error for ResumeScheduleError {}
 
-fn current_state(state: &state_v1::State) -> Result<state_v1::StateValue, PauseScheduleError> {
+fn current_state(state: &state_v1::State) -> Result<state_v1::StateValue, ResumeScheduleError> {
     let Some(value) = state.state.as_ref() else {
-        return Err(PauseScheduleError::MissingStateValue);
+        return Err(ResumeScheduleError::MissingStateValue);
     };
     let Some(current_state) = value.as_known() else {
-        return Err(PauseScheduleError::UnknownStateValue { value: value.to_i32() });
+        return Err(ResumeScheduleError::UnknownStateValue { value: value.to_i32() });
     };
     if current_state == state_v1::StateValue::STATE_VALUE_UNSPECIFIED {
-        return Err(PauseScheduleError::UnknownStateValue { value: 0 });
+        return Err(ResumeScheduleError::UnknownStateValue { value: 0 });
     }
     Ok(current_state)
 }
 
-impl PauseSchedule {
+impl ResumeSchedule {
     pub fn new(id: ScheduleId) -> Self {
         Self { id }
     }
 }
 
-impl Decider for PauseSchedule {
+impl Decider for ResumeSchedule {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
-    type DecideError = PauseScheduleError;
+    type DecideError = ResumeScheduleError;
     type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
@@ -72,17 +72,17 @@ impl Decider for PauseSchedule {
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let current_state = current_state(state)?;
         if current_state == state_v1::StateValue::STATE_VALUE_MISSING {
-            return Err(PauseScheduleError::ScheduleNotFound { id: command.id.clone() });
+            return Err(ResumeScheduleError::ScheduleNotFound { id: command.id.clone() });
         }
         if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
-            return Err(PauseScheduleError::ScheduleDeleted { id: command.id.clone() });
+            return Err(ResumeScheduleError::ScheduleDeleted { id: command.id.clone() });
         }
-        if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED {
-            return Err(PauseScheduleError::AlreadyPaused { id: command.id.clone() });
+        if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED {
+            return Err(ResumeScheduleError::AlreadyActive { id: command.id.clone() });
         }
         Ok(Decision::event(v1::ScheduleEvent {
             event: Some(
-                v1::SchedulePaused {
+                v1::ScheduleResumed {
                     schedule_id: command.id.as_str().to_string(),
                 }
                 .into(),
@@ -94,20 +94,20 @@ impl Decider for PauseSchedule {
 #[cfg(test)]
 mod tests {
     use buffa::EnumValue;
-    use trogon_decider::testing::TestCase;
 
     use super::*;
     use crate::commands::domain::{
         Delivery, MessageContent, MessageEnvelope, Schedule as DomainSchedule, ScheduleEventDelivery,
-        ScheduleEventSchedule, ScheduleEventStatus, ScheduleHeaders, ScheduleMessage,
+        ScheduleEventSchedule, ScheduleEventStatus, ScheduleHeaders, ScheduleId, ScheduleMessage,
     };
+    use trogon_decider::testing::TestCase;
 
     fn schedule_id(id: &str) -> ScheduleId {
         ScheduleId::parse(id).unwrap()
     }
 
-    fn pause_job_command(id: &str) -> PauseSchedule {
-        PauseSchedule::new(ScheduleId::parse(id).unwrap())
+    fn resume_job_command(id: &str) -> ResumeSchedule {
+        ResumeSchedule::new(ScheduleId::parse(id).unwrap())
     }
 
     fn create_schedule(id: &str, status: ScheduleEventStatus) -> crate::CreateSchedule {
@@ -124,7 +124,7 @@ mod tests {
     }
 
     fn added(id: &str) -> v1::ScheduleEvent {
-        let command = create_schedule(id, ScheduleEventStatus::Scheduled);
+        let command = create_schedule(id, ScheduleEventStatus::Paused);
 
         v1::ScheduleEvent {
             event: Some(
@@ -144,10 +144,10 @@ mod tests {
         }
     }
 
-    fn paused(id: &str) -> v1::ScheduleEvent {
+    fn resumed(id: &str) -> v1::ScheduleEvent {
         v1::ScheduleEvent {
             event: Some(
-                v1::SchedulePaused {
+                v1::ScheduleResumed {
                     schedule_id: id.to_string(),
                 }
                 .into(),
@@ -167,42 +167,41 @@ mod tests {
     }
 
     #[test]
-    fn given_when_then_supports_pause_job_decider() {
-        TestCase::<PauseSchedule>::new()
+    fn given_when_then_supports_resume_job_decider() {
+        TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
-            .when(pause_job_command("backup"))
-            .then([paused("backup")]);
+            .when(resume_job_command("backup"))
+            .then([resumed("backup")]);
     }
 
     #[test]
-    fn given_when_then_supports_pause_job_failures() {
-        TestCase::<PauseSchedule>::new()
+    fn given_when_then_supports_resume_job_failures() {
+        TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
-            .given([paused("backup")])
-            .when(pause_job_command("backup"))
-            .then_error(PauseScheduleError::AlreadyPaused {
+            .given([resumed("backup")])
+            .when(resume_job_command("backup"))
+            .then_error(ResumeScheduleError::AlreadyActive {
                 id: ScheduleId::parse("backup").unwrap(),
             });
     }
 
     #[test]
-    fn given_when_then_rejects_pausing_missing_jobs() {
-        TestCase::<PauseSchedule>::new()
+    fn given_when_then_rejects_resuming_missing_jobs() {
+        TestCase::<ResumeSchedule>::new()
             .given_no_history()
-            .when(pause_job_command("backup"))
-            .then_error(PauseScheduleError::ScheduleNotFound {
+            .when(resume_job_command("backup"))
+            .then_error(ResumeScheduleError::ScheduleNotFound {
                 id: ScheduleId::parse("backup").unwrap(),
             });
     }
 
     #[test]
-    fn given_when_then_rejects_pausing_deleted_jobs() {
-        TestCase::<PauseSchedule>::new()
+    fn given_when_then_rejects_resuming_deleted_jobs() {
+        TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
-            .given([paused("backup")])
             .given([removed("backup")])
-            .when(pause_job_command("backup"))
-            .then_error(PauseScheduleError::ScheduleDeleted {
+            .when(resume_job_command("backup"))
+            .then_error(ResumeScheduleError::ScheduleDeleted {
                 id: ScheduleId::parse("backup").unwrap(),
             });
     }
@@ -212,23 +211,23 @@ mod tests {
         let id = ScheduleId::parse("backup").unwrap();
 
         assert_eq!(
-            PauseScheduleError::ScheduleNotFound { id: id.clone() }.to_string(),
+            ResumeScheduleError::ScheduleNotFound { id: id.clone() }.to_string(),
             "schedule 'backup' does not exist"
         );
         assert_eq!(
-            PauseScheduleError::ScheduleDeleted { id: id.clone() }.to_string(),
+            ResumeScheduleError::ScheduleDeleted { id: id.clone() }.to_string(),
             "schedule 'backup' was deleted"
         );
         assert_eq!(
-            PauseScheduleError::AlreadyPaused { id }.to_string(),
-            "schedule 'backup' is already paused"
+            ResumeScheduleError::AlreadyActive { id }.to_string(),
+            "schedule 'backup' is already active"
         );
         assert_eq!(
-            PauseScheduleError::MissingStateValue.to_string(),
+            ResumeScheduleError::MissingStateValue.to_string(),
             "state value is missing"
         );
         assert_eq!(
-            PauseScheduleError::UnknownStateValue { value: 42 }.to_string(),
+            ResumeScheduleError::UnknownStateValue { value: 42 }.to_string(),
             "unknown state value: 42"
         );
     }
@@ -237,21 +236,21 @@ mod tests {
     fn rejects_invalid_state_values() {
         assert_eq!(
             current_state(&state_v1::State { state: None }).unwrap_err(),
-            PauseScheduleError::MissingStateValue
+            ResumeScheduleError::MissingStateValue
         );
         assert_eq!(
             current_state(&state_v1::State {
                 state: Some(EnumValue::from(123)),
             })
             .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 123 }
+            ResumeScheduleError::UnknownStateValue { value: 123 }
         );
         assert_eq!(
             current_state(&state_v1::State {
                 state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
             })
             .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 0 }
+            ResumeScheduleError::UnknownStateValue { value: 0 }
         );
     }
 }
