@@ -134,7 +134,10 @@ pub fn apply(
     }
 }
 
-fn validate_event_payload_schedule_id(stream_id: &str, event: &v1::ScheduleEvent) -> Result<(), ScheduleTransitionError> {
+fn validate_event_payload_schedule_id(
+    stream_id: &str,
+    event: &v1::ScheduleEvent,
+) -> Result<(), ScheduleTransitionError> {
     let Some(schedule_id) = event_schedule_id(event) else {
         return Ok(());
     };
@@ -319,7 +322,10 @@ impl std::fmt::Display for ScheduleTransitionError {
         match self {
             Self::InvalidEventId { id, .. } => write!(f, "schedule event id '{id}' is invalid"),
             Self::MismatchedEventScheduleId { stream_id, schedule_id } => {
-                write!(f, "schedule event id '{schedule_id}' does not match stream id '{stream_id}'")
+                write!(
+                    f,
+                    "schedule event id '{schedule_id}' does not match stream id '{stream_id}'"
+                )
             }
             Self::MalformedEvent { context } => write!(f, "schedule event is malformed: {context}"),
             Self::CannotAddExistingSchedule { id } => write!(f, "job '{id}' already exists"),
@@ -460,7 +466,10 @@ where
 
     while let Some(message) = messages.next().await {
         let message = message.map_err(|source| {
-            SchedulerError::event_source("failed to read schedule event during schedules read-model catch-up", source)
+            SchedulerError::event_source(
+                "failed to read schedule event during schedules read-model catch-up",
+                source,
+            )
         })?;
         let sequence = event_message_sequence(&message, "failed to read schedules read-model catch-up event metadata")?;
         if sequence > info.state.last_sequence {
@@ -588,17 +597,17 @@ async fn rebuild_jobs_from_stream(
         .map_err(|source| SchedulerError::event_source("failed to open schedule projection replay stream", source))?;
 
     while let Some(message) = messages.next().await {
-        let message =
-            message.map_err(|source| SchedulerError::event_source("failed to read schedule event from stream", source))?;
+        let message = message
+            .map_err(|source| SchedulerError::event_source("failed to read schedule event from stream", source))?;
         let sequence = event_message_sequence(&message, "failed to read schedule event metadata")?;
         if sequence > last_sequence {
             break;
         }
         let reached_tail = sequence >= last_sequence;
         let event = decode_recorded_watch_message(&message)?;
-        let data = event
-            .decode::<v1::ScheduleEvent>()
-            .map_err(|source| SchedulerError::event_source("failed to decode recorded schedule event payload", source))?;
+        let data = event.decode::<v1::ScheduleEvent>().map_err(|source| {
+            SchedulerError::event_source("failed to decode recorded schedule event payload", source)
+        })?;
         let Some(data) = data.into_decoded() else {
             if reached_tail {
                 break;
@@ -851,8 +860,9 @@ fn apply_event_to_read_model_state(
     event: &v1::ScheduleEvent,
 ) -> Result<Option<ProjectionChange>, SchedulerError> {
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
-    let next_state = apply(stream_id, current_state.clone(), event)
-        .map_err(|source| SchedulerError::event_source("failed to apply schedule event to schedules read model", source))?;
+    let next_state = apply(stream_id, current_state.clone(), event).map_err(|source| {
+        SchedulerError::event_source("failed to apply schedule event to schedules read model", source)
+    })?;
     let change = projection_change(&current_state, &next_state);
 
     match next_state.clone() {
@@ -1059,7 +1069,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, ScheduleTransitionError::CannotAddDeletedSchedule { .. }));
+        assert!(matches!(
+            error,
+            ScheduleTransitionError::CannotAddDeletedSchedule { .. }
+        ));
     }
 
     #[test]
@@ -1096,7 +1109,10 @@ mod tests {
             &added_event("backup"),
         )
         .unwrap_err();
-        assert!(matches!(error, ScheduleTransitionError::CannotAddExistingSchedule { .. }));
+        assert!(matches!(
+            error,
+            ScheduleTransitionError::CannotAddExistingSchedule { .. }
+        ));
     }
 
     #[test]
@@ -1105,7 +1121,10 @@ mod tests {
         let prepared = prepare_projection_change(&state, "backup", &added_event("backup")).unwrap();
 
         assert!(state.is_empty());
-        assert_eq!(prepared.change, Some(ProjectionChange::Upsert(expected_schedule("backup"))));
+        assert_eq!(
+            prepared.change,
+            Some(ProjectionChange::Upsert(expected_schedule("backup")))
+        );
 
         commit_watched_projection_state(&mut state, prepared.stream_id, prepared.next_state);
 

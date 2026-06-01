@@ -419,9 +419,9 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, Schedul
 
     let trimmed = timezone.trim();
     if trimmed.is_empty() || trimmed != timezone || timezone.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
-        return Err(SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidTimezone {
-            timezone,
-        }));
+        return Err(SchedulerError::invalid_schedule_spec(
+            ScheduleSpecError::InvalidTimezone { timezone },
+        ));
     }
     Ok(Some(timezone))
 }

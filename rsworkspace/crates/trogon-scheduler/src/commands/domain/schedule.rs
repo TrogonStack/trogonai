@@ -724,8 +724,8 @@ impl From<Schedule> for ScheduleEventSchedule {
     }
 }
 
-impl From<&ScheduleSpec> for ScheduleEventSchedule {
-    fn from(value: &ScheduleSpec) -> Self {
+impl From<&Schedule> for ScheduleEventSchedule {
+    fn from(value: &Schedule) -> Self {
         match value {
             Schedule::At { at } => Self::At { at: *at },
             Schedule::Every { every } => Self::Every { every: *every },
@@ -733,7 +733,7 @@ impl From<&ScheduleSpec> for ScheduleEventSchedule {
                 expr: expr.clone(),
                 timezone: timezone.clone(),
             },
-            ScheduleSpec::RRule {
+            Schedule::RRule {
                 dtstart,
                 rrule,
                 timezone,

@@ -21,8 +21,8 @@ use trogon_nats::lease::{ReleaseLease, RenewLease, TryAcquireLease};
 use trogon_std::{NowV7, UuidV7Generator};
 
 use crate::{
-    DeliveryKind, GetSchedule, ListSchedules, ResolvedSchedule, ScheduleEventCase, ScheduleKind,
-    ScheduleStatusKind, SourceKind,
+    DeliveryKind, GetSchedule, ListSchedules, ResolvedSchedule, ScheduleEventCase, ScheduleKind, ScheduleStatusKind,
+    SourceKind,
     config::{ScheduleWriteCondition, ScheduleWriteState},
     error::SchedulerError,
     projections::{LoadAndWatchSchedulesResult, ScheduleWatchStream},
@@ -575,8 +575,9 @@ impl StreamAppend<str> for MockSchedulerStore {
         let mut raw_position = current_position.map(StreamPosition::as_u64).unwrap_or(0);
 
         for event_data in events {
-            let event = v1::ScheduleEvent::decode(EventData::new(&event_data.r#type, &event_data.content))
-                .map_err(|source| SchedulerError::event_source("failed to decode mocked schedule event payload", source))?;
+            let event = v1::ScheduleEvent::decode(EventData::new(&event_data.r#type, &event_data.content)).map_err(
+                |source| SchedulerError::event_source("failed to decode mocked schedule event payload", source),
+            )?;
             raw_position += 1;
             stored_events.push(event_data);
             let Some(event) = event.into_decoded() else {
@@ -682,9 +683,9 @@ mod tests {
     use super::*;
     use crate::commands::domain as command_domain;
     use crate::{
-        CreateSchedule, GetSchedule, ListSchedules, MessageContent, MessageEnvelope,
-        MessageHeaders, PauseSchedule, RemoveSchedule, ResumeSchedule, Schedule,
-        ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleWriteCondition,
+        CreateSchedule, GetSchedule, ListSchedules, MessageContent, MessageEnvelope, MessageHeaders, PauseSchedule,
+        RemoveSchedule, ResumeSchedule, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
+        ScheduleId, ScheduleWriteCondition,
     };
 
     fn position(value: u64) -> StreamPosition {

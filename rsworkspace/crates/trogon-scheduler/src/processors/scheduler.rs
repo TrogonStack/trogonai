@@ -404,9 +404,9 @@ async fn rebuild_scheduler_state_from_stream(
         let reached_bootstrap_tail = sequence >= last_sequence;
 
         let event = decode_recorded_watch_message(&message)?;
-        let data = event
-            .decode::<v1::ScheduleEvent>()
-            .map_err(|source| SchedulerError::event_source("failed to decode recorded schedule event payload", source))?;
+        let data = event.decode::<v1::ScheduleEvent>().map_err(|source| {
+            SchedulerError::event_source("failed to decode recorded schedule event payload", source)
+        })?;
         let Some(data) = data.into_decoded() else {
             if reached_bootstrap_tail {
                 break;
@@ -996,7 +996,10 @@ mod tests {
 
         let added = apply_scheduler_event(&mut desired_schedules, "alpha", &added_event("alpha")).unwrap();
         assert_eq!(added, SchedulerChange::Upsert(expected_schedule("alpha")));
-        assert!(matches!(desired_schedules.get("alpha"), Some(DesiredScheduleState::Present(_))));
+        assert!(matches!(
+            desired_schedules.get("alpha"),
+            Some(DesiredScheduleState::Present(_))
+        ));
 
         let disabled = apply_scheduler_event(&mut desired_schedules, "alpha", &paused_event("alpha")).unwrap();
         assert_eq!(disabled, SchedulerChange::Delete("alpha".to_string()));
@@ -1010,7 +1013,10 @@ mod tests {
 
         let removed = apply_scheduler_event(&mut desired_schedules, "alpha", &removed_event("alpha")).unwrap();
         assert_eq!(removed, SchedulerChange::Delete("alpha".to_string()));
-        assert!(matches!(desired_schedules.get("alpha"), Some(DesiredScheduleState::Deleted)));
+        assert!(matches!(
+            desired_schedules.get("alpha"),
+            Some(DesiredScheduleState::Deleted)
+        ));
 
         let error = apply_scheduler_event(&mut desired_schedules, "alpha", &added_event("alpha")).unwrap_err();
         assert!(error.to_string().contains("deleted schedule stream"));
@@ -1076,9 +1082,12 @@ mod tests {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_schedule("invalid");
 
-        apply_scheduler_change(&publisher, &SchedulerChange::Upsert(invalid_enabled_schedule("invalid")))
-            .await
-            .unwrap();
+        apply_scheduler_change(
+            &publisher,
+            &SchedulerChange::Upsert(invalid_enabled_schedule("invalid")),
+        )
+        .await
+        .unwrap();
 
         assert!(publisher.upserts().is_empty());
         assert_eq!(publisher.removals(), vec!["invalid"]);

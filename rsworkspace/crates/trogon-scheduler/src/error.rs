@@ -126,9 +126,9 @@ impl std::error::Error for SchedulerError {
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
             Self::InvalidScheduleSpec { source } => Some(source),
-            Self::ScheduleAlreadyExists { .. } | Self::ScheduleNotFound { .. } | Self::OptimisticConcurrencyConflict { .. } => {
-                None
-            }
+            Self::ScheduleAlreadyExists { .. }
+            | Self::ScheduleNotFound { .. }
+            | Self::OptimisticConcurrencyConflict { .. } => None,
         }
     }
 }
@@ -292,7 +292,9 @@ where
             JetStreamStoreError::ReadStream(source) => {
                 Self::event_source("failed to read schedule stream while catching up command state", source)
             }
-            JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append schedule event batch", source),
+            JetStreamStoreError::AppendStream(source) => {
+                Self::event_source("failed to append schedule event batch", source)
+            }
             JetStreamStoreError::Snapshot(source) => Self::from(source),
             JetStreamStoreError::Codec(source) => source,
             JetStreamStoreError::OptimisticConcurrencyConflict(source) => Self::OptimisticConcurrencyConflict {

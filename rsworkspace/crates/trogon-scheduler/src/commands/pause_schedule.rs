@@ -72,9 +72,7 @@ impl Decider for PauseSchedule {
                     .into(),
                 ),
             })),
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => {
-                Err(PauseScheduleError::UnknownStateValue { value: 0 })
-            }
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(PauseScheduleError::UnknownStateValue { value: 0 }),
         }
     }
 }
@@ -225,7 +223,10 @@ mod tests {
             PauseScheduleError::AlreadyPaused { id }.to_string(),
             "schedule 'backup' is already paused"
         );
-        assert_eq!(PauseScheduleError::MissingStateValue.to_string(), "state value is missing");
+        assert_eq!(
+            PauseScheduleError::MissingStateValue.to_string(),
+            "state value is missing"
+        );
         assert_eq!(
             PauseScheduleError::UnknownStateValue { value: 42 }.to_string(),
             "unknown state value: 42"

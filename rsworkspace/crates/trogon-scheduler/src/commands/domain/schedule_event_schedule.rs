@@ -152,14 +152,3 @@ mod tests {
         assert_eq!(inner.exdate.len(), 1);
     }
 }
-
-fn timestamp_from(dt: &chrono::DateTime<chrono::Utc>) -> Timestamp {
-    Timestamp::from_unix(dt.timestamp(), dt.timestamp_subsec_nanos() as i32)
-}
-
-fn timezone_from(value: &str) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
-    MessageField::some(trogonai_proto::google::r#type::TimeZone {
-        id: value.to_owned(),
-        version: String::new(),
-    })
-}
