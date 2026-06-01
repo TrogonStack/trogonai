@@ -8,6 +8,28 @@ use tokio::sync::mpsc;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
 
+/// Neutral system prompt injected when importing history into the target runner
+/// on a cross-runner switch. The exported history can contain identity statements
+/// from the source model (e.g. "I'm Claude"); without this, the target model
+/// (e.g. grok) continues that persona. This instructs it to ignore prior
+/// identity claims and respond as itself.
+const IDENTITY_RESET_SYSTEM_PROMPT: &str = "You are the AI assistant for this session. \
+The conversation history may have been produced by a different AI model. Ignore any \
+statements in the history about being a specific named model or assistant (for example \
+\"I'm Claude\"); do not adopt or continue that persona. Simply continue helping the user as yourself.";
+
+/// Build the `_meta` for the target runner's `new_session` so the imported
+/// history doesn't make it impersonate the source model. Both the Claude runner
+/// and the xAI/OpenRouter runners honor `_meta.systemPrompt`.
+fn import_session_meta() -> serde_json::Map<String, serde_json::Value> {
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "systemPrompt".to_string(),
+        serde_json::Value::String(IDENTITY_RESET_SYSTEM_PROMPT.to_string()),
+    );
+    meta
+}
+
 // LOW-7: Bundle each bridge with its notification receiver in a single tuple.
 // The receiver is never polled here — CrossRunnerSwitcher only calls new_session
 // and ext_method, which never trigger notifications.  Storing them as a pair
@@ -87,11 +109,13 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .0
         };
 
-        // 4. Open new session on target runner (same workspace path)
+        // 4. Open new session on target runner (same workspace path). Inject a
+        // neutral system prompt so imported history from the source model doesn't
+        // make the target model impersonate it (e.g. grok continuing as "Claude").
         let new_session_id = {
             let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
             bridge
-                .new_session(NewSessionRequest::new(cwd))
+                .new_session(NewSessionRequest::new(cwd).meta(import_session_meta()))
                 .await
                 .map_err(|e| e.to_string())?
                 .session_id
@@ -203,6 +227,18 @@ pub mod mock {
 mod tests {
     use super::*;
     use acp_nats::AcpPrefix;
+
+    #[test]
+    fn import_session_meta_carries_identity_reset_prompt() {
+        let meta = import_session_meta();
+        let sp = meta
+            .get("systemPrompt")
+            .and_then(|v| v.as_str())
+            .expect("systemPrompt present");
+        assert!(sp.contains("Ignore any"));
+        assert!(sp.to_lowercase().contains("claude")); // names the persona to drop
+    }
+
     use testcontainers_modules::nats::Nats;
     use testcontainers_modules::testcontainers::runners::AsyncRunner;
     use trogon_nats::{NatsAuth, NatsConfig};
