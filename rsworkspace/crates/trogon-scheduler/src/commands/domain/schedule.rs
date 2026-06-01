@@ -736,6 +736,18 @@ mod tests {
         let rrule_timezone = RRuleTimezone::try_from("UTC".to_string()).unwrap();
 
         assert_eq!(every.as_duration(), Duration::from_secs(30));
+        assert_eq!(
+            EveryDuration::from_secs(31).unwrap().as_duration(),
+            Duration::from_secs(31)
+        );
+        assert_eq!(
+            EveryDuration::try_from(Duration::from_secs(32)).unwrap().as_duration(),
+            Duration::from_secs(32)
+        );
+        assert_eq!(
+            EveryDuration::try_from(33).unwrap().as_duration(),
+            Duration::from_secs(33)
+        );
         assert!(EveryDuration::new(Duration::ZERO).is_err());
         assert!(EveryDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).is_err());
         assert_eq!(CronExpression::try_from("0 0 * * * *").unwrap().as_str(), "0 0 * * * *");
@@ -832,6 +844,18 @@ mod tests {
         assert_eq!(subject.as_str(), "agent.events");
         assert_eq!(subject_ref.as_str(), "agent.replay");
         assert_eq!(ttl.as_duration(), Duration::from_secs(60));
+        assert_eq!(
+            TtlDuration::from_secs(61).unwrap().as_duration(),
+            Duration::from_secs(61)
+        );
+        assert_eq!(
+            TtlDuration::try_from(Duration::from_secs(62)).unwrap().as_duration(),
+            Duration::from_secs(62)
+        );
+        assert_eq!(
+            TtlDuration::try_from(63).unwrap().as_duration(),
+            Duration::from_secs(63)
+        );
         assert!(TtlDuration::new(Duration::ZERO).is_err());
         assert!(TtlDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).is_err());
         assert_eq!(source.subject().as_str(), "agent.events");

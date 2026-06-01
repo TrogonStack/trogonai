@@ -44,18 +44,8 @@ pub fn duration_from_std(value: std::time::Duration) -> Result<Duration, Duratio
         });
     }
 
-    let Ok(seconds) = i64::try_from(value.as_secs()) else {
-        return Err(DurationConversionError {
-            max: PROTOBUF_DURATION_MAX,
-            actual: value,
-        });
-    };
-    let Ok(nanos) = i32::try_from(value.subsec_nanos()) else {
-        return Err(DurationConversionError {
-            max: PROTOBUF_DURATION_MAX,
-            actual: value,
-        });
-    };
+    let seconds = value.as_secs() as i64;
+    let nanos = value.subsec_nanos() as i32;
 
     Ok(Duration::from_secs_nanos(seconds, nanos))
 }

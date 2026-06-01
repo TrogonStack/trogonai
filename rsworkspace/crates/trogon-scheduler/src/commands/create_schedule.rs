@@ -117,6 +117,8 @@ impl Decider for CreateSchedule {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use buffa::EnumValue;
     use trogon_decider::testing::TestCase;
 
@@ -206,13 +208,17 @@ mod tests {
     #[test]
     fn decide_errors_display_user_facing_messages() {
         let id = ScheduleId::parse("backup").unwrap();
+        let duration_error = trogonai_proto::convert::duration_from_std(
+            trogonai_proto::convert::PROTOBUF_DURATION_MAX + std::time::Duration::from_nanos(1),
+        )
+        .unwrap_err();
 
         assert_eq!(
             CreateScheduleDecideError::AlreadyExists { id: id.clone() }.to_string(),
             "schedule 'backup' already exists"
         );
         assert_eq!(
-            CreateScheduleDecideError::ScheduleDeleted { id }.to_string(),
+            CreateScheduleDecideError::ScheduleDeleted { id: id.clone() }.to_string(),
             "schedule 'backup' was deleted"
         );
         assert_eq!(
@@ -222,6 +228,24 @@ mod tests {
         assert_eq!(
             CreateScheduleDecideError::UnknownStateValue { value: 123 }.to_string(),
             "unknown state value: 123"
+        );
+        let err = CreateScheduleDecideError::DurationConversion { source: duration_error };
+        assert_eq!(
+            err.to_string(),
+            "schedule duration is invalid: duration must fit the protobuf Duration range: max 315576000000s, got 315576000000.000000001s"
+        );
+        assert!(err.source().is_some());
+        assert!(
+            CreateScheduleDecideError::AlreadyExists { id: id.clone() }
+                .source()
+                .is_none()
+        );
+        assert!(CreateScheduleDecideError::ScheduleDeleted { id }.source().is_none());
+        assert!(CreateScheduleDecideError::MissingStateValue.source().is_none());
+        assert!(
+            CreateScheduleDecideError::UnknownStateValue { value: 123 }
+                .source()
+                .is_none()
         );
     }
 
