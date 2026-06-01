@@ -1,8 +1,8 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use chrono::{DateTime, Utc};
 use trogon_nats::DottedNatsToken;
-use trogonai_proto::convert::{PROTOBUF_DURATION_MAX_SECONDS, ProtobufDurationSeconds};
+use trogonai_proto::convert::PROTOBUF_DURATION_MAX;
 
 use crate::error::ScheduleSpecError;
 
@@ -17,7 +17,7 @@ pub enum Schedule {
         at: DateTime<Utc>,
     },
     Every {
-        every_sec: EverySeconds,
+        every: EveryDuration,
     },
     Cron {
         expr: CronExpression,
@@ -33,9 +33,9 @@ pub enum Schedule {
 }
 
 impl Schedule {
-    pub fn every(every_sec: u64) -> Result<Self, ScheduleSpecError> {
+    pub fn every(every: Duration) -> Result<Self, ScheduleSpecError> {
         Ok(Self::Every {
-            every_sec: EverySeconds::new(every_sec)?,
+            every: EveryDuration::new(every)?,
         })
     }
 
@@ -62,38 +62,45 @@ impl Schedule {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EverySeconds(ProtobufDurationSeconds);
+pub struct EveryDuration(Duration);
 
-impl EverySeconds {
-    pub fn new(every_sec: u64) -> Result<Self, ScheduleSpecError> {
-        if every_sec == 0 {
-            return Err(ScheduleSpecError::EverySecondsMustBePositive);
+impl EveryDuration {
+    pub fn new(every: Duration) -> Result<Self, ScheduleSpecError> {
+        if every.is_zero() {
+            return Err(ScheduleSpecError::EveryDurationMustBePositive);
+        }
+        if every > PROTOBUF_DURATION_MAX {
+            return Err(ScheduleSpecError::EveryDurationTooLarge {
+                max: PROTOBUF_DURATION_MAX,
+                actual: every,
+            });
         }
 
-        let Some(every_sec) = ProtobufDurationSeconds::new(every_sec) else {
-            return Err(ScheduleSpecError::EverySecondsTooLarge {
-                max: PROTOBUF_DURATION_MAX_SECONDS,
-                actual: every_sec,
-            });
-        };
-
-        Ok(Self(every_sec))
+        Ok(Self(every))
     }
 
-    pub fn as_u64(self) -> u64 {
-        self.0.as_u64()
+    pub fn from_secs(seconds: u64) -> Result<Self, ScheduleSpecError> {
+        Self::new(Duration::from_secs(seconds))
     }
 
-    pub fn as_protobuf_duration_seconds(self) -> ProtobufDurationSeconds {
+    pub fn as_duration(self) -> Duration {
         self.0
     }
 }
 
-impl TryFrom<u64> for EverySeconds {
+impl TryFrom<Duration> for EveryDuration {
+    type Error = ScheduleSpecError;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<u64> for EveryDuration {
     type Error = ScheduleSpecError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Self::new(value)
+        Self::from_secs(value)
     }
 }
 
@@ -502,38 +509,45 @@ impl TryFrom<&str> for SamplingSubject {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TtlSeconds(ProtobufDurationSeconds);
+pub struct TtlDuration(Duration);
 
-impl TtlSeconds {
-    pub fn new(ttl_sec: u64) -> Result<Self, ScheduleSpecError> {
-        if ttl_sec == 0 {
+impl TtlDuration {
+    pub fn new(ttl: Duration) -> Result<Self, ScheduleSpecError> {
+        if ttl.is_zero() {
             return Err(ScheduleSpecError::TtlMustBePositive);
         }
-
-        let Some(ttl_sec) = ProtobufDurationSeconds::new(ttl_sec) else {
-            return Err(ScheduleSpecError::TtlSecondsTooLarge {
-                max: PROTOBUF_DURATION_MAX_SECONDS,
-                actual: ttl_sec,
+        if ttl > PROTOBUF_DURATION_MAX {
+            return Err(ScheduleSpecError::TtlDurationTooLarge {
+                max: PROTOBUF_DURATION_MAX,
+                actual: ttl,
             });
-        };
+        }
 
-        Ok(Self(ttl_sec))
+        Ok(Self(ttl))
     }
 
-    pub fn as_u64(self) -> u64 {
-        self.0.as_u64()
+    pub fn from_secs(seconds: u64) -> Result<Self, ScheduleSpecError> {
+        Self::new(Duration::from_secs(seconds))
     }
 
-    pub fn as_protobuf_duration_seconds(self) -> ProtobufDurationSeconds {
+    pub fn as_duration(self) -> Duration {
         self.0
     }
 }
 
-impl TryFrom<u64> for TtlSeconds {
+impl TryFrom<Duration> for TtlDuration {
+    type Error = ScheduleSpecError;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<u64> for TtlDuration {
     type Error = ScheduleSpecError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        Self::new(value)
+        Self::from_secs(value)
     }
 }
 
@@ -560,7 +574,7 @@ impl SamplingSource {
 pub enum Delivery {
     NatsEvent {
         route: DeliveryRoute,
-        ttl_sec: Option<TtlSeconds>,
+        ttl: Option<TtlDuration>,
         source: Option<SamplingSource>,
     },
 }
@@ -569,7 +583,7 @@ impl Delivery {
     pub fn nats_event(route: impl AsRef<str>) -> Result<Self, ScheduleSpecError> {
         Ok(Self::NatsEvent {
             route: DeliveryRoute::new(route)?,
-            ttl_sec: None,
+            ttl: None,
             source: None,
         })
     }
@@ -607,7 +621,7 @@ impl From<&Schedule> for ScheduleEventSchedule {
     fn from(value: &Schedule) -> Self {
         match value {
             Schedule::At { at } => Self::At { at: *at },
-            Schedule::Every { every_sec } => Self::Every { every_sec: *every_sec },
+            Schedule::Every { every } => Self::Every { every: *every },
             Schedule::Cron { expr, timezone } => Self::Cron {
                 expr: expr.clone(),
                 timezone: timezone.clone(),
@@ -654,9 +668,9 @@ impl From<Delivery> for ScheduleEventDelivery {
 impl From<&Delivery> for ScheduleEventDelivery {
     fn from(value: &Delivery) -> Self {
         match value {
-            Delivery::NatsEvent { route, ttl_sec, source } => Self::NatsMessage {
+            Delivery::NatsEvent { route, ttl, source } => Self::NatsMessage {
                 subject: route.clone(),
-                ttl_sec: *ttl_sec,
+                ttl: *ttl,
                 source: source.as_ref().map(Into::into),
             },
         }
@@ -683,6 +697,8 @@ impl From<&ScheduleMessage> for MessageEnvelope {
 
 #[cfg(test)]
 mod tests {
+    use trogonai_proto::convert::PROTOBUF_DURATION_MAX_SECONDS;
+
     use super::*;
 
     #[test]
@@ -697,7 +713,7 @@ mod tests {
 
         assert!(matches!(cron, Schedule::Cron { .. }));
         assert!(matches!(rrule, Schedule::RRule { .. }));
-        assert!(Schedule::every(0).is_err());
+        assert!(Schedule::every(Duration::ZERO).is_err());
         assert!(Schedule::cron("not a cron", None).is_err());
         assert!(Schedule::rrule("tomorrow", "FREQ=DAILY;COUNT=2", None).is_err());
         assert!(
@@ -712,16 +728,16 @@ mod tests {
 
     #[test]
     fn value_objects_cover_success_error_and_conversion_paths() {
-        let every = EverySeconds::try_from(30).unwrap();
+        let every = EveryDuration::new(Duration::from_secs(30)).unwrap();
         let cron = CronExpression::try_from("0 0 * * * *".to_string()).unwrap();
         let rrule = RRuleExpression::try_from("freq=daily;count=2").unwrap();
         let dtstart = RRuleDateTime::new("dtstart", "2026-01-01T00:00:00Z").unwrap();
         let schedule_timezone = ScheduleTimezone::try_from("UTC").unwrap();
         let rrule_timezone = RRuleTimezone::try_from("UTC".to_string()).unwrap();
 
-        assert_eq!(every.as_u64(), 30);
-        assert!(EverySeconds::try_from(0).is_err());
-        assert!(EverySeconds::try_from(PROTOBUF_DURATION_MAX_SECONDS + 1).is_err());
+        assert_eq!(every.as_duration(), Duration::from_secs(30));
+        assert!(EveryDuration::new(Duration::ZERO).is_err());
+        assert!(EveryDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).is_err());
         assert_eq!(CronExpression::try_from("0 0 * * * *").unwrap().as_str(), "0 0 * * * *");
         assert_eq!(cron.as_str(), "0 0 * * * *");
         assert_eq!(cron.into_string(), "0 0 * * * *");
@@ -802,11 +818,11 @@ mod tests {
         let route_ref = DeliveryRoute::try_from("agent.reply").unwrap();
         let subject = SamplingSubject::try_from("agent.events".to_string()).unwrap();
         let subject_ref = SamplingSubject::try_from("agent.replay").unwrap();
-        let ttl = TtlSeconds::try_from(60).unwrap();
+        let ttl = TtlDuration::new(Duration::from_secs(60)).unwrap();
         let source = SamplingSource::latest_from_subject("agent.events").unwrap();
         let delivery = Delivery::NatsEvent {
             route: route.clone(),
-            ttl_sec: Some(ttl),
+            ttl: Some(ttl),
             source: Some(source.clone()),
         };
 
@@ -815,10 +831,9 @@ mod tests {
         assert_eq!(route_ref.as_str(), "agent.reply");
         assert_eq!(subject.as_str(), "agent.events");
         assert_eq!(subject_ref.as_str(), "agent.replay");
-        assert_eq!(ttl.as_u64(), 60);
-        assert_eq!(ttl.as_protobuf_duration_seconds().as_u64(), 60);
-        assert!(TtlSeconds::try_from(0).is_err());
-        assert!(TtlSeconds::try_from(PROTOBUF_DURATION_MAX_SECONDS + 1).is_err());
+        assert_eq!(ttl.as_duration(), Duration::from_secs(60));
+        assert!(TtlDuration::new(Duration::ZERO).is_err());
+        assert!(TtlDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).is_err());
         assert_eq!(source.subject().as_str(), "agent.events");
         assert!(DeliveryRoute::try_from("bad*route").is_err());
         assert!(SamplingSubject::try_from("bad>subject").is_err());
@@ -833,7 +848,7 @@ mod tests {
         assert!(matches!(
             ScheduleEventDelivery::from(delivery),
             ScheduleEventDelivery::NatsMessage {
-                ttl_sec: Some(_),
+                ttl: Some(_),
                 source: Some(_),
                 ..
             }
@@ -848,7 +863,7 @@ mod tests {
         let rrule_dt = RRuleDateTime::new("dtstart", "2026-01-01T00:00:00Z").unwrap();
         let schedules = [
             Schedule::At { at },
-            Schedule::every(30).unwrap(),
+            Schedule::every(Duration::from_secs(30)).unwrap(),
             Schedule::cron("0 0 * * * *", Some("UTC".to_string())).unwrap(),
             Schedule::RRule {
                 dtstart: rrule_dt.clone(),
@@ -892,15 +907,17 @@ mod tests {
 
         proptest! {
             #[test]
-            fn every_seconds_accepts_any_positive_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
-                let every = EverySeconds::new(n).unwrap();
-                prop_assert_eq!(every.as_u64(), n);
+            fn every_duration_accepts_any_positive_duration_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
+                let duration = Duration::from_secs(n);
+                let every = EveryDuration::new(duration).unwrap();
+                prop_assert_eq!(every.as_duration(), duration);
             }
 
             #[test]
-            fn ttl_seconds_accepts_any_positive_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
-                let ttl = TtlSeconds::new(n).unwrap();
-                prop_assert_eq!(ttl.as_u64(), n);
+            fn ttl_duration_accepts_any_positive_duration_and_round_trips(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
+                let duration = Duration::from_secs(n);
+                let ttl = TtlDuration::new(duration).unwrap();
+                prop_assert_eq!(ttl.as_duration(), duration);
             }
 
             #[test]
@@ -1001,9 +1018,10 @@ mod tests {
 
             #[test]
             fn schedule_every_constructor_matches_value_object(n in 1u64..=PROTOBUF_DURATION_MAX_SECONDS) {
-                let schedule = Schedule::every(n).unwrap();
+                let duration = Duration::from_secs(n);
+                let schedule = Schedule::every(duration).unwrap();
                 match schedule {
-                    Schedule::Every { every_sec } => prop_assert_eq!(every_sec.as_u64(), n),
+                    Schedule::Every { every } => prop_assert_eq!(every.as_duration(), duration),
                     other => prop_assert!(false, "expected Every, got {other:?}"),
                 }
             }

@@ -1,8 +1,8 @@
 use buffa::MessageField;
-use trogonai_proto::convert::{duration_from_seconds, timestamp_from_datetime};
+use trogonai_proto::convert::{duration_from_std, timestamp_from_datetime};
 use trogonai_proto::scheduler::schedules::v1;
 
-use super::{CronExpression, EverySeconds, RRuleExpression, RRuleTimezone, ScheduleTimezone, TimeZone};
+use super::{CronExpression, EveryDuration, RRuleExpression, RRuleTimezone, ScheduleTimezone, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScheduleEventSchedule {
@@ -10,7 +10,7 @@ pub enum ScheduleEventSchedule {
         at: chrono::DateTime<chrono::Utc>,
     },
     Every {
-        every_sec: EverySeconds,
+        every: EveryDuration,
     },
     Cron {
         expr: CronExpression,
@@ -32,8 +32,8 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
                 at: MessageField::some(timestamp_from_datetime(at)),
             }
             .into(),
-            ScheduleEventSchedule::Every { every_sec } => v1::schedule::Every {
-                every: MessageField::some(duration_from_seconds(every_sec.as_protobuf_duration_seconds())),
+            ScheduleEventSchedule::Every { every } => v1::schedule::Every {
+                every: MessageField::some(duration_from_std(every.as_duration())),
             }
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
@@ -90,7 +90,7 @@ mod tests {
     fn converts_at_and_every_schedules_to_proto() {
         let at_proto = v1::Schedule::from(&ScheduleEventSchedule::At { at: at() });
         let every_proto = v1::Schedule::from(&ScheduleEventSchedule::Every {
-            every_sec: EverySeconds::new(30).unwrap(),
+            every: EveryDuration::new(std::time::Duration::from_secs(30)).unwrap(),
         });
 
         let inner = expect_schedule_kind!(at_proto.kind.unwrap(), v1::schedule::Kind::At, "expected at schedule");

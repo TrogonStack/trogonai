@@ -3,8 +3,8 @@ use trogon_decider_runtime::{Decider, Decision, WritePrecondition};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
 use super::domain::{
-    Delivery, MessageEnvelope, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
-    ScheduleId, ScheduleMessage,
+    Delivery, MessageEnvelope, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId,
+    ScheduleMessage,
 };
 
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ mod tests {
         CreateScheduleCommand {
             id: schedule_id(id),
             status: ScheduleEventStatus::Scheduled,
-            schedule: DomainSchedule::every(30).unwrap(),
+            schedule: DomainSchedule::every(std::time::Duration::from_secs(30)).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: ScheduleMessage {
                 content: MessageContent::json(r#"{"kind":"heartbeat"}"#),

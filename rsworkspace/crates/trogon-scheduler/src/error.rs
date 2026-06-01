@@ -1,13 +1,15 @@
+use std::time::Duration;
+
 #[derive(Debug)]
 pub enum ScheduleSpecError {
     InvalidCronExpression {
         expr: String,
         source: Box<dyn std::error::Error>,
     },
-    EverySecondsMustBePositive,
-    EverySecondsTooLarge {
-        max: u64,
-        actual: u64,
+    EveryDurationMustBePositive,
+    EveryDurationTooLarge {
+        max: Duration,
+        actual: Duration,
     },
     InvalidHeaderName {
         name: String,
@@ -42,9 +44,9 @@ pub enum ScheduleSpecError {
         version: String,
     },
     TtlMustBePositive,
-    TtlSecondsTooLarge {
-        max: u64,
-        actual: u64,
+    TtlDurationTooLarge {
+        max: Duration,
+        actual: Duration,
     },
 }
 
@@ -54,9 +56,9 @@ impl std::fmt::Display for ScheduleSpecError {
             Self::InvalidCronExpression { expr, source } => {
                 write!(formatter, "cron expression '{expr}' is invalid: {source}")
             }
-            Self::EverySecondsMustBePositive => formatter.write_str("every seconds must be positive"),
-            Self::EverySecondsTooLarge { max, actual } => {
-                write!(formatter, "every seconds must be at most {max}, got {actual}")
+            Self::EveryDurationMustBePositive => formatter.write_str("every duration must be positive"),
+            Self::EveryDurationTooLarge { max, actual } => {
+                write!(formatter, "every duration must be at most {max:?}, got {actual:?}")
             }
             Self::InvalidHeaderName { name } => write!(formatter, "header name '{name}' is invalid"),
             Self::ReservedHeaderName { name } => write!(formatter, "header name '{name}' is reserved"),
@@ -73,9 +75,9 @@ impl std::fmt::Display for ScheduleSpecError {
             Self::InvalidTimezoneDatabaseVersion { version } => {
                 write!(formatter, "timezone database version '{version}' is invalid")
             }
-            Self::TtlMustBePositive => formatter.write_str("ttl seconds must be positive"),
-            Self::TtlSecondsTooLarge { max, actual } => {
-                write!(formatter, "ttl seconds must be at most {max}, got {actual}")
+            Self::TtlMustBePositive => formatter.write_str("ttl duration must be positive"),
+            Self::TtlDurationTooLarge { max, actual } => {
+                write!(formatter, "ttl duration must be at most {max:?}, got {actual:?}")
             }
         }
     }
@@ -88,15 +90,15 @@ impl std::error::Error for ScheduleSpecError {
             | Self::InvalidRRuleDateTime { source, .. }
             | Self::InvalidRRule { source, .. } => Some(source.as_ref()),
             Self::InvalidRoute { source, .. } | Self::InvalidSamplingSource { source, .. } => Some(source),
-            Self::EverySecondsMustBePositive
-            | Self::EverySecondsTooLarge { .. }
+            Self::EveryDurationMustBePositive
+            | Self::EveryDurationTooLarge { .. }
             | Self::InvalidHeaderName { .. }
             | Self::ReservedHeaderName { .. }
             | Self::InvalidHeaderValue { .. }
             | Self::InvalidTimezone { .. }
             | Self::InvalidTimezoneDatabaseVersion { .. }
             | Self::TtlMustBePositive
-            | Self::TtlSecondsTooLarge { .. } => None,
+            | Self::TtlDurationTooLarge { .. } => None,
         }
     }
 }
@@ -123,16 +125,16 @@ mod tests {
                 true,
             ),
             (
-                ScheduleSpecError::EverySecondsMustBePositive,
-                "every seconds must be positive",
+                ScheduleSpecError::EveryDurationMustBePositive,
+                "every duration must be positive",
                 false,
             ),
             (
-                ScheduleSpecError::EverySecondsTooLarge {
-                    max: 315_576_000_000,
-                    actual: 315_576_000_001,
+                ScheduleSpecError::EveryDurationTooLarge {
+                    max: Duration::from_secs(315_576_000_000),
+                    actual: Duration::from_secs(315_576_000_001),
                 },
-                "every seconds must be at most 315576000000, got 315576000001",
+                "every duration must be at most 315576000000s, got 315576000001s",
                 false,
             ),
             (
@@ -205,15 +207,15 @@ mod tests {
             ),
             (
                 ScheduleSpecError::TtlMustBePositive,
-                "ttl seconds must be positive",
+                "ttl duration must be positive",
                 false,
             ),
             (
-                ScheduleSpecError::TtlSecondsTooLarge {
-                    max: 315_576_000_000,
-                    actual: 315_576_000_001,
+                ScheduleSpecError::TtlDurationTooLarge {
+                    max: Duration::from_secs(315_576_000_000),
+                    actual: Duration::from_secs(315_576_000_001),
                 },
-                "ttl seconds must be at most 315576000000, got 315576000001",
+                "ttl duration must be at most 315576000000s, got 315576000001s",
                 false,
             ),
         ];

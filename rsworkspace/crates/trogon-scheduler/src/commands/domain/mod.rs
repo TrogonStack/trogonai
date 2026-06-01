@@ -11,9 +11,9 @@ pub use message::{
     MessageHeadersError,
 };
 pub use schedule::{
-    CronExpression, Delivery, DeliveryRoute, EverySeconds, RRuleDateTime, ScheduleHeaders, ScheduleMessage,
-    RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TimeZone, TtlSeconds,
-    TzdbVersion,
+    CronExpression, Delivery, DeliveryRoute, EveryDuration, RRuleDateTime, RRuleExpression, RRuleTimezone,
+    SamplingSource, SamplingSubject, Schedule, ScheduleHeaders, ScheduleMessage, ScheduleTimezone, TimeZone,
+    TtlDuration, TzdbVersion,
 };
 pub use schedule_event_delivery::ScheduleEventDelivery;
 pub use schedule_event_sampling_source::ScheduleEventSamplingSource;
