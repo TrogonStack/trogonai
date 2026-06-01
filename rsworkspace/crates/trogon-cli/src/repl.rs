@@ -201,6 +201,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
 
     let mut mcp_manager = McpManager::load(&fs);
+    // HTTP client used to fetch MCP prompts on demand for `/mcp__server__prompt`.
+    let mcp_http = reqwest::Client::new();
     // Session name: prefer the `--name` flag; otherwise inherit a name from the
     // resumed session entry. Updatable at runtime via `/rename`.
     let mut session_name = name.or_else(|| resume.as_ref().and_then(|e| e.name.clone()));
@@ -324,6 +326,31 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     }
                     continue;
                 }
+
+                // MCP prompt slash command: `/mcp__<server>__<prompt> [k=v...]`.
+                // Fetch the prompt from the server and submit its text as a normal
+                // prompt. Non-matching lines fall through to slash-command handling.
+                let line = match crate::mcp_prompts::parse_mcp_prompt_command(&line) {
+                    Some(inv) => {
+                        match fetch_mcp_prompt(&inv, &mcp_manager, session.session_id(), &mcp_http)
+                            .await
+                        {
+                            Ok(text) if !text.trim().is_empty() => text,
+                            Ok(_) => {
+                                eprintln!(
+                                    "warning: MCP prompt `{}__{}` returned no content",
+                                    inv.server, inv.prompt
+                                );
+                                continue;
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                    None => line,
+                };
 
                 if line.starts_with('/') {
                     let mut parts = line.splitn(2, ' ');
@@ -709,6 +736,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             &fs,
                             &session,
                             &cwd,
+                            &mcp_http,
                         )
                         .await;
                     } else if cmd == "/memory" {
@@ -984,6 +1012,26 @@ async fn start_session<SF: SessionFactory>(
     Ok(session)
 }
 
+/// Resolve an MCP prompt invocation to its rendered text by connecting to the
+/// owning server (`prompts/get`). Returns a user-facing error string on failure.
+async fn fetch_mcp_prompt(
+    inv: &crate::mcp_prompts::McpPromptInvocation,
+    mcp: &McpManager,
+    session_id: &str,
+    http: &reqwest::Client,
+) -> Result<String, String> {
+    let conns = mcp.active_connections(session_id);
+    let Some((_, url, headers)) = conns.into_iter().find(|(n, _, _)| n == &inv.server) else {
+        return Err(format!(
+            "no active MCP server named `{}` (see /mcp list)",
+            inv.server
+        ));
+    };
+    let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+    client.initialize().await?;
+    client.get_prompt(&inv.prompt, &inv.arguments).await
+}
+
 async fn activate_session<SF: SessionFactory>(
     factory: &SF,
     mcp: &mut McpManager,
@@ -1004,6 +1052,7 @@ async fn handle_mcp_command<F: Fs, S: Session>(
     fs: &F,
     session: &S,
     cwd: &Path,
+    http: &reqwest::Client,
 ) {
     let mut parts = arg.splitn(2, ' ');
     let sub = parts.next().unwrap_or("list").trim();
@@ -1016,7 +1065,14 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 println!("  (none)");
             } else {
                 for s in mcp.configured_servers() {
-                    println!("  {} — {} {}", s.name, s.command, s.args.join(" "));
+                    match s.transport {
+                        crate::mcp::McpTransport::Stdio => {
+                            println!("  {} — stdio: {} {}", s.name, s.command, s.args.join(" "))
+                        }
+                        crate::mcp::McpTransport::Http => {
+                            println!("  {} — http: {}", s.name, s.url)
+                        }
+                    }
                 }
             }
             let active = mcp.active_for_session(session.session_id());
@@ -1030,12 +1086,10 @@ async fn handle_mcp_command<F: Fs, S: Session>(
             }
         }
         "add" => {
-            let mut add_parts = rest.splitn(2, ' ');
-            let name = add_parts.next().unwrap_or("").trim();
-            let cmd_rest = add_parts.next().unwrap_or("").trim();
-            match McpManager::parse_add_args(name, cmd_rest) {
+            match McpManager::parse_add_args(rest) {
                 Err(e) => eprintln!("{e}"),
                 Ok(cfg) => {
+                    let name = cfg.name.clone();
                     mcp.add_server(cfg);
                     if let Err(e) = mcp.save(fs) {
                         eprintln!("error saving MCP config: {e}");
@@ -1065,7 +1119,51 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 eprintln!("no MCP server named `{rest}`");
             }
         }
-        other => eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove"),
+        "prompts" => {
+            let conns = mcp.active_connections(session.session_id());
+            if conns.is_empty() {
+                println!("no active MCP servers");
+                return;
+            }
+            println!("available MCP prompts (call as /mcp__<server>__<prompt> [k=v...]):");
+            let mut any = false;
+            for (name, url, headers) in conns {
+                let client = trogon_mcp::McpClient::with_headers(http.clone(), &url, headers);
+                if client.initialize().await.is_err() {
+                    continue;
+                }
+                match client.list_prompts().await {
+                    Ok(prompts) => {
+                        for p in prompts {
+                            any = true;
+                            let args = p
+                                .arguments
+                                .iter()
+                                .map(|a| {
+                                    if a.required {
+                                        format!("{}=…", a.name)
+                                    } else {
+                                        format!("[{}=…]", a.name)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            println!("  /mcp__{name}__{} {args}", p.name);
+                            if !p.description.is_empty() {
+                                println!("      {}", p.description);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("  {name}: {e}"),
+                }
+            }
+            if !any {
+                println!("  (none advertised)");
+            }
+        }
+        other => {
+            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, prompts")
+        }
     }
 }
 
@@ -1258,7 +1356,8 @@ Commands:
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
-  {m}/mcp{r} list|add|remove  manage MCP server bridges
+  {m}/mcp{r} list|add|remove|prompts  manage MCP servers (add supports {m}--transport http <name> <url> --header \"K: V\"{r})
+  {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})
   {m}/compact{r}            force context compaction now
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
