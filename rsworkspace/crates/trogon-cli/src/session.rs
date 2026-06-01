@@ -266,6 +266,49 @@ pub trait Session: Send + Sync + 'static {
     fn close(&self) -> impl std::future::Future<Output = ()> + Send + '_;
 }
 
+// ── SessionInit ───────────────────────────────────────────────────────────────
+
+/// Startup-only initialisation metadata sent in the ACP `session/new` `_meta`
+/// block. The runner applies these when the session is created; they cannot be
+/// changed from the CLI afterwards.
+#[derive(Debug, Clone, Default)]
+pub struct SessionInit {
+    /// Replaces the runner's built-in system prompt identity. (`--system-prompt`)
+    pub system_prompt_override: Option<String>,
+    /// Appended after the built-in system prompt and TROGON.md. (`--append-system-prompt`)
+    pub append_system_prompt: Option<String>,
+    /// Extra working directories granted to the agent. (`--add-dir`)
+    pub additional_roots: Vec<String>,
+}
+
+impl SessionInit {
+    /// Build the ACP `_meta` map for `session/new`, or `None` when no init values
+    /// are set (so the request omits `_meta` entirely).
+    pub fn to_meta(&self) -> Option<serde_json::Map<String, Value>> {
+        let mut meta = serde_json::Map::new();
+        if let Some(ref s) = self.system_prompt_override {
+            meta.insert("systemPromptOverride".into(), Value::String(s.clone()));
+        }
+        if let Some(ref s) = self.append_system_prompt {
+            meta.insert("systemPrompt".into(), Value::String(s.clone()));
+        }
+        if !self.additional_roots.is_empty() {
+            let roots = self
+                .additional_roots
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect();
+            meta.insert("additionalRoots".into(), Value::Array(roots));
+        }
+        if meta.is_empty() {
+            None
+        } else {
+            Some(meta)
+        }
+    }
+}
+
 // ── SessionFactory trait ──────────────────────────────────────────────────────
 
 pub trait SessionFactory {
@@ -277,6 +320,19 @@ pub trait SessionFactory {
         cwd: PathBuf,
         mcp_servers: Vec<McpServer>,
     ) -> impl std::future::Future<Output = anyhow::Result<Self::Sess>> + 'a;
+
+    /// Like `create_session` but also forwards startup `_meta` (system prompt,
+    /// extra dirs). The default impl ignores `init` and delegates to
+    /// `create_session`; the NATS factory overrides this to forward the metadata.
+    fn create_session_with_init<'a>(
+        &'a self,
+        prefix: &'a str,
+        cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
+        _init: &'a SessionInit,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self::Sess>> + 'a {
+        self.create_session(prefix, cwd, mcp_servers)
+    }
 
     fn attach_session(&self, prefix: &str, session_id: String) -> Self::Sess;
 }
@@ -305,6 +361,19 @@ impl<N: NatsClient + Clone> SessionFactory for NatsSessionFactory<N> {
         let nats = self.nats.clone();
         let prefix = prefix.to_string();
         async move { TrogonSession::new(nats, &prefix, cwd, mcp_servers).await }
+    }
+
+    fn create_session_with_init<'a>(
+        &'a self,
+        prefix: &'a str,
+        cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
+        init: &'a SessionInit,
+    ) -> impl std::future::Future<Output = anyhow::Result<TrogonSession<N>>> + 'a {
+        let nats = self.nats.clone();
+        let prefix = prefix.to_string();
+        let init = init.clone();
+        async move { TrogonSession::new_with_init(nats, &prefix, cwd, mcp_servers, &init).await }
     }
 
     fn attach_session(&self, prefix: &str, session_id: String) -> TrogonSession<N> {
@@ -383,8 +452,21 @@ impl<N: NatsClient> TrogonSession<N> {
         cwd: PathBuf,
         mcp_servers: Vec<McpServer>,
     ) -> anyhow::Result<Self> {
+        Self::new_with_init(nats, prefix, cwd, mcp_servers, &SessionInit::default()).await
+    }
+
+    pub async fn new_with_init(
+        nats: N,
+        prefix: &str,
+        cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
+        init: &SessionInit,
+    ) -> anyhow::Result<Self> {
         let subject = format!("{prefix}.agent.session.new");
-        let req = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
+        let mut req = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
+        if let Some(meta) = init.to_meta() {
+            req = req.meta(meta);
+        }
         let payload = serde_json::to_vec(&req)?;
 
         let reply_bytes = tokio::time::timeout(
@@ -1901,5 +1983,61 @@ mod tests {
         let factory = MockSessionFactory::new("default");
         let session = factory.attach_session("acp", "attached-id".to_string());
         assert_eq!(session.session_id(), "attached-id");
+    }
+}
+
+#[cfg(test)]
+mod session_init_tests {
+    use super::SessionInit;
+
+    #[test]
+    fn empty_init_produces_no_meta() {
+        assert!(SessionInit::default().to_meta().is_none());
+    }
+
+    #[test]
+    fn override_maps_to_system_prompt_override_key() {
+        let init = SessionInit {
+            system_prompt_override: Some("be terse".into()),
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        assert_eq!(meta.get("systemPromptOverride").and_then(|v| v.as_str()), Some("be terse"));
+        assert!(meta.get("systemPrompt").is_none());
+    }
+
+    #[test]
+    fn append_maps_to_system_prompt_key() {
+        let init = SessionInit {
+            append_system_prompt: Some("reply in spanish".into()),
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        assert_eq!(meta.get("systemPrompt").and_then(|v| v.as_str()), Some("reply in spanish"));
+        assert!(meta.get("systemPromptOverride").is_none());
+    }
+
+    #[test]
+    fn additional_roots_map_to_array() {
+        let init = SessionInit {
+            additional_roots: vec!["/a".into(), "/b".into()],
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        let arr = meta.get("additionalRoots").and_then(|v| v.as_array()).expect("array");
+        let got: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(got, vec!["/a", "/b"]);
+    }
+
+    #[test]
+    fn override_and_append_coexist() {
+        let init = SessionInit {
+            system_prompt_override: Some("base".into()),
+            append_system_prompt: Some("extra".into()),
+            ..Default::default()
+        };
+        let meta = init.to_meta().expect("meta present");
+        assert_eq!(meta.get("systemPromptOverride").and_then(|v| v.as_str()), Some("base"));
+        assert_eq!(meta.get("systemPrompt").and_then(|v| v.as_str()), Some("extra"));
     }
 }

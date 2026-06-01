@@ -580,12 +580,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             "You are Trogon, an AI coding assistant.\n\n{}",
             trogon_runner_tools::URL_FETCH_GUIDANCE
         );
-        let system_prompt = match (trogon_md, state.system_prompt.clone()) {
-            (Some(tmd), Some(sp)) => Some(format!("{identity}\n\n{tmd}\n\n{sp}")),
-            (Some(tmd), None) => Some(format!("{identity}\n\n{tmd}")),
-            (None, Some(sp)) => Some(format!("{identity}\n\n{sp}")),
-            (None, None) => Some(identity.to_string()),
-        };
+        // `--system-prompt` (systemPromptOverride) replaces the built-in identity;
+        // TROGON.md and `--append-system-prompt` (system_prompt) still apply on top.
+        let base = state.system_prompt_override.clone().unwrap_or(identity);
+        let mut assembled = base;
+        if let Some(tmd) = trogon_md {
+            assembled = format!("{assembled}\n\n{tmd}");
+        }
+        if let Some(sp) = state.system_prompt.clone() {
+            assembled = format!("{assembled}\n\n{sp}");
+        }
+        let system_prompt = Some(assembled);
 
         let system_prompt = if !state.additional_roots.is_empty() {
             let roots_info = state
@@ -630,6 +635,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         let mut converter = PromptEventConverter::new(session_id.clone());
         let mut final_messages: Option<Vec<Message>> = None;
         let mut cancelled = false;
+        // Tier-1 cancel-commit: accumulate streamed assistant text so an
+        // interrupted turn can still be persisted (user prompt + partial reply)
+        // instead of being discarded. Tool blocks are intentionally NOT captured
+        // here — pairing tool_use/tool_result and preserving role alternation on
+        // resume is deferred to a follow-up; text-only keeps the transcript valid.
+        let mut partial_text = String::new();
         let mut last_input_tokens: u32 = 0;
         let mut last_output_tokens: u32 = 0;
         let mut last_cache_creation_tokens: u32 = 0;
@@ -650,7 +661,10 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     match maybe_event {
                         Some(event) => {
                             let prompt_event = match event {
-                                AgentEvent::TextDelta { text } => PromptEvent::TextDelta { text },
+                                AgentEvent::TextDelta { text } => {
+                                    partial_text.push_str(&text);
+                                    PromptEvent::TextDelta { text }
+                                }
                                 AgentEvent::ThinkingDelta { text } => PromptEvent::ThinkingDelta { text },
                                 AgentEvent::ToolCallStarted { id, name, input, parent_tool_use_id } => {
                                     tool_name_by_id.insert(id.clone(), name.clone());
@@ -768,13 +782,32 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     info!(session_id, "agent: cancel received");
                     cancelled = true;
                     agent_fut.abort();
+                    // Drain any text deltas already buffered between the model
+                    // emitting them and the cancel firing, so the persisted
+                    // partial reply is as complete as possible.
+                    while let Ok(event) = event_rx.try_recv() {
+                        if let AgentEvent::TextDelta { text } = event {
+                            partial_text.push_str(&text);
+                        }
+                    }
                     break;
                 }
             }
         }
 
-        if cancelled {
-            return Ok(PromptResponse::new(StopReason::Cancelled));
+        // Tier-1 cancel-commit: persist the user prompt plus whatever assistant
+        // text streamed before the interrupt, so a cancelled turn is remembered
+        // on the next prompt instead of vanishing. `state.messages` already holds
+        // the user message (it was never moved into the streaming task); append a
+        // single assistant text block. With no trailing tool_use blocks the
+        // transcript stays valid (user → assistant) for resume. If nothing
+        // streamed, leave history untouched (avoids a dangling user turn).
+        if cancelled && !partial_text.is_empty() {
+            let mut updated = state.messages.clone();
+            updated.push(Message::assistant(vec![AgentContentBlock::Text {
+                text: std::mem::take(&mut partial_text),
+            }]));
+            final_messages = Some(updated);
         }
 
         if let Some(updated) = final_messages {
@@ -822,7 +855,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             }
         }
 
-        Ok(PromptResponse::new(StopReason::EndTurn))
+        Ok(PromptResponse::new(if cancelled {
+            StopReason::Cancelled
+        } else {
+            StopReason::EndTurn
+        }))
     }
 }
 
@@ -895,6 +932,19 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|m| m.get("systemPrompt"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        let system_prompt_override = meta
+            .and_then(|m| m.get("systemPromptOverride"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let additional_roots = meta
+            .and_then(|m| m.get("additionalRoots"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -907,6 +957,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             cwd: req.cwd.to_string_lossy().to_string(),
             mode,
             system_prompt,
+            system_prompt_override,
+            additional_roots,
             mcp_servers,
             created_at: now.clone(),
             updated_at: now,
@@ -1602,6 +1654,86 @@ mod tests {
         assert_eq!(portable[0].text, "hello");
         assert_eq!(portable[1].role, "assistant");
         assert_eq!(portable[1].text, "world");
+    }
+
+    // ── cancel-commit (Tier 1) ────────────────────────────────────────────────
+
+    /// A cancelled turn must persist the user prompt plus whatever assistant text
+    /// streamed before the interrupt, so the partial reply survives into the next
+    /// prompt instead of being discarded.
+    #[cfg(feature = "test-helpers")]
+    #[tokio::test]
+    async fn cancel_commits_partial_assistant_text() {
+        use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
+
+        let store = MemorySessionStore::new();
+        let store_clone = store.clone();
+        // run_prompt errors if the session can't be loaded — create it first.
+        store_clone.save("cancel-1", &SessionState::default()).await.unwrap();
+
+        // The runner emits one text delta, then blocks on the steer wait. With the
+        // steer sender kept alive (never sending), the only way out of the prompt
+        // loop is the cancel signal — making the cancel path deterministic.
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let runner = crate::agent_runner::mock::MockAgentRunner::new("claude-test")
+            .with_events(vec![AgentEvent::TextDelta { text: "partial answer".into() }])
+            .with_steer_wait()
+            .with_started_notify(started.clone());
+
+        let agent = TrogonAgent::new(
+            crate::session_notifier::mock::MockSessionNotifier::new(),
+            store,
+            runner,
+            "test-prefix",
+            "claude-test",
+            None,
+            None,
+            std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        );
+
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let (_steer_tx, steer_rx) = tokio::sync::mpsc::channel::<String>(1);
+
+        let req = PromptRequest::new("cancel-1", vec![]);
+        let prompt_client = agent.notifier.make_prompt_client(
+            AcpSessionId::new("cancel-1").unwrap(),
+            AcpPrefix::new("test-prefix").unwrap(),
+        );
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let canceller = async {
+                    // The runner has now emitted its text and is blocked on steer,
+                    // so the partial text is guaranteed buffered before we cancel.
+                    started.notified().await;
+                    let _ = cancel_tx.send(());
+                };
+                let (resp, ()) = tokio::join!(
+                    agent.run_prompt(&req, &*prompt_client, Some(cancel_rx), Some(steer_rx)),
+                    canceller,
+                );
+                let resp = resp.expect("run_prompt must return Ok on cancel");
+                assert!(
+                    matches!(resp.stop_reason, StopReason::Cancelled),
+                    "cancelled turn must report StopReason::Cancelled, got {:?}",
+                    resp.stop_reason
+                );
+            })
+            .await;
+
+        let state = store_clone.load("cancel-1").await.unwrap();
+        assert_eq!(
+            state.messages.len(),
+            2,
+            "user prompt + partial assistant reply must be persisted on cancel"
+        );
+        assert_eq!(state.messages[0].role, "user");
+        assert_eq!(state.messages[1].role, "assistant");
+        match &state.messages[1].content[0] {
+            AgentContentBlock::Text { text } => assert_eq!(text, "partial answer"),
+            other => panic!("expected assistant Text block, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
