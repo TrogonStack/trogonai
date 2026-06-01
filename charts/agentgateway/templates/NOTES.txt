@@ -1,0 +1,18 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} installed as {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Workload: Deployment/{{ include "agentgateway.fullname" . }} (binary: {{ .Values.image.bin }})
+Replicas: {{ .Values.replicaCount }}
+Probes:   /healthz, /readyz on container port {{ .Values.probePort }}
+
+Verify rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "agentgateway.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -f
+
+Probe the health endpoint:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "agentgateway.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/readyz
+
+v0.1 constraints (see docs/runbook/agentgateway.md):
+  * Single-replica per tenant — distributed rate-limit ships in v0.2.
+  * SpiceDB outage degrades authz to deny-by-default without flapping pods.
+  * Multi-region routing not yet wired; deploy one release per region.

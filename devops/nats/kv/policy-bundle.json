@@ -1,0 +1,9 @@
+{
+  "bucket": "policy-bundle",
+  "description": "Versioned CEL + WASM policy bundles (hot-reload source of truth).",
+  "history": 5,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}
