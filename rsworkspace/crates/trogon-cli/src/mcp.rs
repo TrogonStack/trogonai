@@ -1,6 +1,7 @@
 //! MCP server config and stdio bridge lifecycle for the Trogon REPL.
 
 use crate::fs::Fs;
+use crate::mcp_oauth::{OAuthStore, StoredToken};
 use crate::stdio_mcp_bridge::StdioMcpBridge;
 use agent_client_protocol::{HttpHeader, McpServer, McpServerHttp};
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,11 @@ pub struct McpServerConfig {
     /// HTTP headers (e.g. `Authorization: Bearer …`) sent to an HTTP MCP server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<(String, String)>,
+    /// When true, an OAuth access token (from the auth store, refreshed as needed)
+    /// is injected as an `Authorization: Bearer` header at connect time. The token
+    /// itself lives in `mcp-auth.json`, never here.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oauth: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +66,10 @@ pub struct McpManager {
     config: McpConfig,
     active: HashMap<String, Vec<ActiveBridge>>,
     pending: Vec<ActiveBridge>,
+    /// OAuth tokens for servers marked `oauth: true`, persisted separately.
+    oauth: OAuthStore,
+    /// HTTP client used for OAuth token refresh at connect time.
+    oauth_http: reqwest::Client,
 }
 
 impl McpManager {
@@ -72,7 +82,35 @@ impl McpManager {
             Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).unwrap_or_default(),
             _ => McpConfig::default(),
         };
-        Self { config, active: HashMap::new(), pending: Vec::new() }
+        Self {
+            config,
+            active: HashMap::new(),
+            pending: Vec::new(),
+            oauth: OAuthStore::load(fs),
+            oauth_http: reqwest::Client::new(),
+        }
+    }
+
+    /// Persist the OAuth token store (`mcp-auth.json`).
+    pub fn save_oauth<F: Fs>(&self, fs: &F) -> std::io::Result<()> {
+        self.oauth.save(fs)
+    }
+
+    /// Store/replace the OAuth token for `name` and mark its server `oauth: true`.
+    pub fn set_oauth_token(&mut self, name: &str, token: StoredToken) {
+        self.oauth.set(name, token);
+        if let Some(s) = self.config.servers.iter_mut().find(|s| s.name == name) {
+            s.oauth = true;
+        }
+    }
+
+    /// URL of the configured HTTP server `name`, if any.
+    pub fn http_server_url(&self, name: &str) -> Option<String> {
+        self.config
+            .servers
+            .iter()
+            .find(|s| s.name == name && s.transport == McpTransport::Http)
+            .map(|s| s.url.clone())
     }
 
     pub fn save<F: Fs>(&self, fs: &F) -> std::io::Result<()> {
@@ -95,10 +133,12 @@ impl McpManager {
             .unwrap_or_default()
     }
 
-    /// Spawn configured stdio MCP bridges; call [`Self::commit_pending`] after session.new.
-    pub async fn spawn_pending(&mut self) -> Vec<McpServer> {
+    /// Spawn configured MCP servers (stdio bridges + direct HTTP); call
+    /// [`Self::commit_pending`] after session.new. `fs` is used to persist any
+    /// OAuth tokens refreshed during connection.
+    pub async fn spawn_pending<F: Fs>(&mut self, fs: &F) -> Vec<McpServer> {
         self.pending.clear();
-        let (servers, bridges) = self.spawn_bridges().await;
+        let (servers, bridges) = self.spawn_bridges(fs).await;
         self.pending = bridges;
         servers
     }
@@ -110,11 +150,14 @@ impl McpManager {
         self.active.insert(session_id.to_string(), std::mem::take(&mut self.pending));
     }
 
-    async fn spawn_bridges(&self) -> (Vec<McpServer>, Vec<ActiveBridge>) {
+    async fn spawn_bridges<F: Fs>(&mut self, fs: &F) -> (Vec<McpServer>, Vec<ActiveBridge>) {
         let mut bridges = Vec::new();
         let mut acp_servers = Vec::new();
 
-        for cfg in &self.config.servers {
+        // Clone configs so we can borrow `self.oauth` mutably for token refresh
+        // while iterating.
+        let configs = self.config.servers.clone();
+        for cfg in &configs {
             match cfg.transport {
                 McpTransport::Stdio => {
                     let env: Vec<(String, String)> =
@@ -140,10 +183,29 @@ impl McpManager {
                 McpTransport::Http => {
                     // Direct HTTP server: no local bridge, pass the URL (and any
                     // auth headers) straight to the runner.
+                    let mut headers = cfg.headers.clone();
+                    if cfg.oauth {
+                        match crate::mcp_oauth::ensure_token(
+                            &cfg.name,
+                            &mut self.oauth,
+                            fs,
+                            &self.oauth_http,
+                        )
+                        .await
+                        {
+                            Ok(token) => {
+                                headers.push(("Authorization".into(), format!("Bearer {token}")))
+                            }
+                            Err(e) => {
+                                eprintln!("warning: MCP server `{}` OAuth: {e}", cfg.name);
+                                continue;
+                            }
+                        }
+                    }
                     let mut http = McpServerHttp::new(cfg.name.clone(), cfg.url.clone());
-                    if !cfg.headers.is_empty() {
+                    if !headers.is_empty() {
                         http = http.headers(
-                            cfg.headers
+                            headers
                                 .iter()
                                 .map(|(k, v)| HttpHeader::new(k.clone(), v.clone()))
                                 .collect(),
@@ -234,10 +296,15 @@ impl McpManager {
         let mut transport = McpTransport::Stdio;
         let mut headers: Vec<(String, String)> = Vec::new();
         let mut positional: Vec<String> = Vec::new();
+        let mut oauth = false;
 
         let mut i = 0;
         while i < tokens.len() {
             match tokens[i].as_str() {
+                "--oauth" => {
+                    oauth = true;
+                    i += 1;
+                }
                 "--transport" => {
                     let v = tokens
                         .get(i + 1)
@@ -272,6 +339,9 @@ impl McpManager {
 
         match transport {
             McpTransport::Stdio => {
+                if oauth {
+                    return Err("--oauth is only valid with --transport http".into());
+                }
                 if positional.len() < 2 {
                     return Err(STDIO_USAGE.into());
                 }
@@ -283,6 +353,7 @@ impl McpManager {
                     env: HashMap::new(),
                     url: String::new(),
                     headers: Vec::new(),
+                    oauth: false,
                 })
             }
             McpTransport::Http => {
@@ -297,6 +368,7 @@ impl McpManager {
                     env: HashMap::new(),
                     url: positional[1].clone(),
                     headers,
+                    oauth,
                 })
             }
         }
@@ -361,6 +433,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_add_args_http_oauth_flag() {
+        let cfg = McpManager::parse_add_args("--transport http linear https://mcp.linear.app/sse --oauth").unwrap();
+        assert!(cfg.oauth);
+        assert_eq!(cfg.transport, McpTransport::Http);
+        assert!(cfg.headers.is_empty());
+    }
+
+    #[test]
+    fn parse_add_args_oauth_with_stdio_errors() {
+        assert!(McpManager::parse_add_args("--oauth name echo").is_err());
+    }
+
+    #[test]
     fn http_config_round_trips_and_legacy_stdio_loads() {
         // Legacy stdio JSON (no `transport` field) must still deserialize as Stdio.
         let legacy: McpServerConfig =
@@ -377,6 +462,7 @@ mod tests {
             env: HashMap::new(),
             url: "https://api.example.com/mcp".into(),
             headers: vec![("Authorization".into(), "Bearer t".into())],
+            oauth: false,
         };
         let json = serde_json::to_string(&http).unwrap();
         let back: McpServerConfig = serde_json::from_str(&json).unwrap();
@@ -395,6 +481,7 @@ mod tests {
             env: HashMap::new(),
             url: String::new(),
             headers: vec![],
+            oauth: false,
         });
         mgr.save(&fs).unwrap();
         let loaded = McpManager::load(&fs);
