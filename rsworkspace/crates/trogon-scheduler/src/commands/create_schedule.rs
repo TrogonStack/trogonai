@@ -9,7 +9,7 @@ use super::domain::{
 };
 
 #[derive(Debug, Clone)]
-pub struct CreateScheduleCommand {
+pub struct CreateSchedule {
     pub id: ScheduleId,
     pub status: ScheduleEventStatus,
     pub schedule: Schedule,
@@ -50,7 +50,7 @@ impl std::error::Error for CreateScheduleDecideError {
     }
 }
 
-impl Decider for CreateScheduleCommand {
+impl Decider for CreateSchedule {
     type StreamId = str;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
@@ -129,8 +129,8 @@ mod tests {
         ScheduleId::parse(id).unwrap()
     }
 
-    fn create_schedule_command(id: &str) -> CreateScheduleCommand {
-        CreateScheduleCommand {
+    fn create_schedule(id: &str) -> CreateSchedule {
+        CreateSchedule {
             id: schedule_id(id),
             status: ScheduleEventStatus::Scheduled,
             schedule: DomainSchedule::every(std::time::Duration::from_secs(30)).unwrap(),
@@ -143,7 +143,7 @@ mod tests {
     }
 
     fn added(id: &str) -> v1::ScheduleEvent {
-        let command = create_schedule_command(id);
+        let command = create_schedule(id);
 
         v1::ScheduleEvent {
             event: Some(
@@ -176,17 +176,17 @@ mod tests {
 
     #[test]
     fn given_when_then_supports_create_schedule_decider() {
-        TestCase::<CreateScheduleCommand>::new()
+        TestCase::<CreateSchedule>::new()
             .given_no_history()
-            .when(create_schedule_command("backup"))
+            .when(create_schedule("backup"))
             .then([added("backup")]);
     }
 
     #[test]
     fn given_when_then_supports_create_schedule_failures() {
-        TestCase::<CreateScheduleCommand>::new()
+        TestCase::<CreateSchedule>::new()
             .given([added("backup")])
-            .when(create_schedule_command("backup"))
+            .when(create_schedule("backup"))
             .then_error(CreateScheduleDecideError::AlreadyExists {
                 id: ScheduleId::parse("backup").unwrap(),
             });
@@ -194,10 +194,10 @@ mod tests {
 
     #[test]
     fn rejects_adding_deleted_schedule_ids() {
-        TestCase::<CreateScheduleCommand>::new()
+        TestCase::<CreateSchedule>::new()
             .given([added("backup")])
             .given([removed()])
-            .when(create_schedule_command("backup"))
+            .when(create_schedule("backup"))
             .then_error(CreateScheduleDecideError::ScheduleDeleted {
                 id: ScheduleId::parse("backup").unwrap(),
             });
@@ -228,26 +228,25 @@ mod tests {
     #[test]
     fn decide_rejects_invalid_state_values() {
         assert_eq!(
-            CreateScheduleCommand::decide(&state_v1::State { state: None }, &create_schedule_command("backup"))
-                .unwrap_err(),
+            CreateSchedule::decide(&state_v1::State { state: None }, &create_schedule("backup")).unwrap_err(),
             CreateScheduleDecideError::MissingStateValue
         );
         assert_eq!(
-            CreateScheduleCommand::decide(
+            CreateSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(123)),
                 },
-                &create_schedule_command("backup")
+                &create_schedule("backup")
             )
             .unwrap_err(),
             CreateScheduleDecideError::UnknownStateValue { value: 123 }
         );
         assert_eq!(
-            CreateScheduleCommand::decide(
+            CreateSchedule::decide(
                 &state_v1::State {
                     state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
                 },
-                &create_schedule_command("backup")
+                &create_schedule("backup")
             )
             .unwrap_err(),
             CreateScheduleDecideError::UnknownStateValue { value: 0 }
