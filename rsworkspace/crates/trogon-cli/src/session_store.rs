@@ -16,6 +16,10 @@ pub struct SessionEntry {
     pub session_id: String,
     pub model: String,
     pub updated_at: String,
+    /// Optional human-readable name (`--name` / `/rename`). Absent in older
+    /// sessions.json files, so it deserialises to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Per-project session index with optional per-runner entries.
@@ -140,6 +144,7 @@ pub fn new_session_entry(prefix: impl Into<String>, session_id: impl Into<String
         session_id: session_id.into(),
         model: model.into(),
         updated_at: now_iso8601(),
+        name: None,
     }
 }
 
@@ -147,6 +152,25 @@ pub fn new_session_entry(prefix: impl Into<String>, session_id: impl Into<String
 mod tests {
     use super::*;
     use crate::fs::mock::MockFs;
+
+    #[test]
+    fn entry_without_name_field_deserialises_to_none() {
+        // Backward compatibility: sessions.json written before `name` existed.
+        let raw = r#"{"prefix":"acp.claude","session_id":"s1","model":"m","updated_at":"t"}"#;
+        let entry: SessionEntry = serde_json::from_str(raw).unwrap();
+        assert_eq!(entry.name, None);
+    }
+
+    #[test]
+    fn entry_name_round_trips_and_is_omitted_when_none() {
+        let mut entry = new_session_entry("acp.claude", "s1", "m");
+        assert!(!serde_json::to_string(&entry).unwrap().contains("name"));
+        entry.name = Some("my-session".into());
+        let raw = serde_json::to_string(&entry).unwrap();
+        assert!(raw.contains("\"name\":\"my-session\""));
+        let back: SessionEntry = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.name.as_deref(), Some("my-session"));
+    }
 
     #[test]
     fn record_and_get_last_round_trip() {

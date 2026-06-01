@@ -69,6 +69,10 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     add_dir: Vec<PathBuf>,
 
+    /// Give the interactive session a human-readable name (shown in /status, recorded in the index)
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+
     /// Model id for --print (resolved via aliases; uses --prefix runner)
     #[arg(long)]
     model: Option<String>,
@@ -278,6 +282,7 @@ async fn main() -> anyhow::Result<()> {
                 session_id: id.clone(),
                 model: String::new(),
                 updated_at: String::new(),
+                name: None,
             })
         } else {
             None
@@ -302,6 +307,7 @@ async fn main() -> anyhow::Result<()> {
             args.dangerously_skip_permissions,
             args.plan,
             session_init,
+            args.name,
         )
         .await?;
     }
