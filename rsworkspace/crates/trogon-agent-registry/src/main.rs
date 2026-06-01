@@ -29,22 +29,25 @@ async fn main() -> Result<(), BoxError> {
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     let auto_create = env_var_is_truthy("TROGON_REGISTRY_AUTOCREATE");
+    let prefix: std::sync::Arc<str> = std::env::var("MCP_REGISTRY_PREFIX")
+        .unwrap_or_else(|_| "mcp".to_string())
+        .into();
 
-    info!(nats_url = %nats_url, auto_create, "starting trogon-agent-registry");
+    info!(nats_url = %nats_url, auto_create, prefix = %prefix, "starting trogon-agent-registry");
 
     let nats_config = NatsConfig::new(vec![nats_url], NatsAuth::None);
     let client = connect(&nats_config, Duration::from_secs(15)).await?;
     let jetstream = async_nats::jetstream::new(client.clone());
 
     let kv = open_bucket(&jetstream, auto_create).await?;
-    let store = AgentRegistryStore::new(kv, client.clone());
+    let store = AgentRegistryStore::new(kv, client.clone(), prefix.clone());
     let cache = RegistryCache::new();
 
     store.warm_cache(cache.clone()).await?;
     spawn_watch_task(store.clone(), cache.clone()).await?;
 
     info!("registry KV ready; lookup consumer listening");
-    run_lookup_consumer(client, store, cache, shutdown_signal()).await?;
+    run_lookup_consumer(client, store, cache, prefix, shutdown_signal()).await?;
 
     info!("trogon-agent-registry stopped");
     Ok(())

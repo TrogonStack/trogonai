@@ -8,7 +8,8 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::audit::{
-    AUDIT_LOOKUP_FOUND, AUDIT_LOOKUP_NOTFOUND, AUDIT_LOOKUP_REVOKED, LookupAuditEvent, publish_lookup_audit,
+    LookupAuditEvent, audit_lookup_found_subject, audit_lookup_notfound_subject, audit_lookup_revoked_subject,
+    publish_lookup_audit,
 };
 use crate::cache::RegistryCache;
 use crate::store::AgentRegistryStore;
@@ -83,24 +84,25 @@ pub async fn lookup(
     Ok(resolve_lookup(request, record))
 }
 
-async fn publish_lookup_outcome(client: &Client, request: &LookupRequest, response: &LookupResponse) {
+async fn publish_lookup_outcome(client: &Client, prefix: &str, request: &LookupRequest, response: &LookupResponse) {
     let (subject, outcome) = match response {
-        LookupResponse::Found { .. } => (AUDIT_LOOKUP_FOUND, "found"),
-        LookupResponse::NotFound => (AUDIT_LOOKUP_NOTFOUND, "notfound"),
-        LookupResponse::Revoked { .. } => (AUDIT_LOOKUP_REVOKED, "revoked"),
+        LookupResponse::Found { .. } => (audit_lookup_found_subject(prefix), "found"),
+        LookupResponse::NotFound => (audit_lookup_notfound_subject(prefix), "notfound"),
+        LookupResponse::Revoked { .. } => (audit_lookup_revoked_subject(prefix), "revoked"),
     };
     let event = LookupAuditEvent {
         agent_id: &request.agent_id,
         tenant_hint: request.tenant_hint.as_deref(),
         outcome,
     };
-    publish_lookup_audit(client, subject, &event).await;
+    publish_lookup_audit(client, &subject, &event).await;
 }
 
 pub async fn run_lookup_consumer(
     client: Client,
     store: AgentRegistryStore,
     cache: Arc<RegistryCache>,
+    prefix: Arc<str>,
     shutdown: impl std::future::Future<Output = ()> + Send,
 ) -> Result<(), ConsumerError> {
     let mut subscription = client
@@ -123,7 +125,7 @@ pub async fn run_lookup_consumer(
                 let Some(message) = message else {
                     break;
                 };
-                if let Err(error) = handle_lookup_message(&client, &store, cache.clone(), message).await {
+                if let Err(error) = handle_lookup_message(&client, &store, cache.clone(), &prefix, message).await {
                     warn!(%error, "registry lookup request failed");
                 }
             }
@@ -137,6 +139,7 @@ async fn handle_lookup_message(
     client: &Client,
     store: &AgentRegistryStore,
     cache: Arc<RegistryCache>,
+    prefix: &str,
     message: async_nats::Message,
 ) -> Result<(), ConsumerError> {
     let Some(reply) = message.reply.clone() else {
@@ -146,7 +149,7 @@ async fn handle_lookup_message(
 
     let request: LookupRequest = serde_json::from_slice(&message.payload).map_err(ConsumerError::RequestDeserialize)?;
     let response = lookup(store, cache, &request).await?;
-    publish_lookup_outcome(client, &request, &response).await;
+    publish_lookup_outcome(client, prefix, &request, &response).await;
 
     let body = serde_json::to_vec(&response).map_err(ConsumerError::ResponseSerialize)?;
     if let Err(error) = client.publish(reply.to_string(), Bytes::from(body)).await {

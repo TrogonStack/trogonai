@@ -128,11 +128,16 @@ pub async fn open_bucket(jetstream: &jetstream::Context, auto_create: bool) -> R
 pub struct AgentRegistryStore {
     kv: kv::Store,
     nats: Client,
+    prefix: Arc<str>,
 }
 
 impl AgentRegistryStore {
-    pub fn new(kv: kv::Store, nats: Client) -> Self {
-        Self { kv, nats }
+    pub fn new(kv: kv::Store, nats: Client, prefix: impl Into<Arc<str>>) -> Self {
+        Self {
+            kv,
+            nats,
+            prefix: prefix.into(),
+        }
     }
 
     pub async fn get(&self, agent_id: &str) -> Result<Option<AgentRecord>, StoreError> {
@@ -148,7 +153,7 @@ impl AgentRegistryStore {
         let key = latest_key(&record.agent_id);
         let payload = serde_json::to_vec(&record).map_err(StoreError::Serialize)?;
         let revision = self.kv.put(key, payload.into()).await.map_err(StoreError::KvPut)?;
-        publish_put_audit(&self.nats, &record, Some(revision)).await;
+        publish_put_audit(&self.nats, &self.prefix, &record, Some(revision)).await;
         Ok(())
     }
 
@@ -161,7 +166,7 @@ impl AgentRegistryStore {
             .flatten()
             .map(|record| record.agent_version);
         self.kv.delete(key).await.map_err(StoreError::KvDelete)?;
-        publish_delete_audit(&self.nats, agent_id, version.as_deref()).await;
+        publish_delete_audit(&self.nats, &self.prefix, agent_id, version.as_deref()).await;
         Ok(())
     }
 
