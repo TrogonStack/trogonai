@@ -6,6 +6,7 @@ use super::errors::SchemaCacheError;
 use super::hash::hash_schema;
 use super::key::{SchemaCacheKey, ServerId};
 use super::store::SchemaCache;
+use crate::stepup::ToolAnnotations;
 
 /// Extract `inputSchema` (and optional `outputSchema`) from a successful `tools/list` reply.
 pub async fn sniff_tools_list_reply<C: SchemaCache + ?Sized>(
@@ -49,6 +50,7 @@ pub async fn sniff_tools_list_reply<C: SchemaCache + ?Sized>(
             .await?;
             stored += 1;
         }
+        store_tool_annotations(cache, server_id, name, tool).await?;
         if let Some(output_schema) = tool.get("outputSchema").filter(|s| !s.is_null()) {
             store_tool_schema(
                 cache,
@@ -62,6 +64,26 @@ pub async fn sniff_tools_list_reply<C: SchemaCache + ?Sized>(
         }
     }
     Ok(stored)
+}
+
+async fn store_tool_annotations<C: SchemaCache + ?Sized>(
+    cache: &C,
+    server_id: &ServerId,
+    tool_name: &str,
+    tool: &serde_json::Value,
+) -> Result<(), SchemaCacheError> {
+    let sensitive = tool
+        .get("annotations")
+        .and_then(|annotations| annotations.get("sensitive"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    cache
+        .put_tool_annotations(
+            server_id,
+            tool_name,
+            ToolAnnotations { sensitive },
+        )
+        .await
 }
 
 async fn store_tool_schema<C: SchemaCache + ?Sized>(

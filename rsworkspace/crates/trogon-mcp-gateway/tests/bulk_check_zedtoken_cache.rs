@@ -49,6 +49,9 @@ impl ZedTokenCacheHarness {
             mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
             context_throttle: None,
             anomaly_emitter: None,
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
         };
         Self {
             nats_conf,

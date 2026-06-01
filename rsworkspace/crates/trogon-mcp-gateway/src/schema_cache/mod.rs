@@ -20,7 +20,7 @@ pub use invalidate::{
     parse_client_id_from_notification_subject, should_invalidate,
 };
 pub use key::{SchemaCacheKey, SchemaHash, SchemaHashError, ServerId};
-pub use runtime::{SchemaCacheRuntime, ensure_tool_schema, lookup_tool_schema, schema_cache_key_for_tool};
+pub use runtime::{SchemaCacheRuntime, ensure_tool_schema, lookup_tool_annotations, lookup_tool_schema, schema_cache_key_for_tool};
 pub use singleflight::SchemaSingleflight;
 pub use sniff::sniff_tools_list_reply;
 pub use store::{InMemorySchemaCache, SchemaCache, SharedSchemaCache};

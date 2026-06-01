@@ -20,7 +20,8 @@ use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_RE
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
 use crate::approvals::{
     ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
-    build_approval_required_with_subject, jsonrpc_error_with_approval_data,
+    build_approval_required_step_up, build_approval_required_with_subject,
+    jsonrpc_error_with_approval_data,
 };
 use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
@@ -39,7 +40,12 @@ use crate::redaction::{
 };
 use crate::rpc_codes;
 use crate::schema_cache::{
-    SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
+    SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_annotations, lookup_tool_schema,
+    sniff_tools_list_reply,
+};
+use crate::stepup::{
+    ApprovalBridge, FreshnessClock, NoopApprovalBridge, StepUpOutcome, StepUpPolicy, StepUpRequestCtx,
+    SystemFreshnessClock, ToolAnnotations,
 };
 use crate::subject::gateway_to_server_subject;
 use crate::throttle::{RateLimitDeny, RateLimitScope, RateLimiter};
@@ -68,6 +74,9 @@ impl std::fmt::Display for GatewayError {
 
 impl std::error::Error for GatewayError {}
 
+const DEFAULT_STEPUP_APPROVAL_TTL_SECS: u64 = 300;
+const DEFAULT_STEPUP_APPROVAL_BASE_URL: &str = "https://console.trogon.local";
+
 #[derive(Clone)]
 pub struct GatewaySettings {
     pub mcp: Config,
@@ -87,6 +96,12 @@ pub struct GatewaySettings {
     pub context_throttle: Option<Arc<ContextThrottle>>,
     /// When `None`, ingress does not publish anomaly feature vectors.
     pub anomaly_emitter: Option<Arc<dyn AnomalyEmit>>,
+    /// When `None`, step-up is bypassed (preserves existing behavior).
+    pub stepup_policy: Option<Arc<StepUpPolicy>>,
+    /// When `None` and step-up is enabled, defaults to [`NoopApprovalBridge`].
+    pub stepup_bridge: Option<Arc<dyn ApprovalBridge>>,
+    /// When `None` and step-up is enabled, defaults to [`SystemFreshnessClock`].
+    pub freshness_clock: Option<Arc<dyn FreshnessClock>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -94,6 +109,20 @@ fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
         .rate_limit
         .clone()
         .unwrap_or_else(|| Arc::new(RateLimiter::default()))
+}
+
+fn freshness_clock(settings: &GatewaySettings) -> Arc<dyn FreshnessClock> {
+    settings
+        .freshness_clock
+        .clone()
+        .unwrap_or_else(|| Arc::new(SystemFreshnessClock))
+}
+
+fn stepup_bridge(settings: &GatewaySettings) -> Arc<dyn ApprovalBridge> {
+    settings
+        .stepup_bridge
+        .clone()
+        .unwrap_or_else(|| Arc::new(NoopApprovalBridge))
 }
 
 pub async fn run<S>(
@@ -506,6 +535,34 @@ async fn handle_ingress_inner(
                 debug!("context throttle skipped: incomplete tenant_id, agent_id, or purpose");
             }
         }
+    }
+
+    if let Some(block) = evaluate_step_up(
+        settings,
+        &jsonrpc_method,
+        tool_call.as_deref(),
+        &server_id_typed,
+        &request_id,
+        &jwt_claims,
+    )
+    .await
+    {
+        finish_ingress_step_up_blocked(FinishIngressStepUpBlockedParams {
+            client,
+            jetstream,
+            mcp: &settings.mcp,
+            msg: &msg,
+            backend_subject: &backend_subject,
+            jsonrpc_method: &jsonrpc_method,
+            gateway_identity: gateway_identity.clone(),
+            request_id: request_id.clone(),
+            requires_spicedb,
+            spicedb_allowed: None,
+            traces,
+            block,
+        })
+        .await;
+        return Ok(());
     }
 
     let requires_spicedb = merged_requires_spicedb(
@@ -966,6 +1023,184 @@ fn anonymous_audit_identity() -> GatewayIdentity {
 struct HierarchicalPolicyDeny {
     code: i32,
     message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StepUpIngressBlock {
+    Reauth { max_age_seconds: u64 },
+    Approval { body: Bytes },
+    Error { code: i32, message: String },
+}
+
+pub async fn evaluate_step_up(
+    settings: &GatewaySettings,
+    jsonrpc_method: &str,
+    tool_name: Option<&str>,
+    server_id: &ServerId,
+    request_id: &Option<serde_json::Value>,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+) -> Option<StepUpIngressBlock> {
+    let policy = settings.stepup_policy.as_ref()?;
+    if jsonrpc_method != "tools/call" {
+        return None;
+    }
+    let tool_name = tool_name?;
+    let tool_annotations = lookup_tool_annotations_for_call(server_id, tool_name).await;
+    let request_ctx = step_up_request_ctx(request_id, jwt_claims);
+    let clock = freshness_clock(settings);
+    let bridge = stepup_bridge(settings);
+    match policy.evaluate(&clock, &request_ctx, &tool_annotations) {
+        Ok(demand) => match StepUpOutcome::from_demand(demand) {
+            StepUpOutcome::Allow => None,
+            StepUpOutcome::Reauth { max_age_seconds } => Some(StepUpIngressBlock::Reauth { max_age_seconds }),
+            StepUpOutcome::Approval { reason } => {
+                if bridge.escalate(&request_ctx).await.is_err() {
+                    return Some(StepUpIngressBlock::Error {
+                        code: rpc_codes::AUTHZ_UNREACHABLE,
+                        message: "step_up_escalation_failed".to_string(),
+                    });
+                }
+                let wire_id = step_up_wire_request_id(request_id);
+                let Ok(request_id_typed) = RequestId::new(wire_id) else {
+                    return Some(StepUpIngressBlock::Error {
+                        code: rpc_codes::AUTHZ_UNREACHABLE,
+                        message: "step_up_request_id_invalid".to_string(),
+                    });
+                };
+                let data = build_approval_required_step_up(
+                    &request_id_typed,
+                    reason.as_str(),
+                    DEFAULT_STEPUP_APPROVAL_TTL_SECS,
+                    DEFAULT_STEPUP_APPROVAL_BASE_URL,
+                );
+                let body = jsonrpc_error_bytes_with_data(request_id.clone(), rpc_codes::APPROVAL_REQUIRED, data);
+                Some(StepUpIngressBlock::Approval { body })
+            }
+            StepUpOutcome::Error(err) => Some(step_up_error_block(err)),
+        },
+        Err(err) => Some(step_up_error_block(err)),
+    }
+}
+
+fn step_up_error_block(err: crate::stepup::StepUpError) -> StepUpIngressBlock {
+    use crate::stepup::StepUpError;
+    match err {
+        StepUpError::MissingAuthTime | StepUpError::MalformedAuthMethod => StepUpIngressBlock::Error {
+            code: rpc_codes::AUTH_EXPIRED,
+            message: "auth_expired".to_string(),
+        },
+    }
+}
+
+async fn lookup_tool_annotations_for_call(server_id: &ServerId, tool_name: &str) -> ToolAnnotations {
+    if let Some(runtime) = SchemaCacheRuntime::shared()
+        && let Ok(annotations) = lookup_tool_annotations(&runtime, server_id, tool_name).await
+    {
+        return annotations;
+    }
+    ToolAnnotations::default()
+}
+
+fn step_up_request_ctx(
+    request_id: &Option<serde_json::Value>,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+) -> StepUpRequestCtx {
+    StepUpRequestCtx {
+        request_id: step_up_wire_request_id(request_id),
+        auth_method: jwt_claims.auth_method.clone(),
+        auth_time: jwt_claims.auth_time,
+    }
+}
+
+fn step_up_wire_request_id(request_id: &Option<serde_json::Value>) -> String {
+    request_id
+        .as_ref()
+        .and_then(|id| match id {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => n.as_i64().map(|v| v.to_string()),
+            _ => Some(id.to_string()),
+        })
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| "gateway-step-up".to_string())
+}
+
+struct FinishIngressStepUpBlockedParams<'a> {
+    client: &'a async_nats::Client,
+    jetstream: &'a jetstream::Context,
+    mcp: &'a Config,
+    msg: &'a Message,
+    backend_subject: &'a str,
+    jsonrpc_method: &'a str,
+    gateway_identity: GatewayIdentity,
+    request_id: Option<serde_json::Value>,
+    requires_spicedb: bool,
+    spicedb_allowed: Option<bool>,
+    traces: &'a TraceStore,
+    block: StepUpIngressBlock,
+}
+
+async fn finish_ingress_step_up_blocked(params: FinishIngressStepUpBlockedParams<'_>) {
+    let audit_outcome = "deny";
+    if params.msg.reply.is_some() {
+        match &params.block {
+            StepUpIngressBlock::Reauth { max_age_seconds } => {
+                reply_with_jsonrpc_error(
+                    params.client,
+                    params.msg,
+                    params.request_id.clone(),
+                    rpc_codes::AUTH_EXPIRED,
+                    format!("auth_expired:max_age_seconds={max_age_seconds}"),
+                )
+                .await;
+            }
+            StepUpIngressBlock::Approval { body } => {
+                reply_with_jsonrpc_body(params.client, params.msg, body.clone()).await;
+            }
+            StepUpIngressBlock::Error { code, message } => {
+                reply_with_jsonrpc_error(
+                    params.client,
+                    params.msg,
+                    params.request_id.clone(),
+                    *code,
+                    message.clone(),
+                )
+                .await;
+            }
+        }
+    }
+    let envelope = AuditEnvelope::new(
+        params.msg.subject.to_string(),
+        params.backend_subject.to_string(),
+        audit_outcome,
+        "request",
+        params.jsonrpc_method.to_string(),
+        params.gateway_identity.tenant.clone(),
+        params.gateway_identity.caller_sub.clone(),
+        params.gateway_identity.issuer.clone(),
+        params.gateway_identity.source,
+        params.request_id.clone(),
+        None,
+    );
+    let prefix = params.mcp.prefix_str();
+    let method_root = audit::jsonrpc_method_root(params.jsonrpc_method);
+    let subject = audit::audit_publish_subject(prefix, audit_outcome, "request", &method_root);
+    audit::publish_audit(params.jetstream, subject, &envelope, std::time::Duration::from_secs(5)).await;
+
+    if let Some(id) = params.request_id {
+        params.traces.insert(
+            id.to_string(),
+            DecisionTrace {
+                subject_in: params.msg.subject.to_string(),
+                subject_out: params.backend_subject.to_string(),
+                jsonrpc_method: params.jsonrpc_method.to_string(),
+                cel_requires_spicedb: params.requires_spicedb,
+                spicedb_allowed: params.spicedb_allowed,
+                tenant: params.gateway_identity.tenant,
+                caller_sub: params.gateway_identity.caller_sub,
+                identity_source: params.gateway_identity.source,
+            },
+        );
+    }
 }
 
 fn merge_request_context(
@@ -1857,6 +2092,27 @@ fn jsonrpc_error_bytes(id: Option<serde_json::Value>, code: i32, message: String
         "error": { "code": code, "message": message }
     });
     Bytes::from(value.to_string())
+}
+
+fn jsonrpc_error_bytes_with_data(id: Option<serde_json::Value>, _code: i32, data: serde_json::Value) -> Bytes {
+    let value = jsonrpc_error_with_approval_data(id, data);
+    Bytes::from(value.to_string())
+}
+
+async fn reply_with_jsonrpc_body(client: &async_nats::Client, ingress: &Message, body: Bytes) {
+    let Some(reply) = ingress.reply.clone() else {
+        warn!("cannot send JSON-RPC response: ingress message has no reply subject");
+        return;
+    };
+    if let Err(e) = client
+        .publish_with_headers(reply.to_string(), async_nats::HeaderMap::new(), body)
+        .await
+    {
+        warn!(error = %e, "failed to publish JSON-RPC response to reply subject");
+    }
+    if let Err(e) = client.flush().await {
+        warn!(error = %e, "flush after JSON-RPC response failed");
+    }
 }
 
 #[cfg(test)]

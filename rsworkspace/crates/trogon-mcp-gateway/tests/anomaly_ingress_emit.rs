@@ -125,6 +125,9 @@ async fn anomaly_emits_when_emitter_configured() {
         mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         context_throttle: None,
         anomaly_emitter: Some(fake.clone()),
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
     };
 
     let harness = harness::start_gateway(settings).await;
@@ -183,6 +186,9 @@ async fn anomaly_emit_failure_does_not_fail_request() {
         mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         context_throttle: None,
         anomaly_emitter: Some(fake.clone()),
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
     };
 
     let harness = harness::start_gateway(settings).await;

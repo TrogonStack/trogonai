@@ -15,7 +15,7 @@ mod policy;
 
 pub use bridge::{ApprovalBridge, NoopApprovalBridge};
 pub use errors::StepUpError;
-pub use freshness::{FreshnessClock, SystemFreshnessClock, is_auth_time_fresh};
+pub use freshness::{FreshnessClock, SystemFreshnessClock, TestFreshnessClock, is_auth_time_fresh};
 pub use policy::{
     StepUpDemand, StepUpPolicy, StepUpRequestCtx, ToolAnnotations, DEFAULT_MAX_AUTH_AGE_SECS,
 };

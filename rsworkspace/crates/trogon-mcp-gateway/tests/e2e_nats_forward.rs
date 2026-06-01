@@ -75,6 +75,9 @@ async fn gateway_forwards_tools_list_request_reply() {
         mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         context_throttle: None,
         anomaly_emitter: None,
+        stepup_policy: None,
+        stepup_bridge: None,
+        freshness_clock: None,
     };
 
     let gateway_client = Arc::new(connect(&nats_conf, connect_timeout).await.expect("gateway nats"));

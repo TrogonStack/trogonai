@@ -104,6 +104,9 @@ mod harness {
             mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
             context_throttle: Some(context_throttle),
             anomaly_emitter: None,
+            stepup_policy: None,
+            stepup_bridge: None,
+            freshness_clock: None,
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));
