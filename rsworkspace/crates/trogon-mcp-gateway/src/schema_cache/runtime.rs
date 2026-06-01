@@ -12,6 +12,7 @@ use super::key::{SchemaCacheKey, ServerId};
 use super::singleflight::SchemaSingleflight;
 use super::sniff::sniff_tools_list_reply;
 use super::store::{InMemorySchemaCache, SchemaCache, SharedSchemaCache};
+use crate::stepup::ToolAnnotations;
 
 static SHARED: OnceLock<Arc<SchemaCacheRuntime>> = OnceLock::new();
 
@@ -96,6 +97,14 @@ impl SchemaCacheRuntime {
             .copied()
             .unwrap_or(0)
     }
+}
+
+pub async fn lookup_tool_annotations(
+    runtime: &SchemaCacheRuntime,
+    server_id: &ServerId,
+    tool_name: &str,
+) -> Result<ToolAnnotations, SchemaCacheError> {
+    runtime.cache.lookup_tool_annotations(server_id, tool_name).await
 }
 
 pub async fn lookup_tool_schema(
