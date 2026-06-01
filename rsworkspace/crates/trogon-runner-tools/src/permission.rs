@@ -355,6 +355,106 @@ fn is_plan_denied_tool(tool_name: &str) -> bool {
         || matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Bash")
 }
 
+// ── Protected paths (never auto-approved) ─────────────────────────────────────
+
+/// Sensitive paths that must never be auto-approved (read OR write): secrets and
+/// VCS/credential internals. A match forces the interactive prompt regardless of
+/// mode (so the user explicitly approves), short of `bypassPermissions`.
+fn is_protected_path(path: &str) -> bool {
+    let p = path.trim();
+    if p.is_empty() {
+        return false;
+    }
+    let file = p.rsplit(['/', '\\']).next().unwrap_or(p);
+    let protected_file = matches!(
+        file,
+        ".env" | "credentials" | ".npmrc" | ".netrc" | "id_rsa" | "id_ed25519" | ".pgpass"
+    ) || file.starts_with(".env.")
+        || file.ends_with(".pem")
+        || file.ends_with(".key");
+    if protected_file {
+        return true;
+    }
+    // Any path component naming a secrets/VCS directory.
+    p.split(['/', '\\'])
+        .any(|c| matches!(c, ".git" | ".ssh" | ".aws" | ".gnupg"))
+}
+
+/// True when a tool call targets a protected path: an explicit path argument, or
+/// a (read-only) bash command that references one (e.g. `cat .env`).
+fn touches_protected_path(tool_name: &str, tool_input: &Value) -> bool {
+    if extract_path_from_input(tool_input)
+        .map(is_protected_path)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    normalize_tool_name(tool_name) == "bash"
+        && tool_input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|cmd| cmd.split_whitespace().any(is_protected_path))
+            .unwrap_or(false)
+}
+
+// ── Read containment ──────────────────────────────────────────────────────────
+
+/// Lexically resolve `p` (relative to `base`) to a normalized absolute path,
+/// collapsing `.`/`..` WITHOUT touching the filesystem.
+fn lexical_abs(base: &str, p: &str) -> std::path::PathBuf {
+    use std::path::{Component, Path, PathBuf};
+    let raw = if Path::new(p).is_absolute() {
+        PathBuf::from(p)
+    } else {
+        Path::new(base).join(p)
+    };
+    let mut out = PathBuf::new();
+    for comp in raw.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            c => out.push(c.as_os_str()),
+        }
+    }
+    out
+}
+
+// ── Safety classifier (auto mode) ─────────────────────────────────────────────
+
+/// Verdict from the `auto`-mode safety classifier for a side-effecting tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassifierVerdict {
+    Allow,
+    Prompt,
+    Deny,
+}
+
+/// Classifies whether a tool call is safe to auto-approve in `auto` mode. The
+/// production implementation asks an LLM; tests inject a mock. Read-only and
+/// protected-path calls are decided before the classifier is consulted.
+pub trait SafetyClassifier: Send + Sync {
+    fn classify<'a>(
+        &'a self,
+        tool_name: &'a str,
+        tool_input: &'a Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ClassifierVerdict> + Send + 'a>>;
+}
+
+/// Optional extra configuration for [`build_mode_permission_checker`].
+#[derive(Default, Clone)]
+pub struct PermissionExtras {
+    /// Session cwd. When set, read-only auto-allow is contained to `cwd` +
+    /// `additional_read_dirs` (reads elsewhere prompt). `None` disables containment.
+    pub cwd: Option<String>,
+    /// Directories where reads are auto-allowed beyond `cwd` (`--add-dir` roots +
+    /// `permissions.additionalDirectories`).
+    pub additional_read_dirs: Vec<String>,
+    /// `auto`-mode classifier. `None` makes `auto` prompt for side-effecting tools.
+    pub classifier: Option<Arc<dyn SafetyClassifier>>,
+}
+
 /// Applies session permission mode policy before delegating to [`RulesPermissionChecker`].
 ///
 /// An explicit `Deny` (TROGON.md rule or tool-policy) is a hard boundary and wins
@@ -367,10 +467,22 @@ fn is_plan_denied_tool(tool_name: &str) -> bool {
 /// | `acceptEdits` | Auto-allow read-only tools + read-only bash + file edits; prompt write-bash, MCP, other tools |
 /// | `dontAsk` | Auto-allow all except explicit Deny rules/policies (audit) |
 /// | `plan` | Auto-allow read-only tools + read-only bash; deny write tools + write-bash |
+/// | `auto` | Auto-allow read-only; side-effecting tools decided by an LLM safety classifier (Allow/Prompt/Deny) |
 /// | `bypassPermissions` | Not installed — caller skips checker entirely (ignores Deny rules too) |
+///
+/// Two cross-cutting rules apply in every installed mode (i.e. not `bypassPermissions`):
+/// - **Protected paths** (`.env*`, `.git/`, `.ssh/`, keys, …) are never auto-approved — they force the prompt.
+/// - **Read containment**: when a cwd is configured, read-only auto-allow is limited to the cwd plus
+///   `additional_read_dirs` (`--add-dir` + `permissions.additionalDirectories`); reads elsewhere prompt.
 pub struct ModePermissionChecker {
     pub mode: String,
     pub inner: RulesPermissionChecker,
+    /// Session cwd for read containment; `None` disables containment.
+    pub cwd: Option<String>,
+    /// Extra dirs where reads are auto-allowed (beyond cwd).
+    pub read_dirs: Vec<String>,
+    /// `auto`-mode safety classifier.
+    pub classifier: Option<Arc<dyn SafetyClassifier>>,
 }
 
 impl ModePermissionChecker {
@@ -382,6 +494,22 @@ impl ModePermissionChecker {
                 eval_tool_policies(&self.inner.tool_policies, tool_name, tool_input),
                 Some(PolicyAction::Deny)
             )
+    }
+
+    /// Whether a read-only tool's path is within the allowed read roots (cwd +
+    /// `read_dirs`). Returns `true` when containment is disabled (`cwd` is `None`)
+    /// or the tool has no path argument.
+    fn read_allowed(&self, tool_input: &Value) -> bool {
+        let Some(cwd) = self.cwd.as_deref() else {
+            return true;
+        };
+        let Some(path) = extract_path_from_input(tool_input) else {
+            return true;
+        };
+        let target = lexical_abs(cwd, path);
+        std::iter::once(lexical_abs(cwd, "."))
+            .chain(self.read_dirs.iter().map(|d| lexical_abs(cwd, d)))
+            .any(|root| target.starts_with(&root))
     }
 }
 
@@ -402,18 +530,29 @@ impl PermissionChecker for ModePermissionChecker {
             return Box::pin(async move { false });
         }
 
+        // Protected paths (.env*, .git/, keys, …) are NEVER auto-approved: force the
+        // interactive prompt, skipping both mode auto-allow and rule auto-allow.
+        if touches_protected_path(tool_name, tool_input) {
+            return self.inner.inner.check(tool_call_id, tool_name, tool_input);
+        }
+
         match self.mode.as_str() {
             "dontAsk" => {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
                 Box::pin(async move { true })
             }
             // Read-only tools auto-allow in every non-bypass mode that isn't a pure
-            // deny: `default`, `acceptEdits`, and `plan` (read-only exploration).
-            "default" | "acceptEdits" | "plan" if is_read_only_tool(tool_name) => {
-                push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
-                Box::pin(async move { true })
+            // deny: `default`, `acceptEdits`, `plan`, and `auto` — but only within the
+            // allowed read roots (cwd + additional_read_dirs); reads elsewhere prompt.
+            "default" | "acceptEdits" | "plan" | "auto" if is_read_only_tool(tool_name) => {
+                if self.read_allowed(tool_input) {
+                    push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                    Box::pin(async move { true })
+                } else {
+                    self.inner.inner.check(tool_call_id, tool_name, tool_input)
+                }
             }
-            "default" | "acceptEdits" | "plan"
+            "default" | "acceptEdits" | "plan" | "auto"
                 if normalize_tool_name(tool_name) == "bash" && is_read_only_bash_command(tool_input) =>
             {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
@@ -428,6 +567,27 @@ impl PermissionChecker for ModePermissionChecker {
                 push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
                 Box::pin(async move { false })
             }
+            // `auto`: a side-effecting (non-read, non-protected) tool — let the LLM
+            // safety classifier decide. No classifier configured → fall back to the
+            // interactive prompt (fail safe).
+            "auto" => Box::pin(async move {
+                match &self.classifier {
+                    Some(classifier) => match classifier.classify(tool_name, tool_input).await {
+                        ClassifierVerdict::Allow => {
+                            push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Allowed);
+                            true
+                        }
+                        ClassifierVerdict::Deny => {
+                            push_audit(&audit_buf, tool_name, tool_input, AuditOutcome::Denied);
+                            false
+                        }
+                        ClassifierVerdict::Prompt => {
+                            self.inner.inner.check(tool_call_id, tool_name, tool_input).await
+                        }
+                    },
+                    None => self.inner.check(tool_call_id, tool_name, tool_input).await,
+                }
+            }),
             _ => self.inner.check(tool_call_id, tool_name, tool_input),
         }
     }
@@ -444,6 +604,7 @@ pub fn build_mode_permission_checker(
     tool_policies: Vec<ToolPolicy>,
     audit_buf: AuditBuf,
     exit_plan_mode: Arc<Mutex<Option<String>>>,
+    extras: PermissionExtras,
 ) -> Option<Arc<dyn PermissionChecker>> {
     if mode == "bypassPermissions" {
         return None;
@@ -463,6 +624,9 @@ pub fn build_mode_permission_checker(
     Some(Arc::new(ModePermissionChecker {
         mode: mode.to_string(),
         inner: rules_checker,
+        cwd: extras.cwd,
+        read_dirs: extras.additional_read_dirs,
+        classifier: extras.classifier,
     }))
 }
 
@@ -501,6 +665,8 @@ pub async fn check_tool_permission(
         audit_buf,
         // One-shot gate (xai/openrouter): no ExitPlanMode handling, so a throwaway cell.
         Arc::new(Mutex::new(None)),
+        // Containment/classifier not wired for the one-shot path; defaults are inert.
+        PermissionExtras::default(),
     ) else {
         return true;
     };
@@ -679,6 +845,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "dontAsk".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -694,6 +863,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "default".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -712,6 +884,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "default".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -732,6 +907,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -747,6 +925,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         tokio::spawn(async move {
             if let Some(req) = rx.recv().await {
@@ -770,6 +951,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -785,6 +969,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -799,6 +986,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "plan".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             !checker
@@ -813,6 +1003,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "plan".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             !checker
@@ -831,6 +1024,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "plan".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -846,6 +1042,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "plan".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             checker
@@ -861,6 +1060,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "plan".to_string(),
             inner: make_rules_checker("", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             !checker
@@ -877,6 +1079,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "dontAsk".to_string(),
             inner: make_rules_checker("deny_commands: rm -rf", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             !checker
@@ -894,6 +1099,9 @@ mod tests {
         let checker = ModePermissionChecker {
             mode: "acceptEdits".to_string(),
             inner: make_rules_checker("deny_paths: secrets/**", tx),
+            cwd: None,
+            read_dirs: vec![],
+            classifier: None,
         };
         assert!(
             !checker
@@ -914,6 +1122,7 @@ mod tests {
             vec![],
             Arc::new(Mutex::new(Vec::new())),
             Arc::new(Mutex::new(None)),
+            PermissionExtras::default(),
         );
         assert!(checker.is_none());
     }
@@ -1342,5 +1551,185 @@ mod tests {
             )
             .await;
         assert!(!result, "Deny must beat Allow");
+    }
+
+    // ── Protected paths / read containment / auto mode ────────────────────────
+
+    struct MockClassifier(ClassifierVerdict);
+    impl SafetyClassifier for MockClassifier {
+        fn classify<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _tool_input: &'a Value,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ClassifierVerdict> + Send + 'a>>
+        {
+            let v = self.0;
+            Box::pin(async move { v })
+        }
+    }
+
+    fn full_checker(
+        mode: &str,
+        tx: PermissionTx,
+        cwd: Option<&str>,
+        read_dirs: Vec<String>,
+        classifier: Option<Arc<dyn SafetyClassifier>>,
+    ) -> ModePermissionChecker {
+        ModePermissionChecker {
+            mode: mode.to_string(),
+            inner: make_rules_checker("", tx),
+            cwd: cwd.map(String::from),
+            read_dirs,
+            classifier,
+        }
+    }
+
+    #[tokio::test]
+    async fn protected_path_not_auto_allowed_even_in_dontask() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("dontAsk", tx, None, vec![], None);
+        // .env routes to the (dropped) channel instead of auto-allowing → false.
+        assert!(
+            !checker
+                .check("tc", "write_file", &serde_json::json!({"path": ".env"}))
+                .await,
+            "protected .env must never be auto-approved"
+        );
+    }
+
+    #[tokio::test]
+    async fn normal_path_still_auto_allowed_in_dontask() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("dontAsk", tx, None, vec![], None);
+        assert!(
+            checker
+                .check("tc", "write_file", &serde_json::json!({"path": "src/main.rs"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn protected_bash_cat_env_not_auto_allowed() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, None, vec![], None);
+        assert!(
+            !checker
+                .check("tc", "bash", &serde_json::json!({"command": "cat .env"}))
+                .await,
+            "`cat .env` references a protected path → must prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_inside_cwd_allowed_outside_prompts() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, Some("/work"), vec![], None);
+        assert!(
+            checker
+                .check("tc", "read_file", &serde_json::json!({"path": "/work/src/a.rs"}))
+                .await
+        );
+        let (tx2, rx2) = mpsc::channel(1);
+        drop(rx2);
+        let checker2 = full_checker("default", tx2, Some("/work"), vec![], None);
+        assert!(
+            !checker2
+                .check("tc", "read_file", &serde_json::json!({"path": "/etc/passwd"}))
+                .await,
+            "reads outside cwd must not be auto-allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_in_additional_directory_allowed() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, Some("/work"), vec!["/extra".into()], None);
+        assert!(
+            checker
+                .check("tc", "read_file", &serde_json::json!({"path": "/extra/lib.rs"}))
+                .await,
+            "reads in permissions.additionalDirectories must be auto-allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_escaping_cwd_via_dotdot_prompts() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("default", tx, Some("/work"), vec![], None);
+        assert!(
+            !checker
+                .check("tc", "read_file", &serde_json::json!({"path": "../etc/passwd"}))
+                .await,
+            "../ escaping cwd must not be auto-allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_mode_read_only_auto_allows() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let checker = full_checker("auto", tx, None, vec![], None);
+        assert!(
+            checker
+                .check("tc", "read_file", &serde_json::json!({"path": "a.rs"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_mode_classifier_allow_and_deny() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let allow = full_checker(
+            "auto",
+            tx,
+            None,
+            vec![],
+            Some(Arc::new(MockClassifier(ClassifierVerdict::Allow))),
+        );
+        assert!(
+            allow
+                .check("tc", "write_file", &serde_json::json!({"path": "a.rs", "content": "x"}))
+                .await
+        );
+
+        let (tx2, rx2) = mpsc::channel(1);
+        drop(rx2);
+        let deny = full_checker(
+            "auto",
+            tx2,
+            None,
+            vec![],
+            Some(Arc::new(MockClassifier(ClassifierVerdict::Deny))),
+        );
+        assert!(
+            !deny
+                .check("tc", "write_file", &serde_json::json!({"path": "a.rs", "content": "x"}))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_mode_prompt_verdict_and_no_classifier_route_to_channel() {
+        for classifier in [
+            Some(Arc::new(MockClassifier(ClassifierVerdict::Prompt)) as Arc<dyn SafetyClassifier>),
+            None,
+        ] {
+            let (tx, rx) = mpsc::channel(1);
+            drop(rx);
+            let checker = full_checker("auto", tx, None, vec![], classifier);
+            assert!(
+                !checker
+                    .check("tc", "write_file", &serde_json::json!({"path": "a.rs", "content": "x"}))
+                    .await,
+                "Prompt/None must route to the interactive channel (dropped rx → false)"
+            );
+        }
     }
 }

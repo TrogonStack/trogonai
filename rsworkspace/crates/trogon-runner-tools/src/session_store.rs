@@ -107,6 +107,11 @@ pub struct SessionState {
     /// Additional root directories supplied via `_meta.additionalRoots` at session creation.
     #[serde(default)]
     pub additional_roots: Vec<String>,
+    /// Read-only allow-listed directories outside cwd, from
+    /// `_meta.permissions.additionalDirectories`. Reads here are auto-approved even
+    /// though they are outside the working directory.
+    #[serde(default)]
+    pub additional_read_dirs: Vec<String>,
     /// If true, all built-in agent tools are disabled for this session.
     /// Set via `_meta.disableBuiltInTools` at session creation.
     #[serde(default)]
@@ -190,6 +195,7 @@ impl Default for SessionState {
             system_prompt: None,
             system_prompt_override: None,
             additional_roots: Vec::new(),
+            additional_read_dirs: Vec::new(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
             parent_session_id: None,

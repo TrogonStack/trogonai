@@ -555,6 +555,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     if let Some(ref extra) = state.permission_rules_text {
                         rules.merge(PermissionRules::parse(extra));
                     }
+                    // Read containment: scope read-only auto-allow to cwd plus the
+                    // session's additional working dirs (--add-dir) and configured
+                    // permissions.additionalDirectories. Protected paths are always
+                    // prompted (handled inside the checker). The `auto`-mode LLM
+                    // classifier is not yet wired (None → side-effecting tools prompt).
+                    let mut read_dirs = state.additional_roots.clone();
+                    read_dirs.extend(state.additional_read_dirs.clone());
+                    let extras = trogon_runner_tools::PermissionExtras {
+                        cwd: Some(state.cwd.clone()),
+                        additional_read_dirs: read_dirs,
+                        classifier: None,
+                    };
                     if let Some(checker) = build_mode_permission_checker(
                         &state.mode,
                         &session_id,
@@ -564,6 +576,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         state.tool_policies.clone(),
                         audit_buf.clone(),
                         exit_plan_mode_cell.clone(),
+                        extras,
                     ) {
                         a.set_permission_checker(checker);
                     }
@@ -1040,6 +1053,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // permissions.additionalDirectories — read-only allow-list outside cwd.
+        let additional_read_dirs = meta
+            .and_then(|m| m.get("permissions"))
+            .and_then(|p| p.get("additionalDirectories"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -1054,6 +1078,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             system_prompt,
             system_prompt_override,
             additional_roots,
+            additional_read_dirs,
             mcp_servers,
             created_at: now.clone(),
             updated_at: now,
