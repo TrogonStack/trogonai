@@ -64,6 +64,7 @@ impl StsExchangeHarness {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
+            context_throttle: None,
         };
         Self {
             nats_conf,

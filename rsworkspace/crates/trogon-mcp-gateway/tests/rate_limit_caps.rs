@@ -108,6 +108,7 @@ mod harness {
             egress: None,
             chain_resolver: None,
             rate_limit: Some(rate_limit),
+            context_throttle: None,
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));

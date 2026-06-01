@@ -8,7 +8,7 @@ use async_nats::jetstream;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
@@ -16,6 +16,7 @@ use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
+use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, scope_for_tools_call, session_id_from_headers,
     strip_inbound_credentials,
@@ -34,7 +35,7 @@ use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
 };
 use crate::subject::gateway_to_server_subject;
-use crate::throttle::{RateLimitDeny, RateLimiter};
+use crate::throttle::{RateLimitDeny, RateLimitScope, RateLimiter};
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
@@ -71,6 +72,8 @@ pub struct GatewaySettings {
     pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
     /// When `None`, Pin 9 defaults apply via in-process limiter (Tier 2 KV sync TODO per ADR 0012).
     pub rate_limit: Option<Arc<RateLimiter>>,
+    /// Per `(tenant_id, agent_id, purpose)` token-bucket limiter; when `None`, context throttle is skipped.
+    pub context_throttle: Option<Arc<ContextThrottle>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -370,6 +373,41 @@ async fn handle_ingress_inner(
         })
         .await;
         return Ok(());
+    }
+
+    if let Some(throttle) = settings.context_throttle.as_ref() {
+        match context_throttle_key(&gateway_identity, &jwt_claims, legacy_tenant_hdr.as_deref()) {
+            Some(key) => match throttle.acquire(&key, 1) {
+                Ok(ContextThrottleOutcome::Allowed) => {}
+                Ok(ContextThrottleOutcome::Throttled { retry_after_ms }) => {
+                    finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+                        client,
+                        jetstream,
+                        mcp: &settings.mcp,
+                        msg: &msg,
+                        backend_subject: &backend_subject,
+                        jsonrpc_method: &jsonrpc_method,
+                        gateway_identity: gateway_identity.clone(),
+                        request_id: request_id.clone(),
+                        requires_spicedb,
+                        spicedb_allowed: None,
+                        traces,
+                        deny: RateLimitDeny {
+                            scope: RateLimitScope::Purpose,
+                            retry_after_ms,
+                        },
+                    })
+                    .await;
+                    return Ok(());
+                }
+                Err(err) => {
+                    debug!(error = %err, key = %key, "context throttle acquire failed; continuing");
+                }
+            },
+            None => {
+                debug!("context throttle skipped: incomplete tenant_id, agent_id, or purpose");
+            }
+        }
     }
 
     let requires_spicedb = merged_requires_spicedb(
@@ -854,6 +892,21 @@ fn evaluate_hierarchical_policy(
             Some(HierarchicalPolicyDeny { code, message })
         }
     }
+}
+
+fn context_throttle_key(
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    legacy_tenant: Option<&str>,
+) -> Option<ContextThrottleKey> {
+    let tenant_id = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant)
+        .filter(|value| !value.is_empty())?;
+    let agent_id = jwt_claims.agent_id.as_deref().filter(|value| !value.is_empty())?;
+    let purpose = jwt_claims.purpose.as_deref().filter(|value| !value.is_empty())?;
+    ContextThrottleKey::new(tenant_id, agent_id, purpose).ok()
 }
 
 fn merged_requires_spicedb(

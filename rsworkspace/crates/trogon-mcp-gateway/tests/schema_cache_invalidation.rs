@@ -434,6 +434,7 @@ mod gateway_e2e {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
+            context_throttle: None,
         };
 
         let gateway_client = Arc::new(connect(&nats_conf, Duration::from_secs(15)).await.expect("gateway nats"));

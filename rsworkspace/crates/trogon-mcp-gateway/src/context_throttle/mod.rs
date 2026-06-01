@@ -1,6 +1,6 @@
 //! Context-aware rate limits keyed by `(tenant_id, agent_id, purpose)`.
 //!
-//! **Gateway wiring (future PR):** After CEL evaluation in `gateway::handle_ingress_inner`
+//! **Gateway wiring:** After CEL evaluation in `gateway::handle_ingress_inner`
 //! (`evaluate_hierarchical_policy` returns allow, ~line 373) and after the existing per-`jwt.sub`
 //! caller check (`limiter.check_caller`, ~line 324), call [`ContextThrottle::acquire`] with
 //! `tenant_id`, `agent_id`, and `purpose` from JWT / CEL Pin 8 variables. On
