@@ -184,6 +184,7 @@ mod tests {
             cache_max_entries: 100,
             actor_token: "spiffe://test".into(),
             clock_skew_secs: 30,
+            prefix: "mcp".into(),
         };
         let cache = MeshEgressCache::new(config);
         let key = CacheKeyParts {

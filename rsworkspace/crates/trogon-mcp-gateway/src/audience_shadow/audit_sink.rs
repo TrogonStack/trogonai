@@ -3,7 +3,10 @@
 use std::sync::{Mutex, MutexGuard};
 
 /// JetStream subject for gateway ingress audience mismatch (shadow and enforce telemetry).
-pub const AUD_MISMATCH_AUDIT_SUBJECT: &str = "mcp.audit.gateway.aud_mismatch";
+#[must_use]
+pub fn aud_mismatch_audit_subject(prefix: &str) -> String {
+    format!("{prefix}.audit.gateway.aud_mismatch")
+}
 
 /// Payload emitted when inbound mesh `aud` does not include the expected backend/gateway URI.
 #[derive(Clone, Debug, Eq, PartialEq)]
