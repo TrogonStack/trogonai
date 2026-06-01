@@ -1,4 +1,6 @@
-use crate::app::{TurnMetrics, TurnRenderer, TurnStop, print_startup_banner, print_user_line};
+use crate::app::{
+    TurnMetrics, TurnRenderer, TurnStop, print_command_echo, print_startup_banner, print_user_line,
+};
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
@@ -130,11 +132,10 @@ impl Highlighter for FileAtHelper {
         let bracketed = format!("[{}]", mode_label(&mode));
         Cow::Owned(format!("\x1b[35m{:<width$}\x1b[0m › ", bracketed, width = MODE_FIELD))
     }
-
-    /// Force highlighting active so Shift+Tab's `Repaint` re-renders the prompt.
-    fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
-        true
-    }
+    // No highlight_char override: Shift+Tab's Cmd::Repaint forces a full
+    // refresh_line (which always re-renders the prompt via highlight_prompt), so
+    // we don't need per-keystroke re-highlighting — keeping the default (false)
+    // avoids redrawing the whole line on every character.
 }
 
 /// What Tab should do given the current input state.
@@ -578,8 +579,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     // Erase the readline echo line before printing the styled block.
                     eprint!("\x1b[1A\r\x1b[2K");
                 }
-                // No readline echo to erase for queued lines — just print the block.
-                print_user_line(&line);
+                // Commands (cd, !…, /…) get a dim echo — they aren't messages to the
+                // model; real prompts get the "You" block. Queued lines are always
+                // prompts (no readline echo to erase).
+                let is_command = line == "cd"
+                    || line.starts_with("cd ")
+                    || line.starts_with('!')
+                    || line.starts_with('/');
+                if is_command {
+                    print_command_echo(&line);
+                } else {
+                    print_user_line(&line);
+                }
 
                 if line == "cd" || line.starts_with("cd ") {
                     let arg = line.strip_prefix("cd").unwrap_or("").trim();
