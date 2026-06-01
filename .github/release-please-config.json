@@ -15,6 +15,45 @@
   "packages": {
     "rsworkspace/crates/acp-nats-stdio": {
       "component": "acp-nats-stdio"
+    },
+    "rsworkspace/crates/a2a-bridge": {
+      "component": "a2a-bridge"
+    },
+    "rsworkspace/crates/a2a-gateway": {
+      "component": "a2a-gateway"
+    },
+    "rsworkspace/crates/a2a-auth-callout": {
+      "component": "a2a-auth-callout"
+    },
+    "rsworkspace/crates/mcp-nats-server": {
+      "component": "mcp-nats-server"
+    },
+    "rsworkspace/crates/mcp-pack": {
+      "component": "mcp-pack"
+    },
+    "rsworkspace/crates/trogon-agent-registry": {
+      "component": "trogon-agent-registry"
+    },
+    "rsworkspace/crates/trogon-agent-registry-controller": {
+      "component": "trogon-agent-registry-controller"
+    },
+    "rsworkspace/crates/trogon-gateway-ctl": {
+      "component": "trogon-gateway-ctl"
+    },
+    "rsworkspace/crates/trogon-gateway-k8s": {
+      "component": "trogon-gateway-k8s"
+    },
+    "rsworkspace/crates/trogon-jwks-publisher": {
+      "component": "trogon-jwks-publisher"
+    },
+    "rsworkspace/crates/trogon-mcp-gateway": {
+      "component": "trogon-mcp-gateway"
+    },
+    "rsworkspace/crates/trogon-sts": {
+      "component": "trogon-sts"
+    },
+    "rsworkspace/crates/agctl": {
+      "component": "agctl"
     }
   },
   "plugins": [
