@@ -193,6 +193,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
+    session_init: crate::session::SessionInit,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
@@ -215,11 +216,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     "warning: could not resume {}: {e} — starting fresh",
                     entry.session_id
                 );
-                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
+                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await?
             }
         }
     } else {
-        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
+        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await?
     };
     // `--dangerously-skip-permissions` / `--plan` select a startup mode up front
     // (clap enforces they are mutually exclusive). `TROGON_MODE` is applied by the
@@ -342,7 +343,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/clear" {
                         mcp_manager.shutdown_session(session.session_id()).await;
                         session.close().await;
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await {
                             Ok(s) => {
                                 session = s;
                                 session_used_tokens = 0;
@@ -771,7 +772,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 let prompt_result = match session.prompt(&expanded).await {
                     Err(e) if e.to_string().contains("not found") => {
                         eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await {
                             Ok(s) => {
                                 session = s;
                                 session.prompt(&expanded).await
@@ -940,9 +941,12 @@ async fn start_session<SF: SessionFactory>(
     mcp: &mut McpManager,
     prefix: &str,
     cwd: PathBuf,
+    init: &crate::session::SessionInit,
 ) -> anyhow::Result<SF::Sess> {
     let mcp_servers = mcp.spawn_pending().await;
-    let session = factory.create_session(prefix, cwd, mcp_servers).await?;
+    let session = factory
+        .create_session_with_init(prefix, cwd, mcp_servers, init)
+        .await?;
     mcp.commit_pending(session.session_id());
     Ok(session)
 }

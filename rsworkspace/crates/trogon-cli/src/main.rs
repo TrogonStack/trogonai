@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use trogon_cli::{
     connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession, CrossRunnerSwitcher,
-    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
+    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex, SessionInit,
 };
 use trogon_cli::Session as _;
 
@@ -56,6 +56,18 @@ struct Args {
     /// Enable verbose (debug-level) logging for the CLI. Respects an explicit RUST_LOG.
     #[arg(short = 'v', long)]
     verbose: bool,
+
+    /// Override the agent's built-in system prompt entirely (replaces the default identity)
+    #[arg(long)]
+    system_prompt: Option<String>,
+
+    /// Append extra text to the agent's system prompt (kept alongside the default)
+    #[arg(long)]
+    append_system_prompt: Option<String>,
+
+    /// Grant the agent an additional working directory (repeatable)
+    #[arg(long, value_name = "PATH")]
+    add_dir: Vec<PathBuf>,
 
     /// Model id for --print (resolved via aliases; uses --prefix runner)
     #[arg(long)]
@@ -112,6 +124,31 @@ fn init_tracing(verbose: bool) {
         .try_init();
 }
 
+/// Build the per-session init metadata from the CLI flags.
+///
+/// `--add-dir` paths are canonicalised to absolute form; entries that do not
+/// resolve to an existing directory are warned about and skipped (matching the
+/// CLI's warn-and-continue style elsewhere) so a typo never aborts startup.
+fn build_session_init(
+    system_prompt: Option<String>,
+    append_system_prompt: Option<String>,
+    add_dir: &[PathBuf],
+) -> SessionInit {
+    let mut additional_roots = Vec::new();
+    for dir in add_dir {
+        match dir.canonicalize() {
+            Ok(p) if p.is_dir() => additional_roots.push(p.to_string_lossy().into_owned()),
+            Ok(p) => eprintln!("warning: --add-dir {} is not a directory — skipping", p.display()),
+            Err(e) => eprintln!("warning: --add-dir {} could not be resolved ({e}) — skipping", dir.display()),
+        }
+    }
+    SessionInit {
+        system_prompt_override: system_prompt,
+        append_system_prompt,
+        additional_roots,
+    }
+}
+
 fn run_dev_stack() -> anyhow::Result<()> {
     let script = trogon_dev_script()?;
     let status = std::process::Command::new("bash").arg(script).status()?;
@@ -137,6 +174,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cwd = std::env::current_dir()?;
+
+    let session_init = build_session_init(
+        args.system_prompt.clone(),
+        args.append_system_prompt.clone(),
+        &args.add_dir,
+    );
 
     // MED-40: keep `nats_server` in a named binding (not `_child`) so Drop is
     // visible and we can call `drop()` explicitly before `process::exit`.
@@ -180,7 +223,8 @@ async fn main() -> anyhow::Result<()> {
             args.prefix.clone()
         };
 
-        let session = TrogonSession::new(nats, &target_prefix, cwd, vec![]).await?;
+        let session =
+            TrogonSession::new_with_init(nats, &target_prefix, cwd, vec![], &session_init).await?;
         if args.dangerously_skip_permissions
             && let Err(e) = session.set_mode("bypassPermissions").await
         {
@@ -257,10 +301,40 @@ async fn main() -> anyhow::Result<()> {
             resume,
             args.dangerously_skip_permissions,
             args.plan,
+            session_init,
         )
         .await?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_session_init;
+    use std::path::PathBuf;
+
+    #[test]
+    fn prompts_flow_into_init_without_add_dir() {
+        let init = build_session_init(Some("over".into()), Some("app".into()), &[]);
+        assert_eq!(init.system_prompt_override.as_deref(), Some("over"));
+        assert_eq!(init.append_system_prompt.as_deref(), Some("app"));
+        assert!(init.additional_roots.is_empty());
+    }
+
+    #[test]
+    fn existing_dir_is_canonicalised_into_roots() {
+        // The current directory always exists and is a directory.
+        let cwd = std::env::current_dir().unwrap();
+        let init = build_session_init(None, None, &[cwd.clone()]);
+        let expected = cwd.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(init.additional_roots, vec![expected]);
+    }
+
+    #[test]
+    fn missing_dir_is_skipped_not_fatal() {
+        let init = build_session_init(None, None, &[PathBuf::from("/no/such/dir/xyzzy")]);
+        assert!(init.additional_roots.is_empty());
+    }
 }
 

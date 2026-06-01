@@ -50,6 +50,7 @@ pub async fn run_interactive<SF, F, SW, RS>(
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
+    session_init: crate::session::SessionInit,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -61,7 +62,7 @@ where
     local
         .run_until(run_interactive_inner(
             factory, prefix, cwd, fs, switcher, registry, nats, nats_url, stream, resume,
-            skip_permissions, plan,
+            skip_permissions, plan, session_init,
         ))
         .await
 }
@@ -80,6 +81,7 @@ async fn run_interactive_inner<SF, F, SW, RS>(
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
     plan: bool,
+    session_init: crate::session::SessionInit,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -129,6 +131,7 @@ where
         resume,
         skip_permissions,
         plan,
+        session_init,
     )
     .await
 }

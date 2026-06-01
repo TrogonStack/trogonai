@@ -98,6 +98,12 @@ pub struct SessionState {
     /// Optional system prompt set at session creation via `_meta.systemPrompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// Full override of the built-in identity, set at session creation via
+    /// `_meta.systemPromptOverride` (`--system-prompt`). When set it replaces the
+    /// default "You are Trogon" identity; TROGON.md and the appended system prompt
+    /// are still applied on top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt_override: Option<String>,
     /// Additional root directories supplied via `_meta.additionalRoots` at session creation.
     #[serde(default)]
     pub additional_roots: Vec<String>,
@@ -182,6 +188,7 @@ impl Default for SessionState {
             title: String::new(),
             mcp_servers: Vec::new(),
             system_prompt: None,
+            system_prompt_override: None,
             additional_roots: Vec::new(),
             disable_builtin_tools: false,
             allowed_tools: Vec::new(),
