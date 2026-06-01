@@ -150,6 +150,28 @@ async fn main() -> Result<(), BoxError> {
         "MCP NATS gateway starting"
     );
 
+    let probe_addr = SystemEnv
+        .var("MCP_GATEWAY_PROBE_LISTEN_ADDR")
+        .unwrap_or_else(|_| trogon_mcp_gateway::health::DEFAULT_PROBE_LISTEN_ADDR.to_string());
+    let health = trogon_mcp_gateway::health::HealthState::new();
+    health.set_nats_bound(true);
+    health.set_bundle_loaded(true);
+    health.set_spicedb_reachable(true);
+    match tokio::net::TcpListener::bind(&probe_addr).await {
+        Ok(listener) => {
+            info!(addr = %probe_addr, "MCP gateway health probe listener bound");
+            let probe_state = health.clone();
+            tokio::spawn(async move {
+                if let Err(error) = trogon_mcp_gateway::health::serve_health(listener, probe_state, shutdown_signal()).await {
+                    error!(%error, "health probe listener exited with error");
+                }
+            });
+        }
+        Err(error) => {
+            error!(addr = %probe_addr, %error, "failed to bind health probe listener; continuing without probes");
+        }
+    }
+
     let result = trogon_mcp_gateway::run(nats_client, checker, traces, settings, shutdown_signal()).await;
 
     match &result {
