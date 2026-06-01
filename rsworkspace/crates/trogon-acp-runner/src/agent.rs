@@ -1984,9 +1984,15 @@ mod tests {
         );
     }
 
+    // These tests exercise the V2 export format: any message carrying a richer
+    // block (ToolResult / ToolUse / Thinking) is exported as a versioned V2 object
+    // that PRESERVES the block, not the legacy text-only V1 array. The V1 path is
+    // still covered by `ext_method_export_returns_portable_messages` (plain text).
+
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_includes_tool_result_content() {
+    async fn ext_method_export_v2_preserves_tool_result_content() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -2020,17 +2026,26 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].role, "user");
-        assert_eq!(portable[0].text, "tool output here");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert_eq!(exp.messages[0].role, "user");
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::ToolResult { id, output_summary }
+                        if id == "call-1" && output_summary == "tool output here"),
+                    "tool_result content must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_mixed_text_and_tool_result() {
+    async fn ext_method_export_v2_mixed_text_and_tool_result() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -2067,16 +2082,23 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "before\nresult");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                let blocks = &exp.messages[0].blocks;
+                assert_eq!(blocks.len(), 2, "both blocks preserved in order");
+                assert!(matches!(&blocks[0], PortableBlock::Text { text } if text == "before"));
+                assert!(matches!(&blocks[1],
+                    PortableBlock::ToolResult { output_summary, .. } if output_summary == "result"));
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_drops_tool_use_blocks() {
+    async fn ext_method_export_v2_preserves_tool_use_blocks() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -2112,16 +2134,25 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "ToolUse block must be dropped (empty text)");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::ToolUse { id, name, .. }
+                        if id == "call-x" && name == "read_file"),
+                    "tool_use id/name must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
     #[tokio::test]
-    async fn ext_method_export_drops_thinking_blocks() {
+    async fn ext_method_export_v2_preserves_thinking_blocks() {
+        use trogon_runner_tools::portable_session::{ParsedExport, PortableBlock, parse_export_json};
         use trogon_runner_tools::session_store::{SessionState, mock::MemorySessionStore};
 
         let store = MemorySessionStore::new();
@@ -2154,11 +2185,18 @@ mod tests {
             .await
             .unwrap();
 
-        let portable: Vec<trogon_runner_tools::portable_session::PortableMessage> =
-            serde_json::from_str(resp.0.get()).unwrap();
-
-        assert_eq!(portable.len(), 1);
-        assert_eq!(portable[0].text, "", "Thinking block must be dropped (empty text)");
+        match parse_export_json(resp.0.get()).unwrap() {
+            ParsedExport::V2(exp) => {
+                assert_eq!(exp.messages.len(), 1);
+                assert!(
+                    matches!(&exp.messages[0].blocks[0],
+                        PortableBlock::Thinking { text } if text == "internal reasoning"),
+                    "thinking text must be preserved in V2, got {:?}",
+                    exp.messages[0].blocks[0]
+                );
+            }
+            ParsedExport::V1(_) => panic!("rich content must export as V2"),
+        }
     }
 
     #[cfg(feature = "test-helpers")]
