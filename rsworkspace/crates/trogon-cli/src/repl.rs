@@ -519,6 +519,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
         helper.cwd = cwd.clone();
     }
 
+    // Record the session (and any --name) in the local index at creation, so
+    // `trogon sessions list` and /sessions show it — and its name — immediately,
+    // rather than only after the first turn or a /rename. On resume this refreshes
+    // the existing entry.
+    persist_session_index(
+        &fs,
+        &project_dir,
+        &prefix,
+        session.session_id(),
+        &session.current_model(),
+        session_name.as_deref(),
+    );
+
     // Claude-style interrupt UX: when Ctrl+C cancels an in-flight response, the
     // prompt the user submitted is stashed here and pre-filled into the next
     // readline so they can edit and resend it instead of retyping it.
