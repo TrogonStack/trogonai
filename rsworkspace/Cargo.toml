@@ -28,11 +28,14 @@ mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 jsonrpc-nats = { path = "crates/jsonrpc-nats" }
 trogon-nats = { path = "crates/trogon-nats" }
 trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
+trogon-decider = { path = "crates/trogon-decider" }
+trogon-decider-nats = { path = "crates/trogon-decider-nats" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-semconv = { path = "crates/trogon-semconv" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
+trogonai-proto = { path = "crates/trogonai-proto" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
@@ -92,11 +95,13 @@ tonic = { version = "=0.14.6", default-features = false, features = ["transport"
 moka = { version = "=0.12.10", features = ["future"] }
 
 # Misc
+chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=0.8.23"
 wasmtime = "=45.0.0"
 http = "=1.4.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rrule = "=0.14.0"
 sha2 = "=0.10.8"
 wiremock = "=0.6.3"
 tempfile = "=3.27.0"
