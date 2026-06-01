@@ -50,3 +50,5 @@ coverage-*.xml
 
 # Misc
 tmp
+
+.agents/skills/internal-*

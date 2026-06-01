@@ -16,3 +16,13 @@ fi
 if [[ -f "$source_root/devops/docker/compose/.env" && "$source_root" != "$worktree_root" ]]; then
   ln -sf "$source_root/devops/docker/compose/.env" "$worktree_root/devops/docker/compose/.env"
 fi
+
+setup_local="$source_root/.conductor/scripts/setup.local.sh"
+
+if [[ ! -f "$setup_local" ]]; then
+  setup_local="$worktree_root/.conductor/scripts/setup.local.sh"
+fi
+
+if [[ -f "$setup_local" ]]; then
+  bash "$setup_local"
+fi
