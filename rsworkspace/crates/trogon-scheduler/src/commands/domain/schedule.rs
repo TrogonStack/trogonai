@@ -8,28 +8,8 @@ use crate::error::ScheduleSpecError;
 
 use super::{
     MessageContent, MessageEnvelope, MessageHeader, MessageHeaders, MessageHeadersError, ScheduleEventDelivery,
-    ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus,
+    ScheduleEventSamplingSource, ScheduleEventSchedule,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum JobStatus {
-    #[default]
-    Enabled,
-    Disabled,
-}
-
-impl JobStatus {
-    pub fn is_enabled(self) -> bool {
-        matches!(self, Self::Enabled)
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Enabled => "enabled",
-            Self::Disabled => "disabled",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schedule {
@@ -393,9 +373,9 @@ fn is_valid_tzdb_version(version: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct JobHeaders(MessageHeaders);
+pub struct ScheduleHeaders(MessageHeaders);
 
-impl JobHeaders {
+impl ScheduleHeaders {
     pub fn new<I, N, V>(headers: I) -> Result<Self, ScheduleSpecError>
     where
         I: IntoIterator<Item = (N, V)>,
@@ -426,7 +406,7 @@ fn message_headers_error(source: MessageHeadersError) -> ScheduleSpecError {
     }
 }
 
-impl TryFrom<MessageHeaders> for JobHeaders {
+impl TryFrom<MessageHeaders> for ScheduleHeaders {
     type Error = ScheduleSpecError;
 
     fn try_from(value: MessageHeaders) -> Result<Self, Self::Error> {
@@ -435,16 +415,16 @@ impl TryFrom<MessageHeaders> for JobHeaders {
     }
 }
 
-impl From<JobHeaders> for MessageHeaders {
-    fn from(value: JobHeaders) -> Self {
+impl From<ScheduleHeaders> for MessageHeaders {
+    fn from(value: ScheduleHeaders) -> Self {
         value.0
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct JobMessage {
+pub struct ScheduleMessage {
     pub content: MessageContent,
-    pub headers: JobHeaders,
+    pub headers: ScheduleHeaders,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -617,24 +597,6 @@ fn validate_reserved_scheduler_headers(headers: &[MessageHeader]) -> Result<(), 
     Ok(())
 }
 
-impl From<JobStatus> for ScheduleEventStatus {
-    fn from(value: JobStatus) -> Self {
-        match value {
-            JobStatus::Enabled => Self::Scheduled,
-            JobStatus::Disabled => Self::Paused,
-        }
-    }
-}
-
-impl From<ScheduleEventStatus> for JobStatus {
-    fn from(value: ScheduleEventStatus) -> Self {
-        match value {
-            ScheduleEventStatus::Scheduled => Self::Enabled,
-            ScheduleEventStatus::Paused => Self::Disabled,
-        }
-    }
-}
-
 impl From<Schedule> for ScheduleEventSchedule {
     fn from(value: Schedule) -> Self {
         ScheduleEventSchedule::from(&value)
@@ -701,8 +663,8 @@ impl From<&Delivery> for ScheduleEventDelivery {
     }
 }
 
-impl From<JobMessage> for MessageEnvelope {
-    fn from(value: JobMessage) -> Self {
+impl From<ScheduleMessage> for MessageEnvelope {
+    fn from(value: ScheduleMessage) -> Self {
         Self {
             content: value.content,
             headers: value.headers.into(),
@@ -710,8 +672,8 @@ impl From<JobMessage> for MessageEnvelope {
     }
 }
 
-impl From<&JobMessage> for MessageEnvelope {
-    fn from(value: &JobMessage) -> Self {
+impl From<&ScheduleMessage> for MessageEnvelope {
+    fn from(value: &ScheduleMessage) -> Self {
         Self {
             content: value.content.clone(),
             headers: value.headers.clone().into(),
@@ -722,14 +684,6 @@ impl From<&JobMessage> for MessageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn job_status_helpers_work() {
-        assert!(JobStatus::Enabled.is_enabled());
-        assert_eq!(JobStatus::Enabled.as_str(), "enabled");
-        assert!(!JobStatus::Disabled.is_enabled());
-        assert_eq!(JobStatus::Disabled.as_str(), "disabled");
-    }
 
     #[test]
     fn schedule_constructors_validate_and_preserve_values() {
@@ -828,18 +782,18 @@ mod tests {
     }
 
     #[test]
-    fn job_headers_cover_helpers_and_reserved_names() {
-        let headers = JobHeaders::new([("x-kind", "heartbeat")]).unwrap();
+    fn schedule_headers_cover_helpers_and_reserved_names() {
+        let headers = ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap();
         let message_headers = MessageHeaders::new([("x-kind", "heartbeat")]).unwrap();
-        let from_message_headers = JobHeaders::try_from(message_headers).unwrap();
+        let from_message_headers = ScheduleHeaders::try_from(message_headers).unwrap();
 
         assert!(!headers.is_empty());
         assert_eq!(headers.as_slice()[0].name().as_str(), "x-kind");
         assert_eq!(headers.clone().into_message_headers().as_slice().len(), 1);
         assert_eq!(MessageHeaders::from(from_message_headers).as_slice().len(), 1);
-        assert!(JobHeaders::new([("Nats-Schedule", "value")]).is_err());
-        assert!(JobHeaders::new([("bad name", "value")]).is_err());
-        assert!(JobHeaders::new([("x-kind", "bad\nvalue")]).is_err());
+        assert!(ScheduleHeaders::new([("Nats-Schedule", "value")]).is_err());
+        assert!(ScheduleHeaders::new([("bad name", "value")]).is_err());
+        assert!(ScheduleHeaders::new([("x-kind", "bad\nvalue")]).is_err());
     }
 
     #[test]
@@ -911,16 +865,9 @@ mod tests {
             assert_eq!(format!("{event_schedule:?}"), format!("{owned_event_schedule:?}"));
         }
 
-        assert_eq!(JobStatus::from(ScheduleEventStatus::Scheduled), JobStatus::Enabled);
-        assert_eq!(JobStatus::from(ScheduleEventStatus::Paused), JobStatus::Disabled);
-        assert!(matches!(
-            ScheduleEventStatus::from(JobStatus::Disabled),
-            ScheduleEventStatus::Paused
-        ));
-
-        let message = JobMessage {
+        let message = ScheduleMessage {
             content: MessageContent::json("{}"),
-            headers: JobHeaders::new([("x-kind", "heartbeat")]).unwrap(),
+            headers: ScheduleHeaders::new([("x-kind", "heartbeat")]).unwrap(),
         };
         assert_eq!(MessageEnvelope::from(&message).headers.as_slice().len(), 1);
         assert_eq!(
@@ -1035,7 +982,7 @@ mod tests {
                     .map(|(ch, &upper)| if upper { ch.to_ascii_uppercase() } else { ch.to_ascii_lowercase() })
                     .collect();
 
-                let result = JobHeaders::new([(name, value)]);
+                let result = ScheduleHeaders::new([(name, value)]);
                 let is_reserved_error = matches!(result, Err(ScheduleSpecError::ReservedHeaderName { .. }));
                 prop_assert!(is_reserved_error);
             }
@@ -1045,7 +992,7 @@ mod tests {
                 name in "x-[a-z]{1,12}",
                 value in "[ -~]{0,16}",
             ) {
-                let headers = JobHeaders::new([(name.clone(), value.clone())]).unwrap();
+                let headers = ScheduleHeaders::new([(name.clone(), value.clone())]).unwrap();
                 let slice = headers.as_slice();
                 prop_assert_eq!(slice.len(), 1);
                 prop_assert_eq!(slice[0].name().as_str(), name.as_str());

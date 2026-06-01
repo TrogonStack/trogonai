@@ -11,7 +11,7 @@ pub use message::{
     MessageHeadersError,
 };
 pub use schedule::{
-    CronExpression, Delivery, DeliveryRoute, EverySeconds, JobHeaders, JobMessage, JobStatus, RRuleDateTime,
+    CronExpression, Delivery, DeliveryRoute, EverySeconds, RRuleDateTime, ScheduleHeaders, ScheduleMessage,
     RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TimeZone, TtlSeconds,
     TzdbVersion,
 };
