@@ -35,20 +35,25 @@ struct FileAtHelper {
     /// Fish-style autosuggestion from history: dims the most recent matching
     /// entry after the cursor; accepted with Tab (see [`TabHandler`]) or →.
     history_hinter: HistoryHinter,
+    /// Shared permission-mode cell, rendered into the prompt by `highlight_prompt`
+    /// and cycled by Shift+Tab ([`TabModeHandler`]). `Arc<Mutex>` so the handler
+    /// (which must be `Send + Sync`) can share it; no real contention.
+    mode: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self {
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            history_hinter: HistoryHinter::new(),
-        }
+        Self::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 }
 
 impl FileAtHelper {
     fn new(cwd: PathBuf) -> Self {
-        Self { cwd, history_hinter: HistoryHinter::new() }
+        Self::with_mode(cwd, std::sync::Arc::new(std::sync::Mutex::new(String::from("default"))))
+    }
+
+    fn with_mode(cwd: PathBuf, mode: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
+        Self { cwd, history_hinter: HistoryHinter::new(), mode }
     }
 }
 
@@ -107,6 +112,28 @@ impl Highlighter for FileAtHelper {
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
         Cow::Owned(format!("\x1b[90m{hint}\x1b[0m"))
     }
+
+    /// Render the prompt from the shared mode cell, coloured. The *visible* width
+    /// matches `format_mode_prompt` (which is what rustyline measures for cursor
+    /// math), so Shift+Tab can repaint a different-length mode name safely.
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        _prompt: &'p str,
+        _default: bool,
+    ) -> Cow<'b, str> {
+        let mode = self
+            .mode
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| String::from("default"));
+        let bracketed = format!("[{}]", mode_label(&mode));
+        Cow::Owned(format!("\x1b[35m{:<width$}\x1b[0m › ", bracketed, width = MODE_FIELD))
+    }
+
+    /// Force highlighting active so Shift+Tab's `Repaint` re-renders the prompt.
+    fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
+        true
+    }
 }
 
 /// What Tab should do given the current input state.
@@ -154,6 +181,63 @@ impl ConditionalEventHandler for TabHandler {
             TabChoice::CompleteHint => Some(Cmd::CompleteHint),
             TabChoice::Default => None,
         }
+    }
+}
+
+// ── Shift+Tab permission-mode cycling ───────────────────────────────────────────
+
+/// Width of the `[label]` field in the prompt. Sized to the widest label
+/// (`[acceptEdits]` = 13) so the prompt's visible width is constant across modes —
+/// required for correct cursor math when Shift+Tab repaints a new mode.
+const MODE_FIELD: usize = 13;
+
+/// Next mode in the Shift+Tab cycle. Any mode outside the cycle (e.g. dontAsk,
+/// bypassPermissions) enters it at `default`.
+fn next_cycle_mode(current: &str) -> &'static str {
+    match current {
+        "default" => "acceptEdits",
+        "acceptEdits" => "plan",
+        "plan" => "default",
+        _ => "default",
+    }
+}
+
+/// Short display label for a mode (keeps every label ≤ 11 chars so `[label]`
+/// fits `MODE_FIELD`).
+fn mode_label(mode: &str) -> &str {
+    match mode {
+        "bypassPermissions" => "bypass",
+        other => other,
+    }
+}
+
+/// Plain (un-coloured), fixed-width prompt for `mode`. Passed to rustyline as the
+/// raw prompt so its measured width matches the coloured `highlight_prompt`.
+fn format_mode_prompt(mode: &str) -> String {
+    let bracketed = format!("[{}]", mode_label(mode));
+    format!("{:<width$} › ", bracketed, width = MODE_FIELD)
+}
+
+/// Shift+Tab handler: cycle the shared mode cell and repaint so the prompt's mode
+/// indicator updates instantly. The async `set_mode` is applied by the REPL loop
+/// once `readline` returns (a handler cannot await).
+struct TabModeHandler {
+    mode: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl ConditionalEventHandler for TabModeHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        _ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        if let Ok(mut m) = self.mode.lock() {
+            let next = next_cycle_mode(m.as_str()).to_string();
+            *m = next;
+        }
+        Some(Cmd::Repaint)
     }
 }
 
@@ -336,12 +420,19 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     }
 
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
-    rl.set_helper(Some(FileAtHelper::new(cwd.clone())));
+    // Shared permission-mode cell: rendered into the prompt and cycled by Shift+Tab.
+    let mode_cell = std::sync::Arc::new(std::sync::Mutex::new(startup_mode.clone()));
+    rl.set_helper(Some(FileAtHelper::with_mode(cwd.clone(), mode_cell.clone())));
     // Tab accepts the dimmed history autosuggestion when one is showing; falls
     // back to `@`-file completion otherwise (see TabHandler).
     rl.bind_sequence(
         KeyEvent(KeyCode::Tab, Modifiers::NONE),
         EventHandler::Conditional(Box::new(TabHandler)),
+    );
+    // Shift+Tab (BackTab) cycles permission modes: default → acceptEdits → plan → …
+    rl.bind_sequence(
+        KeyEvent(KeyCode::BackTab, Modifiers::NONE),
+        EventHandler::Conditional(Box::new(TabModeHandler { mode: mode_cell.clone() })),
     );
     let _ = rl.load_history(&history_path);
 
@@ -369,6 +460,13 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     loop {
         permission_coordinator.cancel_pending();
+        // Mirror the live mode into the shared cell so the prompt shows it. During
+        // readline, Shift+Tab may diverge the cell; that's reconciled once readline
+        // returns (below). This single sync point covers every session_mode change
+        // (/mode, /clear, /model) without touching each assignment site.
+        if let Ok(mut m) = mode_cell.lock() {
+            *m = session_mode.clone();
+        }
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
@@ -376,15 +474,33 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
             match queued_prompts.pop_front() {
                 Some(q) => (Ok(q), true),
                 None => {
+                    let prompt = format_mode_prompt(&session_mode);
                     let r = match pending_input.take() {
-                        Some(text) => rl.readline_with_initial("> ", (&text, "")),
-                        None => rl.readline("> "),
+                        Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
+                        None => rl.readline(&prompt),
                     };
                     (r, false)
                 }
             };
         match read {
             Ok(raw_line) => {
+                // Apply a Shift+Tab mode change made during readline. The cell was
+                // synced to session_mode at loop top, so any divergence is a cycle.
+                // (A handler can't await, so set_mode happens here.)
+                let desired_mode = mode_cell.lock().ok().map(|m| m.clone());
+                if let Some(desired) = desired_mode
+                    && desired != session_mode
+                {
+                    match session.set_mode(&desired).await {
+                        Ok(()) => session_mode = desired,
+                        Err(e) => {
+                            eprintln!("warning: could not set mode {desired}: {e}");
+                            if let Ok(mut m) = mode_cell.lock() {
+                                *m = session_mode.clone();
+                            }
+                        }
+                    }
+                }
                 let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
                     continue;
@@ -2173,6 +2289,43 @@ mod tests {
     fn tab_after_completed_mention_can_accept_hint() {
         // Trailing space ends the @-token, so a hint may be accepted again.
         assert_eq!(tab_choice("@src/main.rs ", 13, true), TabChoice::CompleteHint);
+    }
+
+    // ── Shift+Tab mode cycling ────────────────────────────────────────────────
+
+    #[test]
+    fn next_cycle_mode_cycles_the_three_core_modes() {
+        assert_eq!(next_cycle_mode("default"), "acceptEdits");
+        assert_eq!(next_cycle_mode("acceptEdits"), "plan");
+        assert_eq!(next_cycle_mode("plan"), "default");
+    }
+
+    #[test]
+    fn next_cycle_mode_enters_cycle_from_other_modes() {
+        assert_eq!(next_cycle_mode("bypassPermissions"), "default");
+        assert_eq!(next_cycle_mode("dontAsk"), "default");
+        assert_eq!(next_cycle_mode(""), "default");
+    }
+
+    #[test]
+    fn mode_prompt_has_constant_visible_width() {
+        // The prompt width must not vary with the mode name, or Shift+Tab repaint
+        // would misalign the cursor (rustyline measures the raw prompt).
+        let widths: Vec<usize> = ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]
+            .iter()
+            .map(|m| format_mode_prompt(m).chars().count())
+            .collect();
+        assert!(
+            widths.iter().all(|&w| w == widths[0]),
+            "prompt widths must all match, got {widths:?}"
+        );
+        // Every label must fit the fixed field (so it's never truncated/overflowed).
+        for m in ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"] {
+            assert!(
+                format!("[{}]", mode_label(m)).chars().count() <= MODE_FIELD,
+                "label for {m} overflows MODE_FIELD"
+            );
+        }
     }
 
     // ── input_needs_continuation ──────────────────────────────────────────────
