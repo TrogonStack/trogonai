@@ -7,16 +7,6 @@ use super::domain::{
     ScheduleEventStatus, ScheduleId,
 };
 
-fn schedule_created_from_command(command: &CreateScheduleCommand) -> v1::ScheduleCreated {
-    v1::ScheduleCreated {
-        schedule_id: command.id.as_str().to_string(),
-        status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::from(command.status))),
-        schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(&command.schedule))),
-        delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(&command.delivery))),
-        message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct CreateScheduleCommand {
     pub id: ScheduleId,
@@ -77,7 +67,20 @@ impl Decider for CreateScheduleCommand {
         };
         match current_state {
             state_v1::StateValue::STATE_VALUE_MISSING => Ok(Decision::event(v1::ScheduleEvent {
-                event: Some(schedule_created_from_command(command).into()),
+                event: Some(
+                    v1::ScheduleCreated {
+                        schedule_id: command.id.as_str().to_string(),
+                        status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::from(command.status))),
+                        schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(
+                            &command.schedule,
+                        ))),
+                        delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(
+                            &command.delivery,
+                        ))),
+                        message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                    }
+                    .into(),
+                ),
             })),
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
                 Err(CreateScheduleDecideError::AlreadyExists { id: command.id.clone() })
@@ -119,8 +122,19 @@ mod tests {
     }
 
     fn added(id: &str) -> v1::ScheduleEvent {
+        let command = create_schedule_command(id);
+
         v1::ScheduleEvent {
-            event: Some(schedule_created_from_command(&create_schedule_command(id)).into()),
+            event: Some(
+                v1::ScheduleCreated {
+                    schedule_id: command.id.as_str().to_string(),
+                    status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::from(command.status))),
+                    schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(&command.schedule))),
+                    delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(&command.delivery))),
+                    message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                }
+                .into(),
+            ),
         }
     }
 
