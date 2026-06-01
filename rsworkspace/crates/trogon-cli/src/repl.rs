@@ -194,12 +194,16 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     skip_permissions: bool,
     plan: bool,
     session_init: crate::session::SessionInit,
+    name: Option<String>,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
     let project_dir = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
 
     let mut mcp_manager = McpManager::load(&fs);
+    // Session name: prefer the `--name` flag; otherwise inherit a name from the
+    // resumed session entry. Updatable at runtime via `/rename`.
+    let mut session_name = name.or_else(|| resume.as_ref().and_then(|e| e.name.clone()));
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
@@ -310,6 +314,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         &project_dir,
                         &prefix,
                         &session.current_model(),
+                        session_name.as_deref(),
                         arg,
                     )
                     .await
@@ -332,6 +337,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             &project_dir,
                             &prefix,
                             &session.current_model(),
+                            session_name.as_deref(),
                             arg,
                         )
                         .await
@@ -368,6 +374,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     &prefix,
                                     session.session_id(),
                                     &session.current_model(),
+                                    session_name.as_deref(),
                                 );
                                 eprintln!("session cleared — new session {}", session.session_id());
                             }
@@ -399,6 +406,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                         &prefix,
                                         session.session_id(),
                                         &session.current_model(),
+                                        session_name.as_deref(),
                                     );
                                     eprintln!("resumed session {}", session.session_id());
                                 }
@@ -468,7 +476,29 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             helper.cwd = cwd.clone();
                         }
                         println!("{}", cwd.display());
+                    } else if cmd == "/rename" {
+                        let new_name = arg.trim();
+                        if new_name.is_empty() {
+                            match &session_name {
+                                Some(n) => println!("current session name: {n}"),
+                                None => println!("session has no name — usage: /rename <name>"),
+                            }
+                        } else {
+                            session_name = Some(new_name.to_string());
+                            persist_session_index(
+                                &fs,
+                                &project_dir,
+                                &prefix,
+                                session.session_id(),
+                                &session.current_model(),
+                                session_name.as_deref(),
+                            );
+                            println!("session renamed to {new_name}");
+                        }
                     } else if cmd == "/status" {
+                        if let Some(n) = &session_name {
+                            println!("name: {n}");
+                        }
                         let text = format_status(
                             &registry,
                             &prefix,
@@ -516,6 +546,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 &prefix,
                                                 session.session_id(),
                                                 &model_id,
+                                                session_name.as_deref(),
                                             );
                                         }
                                         Err(e) => eprintln!("Error setting model: {e}"),
@@ -570,6 +601,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                                 &prefix,
                                                 session.session_id(),
                                                 &model_id,
+                                                session_name.as_deref(),
                                             );
                                         }
                                         Err(e) => eprintln!("Error setting model on new runner: {e}"),
@@ -877,6 +909,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 &prefix,
                                 session.session_id(),
                                 &session.current_model(),
+                                session_name.as_deref(),
                             );
                             sync_repl_cwd_from_session(&session, &mut cwd).await;
                             if let Some(helper) = rl.helper_mut() {
@@ -1076,6 +1109,7 @@ fn sync_cwd_from_tool(name: &str, output: &str, cwd: &mut PathBuf) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_repl_cd<S: Session, F: Fs>(
     session: &S,
     fs: &F,
@@ -1083,6 +1117,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
     project_dir: &Path,
     prefix: &str,
     model: &str,
+    name: Option<&str>,
     arg: &str,
 ) -> bool {
     match resolve_directory_target(&cwd.to_string_lossy(), arg) {
@@ -1090,7 +1125,7 @@ async fn apply_repl_cd<S: Session, F: Fs>(
             *cwd = resolved.clone();
             match session.set_cwd(&resolved).await {
                 Ok(()) => {
-                    persist_session_index(fs, project_dir, prefix, session.session_id(), model);
+                    persist_session_index(fs, project_dir, prefix, session.session_id(), model, name);
                     reset_display();
                     eprintln!("{}", resolved.display());
                 }
@@ -1115,9 +1150,12 @@ fn persist_session_index<F: Fs>(
     prefix: &str,
     session_id: &str,
     model: &str,
+    name: Option<&str>,
 ) {
     let mut index = SessionIndex::load(fs);
-    index.record(project, new_session_entry(prefix, session_id, model));
+    let mut entry = new_session_entry(prefix, session_id, model);
+    entry.name = name.map(String::from);
+    index.record(project, entry);
     if let Err(e) = index.save(fs) {
         eprintln!("warning: could not save session index: {e}");
     }
@@ -1226,6 +1264,7 @@ Commands:
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
+  {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
