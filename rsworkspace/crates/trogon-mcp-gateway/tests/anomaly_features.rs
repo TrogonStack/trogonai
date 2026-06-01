@@ -36,7 +36,7 @@ use trogon_mcp_gateway::gateway::GatewaySettings;
 use trogon_mcp_gateway::rpc_codes;
 use futures::StreamExt;
 use trogon_mcp_gateway::anomaly::{
-    AnomalyEmitter, AnomalyFeatures, NoveltyTracker, RateTracker, subject_for_tenant,
+    AnomalyEmit, AnomalyEmitter, AnomalyFeatures, NoveltyTracker, RateTracker, subject_for_tenant,
 };
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 
