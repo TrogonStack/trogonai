@@ -45,6 +45,28 @@ pub struct McpTool {
     pub input_schema: Value,
 }
 
+/// A prompt advertised by an MCP server (`prompts/list`). Exposed in the REPL as
+/// a `/mcp__<server>__<name>` slash command.
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpPrompt {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Declared arguments, in order. Used for usage hints and positional binding.
+    #[serde(default)]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+/// A single declared argument of an MCP prompt.
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpPromptArgument {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub required: bool,
+}
+
 // ── McpCallTool trait ─────────────────────────────────────────────────────────
 
 /// Abstraction over the single operation the agent loop needs from an MCP server:
@@ -69,6 +91,32 @@ struct ListToolsResult {
 }
 
 #[derive(Deserialize)]
+struct ListPromptsResult {
+    #[serde(default)]
+    prompts: Vec<McpPrompt>,
+}
+
+#[derive(Deserialize)]
+struct GetPromptResult {
+    #[serde(default)]
+    messages: Vec<PromptMessage>,
+}
+
+#[derive(Deserialize)]
+struct PromptMessage {
+    // `role` is present in the wire format but not needed: we submit the text.
+    content: PromptContent,
+}
+
+/// `prompts/get` content is either a single block or an array of blocks.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PromptContent {
+    Single(ContentBlock),
+    Many(Vec<ContentBlock>),
+}
+
+#[derive(Deserialize)]
 struct ContentBlock {
     #[serde(rename = "type")]
     block_type: String,
@@ -89,6 +137,8 @@ struct CallToolResult {
 pub struct McpClient {
     http: Client,
     url: String,
+    /// Extra HTTP headers sent on every request (e.g. `Authorization: Bearer …`).
+    headers: Vec<(String, String)>,
 }
 
 impl McpClient {
@@ -98,6 +148,22 @@ impl McpClient {
         Self {
             http,
             url: url.into(),
+            headers: Vec::new(),
+        }
+    }
+
+    /// Create a client that sends `headers` (name, value) on every request —
+    /// used to carry MCP auth (e.g. a bearer token) to the server.
+    #[cfg_attr(coverage, coverage(off))]
+    pub fn with_headers(
+        http: Client,
+        url: impl Into<String>,
+        headers: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            http,
+            url: url.into(),
+            headers,
         }
     }
 
@@ -169,18 +235,82 @@ impl McpClient {
         if result.is_error { Err(text) } else { Ok(text) }
     }
 
+    /// Retrieve the list of prompts the server exposes (`prompts/list`).
+    /// Returns an empty list if the server does not support prompts.
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn list_prompts(&self) -> Result<Vec<McpPrompt>, String> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(),
+            "method": "prompts/list",
+            "params": {}
+        });
+        let mut resp = self.rpc(body).await?;
+        if let Some(err) = resp.get("error") {
+            // A server without prompt support replies with an error (e.g. -32601
+            // method not found) — treat that as "no prompts" rather than failing.
+            debug!(url = %safe_url(&self.url), %err, "MCP prompts/list unsupported");
+            return Ok(Vec::new());
+        }
+        let result: ListPromptsResult = serde_json::from_value(resp["result"].take())
+            .map_err(|e| format!("MCP prompts/list deserialize error: {e}"))?;
+        debug!(url = %safe_url(&self.url), count = result.prompts.len(), "MCP prompts listed");
+        Ok(result.prompts)
+    }
+
+    /// Fetch a prompt by name with `arguments` (`prompts/get`) and render its
+    /// messages into a single string suitable for submitting as a user prompt.
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn get_prompt(&self, name: &str, arguments: &Value) -> Result<String, String> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": next_id(),
+            "method": "prompts/get",
+            "params": { "name": name, "arguments": arguments }
+        });
+        let mut resp = self.rpc(body).await?;
+        if let Some(err) = resp.get("error") {
+            return Err(format!("MCP prompts/get error: {err}"));
+        }
+        let result: GetPromptResult = serde_json::from_value(resp["result"].take())
+            .map_err(|e| format!("MCP prompts/get deserialize error: {e}"))?;
+        Ok(render_prompt_messages(&result.messages))
+    }
+
     #[cfg_attr(coverage, coverage(off))]
     async fn rpc(&self, body: Value) -> Result<Value, String> {
-        self.http
-            .post(&self.url)
-            .json(&body)
-            .send()
+        let mut req = self.http.post(&self.url).json(&body);
+        for (name, value) in &self.headers {
+            req = req.header(name, value);
+        }
+        req.send()
             .await
             .map_err(|e| format!("MCP HTTP error: {e}"))?
             .json::<Value>()
             .await
             .map_err(|e| format!("MCP parse error: {e}"))
     }
+}
+
+/// Flatten `prompts/get` messages into plain text. Each text block is joined by
+/// newlines; non-text blocks are ignored.
+fn render_prompt_messages(messages: &[PromptMessage]) -> String {
+    let mut out = Vec::new();
+    for msg in messages {
+        let blocks = match &msg.content {
+            PromptContent::Single(b) => std::slice::from_ref(b),
+            PromptContent::Many(v) => v.as_slice(),
+        };
+        for b in blocks {
+            if b.block_type == "text"
+                && let Some(t) = b.text.as_deref()
+                && !t.is_empty()
+            {
+                out.push(t.to_string());
+            }
+        }
+    }
+    out.join("\n")
 }
 
 impl McpCallTool for McpClient {
