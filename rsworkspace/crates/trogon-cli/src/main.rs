@@ -332,7 +332,7 @@ mod tests {
     fn existing_dir_is_canonicalised_into_roots() {
         // The current directory always exists and is a directory.
         let cwd = std::env::current_dir().unwrap();
-        let init = build_session_init(None, None, &[cwd.clone()]);
+        let init = build_session_init(None, None, std::slice::from_ref(&cwd));
         let expected = cwd.canonicalize().unwrap().to_string_lossy().into_owned();
         assert_eq!(init.additional_roots, vec![expected]);
     }
