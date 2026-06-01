@@ -50,8 +50,8 @@ impl From<&StsExchangeRequest> for StsAuditRequestFields {
     }
 }
 
-pub fn audit_subject(outcome: &str) -> String {
-    format!("mcp.audit.sts.{outcome}")
+pub fn audit_subject(prefix: &str, outcome: &str) -> String {
+    format!("{prefix}.audit.sts.{outcome}")
 }
 
 #[async_trait]
@@ -62,11 +62,15 @@ pub trait AuditPublisher: Send + Sync {
 #[derive(Clone)]
 pub struct NatsAuditPublisher<C> {
     client: C,
+    prefix: std::sync::Arc<str>,
 }
 
 impl<C> NatsAuditPublisher<C> {
-    pub fn new(client: C) -> Self {
-        Self { client }
+    pub fn new(client: C, prefix: impl Into<std::sync::Arc<str>>) -> Self {
+        Self {
+            client,
+            prefix: prefix.into(),
+        }
     }
 }
 
@@ -76,7 +80,7 @@ where
     C: trogon_nats::client::PublishClient + trogon_nats::client::FlushClient + Send + Sync + Clone,
 {
     async fn publish(&self, event: StsAuditEvent) -> Result<(), StsError> {
-        let subject = audit_subject(&event.outcome);
+        let subject = audit_subject(&self.prefix, &event.outcome);
         trogon_nats::messaging::publish(
             &self.client,
             &subject,
@@ -164,5 +168,16 @@ pub async fn emit_audit<P: AuditPublisher>(publisher: &P, ctx: StsAuditEmit<'_>)
     };
     if let Err(e) = publisher.publish(event).await {
         warn!(error = %e, "failed to publish sts audit event");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_subject_respects_custom_prefix() {
+        assert_eq!(audit_subject("mcp", "success"), "mcp.audit.sts.success");
+        assert_eq!(audit_subject("acme.mcp", "deny"), "acme.mcp.audit.sts.deny");
     }
 }
