@@ -108,6 +108,8 @@ mod harness {
             egress: None,
             chain_resolver: None,
             rate_limit: Some(rate_limit),
+            approval_gate: None,
+            mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         };
 
         let nats = Arc::new(connect(&nats_conf, connect_timeout).await.expect("nats connect"));

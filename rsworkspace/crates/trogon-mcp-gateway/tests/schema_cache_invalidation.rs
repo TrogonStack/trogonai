@@ -434,6 +434,8 @@ mod gateway_e2e {
             egress: None,
             chain_resolver: None,
             rate_limit: None,
+            approval_gate: None,
+            mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         };
 
         let gateway_client = Arc::new(connect(&nats_conf, Duration::from_secs(15)).await.expect("gateway nats"));
