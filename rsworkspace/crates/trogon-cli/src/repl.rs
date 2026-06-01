@@ -241,6 +241,63 @@ impl ConditionalEventHandler for TabModeHandler {
     }
 }
 
+// ── Ctrl+X Ctrl+E: edit the prompt in $EDITOR ───────────────────────────────────
+
+/// Open `$VISUAL`/`$EDITOR` (fallback `vi`) on a temp file seeded with `initial`,
+/// returning the edited text (trailing newlines trimmed). The editor inherits the
+/// terminal, so this must run with the terminal in normal mode — i.e. *after*
+/// `readline` returns, never inside a rustyline handler.
+fn edit_in_editor(initial: &str) -> std::io::Result<String> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_string());
+    edit_with(&editor, initial)
+}
+
+/// Editor round-trip with an explicit editor command (injected for testability).
+/// `editor` may include args (e.g. `"code --wait"`); the temp file path is
+/// appended as the final argument.
+fn edit_with(editor: &str, initial: &str) -> std::io::Result<String> {
+    // Unique per call (pid + monotonic counter) so concurrent edits/tests don't
+    // share a temp file.
+    static EDIT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = EDIT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut path = std::env::temp_dir();
+    path.push(format!("trogon-prompt-{}-{seq}.md", std::process::id()));
+    std::fs::write(&path, initial)?;
+    let mut parts = editor.split_whitespace();
+    let bin = parts.next().unwrap_or("vi");
+    let args: Vec<&str> = parts.collect();
+    let status = std::process::Command::new(bin).args(&args).arg(&path).status();
+    let content = std::fs::read_to_string(&path);
+    let _ = std::fs::remove_file(&path);
+    status?;
+    Ok(content?.trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// Ctrl+X Ctrl+E handler: capture the current buffer and force `readline` to
+/// return (via `Cmd::Interrupt`) so the REPL loop — where the terminal is back in
+/// normal mode — can launch the editor. The captured buffer distinguishes this
+/// from a real Ctrl+C in the loop's interrupt arm.
+struct EditorHandler {
+    request: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl ConditionalEventHandler for EditorHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        if let Ok(mut r) = self.request.lock() {
+            *r = Some(ctx.line().to_string());
+        }
+        Some(Cmd::Interrupt)
+    }
+}
+
 impl Validator for FileAtHelper {
     fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
         if input_needs_continuation(ctx.input()) {
@@ -433,6 +490,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     rl.bind_sequence(
         KeyEvent(KeyCode::BackTab, Modifiers::NONE),
         EventHandler::Conditional(Box::new(TabModeHandler { mode: mode_cell.clone() })),
+    );
+    // Ctrl+X Ctrl+E opens the current prompt in $EDITOR (see EditorHandler). The
+    // handler stashes the buffer here and returns Interrupt; the loop's interrupt
+    // arm reads this to tell an editor request apart from a real Ctrl+C.
+    let editor_request = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    rl.bind_sequence(
+        rustyline::Event::KeySeq(vec![KeyEvent::ctrl('X'), KeyEvent::ctrl('E')]),
+        EventHandler::Conditional(Box::new(EditorHandler { request: editor_request.clone() })),
     );
     let _ = rl.load_history(&history_path);
 
@@ -1158,8 +1223,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                session.cancel().await;
-                eprintln!("(Ctrl+C)");
+                // Ctrl+X Ctrl+E stashes the buffer here and interrupts; if present,
+                // this is an editor request, not a cancel. The terminal is back in
+                // normal mode now, so it's safe to launch the editor.
+                let edit_seed = editor_request.lock().ok().and_then(|mut r| r.take());
+                if let Some(seed) = edit_seed {
+                    match edit_in_editor(&seed) {
+                        Ok(edited) if !edited.trim().is_empty() => {
+                            reset_display();
+                            // Re-prefill the prompt with the edited text for review
+                            // before sending (Enter submits).
+                            pending_input = Some(edited);
+                        }
+                        Ok(_) => {} // empty result — discard, fresh prompt
+                        Err(e) => eprintln!("editor error: {e}"),
+                    }
+                } else {
+                    session.cancel().await;
+                    eprintln!("(Ctrl+C)");
+                }
             }
             Err(ReadlineError::Eof) => {
                 eprint!("\r\x1b[K");
@@ -2305,6 +2387,31 @@ mod tests {
         assert_eq!(next_cycle_mode("bypassPermissions"), "default");
         assert_eq!(next_cycle_mode("dontAsk"), "default");
         assert_eq!(next_cycle_mode(""), "default");
+    }
+
+    // ── edit_with ($EDITOR round-trip) ────────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_with_round_trips_through_fake_editor() {
+        use std::os::unix::fs::PermissionsExt;
+        // Fake editor: overwrites the file it's given with fixed content.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'rewritten\\n\\n' > \"$1\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let edited = edit_with(script.to_str().unwrap(), "seed text").unwrap();
+        // The editor's content replaces the seed; trailing newlines are trimmed.
+        assert_eq!(edited, "rewritten");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_with_preserves_seed_when_editor_is_noop() {
+        // `true` ignores its argument and exits 0, leaving the seed file intact.
+        let edited = edit_with("true", "keep me\n").unwrap();
+        assert_eq!(edited, "keep me");
     }
 
     #[test]
