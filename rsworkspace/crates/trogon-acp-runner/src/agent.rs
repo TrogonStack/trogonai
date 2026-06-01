@@ -253,6 +253,9 @@ pub struct TrogonAgent<
     registry: Option<Arc<trogon_registry::Registry<async_nats::jetstream::kv::Store>>>,
     /// NATS client forwarded to `WasmRuntimeBashTool` when an execution backend is available.
     execution_nats: Option<async_nats::Client>,
+    /// `auto`-mode LLM safety classifier. `None` makes `auto` prompt for
+    /// side-effecting tools instead of classifying them.
+    classifier: Option<Arc<dyn trogon_runner_tools::SafetyClassifier>>,
 }
 
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
@@ -284,6 +287,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
             http: reqwest::Client::new(),
             registry: None,
             execution_nats: None,
+            classifier: None,
         }
     }
 }
@@ -307,7 +311,17 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             http: self.http,
             registry: self.registry,
             execution_nats: self.execution_nats,
+            classifier: self.classifier,
         }
+    }
+
+    /// Set the `auto`-mode LLM safety classifier.
+    pub fn with_safety_classifier(
+        mut self,
+        classifier: Arc<dyn trogon_runner_tools::SafetyClassifier>,
+    ) -> Self {
+        self.classifier = Some(classifier);
+        self
     }
 
     /// Enable context compaction via `trogon-compactor`.
@@ -558,14 +572,14 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     // Read containment: scope read-only auto-allow to cwd plus the
                     // session's additional working dirs (--add-dir) and configured
                     // permissions.additionalDirectories. Protected paths are always
-                    // prompted (handled inside the checker). The `auto`-mode LLM
-                    // classifier is not yet wired (None → side-effecting tools prompt).
+                    // prompted (handled inside the checker). The classifier (when
+                    // configured) decides side-effecting tools in `auto` mode.
                     let mut read_dirs = state.additional_roots.clone();
                     read_dirs.extend(state.additional_read_dirs.clone());
                     let extras = trogon_runner_tools::PermissionExtras {
                         cwd: Some(state.cwd.clone()),
                         additional_read_dirs: read_dirs,
-                        classifier: None,
+                        classifier: self.classifier.clone(),
                     };
                     if let Some(checker) = build_mode_permission_checker(
                         &state.mode,
