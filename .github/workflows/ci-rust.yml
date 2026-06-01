@@ -73,13 +73,7 @@ jobs:
         run: cargo cov --cobertura --output-path coverage.xml
         working-directory: rsworkspace
 
-      - name: Fetch main coverage baseline
-        run: |
-          mkdir -p tmp/_xml_coverage_reports/data/main
-          git fetch origin _xml_coverage_reports
-          git show origin/_xml_coverage_reports:data/main/coverage.xml > tmp/_xml_coverage_reports/data/main/coverage.xml
-
-      - name: Coverage report
+      - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
         uses: insightsengineering/coverage-action@v3
@@ -91,14 +85,10 @@ jobs:
           diff: true
           diff-branch: main
           diff-storage: _xml_coverage_reports
-          uncovered-statements-increase-failure: false
-          new-uncovered-statements-failure: false
-          coverage-rate-reduction-failure: false
+          uncovered-statements-increase-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          new-uncovered-statements-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          coverage-rate-reduction-failure: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
           togglable-report: true
-
-      - name: Changed-file coverage gate
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
-        run: mise run rust-coverage-gate --format human
 
   build:
     runs-on: ubuntu-latest
