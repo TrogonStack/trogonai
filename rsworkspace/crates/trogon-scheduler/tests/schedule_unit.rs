@@ -14,11 +14,11 @@ fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
 }
 
-fn command_job_id(id: &str) -> command_domain::ScheduleId {
+fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
     command_domain::ScheduleId::parse(id).unwrap()
 }
 
-fn expected_job(id: &str) -> Schedule {
+fn expected_schedule(id: &str) -> Schedule {
     Schedule {
         id: id.to_string(),
         status: ScheduleEventStatus::Scheduled,
@@ -35,15 +35,15 @@ fn expected_job(id: &str) -> Schedule {
     }
 }
 
-fn command_base_job(id: &str) -> command_domain::Job {
-    command_domain::Job {
-        id: command_job_id(id),
-        status: command_domain::JobStatus::Enabled,
-        schedule: command_domain::Schedule::every(30).unwrap(),
+fn command_base_schedule(id: &str) -> command_domain::Schedule {
+    command_domain::Schedule {
+        id: command_schedule_id(id),
+        status: command_domain::ScheduleStatus::Enabled,
+        schedule: command_domain::ScheduleSpec::every(30).unwrap(),
         delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
-        message: command_domain::JobMessage {
+        message: command_domain::ScheduleMessage {
             content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-            headers: command_domain::JobHeaders::default(),
+            headers: command_domain::ScheduleHeaders::default(),
         },
     }
 }
@@ -52,7 +52,7 @@ fn command_base_job(id: &str) -> command_domain::Job {
 async fn client_register_then_get() {
     let store = MockSchedulerStore::new();
 
-    let job = command_base_job("backup");
+    let job = command_base_schedule("backup");
     CommandExecution::new(&store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
@@ -64,20 +64,20 @@ async fn client_register_then_get() {
         .get_schedule(GetScheduleCommand::new(ScheduleId::parse("backup").unwrap()))
         .await
         .unwrap();
-    assert_eq!(got, Some(expected_job("backup")));
+    assert_eq!(got, Some(expected_schedule("backup")));
 }
 
 #[tokio::test]
 async fn client_pause_job_toggles_job() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("toggle")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("toggle")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("toggle")))
+    CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("toggle")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -96,13 +96,13 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_schedules_use_store_paths() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("beta")))
+    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("beta")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -112,7 +112,7 @@ async fn client_remove_and_list_schedules_use_store_paths() {
     let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    CommandExecution::new(&store, &RemoveScheduleCommand::new(command_job_id("beta")))
+    CommandExecution::new(&store, &RemoveScheduleCommand::new(command_schedule_id("beta")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -131,7 +131,7 @@ async fn client_remove_and_list_schedules_use_store_paths() {
 
 #[tokio::test]
 async fn client_rejects_invalid_route() {
-    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
+    let error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
         "id": "bad",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": { "type": "nats_event", "route": "agent.>" },
@@ -144,7 +144,7 @@ async fn client_rejects_invalid_route() {
 
 #[tokio::test]
 async fn client_rejects_invalid_source_subject() {
-    let error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
+    let error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
         "id": "bad-source",
         "schedule": { "type": "every", "every_sec": 30 },
         "delivery": {

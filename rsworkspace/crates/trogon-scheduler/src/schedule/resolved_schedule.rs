@@ -28,7 +28,7 @@ const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
 
 #[derive(Debug, Clone)]
 pub struct ResolvedSchedule {
-    job_id: NatsToken,
+    schedule_id: NatsToken,
     enabled: bool,
     route: DottedNatsToken,
     schedule_subject: String,
@@ -42,7 +42,7 @@ pub struct ResolvedSchedule {
 }
 
 struct ResolvedScheduleParts {
-    job_id: NatsToken,
+    schedule_id: NatsToken,
     enabled: bool,
     route: DottedNatsToken,
     schedule_expression: String,
@@ -54,13 +54,17 @@ struct ResolvedScheduleParts {
 }
 
 impl ResolvedSchedule {
-    pub fn from_event(job_id: &str, job: &v1::ScheduleCreated) -> Result<Self, SchedulerError> {
-        Self::from_event_at(job_id, job, Utc::now())
+    pub fn from_event(schedule_id: &str, created: &v1::ScheduleCreated) -> Result<Self, SchedulerError> {
+        Self::from_event_at(schedule_id, created, Utc::now())
     }
 
-    pub fn from_event_at(job_id: &str, job: &v1::ScheduleCreated, now: DateTime<Utc>) -> Result<Self, SchedulerError> {
+    pub fn from_event_at(
+        schedule_id: &str,
+        created: &v1::ScheduleCreated,
+        now: DateTime<Utc>,
+    ) -> Result<Self, SchedulerError> {
         let ResolvedScheduleParts {
-            job_id,
+            schedule_id,
             enabled,
             route,
             schedule_expression,
@@ -69,13 +73,13 @@ impl ResolvedSchedule {
             source_subject,
             headers,
             body,
-        } = resolved_job_parts(job_id, job, now)?;
+        } = resolved_schedule_parts(schedule_id, created, now)?;
 
-        let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", job_id.as_str());
-        let target_subject = format!("{FIRE_SUBJECT_PREFIX}{}.{}", route.as_str(), job_id.as_str());
+        let schedule_subject = format!("{SCHEDULE_SUBJECT_PREFIX}{}", schedule_id.as_str());
+        let target_subject = format!("{FIRE_SUBJECT_PREFIX}{}.{}", route.as_str(), schedule_id.as_str());
 
         Ok(Self {
-            job_id,
+            schedule_id,
             enabled,
             route,
             schedule_subject,
@@ -90,7 +94,7 @@ impl ResolvedSchedule {
     }
 
     pub fn id(&self) -> &str {
-        self.job_id.as_str()
+        self.schedule_id.as_str()
     }
 
     pub fn enabled(&self) -> bool {
@@ -139,27 +143,27 @@ impl ResolvedSchedule {
     }
 }
 
-fn resolved_job_parts(
-    job_id: &str,
-    job: &v1::ScheduleCreated,
+fn resolved_schedule_parts(
+    schedule_id: &str,
+    created: &v1::ScheduleCreated,
     now: DateTime<Utc>,
 ) -> Result<ResolvedScheduleParts, SchedulerError> {
-    let job_id = parse_job_id(job_id)?;
-    let schedule = job.schedule.as_option().ok_or_else(|| {
+    let schedule_id = parse_schedule_id(schedule_id)?;
+    let schedule = created.schedule.as_option().ok_or_else(|| {
         SchedulerError::event_source(
-            "scheduler received job details without schedule",
+            "scheduler received schedule details without schedule spec",
             std::io::Error::other("missing schedule"),
         )
     })?;
-    let delivery = job.delivery.as_option().ok_or_else(|| {
+    let delivery = created.delivery.as_option().ok_or_else(|| {
         SchedulerError::event_source(
-            "scheduler received job details without delivery",
+            "scheduler received schedule details without delivery",
             std::io::Error::other("missing delivery"),
         )
     })?;
-    let message = job.message.as_option().ok_or_else(|| {
+    let message = created.message.as_option().ok_or_else(|| {
         SchedulerError::event_source(
-            "scheduler received job details without message",
+            "scheduler received schedule details without message",
             std::io::Error::other("missing message"),
         )
     })?;
@@ -178,12 +182,12 @@ fn resolved_job_parts(
         Bytes::from(content_bytes)
     };
     let is_paused = matches!(
-        job.status.as_option().and_then(|s| s.kind.as_ref()),
+        created.status.as_option().and_then(|s| s.kind.as_ref()),
         Some(ScheduleStatusKind::Paused(_))
     );
 
     Ok(ResolvedScheduleParts {
-        job_id,
+        schedule_id,
         enabled: !is_paused,
         route,
         schedule_expression,
@@ -195,9 +199,9 @@ fn resolved_job_parts(
     })
 }
 
-fn parse_job_id(id: &str) -> Result<NatsToken, SchedulerError> {
+fn parse_schedule_id(id: &str) -> Result<NatsToken, SchedulerError> {
     NatsToken::new(id).map_err(|source| {
-        SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidId {
+        SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidId {
             id: id.to_string(),
             source,
         })
@@ -222,7 +226,7 @@ fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String
         Some(ScheduleKind::Every(inner)) => {
             let every_sec = inner.every.as_option().map(|d| d.seconds as u64).unwrap_or(0);
             if every_sec == 0 {
-                return Err(SchedulerError::invalid_job_spec(
+                return Err(SchedulerError::invalid_schedule_spec(
                     ScheduleSpecError::EverySecondsMustBePositive,
                 ));
             }
@@ -231,7 +235,7 @@ fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String
         Some(ScheduleKind::Cron(inner)) => {
             let expr = inner.expr.clone();
             cron::Schedule::from_str(&expr).map_err(|source| {
-                SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidCronExpression {
+                SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidCronExpression {
                     expr: expr.clone(),
                     source: Box::new(source),
                 })
@@ -248,7 +252,7 @@ fn schedule_parts(schedule: &v1::Schedule, now: DateTime<Utc>) -> Result<(String
             Ok((format!("@at {}", next.to_rfc3339()), None))
         }
         None => Err(SchedulerError::event_source(
-            "scheduler received job details without a schedule kind",
+            "scheduler received schedule details without a schedule kind",
             std::io::Error::other("missing schedule kind"),
         )),
     }
@@ -264,14 +268,14 @@ fn next_rrule_occurrence(schedule: &v1::schedule::RRule, now: DateTime<Utc>) -> 
     let timezone_value = parse_rrule_timezone(timezone.as_deref())?;
     let set_text = rrule_set_text(schedule, timezone.as_deref(), timezone_value)?;
     let set = RRuleSet::from_str(&set_text).map_err(|source| {
-        SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidRRule {
+        SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidRRule {
             rrule: schedule.rrule.clone(),
             source: Box::new(source),
         })
     })?;
     let after = now.with_timezone(&timezone_value);
     let next = set.after(after).all(1).dates.into_iter().next().ok_or_else(|| {
-        SchedulerError::invalid_job_spec(ScheduleSpecError::RRuleHasNoNextOccurrence {
+        SchedulerError::invalid_schedule_spec(ScheduleSpecError::RRuleHasNoNextOccurrence {
             rrule: schedule.rrule.clone(),
         })
     })?;
@@ -305,7 +309,7 @@ fn normalize_rrule_value(raw: &str) -> Result<String, SchedulerError> {
         || without_prefix.contains('\r')
         || without_prefix.chars().any(char::is_control)
     {
-        return Err(SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidRRule {
+        return Err(SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidRRule {
             rrule: raw.to_string(),
             source: Box::new(std::io::Error::other("empty or multi-line RRULE")),
         }));
@@ -328,7 +332,7 @@ fn strip_rrule_prefix(trimmed: &str) -> &str {
 fn parse_rrule_timezone(timezone: Option<&str>) -> Result<rrule::Tz, SchedulerError> {
     match timezone {
         Some(timezone) => chrono_tz::Tz::from_str(timezone).map(rrule::Tz::from).map_err(|_| {
-            SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidTimezone {
+            SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidTimezone {
                 timezone: timezone.to_string(),
             })
         }),
@@ -382,7 +386,7 @@ fn delivery_parts(delivery: &v1::Delivery) -> Result<(DottedNatsToken, Option<u6
             let subject = inner.subject.clone();
             Ok((
                 DottedNatsToken::new(&subject).map_err(|source| {
-                    SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidRoute {
+                    SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidRoute {
                         route: subject.clone(),
                         source,
                     })
@@ -392,7 +396,7 @@ fn delivery_parts(delivery: &v1::Delivery) -> Result<(DottedNatsToken, Option<u6
             ))
         }
         None => Err(SchedulerError::event_source(
-            "scheduler received job details without a delivery kind",
+            "scheduler received schedule details without a delivery kind",
             std::io::Error::other("missing delivery kind"),
         )),
     }
@@ -402,7 +406,7 @@ fn source_subject(source: &v1::delivery::nats_message::Source) -> Result<String,
     match source.kind.as_ref() {
         Some(SourceKind::LatestFromSubject(inner)) => Ok(inner.subject.clone()),
         None => Err(SchedulerError::event_source(
-            "scheduler received job details without a sampling source kind",
+            "scheduler received schedule details without a sampling source kind",
             std::io::Error::other("missing sampling source kind"),
         )),
     }
@@ -415,7 +419,7 @@ fn validate_timezone(timezone: Option<String>) -> Result<Option<String>, Schedul
 
     let trimmed = timezone.trim();
     if trimmed.is_empty() || trimmed != timezone || timezone.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
-        return Err(SchedulerError::invalid_job_spec(ScheduleSpecError::InvalidTimezone {
+        return Err(SchedulerError::invalid_schedule_spec(ScheduleSpecError::InvalidTimezone {
             timezone,
         }));
     }
@@ -428,7 +432,7 @@ fn validate_scheduler_headers(headers: &[(String, String)]) -> Result<(), Schedu
             .iter()
             .any(|reserved| reserved.eq_ignore_ascii_case(name))
         {
-            return Err(SchedulerError::invalid_job_spec(
+            return Err(SchedulerError::invalid_schedule_spec(
                 ScheduleSpecError::ReservedHeaderName { name: name.clone() },
             ));
         }
@@ -453,7 +457,7 @@ mod tests {
         }
     }
 
-    fn base_job() -> v1::ScheduleCreated {
+    fn base_schedule() -> v1::ScheduleCreated {
         v1::ScheduleCreated {
             schedule_id: "heartbeat".to_string(),
             status: MessageField::some(v1::ScheduleStatus {
@@ -581,7 +585,7 @@ mod tests {
 
     #[test]
     fn resolved_job_derives_subjects_and_headers() {
-        let job = base_job();
+        let job = base_schedule();
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
         let headers = resolved.schedule_headers();
 
@@ -596,7 +600,7 @@ mod tests {
 
     #[test]
     fn resolved_job_preserves_duplicate_headers() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.message = MessageField::some(message("{}", [("x-kind", "heartbeat"), ("x-kind", "retry")]));
 
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
@@ -611,7 +615,7 @@ mod tests {
 
     #[test]
     fn at_schedule_maps_to_rfc3339() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(at_schedule("2026-04-11T12:00:00+00:00"));
 
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
@@ -628,7 +632,7 @@ mod tests {
 
     #[test]
     fn rrule_schedule_maps_to_next_one_shot_at_schedule() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(rrule_schedule(
             "2026-05-24T09:00:00+00:00",
             "FREQ=DAILY;COUNT=3",
@@ -651,7 +655,7 @@ mod tests {
 
     #[test]
     fn rrule_schedule_expands_with_timezone_wall_clock() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(rrule_schedule(
             "2026-05-24T13:00:00+00:00",
             "FREQ=DAILY;COUNT=3",
@@ -674,7 +678,7 @@ mod tests {
 
     #[test]
     fn rrule_schedule_applies_exdates() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(rrule_schedule(
             "2026-05-24T09:00:00+00:00",
             "FREQ=DAILY;COUNT=3",
@@ -697,7 +701,7 @@ mod tests {
 
     #[test]
     fn expired_rrule_schedule_is_rejected() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(rrule_schedule(
             "2026-05-24T09:00:00+00:00",
             "FREQ=DAILY;COUNT=1",
@@ -713,7 +717,7 @@ mod tests {
 
     #[test]
     fn source_uses_placeholder_body() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.delivery = MessageField::some(nats_delivery(Some("sensors.latest")));
 
         let resolved = ResolvedSchedule::from_event("heartbeat", &job).unwrap();
@@ -730,13 +734,13 @@ mod tests {
 
     #[test]
     fn resolved_job_accepts_valid_job() {
-        let job = base_job();
+        let job = base_schedule();
         ResolvedSchedule::from_event("heartbeat", &job).unwrap();
     }
 
     #[test]
     fn resolved_job_accessors_expose_validated_values() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.status = MessageField::some(v1::ScheduleStatus {
             kind: Some(v1::schedule_status::Paused {}.into()),
         });
@@ -755,7 +759,7 @@ mod tests {
 
     #[test]
     fn zero_every_seconds_is_rejected() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(every_schedule(0));
 
         let error = ResolvedSchedule::from_event("heartbeat", &job).unwrap_err();
@@ -764,7 +768,7 @@ mod tests {
 
     #[test]
     fn invalid_cron_expression_is_rejected() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(cron_schedule("not-a-cron", None));
 
         let error = ResolvedSchedule::from_event("heartbeat", &job).unwrap_err();
@@ -773,7 +777,7 @@ mod tests {
 
     #[test]
     fn invalid_timezone_is_rejected() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.schedule = MessageField::some(cron_schedule("0 * * * * *", Some(" America/New_York ")));
 
         let error = ResolvedSchedule::from_event("heartbeat", &job).unwrap_err();
@@ -782,7 +786,7 @@ mod tests {
 
     #[test]
     fn reserved_scheduler_header_is_rejected_during_schedule_resolution() {
-        let mut job = base_job();
+        let mut job = base_schedule();
         job.message = MessageField::some(message("{}", [("Nats-Schedule-Target", "scheduler.fire.evil.target")]));
 
         let error = ResolvedSchedule::from_event("heartbeat", &job).unwrap_err();

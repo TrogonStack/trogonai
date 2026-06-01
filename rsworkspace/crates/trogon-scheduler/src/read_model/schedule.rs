@@ -19,13 +19,13 @@ impl Schedule {
 }
 
 impl From<(String, ScheduleDetails)> for Schedule {
-    fn from((id, job): (String, ScheduleDetails)) -> Self {
+    fn from((id, details): (String, ScheduleDetails)) -> Self {
         Self {
             id,
-            status: job.status,
-            schedule: job.schedule,
-            delivery: job.delivery,
-            message: job.message,
+            status: details.status,
+            schedule: details.schedule,
+            delivery: details.delivery,
+            message: details.message,
         }
     }
 }

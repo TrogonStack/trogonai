@@ -16,9 +16,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct JobEventSubjectResolver;
+struct ScheduleEventSubjectResolver;
 
-impl StreamSubjectResolver<str> for JobEventSubjectResolver {
+impl StreamSubjectResolver<str> for ScheduleEventSubjectResolver {
     type Error = SchedulerError;
 
     async fn resolve_subject_state(
@@ -27,7 +27,7 @@ impl StreamSubjectResolver<str> for JobEventSubjectResolver {
         stream_id: &str,
     ) -> Result<SubjectState, Self::Error> {
         let subject = StreamSubject::new(event_subject(stream_id))
-            .map_err(|source| SchedulerError::event_source("failed to resolve job event subject", source))?;
+            .map_err(|source| SchedulerError::event_source("failed to resolve schedule event subject", source))?;
         let current_position = subject_current_position(events_stream, &subject)
             .await
             .map_err(|source| SchedulerError::event_source("failed to read latest stream position", source))?;
@@ -43,7 +43,7 @@ impl StreamSubjectResolver<str> for JobEventSubjectResolver {
 
 #[derive(Clone)]
 pub struct EventStore {
-    inner: JetStreamStore<JobEventSubjectResolver>,
+    inner: JetStreamStore<ScheduleEventSubjectResolver>,
     schedules_bucket: kv::Store,
 }
 
@@ -57,7 +57,7 @@ impl EventStore {
         Self {
             inner: JetStreamStore::builder(js, events_stream, command_snapshot_bucket)
                 .with_snapshot_config(NatsSnapshotConfig::without_checkpoint())
-                .with_subject_resolver(JobEventSubjectResolver),
+                .with_subject_resolver(ScheduleEventSubjectResolver),
             schedules_bucket,
         }
     }

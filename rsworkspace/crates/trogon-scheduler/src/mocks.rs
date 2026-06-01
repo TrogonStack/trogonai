@@ -54,7 +54,7 @@ impl MockSchedulePublisher {
         self.removals.lock().unwrap().clone()
     }
 
-    pub fn seed_active_job(&self, job_id: &str) {
+    pub fn seed_active_schedule(&self, job_id: &str) {
         self.active.lock().unwrap().insert(job_id.to_string());
     }
 }
@@ -144,7 +144,7 @@ impl ReleaseLease for MockLeaderLock {
 
 #[derive(Clone, Default)]
 pub struct MockSchedulerStore {
-    jobs: Arc<Mutex<HashMap<String, Schedule>>>,
+    schedules: Arc<Mutex<HashMap<String, Schedule>>>,
     stream_positions: Arc<Mutex<HashMap<String, StreamPosition>>>,
     events: Arc<Mutex<HashMap<String, Vec<Event>>>>,
     command_snapshots: Arc<Mutex<HashMap<String, HashMap<String, EncodedSnapshot>>>>,
@@ -183,7 +183,7 @@ impl MockSchedulerStore {
         Self::default()
     }
 
-    pub fn seed_job(&self, job: Schedule) {
+    pub fn seed_schedule(&self, job: Schedule) {
         let id = job.id.clone();
         let event = v1::ScheduleEvent {
             event: Some(schedule_to_proto_created(&job).into()),
@@ -198,7 +198,7 @@ impl MockSchedulerStore {
             .lock()
             .unwrap()
             .insert(id.clone(), vec![encode_event(&event)]);
-        self.jobs.lock().unwrap().insert(id.clone(), job);
+        self.schedules.lock().unwrap().insert(id.clone(), job);
     }
 
     pub(crate) fn read_command_snapshot<Payload>(
@@ -223,15 +223,15 @@ impl MockSchedulerStore {
     }
 
     pub async fn get_schedule(&self, command: GetScheduleCommand) -> Result<Option<Schedule>, SchedulerError> {
-        Ok(self.jobs.lock().unwrap().get(command.id.as_str()).cloned())
+        Ok(self.schedules.lock().unwrap().get(command.id.as_str()).cloned())
     }
 
     pub async fn list_schedules(&self, _command: ListSchedulesCommand) -> Result<Vec<Schedule>, SchedulerError> {
-        Ok(self.jobs.lock().unwrap().values().cloned().collect())
+        Ok(self.schedules.lock().unwrap().values().cloned().collect())
     }
 
     pub async fn load_and_watch_schedules(&self) -> LoadAndWatchSchedulesResult {
-        let jobs = self.jobs.lock().unwrap().values().cloned().collect();
+        let jobs = self.schedules.lock().unwrap().values().cloned().collect();
         Ok((jobs, Box::pin(futures::stream::pending()) as ScheduleWatchStream))
     }
 }
@@ -542,7 +542,7 @@ impl StreamAppend<str> for MockSchedulerStore {
         let stream_id = request.stream_id.to_string();
         let expected_state = request.stream_write_precondition;
         let events = request.events;
-        let jobs = self.jobs.clone();
+        let jobs = self.schedules.clone();
         let stream_positions = self.stream_positions.clone();
         let event_log = self.events.clone();
 
@@ -572,12 +572,12 @@ impl StreamAppend<str> for MockSchedulerStore {
         }
 
         let stored_events = stream_events.entry(stream_id.to_string()).or_default();
-        let mut projected_job = current_job;
+        let mut projected_schedule = current_job;
         let mut raw_position = current_position.map(StreamPosition::as_u64).unwrap_or(0);
 
         for event_data in events {
             let event = v1::ScheduleEvent::decode(EventData::new(&event_data.r#type, &event_data.content))
-                .map_err(|source| SchedulerError::event_source("failed to decode mocked job event payload", source))?;
+                .map_err(|source| SchedulerError::event_source("failed to decode mocked schedule event payload", source))?;
             raw_position += 1;
             stored_events.push(event_data);
             let Some(event) = event.into_decoded() else {
@@ -585,34 +585,34 @@ impl StreamAppend<str> for MockSchedulerStore {
             };
             match &event.event {
                 Some(ScheduleEventCase::ScheduleCreated(inner)) => {
-                    projected_job = Some(schedule_read_model_from_proto(stream_id.as_str(), inner));
+                    projected_schedule = Some(schedule_read_model_from_proto(stream_id.as_str(), inner));
                 }
                 Some(ScheduleEventCase::SchedulePaused(_)) => {
-                    let mut job = projected_job.take().ok_or_else(|| {
+                    let mut job = projected_schedule.take().ok_or_else(|| {
                         SchedulerError::event_source(
-                            "failed to project mocked job pause without current read model",
+                            "failed to project mocked schedule pause without current read model",
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
                     job.status = crate::ScheduleEventStatus::Paused;
-                    projected_job = Some(job);
+                    projected_schedule = Some(job);
                 }
                 Some(ScheduleEventCase::ScheduleResumed(_)) => {
-                    let mut job = projected_job.take().ok_or_else(|| {
+                    let mut job = projected_schedule.take().ok_or_else(|| {
                         SchedulerError::event_source(
-                            "failed to project mocked job resume without current read model",
+                            "failed to project mocked schedule resume without current read model",
                             std::io::Error::other(stream_id.to_string()),
                         )
                     })?;
                     job.status = crate::ScheduleEventStatus::Scheduled;
-                    projected_job = Some(job);
+                    projected_schedule = Some(job);
                 }
                 Some(ScheduleEventCase::ScheduleRemoved(_)) => {
-                    projected_job = None;
+                    projected_schedule = None;
                 }
                 None => {
                     return Err(SchedulerError::event_source(
-                        "failed to project mocked job event without supported case",
+                        "failed to project mocked schedule event without supported case",
                         std::io::Error::other("missing event case"),
                     ));
                 }
@@ -621,7 +621,7 @@ impl StreamAppend<str> for MockSchedulerStore {
 
         let final_position = stream_position(raw_position)?;
         stream_positions.insert(stream_id.to_string(), final_position);
-        if let Some(job) = projected_job {
+        if let Some(job) = projected_schedule {
             jobs.insert(stream_id.to_string(), job);
         } else {
             jobs.remove(stream_id.as_str());
@@ -693,11 +693,11 @@ mod tests {
     }
     use futures::StreamExt;
 
-    fn command_job_id(id: &str) -> command_domain::ScheduleId {
+    fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
         command_domain::ScheduleId::parse(id).unwrap()
     }
 
-    fn base_job(id: &str) -> Schedule {
+    fn base_schedule(id: &str) -> Schedule {
         Schedule {
             id: id.to_string(),
             status: ScheduleEventStatus::Scheduled,
@@ -714,28 +714,28 @@ mod tests {
         }
     }
 
-    fn command_base_job(id: &str) -> command_domain::Job {
-        command_domain::Job {
-            id: command_job_id(id),
-            status: command_domain::JobStatus::Enabled,
-            schedule: command_domain::Schedule::every(30).unwrap(),
+    fn command_base_schedule(id: &str) -> command_domain::Schedule {
+        command_domain::Schedule {
+            id: command_schedule_id(id),
+            status: command_domain::ScheduleStatus::Enabled,
+            schedule: command_domain::ScheduleSpec::every(30).unwrap(),
             delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
-            message: command_domain::JobMessage {
+            message: command_domain::ScheduleMessage {
                 content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-                headers: command_domain::JobHeaders::default(),
+                headers: command_domain::ScheduleHeaders::default(),
             },
         }
     }
 
-    fn expected_job(id: &str) -> Schedule {
-        base_job(id)
+    fn expected_schedule(id: &str) -> Schedule {
+        base_schedule(id)
     }
 
     #[tokio::test]
-    async fn mock_schedule_publisher_tracks_active_jobs() {
+    async fn mock_schedule_publisher_tracks_active_schedules() {
         let publisher = MockSchedulePublisher::new();
-        publisher.seed_active_job("orphan");
-        let details = schedule_to_proto_created(&expected_job("alpha"));
+        publisher.seed_active_schedule("orphan");
+        let details = schedule_to_proto_created(&expected_schedule("alpha"));
         let resolved = ResolvedSchedule::from_event("alpha", &details).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
@@ -774,16 +774,16 @@ mod tests {
     #[tokio::test]
     async fn mock_scheduler_store_covers_crud_and_read_model_watch() {
         let store = MockSchedulerStore::new();
-        store.seed_job(base_job("seeded"));
+        store.seed_schedule(base_schedule("seeded"));
 
         let seeded = store
             .get_schedule(GetScheduleCommand::new(ScheduleId::parse("seeded").unwrap()))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(seeded, expected_job("seeded"));
+        assert_eq!(seeded, expected_schedule("seeded"));
 
-        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
+        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -794,9 +794,9 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(alpha, expected_job("alpha"));
+        assert_eq!(alpha, expected_schedule("alpha"));
 
-        CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("alpha")))
+        CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -823,7 +823,7 @@ mod tests {
                 .is_err()
         );
 
-        CommandExecution::new(&store, &RemoveScheduleCommand::new(command_job_id("alpha")))
+        CommandExecution::new(&store, &RemoveScheduleCommand::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -837,7 +837,7 @@ mod tests {
                 .is_none()
         );
 
-        let deleted_error = CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
+        let deleted_error = CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -845,14 +845,14 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandError::Decide(crate::CreateScheduleDecideError::JobDeleted { .. })
+            CommandError::Decide(crate::CreateScheduleDecideError::ScheduleDeleted { .. })
         ));
     }
 
     #[tokio::test]
     async fn mock_scheduler_store_rejects_invalid_specs_and_state_errors() {
         let store = MockSchedulerStore::new();
-        let invalid_error = serde_json::from_value::<command_domain::Job>(serde_json::json!({
+        let invalid_error = serde_json::from_value::<command_domain::Schedule>(serde_json::json!({
             "id": "bad",
             "schedule": { "type": "every", "every_sec": 30 },
             "delivery": {
@@ -865,13 +865,13 @@ mod tests {
         .unwrap_err();
         assert!(invalid_error.to_string().contains("sampling source"));
 
-        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_job("alpha")))
+        CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
             .await
             .unwrap();
-        let same_state_error = CommandExecution::new(&store, &ResumeScheduleCommand::new(command_job_id("alpha")))
+        let same_state_error = CommandExecution::new(&store, &ResumeScheduleCommand::new(command_schedule_id("alpha")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -882,7 +882,7 @@ mod tests {
             CommandError::Decide(crate::ResumeScheduleDecideError::AlreadyActive { .. })
         ));
 
-        let missing_error = CommandExecution::new(&store, &PauseScheduleCommand::new(command_job_id("missing")))
+        let missing_error = CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("missing")))
             .with_snapshot(&store)
             .with_task_runtime(ImmediateSnapshotTaskScheduler)
             .execute()
@@ -890,7 +890,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandError::Decide(crate::PauseScheduleDecideError::JobNotFound { .. })
+            CommandError::Decide(crate::PauseScheduleDecideError::ScheduleNotFound { .. })
         ));
     }
 

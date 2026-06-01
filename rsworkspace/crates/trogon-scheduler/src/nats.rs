@@ -140,7 +140,7 @@ impl SchedulePublisher for NatsSchedulePublisher {
 
     async fn remove_schedule(&self, job_id: &str) -> Result<(), Self::Error> {
         let job_id = trogon_nats::NatsToken::new(job_id).map_err(|source| {
-            SchedulerError::invalid_job_spec(crate::error::ScheduleSpecError::InvalidId {
+            SchedulerError::invalid_schedule_spec(crate::error::ScheduleSpecError::InvalidId {
                 id: job_id.to_string(),
                 source,
             })
@@ -187,7 +187,7 @@ pub(crate) fn validate_events_stream(stream: &jetstream::stream::Stream) -> Resu
     }
     if !config.subjects.iter().any(|subject| subject == EVENTS_SUBJECT_PATTERN) {
         return Err(SchedulerError::event_source(
-            "events stream is missing canonical job event subject coverage",
+            "events stream is missing canonical schedule event subject coverage",
             std::io::Error::other(EVENTS_STREAM),
         ));
     }

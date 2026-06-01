@@ -17,7 +17,7 @@ fn test_url() -> String {
     std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
 }
 
-fn command_job_id(id: &str) -> command_domain::ScheduleId {
+fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
     command_domain::ScheduleId::parse(id).unwrap()
 }
 
@@ -108,19 +108,19 @@ async fn wait_for_stream_subject(js: &jetstream::Context, stream_name: &str, sub
     .expect("timed out waiting for stream subject to be configured");
 }
 
-fn base_job(id: &str) -> command_domain::Job {
-    command_domain::Job {
-        id: command_job_id(id),
-        status: command_domain::JobStatus::Enabled,
-        schedule: command_domain::Schedule::every(2).unwrap(),
+fn base_schedule(id: &str) -> command_domain::Schedule {
+    command_domain::Schedule {
+        id: command_schedule_id(id),
+        status: command_domain::ScheduleStatus::Enabled,
+        schedule: command_domain::ScheduleSpec::every(2).unwrap(),
         delivery: command_domain::Delivery::NatsEvent {
             route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
             ttl_sec: Some(command_domain::TtlSeconds::new(30).unwrap()),
             source: None,
         },
-        message: command_domain::JobMessage {
+        message: command_domain::ScheduleMessage {
             content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
-            headers: command_domain::JobHeaders::default(),
+            headers: command_domain::ScheduleHeaders::default(),
         },
     }
 }
@@ -169,8 +169,8 @@ async fn controller_reconciles_one_time_job() {
         SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
-    let mut job = base_job("one-time");
-    job.schedule = command_domain::Schedule::At {
+    let mut job = base_schedule("one-time");
+    job.schedule = command_domain::ScheduleSpec::At {
         at: Utc::now() + ChronoDuration::seconds(2),
     };
 
@@ -198,7 +198,7 @@ async fn controller_reconciles_sampling_job() {
         SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
-    let mut job = base_job("sampling");
+    let mut job = base_schedule("sampling");
     job.delivery = command_domain::Delivery::NatsEvent {
         route: command_domain::DeliveryRoute::new("agent.run").unwrap(),
         ttl_sec: None,
@@ -235,8 +235,8 @@ async fn controller_reconciles_schedule_with_timezone() {
         SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
-    let mut job = base_job("cron-timezone");
-    job.schedule = command_domain::Schedule::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
+    let mut job = base_schedule("cron-timezone");
+    job.schedule = command_domain::ScheduleSpec::cron("*/2 * * * * *", Some("UTC".to_string())).unwrap();
 
     CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
@@ -262,7 +262,7 @@ async fn disabling_job_removes_schedule_subject() {
         SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
-    let job = base_job("disabled");
+    let job = base_schedule("disabled");
     CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -275,7 +275,7 @@ async fn disabling_job_removes_schedule_subject() {
 
     CommandExecution::new(
         &store.event_store,
-        &PauseScheduleCommand::new(command_job_id("disabled")),
+        &PauseScheduleCommand::new(command_schedule_id("disabled")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -298,7 +298,7 @@ async fn removing_job_removes_schedule_subject() {
         SchedulerController::from_nats(nats).await.unwrap().run().await.unwrap();
     });
 
-    let job = base_job("removed");
+    let job = base_schedule("removed");
     CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -311,7 +311,7 @@ async fn removing_job_removes_schedule_subject() {
 
     CommandExecution::new(
         &store.event_store,
-        &RemoveScheduleCommand::new(command_job_id("removed")),
+        &RemoveScheduleCommand::new(command_schedule_id("removed")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -330,8 +330,8 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     reset_state(&js).await;
 
     let store = connect_store(nats.clone()).await.unwrap();
-    let mut job = base_job("eventful");
-    job.schedule = command_domain::Schedule::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
+    let mut job = base_schedule("eventful");
+    job.schedule = command_domain::ScheduleSpec::cron("*/5 * * * * *", Some("UTC".to_string())).unwrap();
     let expected_schedule = ScheduleEventSchedule::Cron {
         expr: "*/5 * * * * *".to_string(),
         timezone: Some("UTC".to_string()),
@@ -345,7 +345,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
         .unwrap();
     CommandExecution::new(
         &store.event_store,
-        &PauseScheduleCommand::new(command_job_id("eventful")),
+        &PauseScheduleCommand::new(command_schedule_id("eventful")),
     )
     .with_snapshot(&store.event_store)
     .with_task_runtime(TokioSnapshotTaskScheduler)
@@ -373,8 +373,8 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     reset_state(&js).await;
     let store = connect_store(nats.clone()).await.unwrap();
 
-    let job = base_job("lifecycle");
-    let command_id = command_job_id("lifecycle");
+    let job = base_schedule("lifecycle");
+    let command_id = command_schedule_id("lifecycle");
 
     let added = CommandExecution::new(&store.event_store, &CreateScheduleCommand::new(job))
         .with_snapshot(&store.event_store)

@@ -23,10 +23,10 @@ pub enum SchedulerError {
         context: &'static str,
         source: BoxError,
     },
-    JobAlreadyExists {
+    ScheduleAlreadyExists {
         id: String,
     },
-    JobNotFound {
+    ScheduleNotFound {
         id: String,
     },
     OptimisticConcurrencyConflict {
@@ -35,7 +35,7 @@ pub enum SchedulerError {
         current_position: Option<StreamPosition>,
     },
     Serde(serde_json::Error),
-    InvalidJobSpec {
+    InvalidScheduleSpec {
         source: ScheduleSpecError,
     },
 }
@@ -95,8 +95,8 @@ impl std::fmt::Display for SchedulerError {
             Self::Schedule { context, source } => {
                 write!(f, "Schedule error: {context}: {source}")
             }
-            Self::JobAlreadyExists { id } => write!(f, "Job '{id}' already exists"),
-            Self::JobNotFound { id } => write!(f, "Job '{id}' not found"),
+            Self::ScheduleAlreadyExists { id } => write!(f, "Schedule '{id}' already exists"),
+            Self::ScheduleNotFound { id } => write!(f, "Schedule '{id}' not found"),
             Self::OptimisticConcurrencyConflict {
                 id,
                 expected,
@@ -104,15 +104,15 @@ impl std::fmt::Display for SchedulerError {
             } => match current_position {
                 Some(current_position) => write!(
                     f,
-                    "OCC conflict for job '{id}': expected {expected:?}, current position is {current_position}"
+                    "OCC conflict for schedule '{id}': expected {expected:?}, current position is {current_position}"
                 ),
                 None => write!(
                     f,
-                    "OCC conflict for job '{id}': expected {expected:?}, job has no current position"
+                    "OCC conflict for schedule '{id}': expected {expected:?}, schedule has no current position"
                 ),
             },
             Self::Serde(error) => write!(f, "Serialization error: {error}"),
-            Self::InvalidJobSpec { source } => write!(f, "Invalid job spec: {source}"),
+            Self::InvalidScheduleSpec { source } => write!(f, "Invalid schedule spec: {source}"),
         }
     }
 }
@@ -125,8 +125,8 @@ impl std::error::Error for SchedulerError {
             Self::Lease { source, .. } => Some(source.as_ref()),
             Self::Schedule { source, .. } => Some(source.as_ref()),
             Self::Serde(error) => Some(error),
-            Self::InvalidJobSpec { source } => Some(source),
-            Self::JobAlreadyExists { .. } | Self::JobNotFound { .. } | Self::OptimisticConcurrencyConflict { .. } => {
+            Self::InvalidScheduleSpec { source } => Some(source),
+            Self::ScheduleAlreadyExists { .. } | Self::ScheduleNotFound { .. } | Self::OptimisticConcurrencyConflict { .. } => {
                 None
             }
         }
@@ -174,15 +174,15 @@ impl SchedulerError {
         }
     }
 
-    pub fn invalid_job_spec(source: ScheduleSpecError) -> Self {
-        Self::InvalidJobSpec { source }
+    pub fn invalid_schedule_spec(source: ScheduleSpecError) -> Self {
+        Self::InvalidScheduleSpec { source }
     }
 }
 
 impl std::fmt::Display for ScheduleSpecError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidId { id, source } => write!(f, "job id '{id}' is invalid: {source:?}"),
+            Self::InvalidId { id, source } => write!(f, "schedule id '{id}' is invalid: {source:?}"),
             Self::EverySecondsMustBePositive => f.write_str("every_sec must be >= 1"),
             Self::InvalidCronExpression { expr, source } => {
                 write!(f, "cron expression '{expr}' is invalid: {source}")
@@ -245,7 +245,7 @@ impl From<serde_json::Error> for SchedulerError {
 
 impl From<trogonai_proto::scheduler::schedules::ScheduleEventPayloadError> for SchedulerError {
     fn from(value: trogonai_proto::scheduler::schedules::ScheduleEventPayloadError) -> Self {
-        Self::event_source("failed to encode or decode job event payload", value)
+        Self::event_source("failed to encode or decode schedule event payload", value)
     }
 }
 
@@ -290,9 +290,9 @@ where
         match value {
             JetStreamStoreError::ResolveSubject(source) => source,
             JetStreamStoreError::ReadStream(source) => {
-                Self::event_source("failed to read job stream while catching up command state", source)
+                Self::event_source("failed to read schedule stream while catching up command state", source)
             }
-            JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append job event batch", source),
+            JetStreamStoreError::AppendStream(source) => Self::event_source("failed to append schedule event batch", source),
             JetStreamStoreError::Snapshot(source) => Self::from(source),
             JetStreamStoreError::Codec(source) => source,
             JetStreamStoreError::OptimisticConcurrencyConflict(source) => Self::OptimisticConcurrencyConflict {
@@ -315,9 +315,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_job_spec_display_mentions_field() {
-        let error = SchedulerError::invalid_job_spec(ScheduleSpecError::TtlMustBePositive);
-        assert_eq!(error.to_string(), "Invalid job spec: ttl_sec must be >= 1");
+    fn invalid_schedule_spec_display_mentions_field() {
+        let error = SchedulerError::invalid_schedule_spec(ScheduleSpecError::TtlMustBePositive);
+        assert_eq!(error.to_string(), "Invalid schedule spec: ttl_sec must be >= 1");
     }
 
     #[test]
@@ -341,16 +341,16 @@ mod tests {
         assert_eq!(schedule.to_string(), "Schedule error: upsert: rejected");
         assert!(std::error::Error::source(&schedule).is_some());
 
-        let already_exists = SchedulerError::JobAlreadyExists {
+        let already_exists = SchedulerError::ScheduleAlreadyExists {
             id: "job-1".to_string(),
         };
-        assert_eq!(already_exists.to_string(), "Job 'job-1' already exists");
+        assert_eq!(already_exists.to_string(), "Schedule 'job-1' already exists");
         assert!(std::error::Error::source(&already_exists).is_none());
 
-        let not_found = SchedulerError::JobNotFound {
+        let not_found = SchedulerError::ScheduleNotFound {
             id: "missing".to_string(),
         };
-        assert_eq!(not_found.to_string(), "Job 'missing' not found");
+        assert_eq!(not_found.to_string(), "Schedule 'missing' not found");
         assert!(std::error::Error::source(&not_found).is_none());
 
         let occ_missing = SchedulerError::OptimisticConcurrencyConflict {
@@ -358,7 +358,7 @@ mod tests {
             expected: StreamWritePrecondition::NoStream,
             current_position: None,
         };
-        assert!(occ_missing.to_string().contains("job has no current position"));
+        assert!(occ_missing.to_string().contains("schedule has no current position"));
         assert!(std::error::Error::source(&occ_missing).is_none());
 
         let occ_current = SchedulerError::OptimisticConcurrencyConflict {
@@ -380,7 +380,7 @@ mod tests {
             id: "".to_string(),
             source: SubjectTokenViolation::Empty,
         };
-        assert!(invalid_id.to_string().contains("job id '' is invalid"));
+        assert!(invalid_id.to_string().contains("schedule id '' is invalid"));
         assert!(std::error::Error::source(&invalid_id).is_some());
 
         let every = ScheduleSpecError::EverySecondsMustBePositive;

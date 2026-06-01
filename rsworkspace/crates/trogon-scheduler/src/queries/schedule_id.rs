@@ -79,7 +79,7 @@ impl fmt::Display for ScheduleId {
 
 impl fmt::Display for ScheduleIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "job id '{}' is invalid: {}", self.raw, self.source)
+        write!(f, "schedule id '{}' is invalid: {}", self.raw, self.source)
     }
 }
 
@@ -94,7 +94,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_job_id_preserves_subject_token_violation_as_source() {
+    fn invalid_schedule_id_preserves_subject_token_violation_as_source() {
         let error = ScheduleId::parse("").unwrap_err();
 
         let source = std::error::Error::source(&error).unwrap();

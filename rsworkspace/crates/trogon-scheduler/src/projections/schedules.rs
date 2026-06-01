@@ -61,13 +61,13 @@ pub enum ScheduleStreamState {
 #[derive(Debug)]
 pub enum ScheduleTransitionError {
     InvalidEventId { id: String, source: SubjectTokenViolation },
-    MismatchedEventScheduleId { stream_id: String, job_id: String },
+    MismatchedEventScheduleId { stream_id: String, schedule_id: String },
     MalformedEvent { context: &'static str },
-    CannotAddExistingJob { id: String },
-    CannotAddDeletedJob { id: String },
-    MissingJobForStateChange { id: String },
-    DeletedJobForStateChange { id: String },
-    DeletedJobForRemoval { id: String },
+    CannotAddExistingSchedule { id: String },
+    CannotAddDeletedSchedule { id: String },
+    MissingScheduleForStateChange { id: String },
+    DeletedScheduleForStateChange { id: String },
+    DeletedScheduleForRemoval { id: String },
 }
 
 pub const fn initial_state() -> ScheduleStreamState {
@@ -79,23 +79,23 @@ pub fn apply(
     state: ScheduleStreamState,
     event: &v1::ScheduleEvent,
 ) -> Result<ScheduleStreamState, ScheduleTransitionError> {
-    validate_event_job_id(stream_id).map_err(|source| ScheduleTransitionError::InvalidEventId {
+    validate_event_schedule_id(stream_id).map_err(|source| ScheduleTransitionError::InvalidEventId {
         id: stream_id.to_string(),
         source,
     })?;
-    validate_event_payload_job_id(stream_id, event)?;
+    validate_event_payload_schedule_id(stream_id, event)?;
 
     match (state, &event.event) {
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleCreated(inner))) => {
             Ok(ScheduleStreamState::Present(project_created_job(inner)?))
         }
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::SchedulePaused(_))) => {
-            Err(ScheduleTransitionError::MissingJobForStateChange {
+            Err(ScheduleTransitionError::MissingScheduleForStateChange {
                 id: stream_id.to_string(),
             })
         }
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleResumed(_))) => {
-            Err(ScheduleTransitionError::MissingJobForStateChange {
+            Err(ScheduleTransitionError::MissingScheduleForStateChange {
                 id: stream_id.to_string(),
             })
         }
@@ -103,7 +103,7 @@ pub fn apply(
             Ok(ScheduleStreamState::Deleted(stream_id.to_string()))
         }
         (ScheduleStreamState::Present(job), Some(ScheduleEventCase::ScheduleCreated(_))) => {
-            Err(ScheduleTransitionError::CannotAddExistingJob { id: job.id })
+            Err(ScheduleTransitionError::CannotAddExistingSchedule { id: job.id })
         }
         (ScheduleStreamState::Present(mut job), Some(ScheduleEventCase::SchedulePaused(_))) => {
             job.status = ScheduleEventStatus::Paused;
@@ -117,42 +117,42 @@ pub fn apply(
             Ok(ScheduleStreamState::Deleted(job.id))
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleCreated(_))) => {
-            Err(ScheduleTransitionError::CannotAddDeletedJob { id })
+            Err(ScheduleTransitionError::CannotAddDeletedSchedule { id })
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::SchedulePaused(_))) => {
-            Err(ScheduleTransitionError::DeletedJobForStateChange { id })
+            Err(ScheduleTransitionError::DeletedScheduleForStateChange { id })
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleResumed(_))) => {
-            Err(ScheduleTransitionError::DeletedJobForStateChange { id })
+            Err(ScheduleTransitionError::DeletedScheduleForStateChange { id })
         }
         (ScheduleStreamState::Deleted(id), Some(ScheduleEventCase::ScheduleRemoved(_))) => {
-            Err(ScheduleTransitionError::DeletedJobForRemoval { id })
+            Err(ScheduleTransitionError::DeletedScheduleForRemoval { id })
         }
         (_, None) => Err(ScheduleTransitionError::MalformedEvent {
-            context: "job event has no supported case",
+            context: "schedule event has no supported case",
         }),
     }
 }
 
-fn validate_event_payload_job_id(stream_id: &str, event: &v1::ScheduleEvent) -> Result<(), ScheduleTransitionError> {
-    let Some(job_id) = event_job_id(event) else {
+fn validate_event_payload_schedule_id(stream_id: &str, event: &v1::ScheduleEvent) -> Result<(), ScheduleTransitionError> {
+    let Some(schedule_id) = event_schedule_id(event) else {
         return Ok(());
     };
-    validate_event_job_id(job_id).map_err(|source| ScheduleTransitionError::InvalidEventId {
-        id: job_id.to_string(),
+    validate_event_schedule_id(schedule_id).map_err(|source| ScheduleTransitionError::InvalidEventId {
+        id: schedule_id.to_string(),
         source,
     })?;
-    if job_id == stream_id {
+    if schedule_id == stream_id {
         Ok(())
     } else {
         Err(ScheduleTransitionError::MismatchedEventScheduleId {
             stream_id: stream_id.to_string(),
-            job_id: job_id.to_string(),
+            schedule_id: schedule_id.to_string(),
         })
     }
 }
 
-fn event_job_id(event: &v1::ScheduleEvent) -> Option<&str> {
+fn event_schedule_id(event: &v1::ScheduleEvent) -> Option<&str> {
     match &event.event {
         Some(ScheduleEventCase::ScheduleCreated(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::SchedulePaused(inner)) => Some(&inner.schedule_id),
@@ -317,22 +317,22 @@ impl From<Schedule> for ScheduleStreamState {
 impl std::fmt::Display for ScheduleTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidEventId { id, .. } => write!(f, "job event id '{id}' is invalid"),
-            Self::MismatchedEventScheduleId { stream_id, job_id } => {
-                write!(f, "job event id '{job_id}' does not match stream id '{stream_id}'")
+            Self::InvalidEventId { id, .. } => write!(f, "schedule event id '{id}' is invalid"),
+            Self::MismatchedEventScheduleId { stream_id, schedule_id } => {
+                write!(f, "schedule event id '{schedule_id}' does not match stream id '{stream_id}'")
             }
-            Self::MalformedEvent { context } => write!(f, "job event is malformed: {context}"),
-            Self::CannotAddExistingJob { id } => write!(f, "job '{id}' already exists"),
-            Self::CannotAddDeletedJob { id } => {
+            Self::MalformedEvent { context } => write!(f, "schedule event is malformed: {context}"),
+            Self::CannotAddExistingSchedule { id } => write!(f, "job '{id}' already exists"),
+            Self::CannotAddDeletedSchedule { id } => {
                 write!(f, "job '{id}' was deleted and cannot be added again")
             }
-            Self::MissingJobForStateChange { id } => {
+            Self::MissingScheduleForStateChange { id } => {
                 write!(f, "missing job for state change '{id}'")
             }
-            Self::DeletedJobForStateChange { id } => {
-                write!(f, "deleted job '{id}' cannot change state")
+            Self::DeletedScheduleForStateChange { id } => {
+                write!(f, "deleted schedule '{id}' cannot change state")
             }
-            Self::DeletedJobForRemoval { id } => {
+            Self::DeletedScheduleForRemoval { id } => {
                 write!(f, "job '{id}' was already deleted")
             }
         }
@@ -345,11 +345,11 @@ impl std::error::Error for ScheduleTransitionError {
             Self::InvalidEventId { source, .. } => Some(source),
             Self::MismatchedEventScheduleId { .. }
             | Self::MalformedEvent { .. }
-            | Self::CannotAddExistingJob { .. }
-            | Self::CannotAddDeletedJob { .. }
-            | Self::MissingJobForStateChange { .. }
-            | Self::DeletedJobForStateChange { .. }
-            | Self::DeletedJobForRemoval { .. } => None,
+            | Self::CannotAddExistingSchedule { .. }
+            | Self::CannotAddDeletedSchedule { .. }
+            | Self::MissingScheduleForStateChange { .. }
+            | Self::DeletedScheduleForStateChange { .. }
+            | Self::DeletedScheduleForRemoval { .. } => None,
         }
     }
 }
@@ -460,7 +460,7 @@ where
 
     while let Some(message) = messages.next().await {
         let message = message.map_err(|source| {
-            SchedulerError::event_source("failed to read job event during schedules read-model catch-up", source)
+            SchedulerError::event_source("failed to read schedule event during schedules read-model catch-up", source)
         })?;
         let sequence = event_message_sequence(&message, "failed to read schedules read-model catch-up event metadata")?;
         if sequence > info.state.last_sequence {
@@ -470,7 +470,7 @@ where
         let event = decode_recorded_watch_message(&message)?;
         let data = event.decode::<v1::ScheduleEvent>().map_err(|source| {
             SchedulerError::event_source(
-                "failed to decode job event during schedules read-model catch-up",
+                "failed to decode schedule event during schedules read-model catch-up",
                 source,
             )
         })?;
@@ -481,7 +481,7 @@ where
             }
             continue;
         };
-        let stream_id = job_id_from_event_subject(event.stream_id())?;
+        let stream_id = schedule_id_from_event_subject(event.stream_id())?;
         if let Some(change) = apply_event_to_read_model_state(&mut states, &stream_id, &data)? {
             apply_projection_change(&bucket, &change).await?;
         }
@@ -503,21 +503,21 @@ pub(crate) async fn project_appended_events(
     if events.is_empty() {
         return Ok(());
     }
-    validate_event_job_id(job_id).map_err(|source| {
-        SchedulerError::invalid_job_spec(crate::ScheduleSpecError::InvalidId {
+    validate_event_schedule_id(job_id).map_err(|source| {
+        SchedulerError::invalid_schedule_spec(crate::ScheduleSpecError::InvalidId {
             id: job_id.to_string(),
             source,
         })
     })?;
 
     let mut states = BTreeMap::new();
-    if let Some(job) = read_projected_job(bucket, job_id).await? {
+    if let Some(job) = read_projected_schedule(bucket, job_id).await? {
         states.insert(job_id.to_string(), ScheduleStreamState::from(job));
     }
 
     for event in events {
         let decoded = v1::ScheduleEvent::decode(EventData::new(&event.r#type, &event.content)).map_err(|source| {
-            SchedulerError::event_source("failed to decode job event for schedules read model", source)
+            SchedulerError::event_source("failed to decode schedule event for schedules read model", source)
         })?;
         let Some(decoded) = decoded.into_decoded() else {
             continue;
@@ -589,8 +589,8 @@ async fn rebuild_jobs_from_stream(
 
     while let Some(message) = messages.next().await {
         let message =
-            message.map_err(|source| SchedulerError::event_source("failed to read job event from stream", source))?;
-        let sequence = event_message_sequence(&message, "failed to read job event metadata")?;
+            message.map_err(|source| SchedulerError::event_source("failed to read schedule event from stream", source))?;
+        let sequence = event_message_sequence(&message, "failed to read schedule event metadata")?;
         if sequence > last_sequence {
             break;
         }
@@ -598,14 +598,14 @@ async fn rebuild_jobs_from_stream(
         let event = decode_recorded_watch_message(&message)?;
         let data = event
             .decode::<v1::ScheduleEvent>()
-            .map_err(|source| SchedulerError::event_source("failed to decode recorded job event payload", source))?;
+            .map_err(|source| SchedulerError::event_source("failed to decode recorded schedule event payload", source))?;
         let Some(data) = data.into_decoded() else {
             if reached_tail {
                 break;
             }
             continue;
         };
-        let stream_id = job_id_from_event_subject(event.stream_id())?;
+        let stream_id = schedule_id_from_event_subject(event.stream_id())?;
         apply_event_to_read_model_state(&mut states, &stream_id, &data)?;
         if reached_tail {
             break;
@@ -620,7 +620,7 @@ fn decode_recorded_job_event(
 ) -> Result<StreamEvent, SchedulerError> {
     let stream_id = message.subject.to_string();
     record_stream_message(message, stream_id)
-        .map_err(|source| SchedulerError::event_source("failed to decode stored job event", source))
+        .map_err(|source| SchedulerError::event_source("failed to decode stored schedule event", source))
 }
 
 fn decode_recorded_watch_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, SchedulerError> {
@@ -675,7 +675,7 @@ fn prepare_watched_projection_change(
     };
     let data = data.into_decoded()?;
 
-    let stream_id = match job_id_from_event_subject(event.stream_id()) {
+    let stream_id = match schedule_id_from_event_subject(event.stream_id()) {
         Ok(stream_id) => stream_id,
         Err(error) => {
             tracing::error!(error = %error, "Failed to derive watched schedule stream id from subject");
@@ -693,11 +693,11 @@ fn prepare_projection_change(
 ) -> Option<WatchedProjectionChange> {
     let current = state.get(stream_id).cloned().unwrap_or_else(initial_state);
     let next = match apply(stream_id, current.clone(), event)
-        .map_err(|error| SchedulerError::event_source("failed to apply watched job event to stream state", error))
+        .map_err(|error| SchedulerError::event_source("failed to apply watched schedule event to stream state", error))
     {
         Ok(next) => next,
         Err(error) => {
-            tracing::error!(error = %error, "Failed to apply job event to current state");
+            tracing::error!(error = %error, "Failed to apply schedule event to current state");
             return None;
         }
     };
@@ -727,13 +727,13 @@ fn commit_watched_projection_state(
 
 async fn ack_watch_message(message: &jetstream::Message) {
     if let Err(error) = message.ack().await {
-        tracing::error!(error = %error, "Failed to acknowledge watched job event");
+        tracing::error!(error = %error, "Failed to acknowledge watched schedule event");
     }
 }
 
 async fn nak_watch_message(message: &jetstream::Message) {
     if let Err(error) = message.ack_with(jetstream::AckKind::Nak(None)).await {
-        tracing::error!(error = %error, "Failed to negatively acknowledge watched job event");
+        tracing::error!(error = %error, "Failed to negatively acknowledge watched schedule event");
     }
 }
 
@@ -748,7 +748,7 @@ fn is_read_model_metadata_key(key: &str) -> bool {
     key == SCHEDULES_CHECKPOINT_KEY
 }
 
-async fn read_projected_job(bucket: &kv::Store, id: &str) -> Result<Option<Schedule>, SchedulerError> {
+async fn read_projected_schedule(bucket: &kv::Store, id: &str) -> Result<Option<Schedule>, SchedulerError> {
     let Some(entry) = bucket
         .entry(id.to_string())
         .await
@@ -775,7 +775,7 @@ async fn read_model_state_map(bucket: &kv::Store) -> Result<BTreeMap<String, Sch
         if is_read_model_metadata_key(&key) {
             continue;
         }
-        if let Some(job) = read_projected_job(bucket, &key).await? {
+        if let Some(job) = read_projected_schedule(bucket, &key).await? {
             states.insert(key, ScheduleStreamState::Present(job));
         }
     }
@@ -852,7 +852,7 @@ fn apply_event_to_read_model_state(
 ) -> Result<Option<ProjectionChange>, SchedulerError> {
     let current_state = states.get(stream_id).cloned().unwrap_or_else(initial_state);
     let next_state = apply(stream_id, current_state.clone(), event)
-        .map_err(|source| SchedulerError::event_source("failed to apply job event to schedules read model", source))?;
+        .map_err(|source| SchedulerError::event_source("failed to apply schedule event to schedules read model", source))?;
     let change = projection_change(&current_state, &next_state);
 
     match next_state.clone() {
@@ -867,25 +867,25 @@ fn apply_event_to_read_model_state(
     Ok(change)
 }
 
-fn job_id_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
+fn schedule_id_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
     let raw_id = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
         SchedulerError::event_source(
-            "failed to derive job stream id from event subject",
+            "failed to derive schedule stream id from event subject",
             std::io::Error::other(subject.to_string()),
         )
     })?;
 
-    validate_event_job_id(raw_id)
+    validate_event_schedule_id(raw_id)
         .map(|()| raw_id.to_string())
         .map_err(|source| {
-            SchedulerError::invalid_job_spec(crate::ScheduleSpecError::InvalidId {
+            SchedulerError::invalid_schedule_spec(crate::ScheduleSpecError::InvalidId {
                 id: raw_id.to_string(),
                 source,
             })
         })
 }
 
-fn validate_event_job_id(id: &str) -> Result<(), SubjectTokenViolation> {
+fn validate_event_schedule_id(id: &str) -> Result<(), SubjectTokenViolation> {
     trogon_nats::NatsToken::new(id).map(|_| ())
 }
 
@@ -911,7 +911,7 @@ mod tests {
         }
     }
 
-    fn expected_job(id: &str) -> Schedule {
+    fn expected_schedule(id: &str) -> Schedule {
         Schedule {
             id: id.to_string(),
             status: ScheduleEventStatus::Scheduled,
@@ -1059,7 +1059,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, ScheduleTransitionError::CannotAddDeletedJob { .. }));
+        assert!(matches!(error, ScheduleTransitionError::CannotAddDeletedSchedule { .. }));
     }
 
     #[test]
@@ -1068,7 +1068,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ScheduleTransitionError::MissingJobForStateChange { .. }
+            ScheduleTransitionError::MissingScheduleForStateChange { .. }
         ));
     }
 
@@ -1078,7 +1078,7 @@ mod tests {
         let after = apply("backup", before.clone(), &added_event("backup")).unwrap();
         assert_eq!(
             projection_change(&before, &after),
-            Some(ProjectionChange::Upsert(expected_job("backup")))
+            Some(ProjectionChange::Upsert(expected_schedule("backup")))
         );
 
         let updated = apply("backup", after.clone(), &paused_event("backup")).unwrap();
@@ -1092,11 +1092,11 @@ mod tests {
     fn initial_state_rejects_adding_existing_job() {
         let error = apply(
             "backup",
-            ScheduleStreamState::Present(expected_job("backup")),
+            ScheduleStreamState::Present(expected_schedule("backup")),
             &added_event("backup"),
         )
         .unwrap_err();
-        assert!(matches!(error, ScheduleTransitionError::CannotAddExistingJob { .. }));
+        assert!(matches!(error, ScheduleTransitionError::CannotAddExistingSchedule { .. }));
     }
 
     #[test]
@@ -1105,7 +1105,7 @@ mod tests {
         let prepared = prepare_projection_change(&state, "backup", &added_event("backup")).unwrap();
 
         assert!(state.is_empty());
-        assert_eq!(prepared.change, Some(ProjectionChange::Upsert(expected_job("backup"))));
+        assert_eq!(prepared.change, Some(ProjectionChange::Upsert(expected_schedule("backup"))));
 
         commit_watched_projection_state(&mut state, prepared.stream_id, prepared.next_state);
 
@@ -1174,7 +1174,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("failed to apply job event to schedules read model")
+                .contains("failed to apply schedule event to schedules read model")
         );
     }
 }
