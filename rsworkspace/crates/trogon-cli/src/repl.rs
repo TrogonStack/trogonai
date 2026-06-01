@@ -9,9 +9,10 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::config::Configurer;
 use rustyline::{
-    Cmd, ConditionalEventHandler, Context, Editor, EventContext, EventHandler, Helper, KeyCode,
-    KeyEvent, Modifiers,
+    Cmd, ConditionalEventHandler, Context, Editor, EditMode, EventContext, EventHandler, Helper,
+    KeyCode, KeyEvent, Modifiers,
 };
 use std::borrow::Cow;
 use std::io::Write;
@@ -508,6 +509,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // cross-runner /model switches, which start a fresh session.
     let mut compactor_model_sel: Option<String> = None;
     let mut session_mode = startup_mode.clone();
+    // Tracks rustyline edit mode toggled by /vim (false = emacs, true = vi).
+    let mut vim_mode = false;
     print_startup_banner(session.session_id(), &prefix, &session_mode);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
@@ -933,6 +936,31 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 Err(e) => eprintln!("error setting mode: {e}"),
                             }
                         }
+                    } else if cmd == "/plan" {
+                        match session.set_mode("plan").await {
+                            Ok(()) => {
+                                session_mode = "plan".to_string();
+                                println!(
+                                    "plan mode on — read-only exploration; writes & bash are denied"
+                                );
+                            }
+                            Err(e) => eprintln!("error entering plan mode: {e}"),
+                        }
+                    } else if cmd == "/vim" {
+                        vim_mode = !vim_mode;
+                        rl.set_edit_mode(if vim_mode { EditMode::Vi } else { EditMode::Emacs });
+                        println!(
+                            "{} input mode",
+                            if vim_mode { "vim" } else { "emacs" }
+                        );
+                    } else if cmd == "/allowed-tools" {
+                        println!("{}", allowed_tools_for_mode(&session_mode));
+                    } else if cmd == "/review" {
+                        // Drive the model to review via its shell tools; runs like a
+                        // normal prompt on the next loop turn.
+                        queued_prompts.push_back(review_prompt(arg));
+                    } else if cmd == "/pr-comments" {
+                        queued_prompts.push_back(pr_comments_prompt(arg));
                     } else if cmd == "/compact" {
                         match session.compact().await {
                             Ok(CompactResult { compacted: true, tokens_before, tokens_after }) => {
@@ -1546,6 +1574,76 @@ pub(crate) async fn do_compact_model<S: Session>(
     }
 }
 
+// ── new slash-command helpers ───────────────────────────────────────────────────
+
+/// Describe how the current permission mode gates each tool category — i.e. which
+/// tools are usable in this mode. The runner owns the actual tool registry; this
+/// reflects the permission model the runner enforces.
+fn allowed_tools_for_mode(mode: &str) -> String {
+    let (edits, bash, mcp) = match mode {
+        "acceptEdits" => ("auto-allow", "prompt", "prompt"),
+        "plan" => ("denied", "denied", "prompt"),
+        "dontAsk" => ("auto-allow", "auto-allow", "auto-allow"),
+        "bypassPermissions" => ("no checks", "no checks", "no checks"),
+        // "default" and anything else
+        _ => ("prompt", "prompt", "prompt"),
+    };
+    format!(
+        "Tool permissions in mode `{mode}`:\n\
+         \u{20}\u{20}reads  (read_file, list_dir, glob, search, fetch_url) : always allowed\n\
+         \u{20}\u{20}edits  (write_file, str_replace)                      : {edits}\n\
+         \u{20}\u{20}bash / shell                                          : {bash}\n\
+         \u{20}\u{20}MCP tools                                             : {mcp}\n\
+         \u{20}\u{20}todo / plan tools                                     : always allowed\n\
+         \nChange with /mode <name>, or cycle default → acceptEdits → plan with Shift+Tab."
+    )
+}
+
+/// Prompt that drives the model to review the current branch / a PR via its shell
+/// tools (git, gh). Sent as a normal prompt.
+fn review_prompt(arg: &str) -> String {
+    let target = arg.trim();
+    let scope = if target.is_empty() {
+        "the changes on the current branch — compare against the base branch (e.g. `git diff main...HEAD`, or `gh pr diff` if a PR exists)".to_string()
+    } else {
+        format!("pull request {target} (use `gh pr diff {target}` and `gh pr view {target}`)")
+    };
+    format!(
+        "Review {scope} as a thorough code reviewer. Use your shell tools to gather the diff and \
+         surrounding context. Report, with file:line references: (1) a short summary of the change, \
+         (2) correctness bugs, (3) security concerns, (4) style/maintainability issues. Prioritise \
+         high-confidence, actionable findings. Do not modify any files."
+    )
+}
+
+/// Prompt that drives the model to fetch and triage PR review comments via `gh`.
+fn pr_comments_prompt(arg: &str) -> String {
+    let target = arg.trim();
+    let (pr, cmd) = if target.is_empty() {
+        ("the current pull request".to_string(), "gh pr view --comments".to_string())
+    } else {
+        (format!("pull request {target}"), format!("gh pr view {target} --comments"))
+    };
+    format!(
+        "Fetch the review comments on {pr} (e.g. `{cmd}`, or the GitHub API via `gh api`). \
+         Summarise them grouped by file and thread, and for each draft a suggested reply or code \
+         change. Do not post replies or push changes unless I explicitly confirm."
+    )
+}
+
+/// Bug-report template with build/environment details for the user to paste.
+fn bug_report_text() -> String {
+    format!(
+        "Report a bug — include the details below when filing an issue:\n\n\
+         \u{20}\u{20}trogon version : {}\n\
+         \u{20}\u{20}os / arch      : {} / {}\n\n\
+         Then describe: what you did, what you expected, what actually happened, and any error output.",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
 fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -1574,6 +1672,13 @@ Commands:
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
+  {m}/plan{r}               enter plan mode (read-only exploration)
+  {m}/allowed-tools{r}      show which tools the current mode permits
+  {m}/vim{r}                toggle vim / emacs input editing
+  {m}/review{r} [pr]        review the current branch or a PR
+  {m}/pr-comments{r} [pr]   fetch & triage PR review comments
+  {m}/bug{r}                print a bug-report template with build info
+  {m}/release-notes{r}      show version / release info
   {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
   {m}/init{r}               analyze project with AI and generate TROGON.md
@@ -1625,6 +1730,48 @@ Ctrl+D    quit")
 
         "/memory" => {
             "use /memory in the REPL to list or show TROGON.md hierarchy".to_string()
+        }
+
+        "/bug" => bug_report_text(),
+
+        "/release-notes" => format!(
+            "trogon {}\n\nNo release notes are bundled with this build — see your project's \
+             releases / CHANGELOG for version history.",
+            env!("CARGO_PKG_VERSION")
+        ),
+
+        "/login" | "/logout" => {
+            "trogon has no interactive login. Authentication uses provider tokens from the \
+             environment (ANTHROPIC_TOKEN, XAI_API_KEY, OPENROUTER_API_KEY, …) or the \
+             secret-proxy / vault. Set or rotate those to change credentials."
+                .to_string()
+        }
+
+        "/ide" => {
+            "trogon integrates with IDEs over the Agent Client Protocol (ACP): JetBrains and Zed \
+             connect natively — there is no trogon plugin to manage here. Run the ACP server \
+             (acp-nats-server) and point your editor's ACP client at it."
+                .to_string()
+        }
+
+        "/tasks" => {
+            "The CLI does not track background tasks — prompts run inline (Ctrl+C to interrupt). \
+             Sub-agents the model spawns run on the runner in isolated worktrees; see /agents."
+                .to_string()
+        }
+
+        "/agents" => {
+            "Sub-agents are spawned by the model via its spawn_agent tool (each gets an isolated \
+             git worktree); the CLI doesn't manage them directly — ask the model to \"spawn a \
+             sub-agent to …\". Use /sessions to list sessions on the current runner."
+                .to_string()
+        }
+
+        "/rewind" | "/checkpoint" => {
+            "Message-level rewind/checkpointing isn't supported yet. To revert state today: \
+             /clear starts a fresh session, /resume <id> reattaches a prior one, and switching \
+             models with /model opens a new session. (Code changes are reverted with git.)"
+                .to_string()
         }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
@@ -2588,6 +2735,59 @@ mod tests {
     fn config_unknown_subcommand_returns_error() {
         let fs = MockFs::new();
         assert!(handle_config_cmd("delete mykey", &fs).contains("unknown config subcommand"));
+    }
+
+    // ── new slash commands ────────────────────────────────────────────────────
+
+    #[test]
+    fn allowed_tools_reflects_mode_gating() {
+        assert!(allowed_tools_for_mode("plan").contains("edits"));
+        assert!(allowed_tools_for_mode("plan").contains("denied"));
+        assert!(allowed_tools_for_mode("acceptEdits").contains("auto-allow"));
+        assert!(allowed_tools_for_mode("bypassPermissions").contains("no checks"));
+        // reads are always allowed regardless of mode
+        assert!(allowed_tools_for_mode("default").contains("always allowed"));
+    }
+
+    #[test]
+    fn review_prompt_targets_branch_or_pr() {
+        assert!(review_prompt("").contains("current branch"));
+        let pr = review_prompt("123");
+        assert!(pr.contains("123") && pr.contains("gh pr diff 123"));
+        assert!(review_prompt("").to_lowercase().contains("do not modify"));
+    }
+
+    #[test]
+    fn pr_comments_prompt_targets_pr_and_is_read_only() {
+        assert!(pr_comments_prompt("").contains("gh pr view --comments"));
+        assert!(pr_comments_prompt("42").contains("gh pr view 42 --comments"));
+        assert!(pr_comments_prompt("").to_lowercase().contains("do not post"));
+    }
+
+    #[test]
+    fn bug_report_includes_version_and_platform() {
+        let out = bug_report_text();
+        assert!(out.contains(env!("CARGO_PKG_VERSION")));
+        assert!(out.contains(std::env::consts::OS));
+    }
+
+    #[test]
+    fn informational_commands_are_recognised_not_unknown() {
+        let fs = MockFs::new();
+        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
+            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+            assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
+            assert!(!out.is_empty());
+        }
+    }
+
+    #[test]
+    fn help_lists_new_commands() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        for c in ["/plan", "/allowed-tools", "/vim", "/review", "/pr-comments", "/bug"] {
+            assert!(out.contains(c), "/help must mention {c}");
+        }
     }
 
     #[test]
