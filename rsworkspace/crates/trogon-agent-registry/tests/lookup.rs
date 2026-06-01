@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use trogon_agent_registry::{
-    AUDIT_LOOKUP_FOUND, AgentRecord, AgentRegistryStore, LOOKUP_SUBJECT, LifecycleState, LookupRequest, LookupResponse,
-    RegistryCache, lookup, open_bucket, run_lookup_consumer,
+    AgentRecord, AgentRegistryStore, LOOKUP_SUBJECT, LifecycleState, LookupRequest, LookupResponse, RegistryCache,
+    audit_lookup_found_subject, lookup, open_bucket, run_lookup_consumer,
 };
 use trogon_nats::{NatsAuth, NatsConfig, connect};
 use uuid::Uuid;
@@ -39,7 +39,8 @@ async fn lookup_returns_found_record_and_emits_audit_event() {
     let jetstream = async_nats::jetstream::new(client.clone());
 
     let kv = open_bucket(&jetstream, true).await.expect("open registry bucket");
-    let store = AgentRegistryStore::new(kv, client.clone());
+    let prefix: std::sync::Arc<str> = "mcp".into();
+    let store = AgentRegistryStore::new(kv, client.clone(), prefix.clone());
     let cache = RegistryCache::new();
 
     let suffix = Uuid::now_v7().as_simple().to_string();
@@ -49,16 +50,17 @@ async fn lookup_returns_found_record_and_emits_audit_event() {
     store.warm_cache(cache.clone()).await.expect("warm cache");
 
     let mut audit_sub = client
-        .subscribe(AUDIT_LOOKUP_FOUND.to_string())
+        .subscribe(audit_lookup_found_subject(&prefix))
         .await
         .expect("subscribe audit subject");
 
     let consumer_client = client.clone();
     let consumer_store = store.clone();
     let consumer_cache = cache.clone();
+    let consumer_prefix = prefix.clone();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let consumer = tokio::spawn(async move {
-        run_lookup_consumer(consumer_client, consumer_store, consumer_cache, async {
+        run_lookup_consumer(consumer_client, consumer_store, consumer_cache, consumer_prefix, async {
             shutdown_rx.await.ok();
         })
         .await
