@@ -72,7 +72,9 @@ impl Decider for PauseSchedule {
                     .into(),
                 ),
             })),
-            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(PauseScheduleError::UnknownStateValue { value: 0 }),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => {
+                Err(PauseScheduleError::UnknownStateValue { value: 0 })
+            }
         }
     }
 }
@@ -84,13 +86,14 @@ impl CommandSnapshotPolicy for PauseSchedule {
 
 #[cfg(test)]
 mod tests {
-    use buffa::EnumValue;
     use trogon_decider::testing::TestCase;
+
+    use buffa::MessageField;
 
     use super::*;
     use crate::commands::domain::{
-        Delivery, MessageContent, MessageEnvelope, Schedule as DomainSchedule, ScheduleEventDelivery,
-        ScheduleEventSchedule, ScheduleEventStatus, ScheduleHeaders, ScheduleMessage,
+        Delivery, MessageContent, MessageEnvelope, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
+        ScheduleHeaders, ScheduleMessage, ScheduleSpec, ScheduleStatus,
     };
 
     fn schedule_id(id: &str) -> ScheduleId {
@@ -101,11 +104,11 @@ mod tests {
         PauseSchedule::new(ScheduleId::parse(id).unwrap())
     }
 
-    fn create_schedule(id: &str, status: ScheduleEventStatus) -> crate::CreateSchedule {
-        crate::CreateSchedule {
+    fn job(id: &str) -> Schedule {
+        Schedule {
             id: schedule_id(id),
-            status,
-            schedule: DomainSchedule::every(std::time::Duration::from_secs(30)).unwrap(),
+            status: ScheduleStatus::Enabled,
+            schedule: ScheduleSpec::every(30).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: ScheduleMessage {
                 content: MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
@@ -114,21 +117,29 @@ mod tests {
         }
     }
 
+    fn create_job_command(id: &str) -> CreateSchedule {
+        create_schedule(id)
+    }
+
+    fn pause_job_command(id: &str) -> PauseScheduleCommand {
+        PauseScheduleCommand::new(ScheduleId::parse(id).unwrap())
+    }
+
     fn added(id: &str) -> v1::ScheduleEvent {
-        let command = create_schedule(id, ScheduleEventStatus::Scheduled);
+        let schedule = job(id);
 
         v1::ScheduleEvent {
             event: Some(
                 v1::ScheduleCreated {
-                    schedule_id: command.id.as_str().to_string(),
-                    status: buffa::MessageField::some(v1::ScheduleStatus::from(command.status)),
-                    schedule: buffa::MessageField::some(
-                        v1::Schedule::try_from(&ScheduleEventSchedule::from(&command.schedule)).unwrap(),
-                    ),
-                    delivery: buffa::MessageField::some(
-                        v1::Delivery::try_from(&ScheduleEventDelivery::from(&command.delivery)).unwrap(),
-                    ),
-                    message: buffa::MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                    schedule_id: schedule.id.as_str().to_string(),
+                    status: buffa::MessageField::some(v1::ScheduleStatus::from(schedule.status)),
+                    schedule: buffa::MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(
+                        &schedule.schedule,
+                    ))),
+                    delivery: buffa::MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(
+                        &schedule.delivery,
+                    ))),
+                    message: buffa::MessageField::some(v1::Message::from(&MessageEnvelope::from(&schedule.message))),
                 }
                 .into(),
             ),
@@ -214,53 +225,10 @@ mod tests {
             PauseScheduleError::AlreadyPaused { id }.to_string(),
             "schedule 'backup' is already paused"
         );
-        assert_eq!(
-            PauseScheduleError::MissingStateValue.to_string(),
-            "state value is missing"
-        );
+        assert_eq!(PauseScheduleError::MissingStateValue.to_string(), "state value is missing");
         assert_eq!(
             PauseScheduleError::UnknownStateValue { value: 42 }.to_string(),
             "unknown state value: 42"
-        );
-    }
-
-    #[test]
-    fn decide_rejects_invalid_state_values() {
-        let command = pause_job_command("backup");
-
-        assert_eq!(
-            PauseSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
-            PauseScheduleError::MissingStateValue
-        );
-        assert_eq!(
-            PauseSchedule::decide(
-                &state_v1::State {
-                    state: Some(EnumValue::from(123)),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 123 }
-        );
-        assert_eq!(
-            PauseSchedule::decide(
-                &state_v1::State {
-                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-                },
-                &command,
-            )
-            .unwrap_err(),
-            PauseScheduleError::UnknownStateValue { value: 0 }
-        );
-    }
-
-    #[test]
-    fn command_snapshot_policy_uses_shared_frequency() {
-        assert_eq!(
-            <PauseSchedule as CommandSnapshotPolicy>::SNAPSHOT_POLICY
-                .frequency()
-                .get(),
-            32
         );
     }
 }

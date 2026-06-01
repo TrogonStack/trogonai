@@ -186,7 +186,21 @@ impl MockSchedulerStore {
     pub fn seed_schedule(&self, job: Schedule) {
         let id = job.id.clone();
         let event = v1::ScheduleEvent {
-            event: Some(schedule_to_proto_created(&job).into()),
+            event: Some(
+                v1::ScheduleCreated {
+                    schedule_id: job.id.clone(),
+                    status: MessageField::some(v1::ScheduleStatus {
+                        kind: Some(match job.status {
+                            ScheduleEventStatus::Scheduled => v1::schedule_status::Scheduled {}.into(),
+                            ScheduleEventStatus::Paused => v1::schedule_status::Paused {}.into(),
+                        }),
+                    }),
+                    schedule: MessageField::some(proto_schedule(&job.schedule)),
+                    delivery: MessageField::some(proto_delivery(&job.delivery)),
+                    message: MessageField::some(proto_message(&job.message)),
+                }
+                .into(),
+            ),
         };
 
         let initial_position = StreamPosition::new(NonZeroU64::MIN);
@@ -233,21 +247,6 @@ impl MockSchedulerStore {
     pub async fn load_and_watch_schedules(&self) -> LoadAndWatchSchedulesResult {
         let jobs = self.schedules.lock().unwrap().values().cloned().collect();
         Ok((jobs, Box::pin(futures::stream::pending()) as ScheduleWatchStream))
-    }
-}
-
-fn schedule_to_proto_created(job: &Schedule) -> v1::ScheduleCreated {
-    v1::ScheduleCreated {
-        schedule_id: job.id.clone(),
-        status: MessageField::some(v1::ScheduleStatus {
-            kind: Some(match job.status {
-                ScheduleEventStatus::Scheduled => v1::schedule_status::Scheduled {}.into(),
-                ScheduleEventStatus::Paused => v1::schedule_status::Paused {}.into(),
-            }),
-        }),
-        schedule: MessageField::some(proto_schedule(&job.schedule)),
-        delivery: MessageField::some(proto_delivery(&job.delivery)),
-        message: MessageField::some(proto_message(&job.message)),
     }
 }
 
@@ -735,7 +734,19 @@ mod tests {
     async fn mock_schedule_publisher_tracks_active_schedules() {
         let publisher = MockSchedulePublisher::new();
         publisher.seed_active_schedule("orphan");
-        let details = schedule_to_proto_created(&expected_schedule("alpha"));
+        let schedule = expected_schedule("alpha");
+        let details = v1::ScheduleCreated {
+            schedule_id: schedule.id.clone(),
+            status: MessageField::some(v1::ScheduleStatus {
+                kind: Some(match schedule.status {
+                    ScheduleEventStatus::Scheduled => v1::schedule_status::Scheduled {}.into(),
+                    ScheduleEventStatus::Paused => v1::schedule_status::Paused {}.into(),
+                }),
+            }),
+            schedule: MessageField::some(super::proto_schedule(&schedule.schedule)),
+            delivery: MessageField::some(super::proto_delivery(&schedule.delivery)),
+            message: MessageField::some(super::proto_message(&schedule.message)),
+        };
         let resolved = ResolvedSchedule::from_event("alpha", &details).unwrap();
 
         let active = publisher.active_schedule_ids().await.unwrap();
@@ -845,7 +856,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             deleted_error,
-            CommandError::Decide(crate::CreateScheduleDecideError::ScheduleDeleted { .. })
+            CommandError::Decide(crate::CreateScheduleError::ScheduleDeleted { .. })
         ));
     }
 
@@ -879,7 +890,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             same_state_error,
-            CommandError::Decide(crate::ResumeScheduleDecideError::AlreadyActive { .. })
+            CommandError::Decide(crate::ResumeScheduleError::AlreadyActive { .. })
         ));
 
         let missing_error = CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("missing")))
@@ -890,7 +901,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             missing_error,
-            CommandError::Decide(crate::PauseScheduleDecideError::ScheduleNotFound { .. })
+            CommandError::Decide(crate::PauseScheduleError::ScheduleNotFound { .. })
         ));
     }
 
