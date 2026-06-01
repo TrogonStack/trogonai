@@ -1078,6 +1078,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // permissions.allow/deny, translated CLI-side to trogon rule-text.
+        let permission_rules_text = meta
+            .and_then(|m| m.get("permissionRules"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -1093,6 +1098,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             system_prompt_override,
             additional_roots,
             additional_read_dirs,
+            permission_rules_text,
             mcp_servers,
             created_at: now.clone(),
             updated_at: now,

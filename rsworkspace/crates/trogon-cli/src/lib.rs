@@ -13,6 +13,7 @@ pub mod repl;
 pub mod runtime;
 pub mod session;
 pub mod session_store;
+pub mod settings;
 pub mod stdio_mcp_bridge;
 pub mod stream_input;
 pub mod tool_update;
@@ -24,6 +25,7 @@ pub use nats::NatsClient;
 pub use print::{OutputFormat, PrintExitCode, PrintOptions};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionInit, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
+pub use settings::{PermissionsSettings, Settings};
 pub use mcp::{McpConfig, McpManager, McpServerConfig, McpTransport};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
