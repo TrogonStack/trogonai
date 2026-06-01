@@ -1,0 +1,118 @@
+# Default values for agentgateway.
+#
+# This chart ships the `trogon-mcp-gateway` binary as the default workload.
+# Other shipping binaries (a2a-gateway, a2a-bridge, mcp-nats-server, trogon-sts,
+# trogon-agent-registry, ...) can be deployed by overriding `image.bin` and
+# `env` on a per-release basis or by reusing this chart under different names.
+
+image:
+  registry: ghcr.io
+  repository: trogonstack/trogonai
+  # Binary baked into the image (matches Dockerfile BIN build-arg).
+  bin: trogon-mcp-gateway
+  tag: ""  # Defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Single-replica per tenant constraint until distributed rate-limiter (ADR 0012
+# Tier 2) ships in v0.2. Override only if you have shard-by-tenant routing in
+# the layer in front.
+replicaCount: 1
+
+# v0.1 ships single-replica per tenant — leave HPA disabled until the
+# distributed rate-limit + multi-region routing land in v0.2.
+autoscaling:
+  enabled: false
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+terminationGracePeriodSeconds: 30
+
+# Health probe port — must match MCP_GATEWAY_PROBE_LISTEN_ADDR.
+probePort: 8080
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http-probe
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 6
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http-probe
+  initialDelaySeconds: 2
+  periodSeconds: 5
+  failureThreshold: 3
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Environment for the gateway. Values are surfaced as a ConfigMap and projected
+# via envFrom; secrets (JWT keys, SpiceDB tokens, NATS creds) MUST come from a
+# pre-existing Secret named in `existingSecret`.
+env:
+  # Required by the gateway binary.
+  MCP_GATEWAY_MCP_PREFIX: "mcp"
+  MCP_GATEWAY_PROBE_LISTEN_ADDR: "0.0.0.0:8080"
+  MCP_GATEWAY_QUEUE_GROUP: "mcp-gateway"
+  MCP_GATEWAY_AUDIT_STREAM_NAME: "MCP_AUDIT"
+  # NATS connection string. Override per environment.
+  NATS_URL: "nats://nats:4222"
+  # SpiceDB — leave empty to fall back to allow-all (dev only). Production
+  # MUST configure these.
+  MCP_GATEWAY_SPICEDB_ENDPOINT: ""
+  MCP_GATEWAY_SPICEDB_INSECURE: "false"
+  # Logging / OTel.
+  RUST_LOG: "info"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  OTEL_SERVICE_NAME: "trogon-mcp-gateway"
+
+# Name of an existing Kubernetes Secret containing sensitive env (JWT keys,
+# SpiceDB token, NATS user creds). Keys are projected via envFrom.
+existingSecret: ""
+
+# Extra environment entries (free-form). Useful for per-tenant overrides.
+extraEnv: []
+
+# Extra volumes/mounts (e.g. read-only JWKS bundle).
+extraVolumes: []
+extraVolumeMounts: []
