@@ -5,6 +5,7 @@ use crate::rpc_codes;
 
 #[must_use]
 pub fn build_approval_required(
+    prefix: &str,
     request_id: &RequestId,
     reason: &str,
     ttl_s: u64,
@@ -12,7 +13,7 @@ pub fn build_approval_required(
 ) -> Value {
     build_approval_required_with_subject(
         request_id,
-        &ApprovalSubject::for_request(request_id),
+        &ApprovalSubject::for_request(prefix, request_id),
         reason,
         ttl_s,
         approval_base_url,
@@ -21,6 +22,7 @@ pub fn build_approval_required(
 
 #[must_use]
 pub fn build_approval_required_step_up(
+    prefix: &str,
     request_id: &RequestId,
     scope_required: &str,
     ttl_s: u64,
@@ -28,7 +30,7 @@ pub fn build_approval_required_step_up(
 ) -> Value {
     build_approval_required_with_subject(
         request_id,
-        &ApprovalSubject::for_step_up(request_id),
+        &ApprovalSubject::for_step_up(prefix, request_id),
         scope_required,
         ttl_s,
         approval_base_url,
@@ -96,7 +98,7 @@ mod tests {
     #[test]
     fn approval_required_envelope_shape() {
         let request_id = RequestId::new("req-abc").unwrap();
-        let body = build_approval_required(&request_id, "high_risk_tool", 300, "https://console.example");
+        let body = build_approval_required("mcp", &request_id, "high_risk_tool", 300, "https://console.example");
         assert_eq!(body["approval_subject"], "mcp.approvals.req-abc");
         assert_eq!(body["request_id"], "req-abc");
         assert_eq!(body["ttl_seconds"], 300);
@@ -108,9 +110,16 @@ mod tests {
     }
 
     #[test]
+    fn approval_subject_respects_custom_prefix() {
+        let request_id = RequestId::new("req-xyz").unwrap();
+        let body = build_approval_required("acme.mcp", &request_id, "policy", 60, "https://console.example");
+        assert_eq!(body["approval_subject"], "acme.mcp.approvals.req-xyz");
+    }
+
+    #[test]
     fn step_up_uses_step_up_subject() {
         let request_id = RequestId::new("req-step").unwrap();
-        let body = build_approval_required_step_up(&request_id, "scope:admin", 120, "https://console.example");
+        let body = build_approval_required_step_up("mcp", &request_id, "scope:admin", 120, "https://console.example");
         assert_eq!(body["approval_subject"], "mcp.approvals.step-up.req-step");
         assert_eq!(body["reason"], "scope:admin");
     }
@@ -118,7 +127,7 @@ mod tests {
     #[test]
     fn jsonrpc_wraps_approval_data() {
         let request_id = RequestId::new("req-wrap").unwrap();
-        let data = build_approval_required(&request_id, "policy", 60, "https://console.example");
+        let data = build_approval_required("mcp", &request_id, "policy", 60, "https://console.example");
         let err = jsonrpc_error_with_approval_data(Some(json!(1)), data);
         assert_eq!(err["error"]["code"], rpc_codes::APPROVAL_REQUIRED);
         assert_eq!(err["error"]["message"], "approval_required");

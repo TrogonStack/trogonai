@@ -124,8 +124,8 @@ async fn request_with_audit(
 async fn approval_decision_resolves_awaiter() {
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-{}", uuid::Uuid::now_v7())).expect("request id");
-    let subject = ApprovalSubject::for_request(&request_id);
-    let request = ApprovalRequest::new(request_id.clone(), Duration::from_secs(5), None);
+    let subject = ApprovalSubject::for_request("mcp", &request_id);
+    let request = ApprovalRequest::new("mcp", request_id.clone(), Duration::from_secs(5), None);
     let audit = RecordingAudit::new();
     let gate = harness.gate();
     let audit_events = audit.events_arc();
@@ -164,8 +164,8 @@ async fn approval_decision_resolves_awaiter() {
 async fn approval_decision_denies_awaiter() {
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-deny-{}", uuid::Uuid::now_v7())).expect("request id");
-    let subject = ApprovalSubject::for_request(&request_id);
-    let request = ApprovalRequest::new(request_id, Duration::from_secs(5), None);
+    let subject = ApprovalSubject::for_request("mcp", &request_id);
+    let request = ApprovalRequest::new("mcp", request_id, Duration::from_secs(5), None);
     let audit = RecordingAudit::new();
     let gate = harness.gate();
     let audit_events = audit.events_arc();
@@ -205,7 +205,7 @@ async fn approval_ttl_expiry_emits_expired_audit() {
     let harness = ApprovalHarness::connect().await;
     let request_id =
         RequestId::new(format!("req-expire-{}", uuid::Uuid::now_v7())).expect("request id");
-    let request = ApprovalRequest::new(request_id.clone(), Duration::from_millis(150), None);
+    let request = ApprovalRequest::new("mcp", request_id.clone(), Duration::from_millis(150), None);
     let audit = RecordingAudit::new();
     let gate = harness.gate();
 
@@ -227,7 +227,7 @@ async fn legacy_approval_client_cache_hit() {
 
     let harness = ApprovalHarness::connect().await;
     let request_id = RequestId::new(format!("req-cache-{}", uuid::Uuid::now_v7())).expect("request id");
-    let subject = ApprovalSubject::for_request(&request_id);
+    let subject = ApprovalSubject::for_request("mcp", &request_id);
     let args_hash = ArgsHash::from_json(&serde_json::json!({"tool": "deploy"}));
     let cache = ApprovalCache::new(100);
     let approval_client = ApprovalClient::new(harness.client.clone(), cache.clone());
