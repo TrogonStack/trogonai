@@ -1,5 +1,5 @@
 use buffa::MessageField;
-use trogonai_proto::convert::{duration_from_std, timestamp_from_datetime};
+use trogonai_proto::convert::{DurationConversionError, duration_from_std, timestamp_from_datetime};
 use trogonai_proto::scheduler::schedules::v1;
 
 use super::{CronExpression, EveryDuration, RRuleExpression, RRuleTimezone, ScheduleTimezone, TimeZone};
@@ -25,15 +25,17 @@ pub enum ScheduleEventSchedule {
     },
 }
 
-impl From<&ScheduleEventSchedule> for v1::Schedule {
-    fn from(value: &ScheduleEventSchedule) -> Self {
+impl TryFrom<&ScheduleEventSchedule> for v1::Schedule {
+    type Error = DurationConversionError;
+
+    fn try_from(value: &ScheduleEventSchedule) -> Result<Self, Self::Error> {
         let kind = match value {
             ScheduleEventSchedule::At { at } => v1::schedule::At {
                 at: MessageField::some(timestamp_from_datetime(at)),
             }
             .into(),
             ScheduleEventSchedule::Every { every } => v1::schedule::Every {
-                every: MessageField::some(duration_from_std(every.as_duration())),
+                every: MessageField::some(duration_from_std(every.as_duration())?),
             }
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
@@ -56,7 +58,7 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
             }
             .into(),
         };
-        v1::Schedule { kind: Some(kind) }
+        Ok(v1::Schedule { kind: Some(kind) })
     }
 }
 
@@ -88,10 +90,11 @@ mod tests {
 
     #[test]
     fn converts_at_and_every_schedules_to_proto() {
-        let at_proto = v1::Schedule::from(&ScheduleEventSchedule::At { at: at() });
-        let every_proto = v1::Schedule::from(&ScheduleEventSchedule::Every {
+        let at_proto = v1::Schedule::try_from(&ScheduleEventSchedule::At { at: at() }).unwrap();
+        let every_proto = v1::Schedule::try_from(&ScheduleEventSchedule::Every {
             every: EveryDuration::new(std::time::Duration::from_secs(30)).unwrap(),
-        });
+        })
+        .unwrap();
 
         let inner = expect_schedule_kind!(at_proto.kind.unwrap(), v1::schedule::Kind::At, "expected at schedule");
         let timestamp = inner.at.as_option().unwrap();
@@ -108,17 +111,19 @@ mod tests {
 
     #[test]
     fn converts_cron_and_rrule_schedules_to_proto() {
-        let cron_proto = v1::Schedule::from(&ScheduleEventSchedule::Cron {
+        let cron_proto = v1::Schedule::try_from(&ScheduleEventSchedule::Cron {
             expr: CronExpression::new("0 0 * * * *").unwrap(),
             timezone: Some(ScheduleTimezone::new("UTC").unwrap()),
-        });
-        let rrule_proto = v1::Schedule::from(&ScheduleEventSchedule::RRule {
+        })
+        .unwrap();
+        let rrule_proto = v1::Schedule::try_from(&ScheduleEventSchedule::RRule {
             dtstart: at(),
             rrule: RRuleExpression::new("FREQ=DAILY;COUNT=2").unwrap(),
             timezone: Some(RRuleTimezone::new("UTC").unwrap()),
             rdate: vec![at()],
             exdate: vec![at()],
-        });
+        })
+        .unwrap();
 
         let inner = expect_schedule_kind!(
             cron_proto.kind.unwrap(),

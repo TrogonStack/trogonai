@@ -1,5 +1,5 @@
 use buffa::MessageField;
-use trogonai_proto::convert::duration_from_std;
+use trogonai_proto::convert::{DurationConversionError, duration_from_std};
 use trogonai_proto::scheduler::schedules::v1;
 
 use super::{DeliveryRoute, ScheduleEventSamplingSource, TtlDuration};
@@ -13,16 +13,19 @@ pub enum ScheduleEventDelivery {
     },
 }
 
-impl From<&ScheduleEventDelivery> for v1::Delivery {
-    fn from(value: &ScheduleEventDelivery) -> Self {
+impl TryFrom<&ScheduleEventDelivery> for v1::Delivery {
+    type Error = DurationConversionError;
+
+    fn try_from(value: &ScheduleEventDelivery) -> Result<Self, Self::Error> {
         match value {
-            ScheduleEventDelivery::NatsMessage { subject, ttl, source } => v1::Delivery {
+            ScheduleEventDelivery::NatsMessage { subject, ttl, source } => Ok(v1::Delivery {
                 kind: Some(
                     v1::delivery::NatsMessage {
                         subject: subject.as_str().to_string(),
-                        ttl: ttl
-                            .map(|ttl| MessageField::some(duration_from_std(ttl.as_duration())))
-                            .unwrap_or_else(MessageField::none),
+                        ttl: match ttl {
+                            Some(ttl) => MessageField::some(duration_from_std(ttl.as_duration())?),
+                            None => MessageField::none(),
+                        },
                         source: source
                             .as_ref()
                             .map(v1::delivery::nats_message::Source::from)
@@ -31,7 +34,7 @@ impl From<&ScheduleEventDelivery> for v1::Delivery {
                     }
                     .into(),
                 ),
-            },
+            }),
         }
     }
 }

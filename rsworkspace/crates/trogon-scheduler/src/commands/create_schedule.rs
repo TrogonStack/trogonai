@@ -1,5 +1,6 @@
 use buffa::MessageField;
 use trogon_decider_runtime::{Decider, Decision, WritePrecondition};
+use trogonai_proto::convert::DurationConversionError;
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
 use super::domain::{
@@ -20,6 +21,7 @@ pub struct CreateScheduleCommand {
 pub enum CreateScheduleDecideError {
     AlreadyExists { id: ScheduleId },
     ScheduleDeleted { id: ScheduleId },
+    DurationConversion { source: DurationConversionError },
     MissingStateValue,
     UnknownStateValue { value: i32 },
 }
@@ -29,13 +31,24 @@ impl std::fmt::Display for CreateScheduleDecideError {
         match self {
             Self::AlreadyExists { id } => write!(formatter, "schedule '{id}' already exists"),
             Self::ScheduleDeleted { id } => write!(formatter, "schedule '{id}' was deleted"),
+            Self::DurationConversion { source } => write!(formatter, "schedule duration is invalid: {source}"),
             Self::MissingStateValue => formatter.write_str("state value is missing"),
             Self::UnknownStateValue { value } => write!(formatter, "unknown state value: {value}"),
         }
     }
 }
 
-impl std::error::Error for CreateScheduleDecideError {}
+impl std::error::Error for CreateScheduleDecideError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::DurationConversion { source } => Some(source),
+            Self::AlreadyExists { .. }
+            | Self::ScheduleDeleted { .. }
+            | Self::MissingStateValue
+            | Self::UnknownStateValue { .. } => None,
+        }
+    }
+}
 
 impl Decider for CreateScheduleCommand {
     type StreamId = str;
@@ -66,22 +79,29 @@ impl Decider for CreateScheduleCommand {
             return Err(CreateScheduleDecideError::UnknownStateValue { value: value.to_i32() });
         };
         match current_state {
-            state_v1::StateValue::STATE_VALUE_MISSING => Ok(Decision::event(v1::ScheduleEvent {
-                event: Some(
-                    v1::ScheduleCreated {
-                        schedule_id: command.id.as_str().to_string(),
-                        status: MessageField::some(v1::ScheduleStatus::from(command.status)),
-                        schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(
-                            &command.schedule,
-                        ))),
-                        delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(
-                            &command.delivery,
-                        ))),
-                        message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
-                    }
-                    .into(),
-                ),
-            })),
+            state_v1::StateValue::STATE_VALUE_MISSING => {
+                let schedule = ScheduleEventSchedule::from(&command.schedule);
+                let delivery = ScheduleEventDelivery::from(&command.delivery);
+
+                Ok(Decision::event(v1::ScheduleEvent {
+                    event: Some(
+                        v1::ScheduleCreated {
+                            schedule_id: command.id.as_str().to_string(),
+                            status: MessageField::some(v1::ScheduleStatus::from(command.status)),
+                            schedule: MessageField::some(
+                                v1::Schedule::try_from(&schedule)
+                                    .map_err(|source| CreateScheduleDecideError::DurationConversion { source })?,
+                            ),
+                            delivery: MessageField::some(
+                                v1::Delivery::try_from(&delivery)
+                                    .map_err(|source| CreateScheduleDecideError::DurationConversion { source })?,
+                            ),
+                            message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                        }
+                        .into(),
+                    ),
+                }))
+            }
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
                 Err(CreateScheduleDecideError::AlreadyExists { id: command.id.clone() })
             }
@@ -130,8 +150,12 @@ mod tests {
                 v1::ScheduleCreated {
                     schedule_id: command.id.as_str().to_string(),
                     status: MessageField::some(v1::ScheduleStatus::from(command.status)),
-                    schedule: MessageField::some(v1::Schedule::from(&ScheduleEventSchedule::from(&command.schedule))),
-                    delivery: MessageField::some(v1::Delivery::from(&ScheduleEventDelivery::from(&command.delivery))),
+                    schedule: MessageField::some(
+                        v1::Schedule::try_from(&ScheduleEventSchedule::from(&command.schedule)).unwrap(),
+                    ),
+                    delivery: MessageField::some(
+                        v1::Delivery::try_from(&ScheduleEventDelivery::from(&command.delivery)).unwrap(),
+                    ),
                     message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
                 }
                 .into(),
