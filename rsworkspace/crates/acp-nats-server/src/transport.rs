@@ -2672,6 +2672,96 @@ mod tests {
             .await;
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn http_connection_logs_response_without_get_listener() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let nats_client = AdvancedMockNatsClient::new();
+                let _injector = nats_client.inject_messages();
+                nats_client.set_response(
+                    "acp.agent.initialize",
+                    bytes::Bytes::from_static(
+                        br#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#,
+                    ),
+                );
+                nats_client.set_response("acp.agent.authenticate", bytes::Bytes::from_static(b"{}"));
+
+                let js_client = MockJs::new();
+                let config = test_config();
+                let connection_id = AcpConnectionId::default();
+                let (command_tx, command_rx) = mpsc::unbounded_channel();
+                let (shutdown_tx, shutdown_rx) = watch::channel(false);
+                let task = tokio::task::spawn_local(run_http_connection(
+                    connection_id.clone(),
+                    nats_client,
+                    js_client,
+                    config,
+                    command_rx,
+                    shutdown_rx,
+                ));
+
+                let (initialize_tx, initialize_rx) = oneshot::channel();
+                command_tx
+                    .send(HttpConnectionCommand::Post {
+                        protocol_version: None,
+                        session_id: None,
+                        message: IncomingHttpMessage::parse(
+                            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#
+                                .to_string(),
+                        )
+                        .unwrap(),
+                        response: initialize_tx,
+                    })
+                    .unwrap();
+                assert!(matches!(
+                    initialize_rx.await.unwrap().unwrap(),
+                    HttpPostOutcome::Json {
+                        protocol_version: Some(ProtocolVersion::V0),
+                        ..
+                    }
+                ));
+
+                let (authenticate_tx, authenticate_rx) = oneshot::channel();
+                command_tx
+                    .send(HttpConnectionCommand::Post {
+                        protocol_version: Some(ProtocolVersion::V0),
+                        session_id: None,
+                        message: IncomingHttpMessage::parse(
+                            r#"{"jsonrpc":"2.0","id":2,"method":"authenticate","params":{"methodId":"api-key"}}"#
+                                .to_string(),
+                        )
+                        .unwrap(),
+                        response: authenticate_tx,
+                    })
+                    .unwrap();
+                assert!(matches!(
+                    authenticate_rx.await.unwrap().unwrap(),
+                    HttpPostOutcome::Accepted
+                ));
+
+                for _ in 0..20 {
+                    tokio::task::yield_now().await;
+                }
+
+                let (close_tx, close_rx) = oneshot::channel();
+                command_tx
+                    .send(HttpConnectionCommand::Close {
+                        protocol_version: Some(ProtocolVersion::V0),
+                        response: close_tx,
+                    })
+                    .unwrap();
+                assert_eq!(close_rx.await.unwrap().unwrap(), Some(ProtocolVersion::V0));
+
+                let _ = shutdown_tx.send(true);
+                tokio::time::timeout(std::time::Duration::from_secs(2), task)
+                    .await
+                    .expect("HTTP connection task did not finish")
+                    .unwrap();
+            })
+            .await;
+    }
+
     #[tokio::test]
     async fn fail_pending_initialize_on_close_sends_internal_error() {
         let (response_tx, response_rx) = oneshot::channel();
