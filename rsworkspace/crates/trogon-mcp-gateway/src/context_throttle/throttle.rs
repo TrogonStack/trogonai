@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::errors::ContextThrottleError;
@@ -14,22 +14,25 @@ pub enum ContextThrottleOutcome {
 }
 
 /// In-process token-bucket store keyed by `(tenant_id, agent_id, purpose)`.
-pub struct ContextThrottle<C: Clock = SystemClock> {
+pub struct ContextThrottle {
     config: super::ContextThrottleConfig,
-    clock: C,
+    clock: Arc<dyn Clock>,
     buckets: Mutex<HashMap<ContextThrottleKey, TokenBucket>>,
 }
 
-impl ContextThrottle<SystemClock> {
+impl ContextThrottle {
     #[must_use]
     pub fn new(config: super::ContextThrottleConfig) -> Self {
-        Self::with_clock(config, SystemClock)
+        Self::with_clock_arc(config, Arc::new(SystemClock))
     }
-}
 
-impl<C: Clock> ContextThrottle<C> {
     #[must_use]
-    pub fn with_clock(config: super::ContextThrottleConfig, clock: C) -> Self {
+    pub fn with_clock(config: super::ContextThrottleConfig, clock: impl Clock + 'static) -> Self {
+        Self::with_clock_arc(config, Arc::new(clock))
+    }
+
+    #[must_use]
+    pub fn with_clock_arc(config: super::ContextThrottleConfig, clock: Arc<dyn Clock>) -> Self {
         Self {
             config,
             clock,

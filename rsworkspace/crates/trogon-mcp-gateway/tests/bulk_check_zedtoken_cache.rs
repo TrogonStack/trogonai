@@ -47,6 +47,7 @@ impl ZedTokenCacheHarness {
             rate_limit: None,
             approval_gate: None,
             mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
+            context_throttle: None,
         };
         Self {
             nats_conf,

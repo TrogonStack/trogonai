@@ -9,7 +9,7 @@ use async_nats::jetstream;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
@@ -21,6 +21,7 @@ use crate::approvals::{
     ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
     build_approval_required_with_subject, jsonrpc_error_with_approval_data,
 };
+use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, backend_target_aud, scope_for_tools_call,
     session_id_from_headers, strip_inbound_credentials,
@@ -40,7 +41,7 @@ use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
 };
 use crate::subject::gateway_to_server_subject;
-use crate::throttle::{RateLimitDeny, RateLimiter};
+use crate::throttle::{RateLimitDeny, RateLimitScope, RateLimiter};
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
@@ -81,6 +82,8 @@ pub struct GatewaySettings {
     pub approval_gate: Option<Arc<dyn ApprovalGate>>,
     /// Risk thresholds and approval envelope defaults for adaptive-access evaluation.
     pub mesh_config: MeshGatewayConfig,
+    /// Per `(tenant_id, agent_id, purpose)` token-bucket limiter; when `None`, context throttle is skipped.
+    pub context_throttle: Option<Arc<ContextThrottle>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -463,6 +466,41 @@ async fn handle_ingress_inner(
                 })
                 .await;
                 return Ok(());
+            }
+        }
+    }
+
+    if let Some(throttle) = settings.context_throttle.as_ref() {
+        match context_throttle_key(&gateway_identity, &jwt_claims, legacy_tenant_hdr.as_deref()) {
+            Some(key) => match throttle.acquire(&key, 1) {
+                Ok(ContextThrottleOutcome::Allowed) => {}
+                Ok(ContextThrottleOutcome::Throttled { retry_after_ms }) => {
+                    finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+                        client,
+                        jetstream,
+                        mcp: &settings.mcp,
+                        msg: &msg,
+                        backend_subject: &backend_subject,
+                        jsonrpc_method: &jsonrpc_method,
+                        gateway_identity: gateway_identity.clone(),
+                        request_id: request_id.clone(),
+                        requires_spicedb,
+                        spicedb_allowed: None,
+                        traces,
+                        deny: RateLimitDeny {
+                            scope: RateLimitScope::Purpose,
+                            retry_after_ms,
+                        },
+                    })
+                    .await;
+                    return Ok(());
+                }
+                Err(err) => {
+                    debug!(error = %err, key = %key, "context throttle acquire failed; continuing");
+                }
+            },
+            None => {
+                debug!("context throttle skipped: incomplete tenant_id, agent_id, or purpose");
             }
         }
     }
@@ -1029,6 +1067,21 @@ fn jsonrpc_params(payload: &[u8]) -> serde_json::Value {
         .ok()
         .and_then(|value| value.get("params").cloned())
         .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn context_throttle_key(
+    gateway_identity: &GatewayIdentity,
+    jwt_claims: &crate::jwt::VerifiedJwtClaims,
+    legacy_tenant: Option<&str>,
+) -> Option<ContextThrottleKey> {
+    let tenant_id = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant)
+        .filter(|value| !value.is_empty())?;
+    let agent_id = jwt_claims.agent_id.as_deref().filter(|value| !value.is_empty())?;
+    let purpose = jwt_claims.purpose.as_deref().filter(|value| !value.is_empty())?;
+    ContextThrottleKey::new(tenant_id, agent_id, purpose).ok()
 }
 
 fn merged_requires_spicedb(
