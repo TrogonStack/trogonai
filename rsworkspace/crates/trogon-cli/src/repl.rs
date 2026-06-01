@@ -209,7 +209,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let resumed = resume.is_some();
     let mut session = if let Some(entry) = resume {
         prefix = entry.prefix.clone();
-        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd).await {
+        match activate_session(&factory, &mut mcp_manager, &prefix, &entry.session_id, &cwd, &fs).await {
             Ok(s) => {
                 eprintln!(
                     "resumed session {} on {prefix}",
@@ -222,11 +222,11 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     "warning: could not resume {}: {e} — starting fresh",
                     entry.session_id
                 );
-                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await?
+                start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await?
             }
         }
     } else {
-        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await?
+        start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await?
     };
     // `--dangerously-skip-permissions` / `--plan` select a startup mode up front
     // (clap enforces they are mutually exclusive). `TROGON_MODE` is applied by the
@@ -376,7 +376,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     } else if cmd == "/clear" {
                         mcp_manager.shutdown_session(session.session_id()).await;
                         session.close().await;
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await {
                             Ok(s) => {
                                 session = s;
                                 session_used_tokens = 0;
@@ -417,7 +417,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             // MCP servers that only allow one instance (e.g. port-binding
                             // servers) do not fail to start for the resumed session.
                             mcp_manager.shutdown_session(&old_session_id).await;
-                            match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd).await {
+                            match activate_session(&factory, &mut mcp_manager, &prefix, target, &cwd, &fs).await {
                                 Ok(s) => {
                                     session.close().await;
                                     session = s;
@@ -444,7 +444,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // tools keep working instead of silently failing.
                                     eprintln!("error resuming session: {e}");
                                     if let Err(re) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
+                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await
                                     {
                                         eprintln!(
                                             "warning: could not restore MCP bridges for current session: {re}"
@@ -596,7 +596,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                     // for the new session (shutdown + spawn_pending +
                                     // commit_pending + load_session) so its tools are available.
                                     if let Err(e) =
-                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd).await
+                                        respawn_session_mcp(&session, &mut mcp_manager, &cwd, &fs).await
                                     {
                                         eprintln!("warning: could not bind MCP for new session: {e}");
                                     }
@@ -832,7 +832,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 let prompt_result = match session.prompt(&expanded).await {
                     Err(e) if e.to_string().contains("not found") => {
                         eprintln!("\x1b[33mwarning: session lost (runner restarted?) — reconnecting...\x1b[0m");
-                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init).await {
+                        match start_session(&factory, &mut mcp_manager, &prefix, cwd.clone(), &session_init, &fs).await {
                             Ok(s) => {
                                 session = s;
                                 session.prompt(&expanded).await
@@ -997,14 +997,15 @@ async fn next_stream_input(
     }
 }
 
-async fn start_session<SF: SessionFactory>(
+async fn start_session<SF: SessionFactory, F: Fs>(
     factory: &SF,
     mcp: &mut McpManager,
     prefix: &str,
     cwd: PathBuf,
     init: &crate::session::SessionInit,
+    fs: &F,
 ) -> anyhow::Result<SF::Sess> {
-    let mcp_servers = mcp.spawn_pending().await;
+    let mcp_servers = mcp.spawn_pending(fs).await;
     let session = factory
         .create_session_with_init(prefix, cwd, mcp_servers, init)
         .await?;
@@ -1032,14 +1033,15 @@ async fn fetch_mcp_prompt(
     client.get_prompt(&inv.prompt, &inv.arguments).await
 }
 
-async fn activate_session<SF: SessionFactory>(
+async fn activate_session<SF: SessionFactory, F: Fs>(
     factory: &SF,
     mcp: &mut McpManager,
     prefix: &str,
     session_id: &str,
     cwd: &Path,
+    fs: &F,
 ) -> anyhow::Result<SF::Sess> {
-    let mcp_servers = mcp.spawn_pending().await;
+    let mcp_servers = mcp.spawn_pending(fs).await;
     let session = factory.attach_session(prefix, session_id.to_string());
     session.load_session(session_id, cwd, mcp_servers).await?;
     mcp.commit_pending(session_id);
@@ -1070,7 +1072,8 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                             println!("  {} — stdio: {} {}", s.name, s.command, s.args.join(" "))
                         }
                         crate::mcp::McpTransport::Http => {
-                            println!("  {} — http: {}", s.name, s.url)
+                            let auth = if s.oauth { " (oauth)" } else { "" };
+                            println!("  {} — http: {}{}", s.name, s.url, auth)
                         }
                     }
                 }
@@ -1090,16 +1093,38 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 Err(e) => eprintln!("{e}"),
                 Ok(cfg) => {
                     let name = cfg.name.clone();
+                    let oauth = cfg.oauth;
+                    let url = cfg.url.clone();
                     mcp.add_server(cfg);
                     if let Err(e) = mcp.save(fs) {
                         eprintln!("error saving MCP config: {e}");
                     } else {
                         println!("added MCP server `{name}`");
-                        if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
+                        if oauth {
+                            run_mcp_login(&name, &url, mcp, fs, http).await;
+                        }
+                        if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
                             eprintln!("warning: could not refresh session MCP: {e}");
                         }
                     }
                 }
+            }
+        }
+        "login" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                eprintln!("usage: /mcp login <name>");
+                return;
+            }
+            let Some(url) = mcp.http_server_url(name) else {
+                eprintln!(
+                    "no HTTP MCP server named `{name}` — add one with /mcp add --transport http {name} <url>"
+                );
+                return;
+            };
+            run_mcp_login(name, &url, mcp, fs, http).await;
+            if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
+                eprintln!("warning: could not refresh session MCP: {e}");
             }
         }
         "remove" => {
@@ -1111,7 +1136,7 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                 } else {
                     mcp.shutdown_session(session.session_id()).await;
                     println!("removed MCP server `{rest}`");
-                    if let Err(e) = respawn_session_mcp(session, mcp, cwd).await {
+                    if let Err(e) = respawn_session_mcp(session, mcp, cwd, fs).await {
                         eprintln!("warning: could not refresh session MCP: {e}");
                     }
                 }
@@ -1162,18 +1187,45 @@ async fn handle_mcp_command<F: Fs, S: Session>(
             }
         }
         other => {
-            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, prompts")
+            eprintln!("unknown /mcp subcommand `{other}` — try list, add, remove, login, prompts")
         }
     }
 }
 
-async fn respawn_session_mcp<S: Session>(
+/// Run the interactive OAuth login for an HTTP MCP server and persist the token.
+async fn run_mcp_login<F: Fs>(
+    name: &str,
+    url: &str,
+    mcp: &mut McpManager,
+    fs: &F,
+    http: &reqwest::Client,
+) {
+    match crate::mcp_oauth::login(http, url).await {
+        Ok(token) => {
+            mcp.set_oauth_token(name, token); // also marks the server config oauth=true
+            if let Err(e) = mcp.save_oauth(fs) {
+                eprintln!("error saving OAuth token: {e}");
+                return;
+            }
+            // Persist the oauth=true marker on the server config.
+            if let Err(e) = mcp.save(fs) {
+                eprintln!("error saving MCP config: {e}");
+                return;
+            }
+            println!("authorized MCP server `{name}`");
+        }
+        Err(e) => eprintln!("OAuth failed for `{name}`: {e}"),
+    }
+}
+
+async fn respawn_session_mcp<S: Session, F: Fs>(
     session: &S,
     mcp: &mut McpManager,
     cwd: &Path,
+    fs: &F,
 ) -> anyhow::Result<()> {
     mcp.shutdown_session(session.session_id()).await;
-    let servers = mcp.spawn_pending().await;
+    let servers = mcp.spawn_pending(fs).await;
     mcp.commit_pending(session.session_id());
     session.load_session(session.session_id(), cwd, servers).await
 }
@@ -1356,7 +1408,8 @@ Commands:
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
-  {m}/mcp{r} list|add|remove|prompts  manage MCP servers (add supports {m}--transport http <name> <url> --header \"K: V\"{r})
+  {m}/mcp{r} list|add|remove|login|prompts  manage MCP servers (add: {m}--transport http <name> <url> [--header \"K: V\"] [--oauth]{r})
+  {m}/mcp login{r} <name>   authorize an HTTP MCP server via OAuth (browser)
   {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})
   {m}/compact{r}            force context compaction now
   {m}/compact-model{r}      list models & show current  |  {m}/compact-model{r} <id> set it  |  {m}/compact-model default{r} reset

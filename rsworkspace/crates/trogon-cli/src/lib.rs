@@ -6,6 +6,7 @@ pub mod fs;
 pub mod markdown;
 pub mod nats;
 pub mod mcp;
+pub mod mcp_oauth;
 pub mod mcp_prompts;
 pub mod print;
 pub mod repl;
