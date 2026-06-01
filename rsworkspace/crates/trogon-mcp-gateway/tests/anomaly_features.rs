@@ -100,7 +100,7 @@ mod side_stream {
         };
 
         let tenant = format!("tenant-{}", uuid::Uuid::now_v7().as_simple());
-        let subject = subject_for_tenant(&tenant);
+        let subject = subject_for_tenant("mcp", &tenant);
         let mut subscription = subscriber.subscribe(subject.clone()).await.expect("subscribe");
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -121,7 +121,7 @@ mod side_stream {
             ts_unix_ms: ts,
         };
 
-        AnomalyEmitter::new(publisher)
+        AnomalyEmitter::new("mcp", publisher)
             .emit(&features)
             .await
             .expect("emit novel tuple features");
@@ -145,7 +145,7 @@ mod side_stream {
         };
 
         let tenant = format!("tenant-{}", uuid::Uuid::now_v7().as_simple());
-        let subject = subject_for_tenant(&tenant);
+        let subject = subject_for_tenant("mcp", &tenant);
         let mut subscription = subscriber.subscribe(subject.clone()).await.expect("subscribe");
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -177,7 +177,7 @@ mod side_stream {
             ts_unix_ms: ts,
         };
 
-        AnomalyEmitter::new(publisher)
+        AnomalyEmitter::new("mcp", publisher)
             .emit(&features)
             .await
             .expect("emit rate spike features");
