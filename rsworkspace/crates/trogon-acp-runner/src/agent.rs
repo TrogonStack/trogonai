@@ -603,6 +603,18 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             system_prompt
         };
 
+        // Plan mode: steer the model to research read-only and present a plan
+        // instead of reacting to write-denials. The permission layer already
+        // blocks writes in plan mode; this makes the model behave like a planner.
+        let system_prompt = if state.mode == "plan" {
+            match system_prompt {
+                Some(s) => Some(format!("{s}\n\n{}", trogon_runner_tools::PLAN_MODE_GUIDANCE)),
+                None => Some(trogon_runner_tools::PLAN_MODE_GUIDANCE.to_string()),
+            }
+        } else {
+            system_prompt
+        };
+
         let context_window = Some(context_window_tokens(&agent.model()));
         let current_model = state
             .model
