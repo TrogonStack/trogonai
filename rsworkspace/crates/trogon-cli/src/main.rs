@@ -36,8 +36,9 @@ struct Args {
     #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "-")]
     print: Option<String>,
 
-    /// Output format for non-interactive mode: "text" (default) or "json".
-    /// json emits a single line: {"text":"...","stop_reason":"..."}
+    /// Output format for non-interactive mode: "text" (default), "json", or
+    /// "stream-json". json emits a single line {"text":...,"stop_reason":...};
+    /// stream-json emits one JSON event per line (NDJSON), ending with a result.
     #[arg(long, default_value = "text")]
     output_format: String,
 
@@ -204,7 +205,11 @@ async fn main() -> anyhow::Result<()> {
             drop(nats_server);
             std::process::exit(1);
         }
-        let format = if args.output_format == "json" { OutputFormat::Json } else { OutputFormat::Text };
+        let format = match args.output_format.as_str() {
+            "json" => OutputFormat::Json,
+            "stream-json" => OutputFormat::StreamJson,
+            _ => OutputFormat::Text,
+        };
         let options = PrintOptions { print_tools: args.print_tools };
 
         // Resolve the target runner prefix: if a model is requested, look it up in
