@@ -4,12 +4,64 @@ use chrono::{DateTime, Utc};
 use trogon_nats::DottedNatsToken;
 use trogonai_proto::convert::PROTOBUF_DURATION_MAX;
 
-use crate::error::ScheduleSpecError;
-
 use super::{
     MessageContent, MessageEnvelope, MessageHeader, MessageHeaders, MessageHeadersError, ScheduleEventDelivery,
     ScheduleEventSamplingSource, ScheduleEventSchedule,
 };
+
+#[derive(Debug)]
+pub enum ScheduleError {
+    CronExpression(CronExpressionError),
+    RRuleDateTime(RRuleDateTimeError),
+    RRuleExpression(RRuleExpressionError),
+    TimeZone(TimeZoneError),
+}
+
+impl std::fmt::Display for ScheduleError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CronExpression(source) => source.fmt(formatter),
+            Self::RRuleDateTime(source) => source.fmt(formatter),
+            Self::RRuleExpression(source) => source.fmt(formatter),
+            Self::TimeZone(source) => source.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ScheduleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CronExpression(source) => Some(source),
+            Self::RRuleDateTime(source) => Some(source),
+            Self::RRuleExpression(source) => Some(source),
+            Self::TimeZone(source) => Some(source),
+        }
+    }
+}
+
+impl From<CronExpressionError> for ScheduleError {
+    fn from(source: CronExpressionError) -> Self {
+        Self::CronExpression(source)
+    }
+}
+
+impl From<RRuleDateTimeError> for ScheduleError {
+    fn from(source: RRuleDateTimeError) -> Self {
+        Self::RRuleDateTime(source)
+    }
+}
+
+impl From<RRuleExpressionError> for ScheduleError {
+    fn from(source: RRuleExpressionError) -> Self {
+        Self::RRuleExpression(source)
+    }
+}
+
+impl From<TimeZoneError> for ScheduleError {
+    fn from(source: TimeZoneError) -> Self {
+        Self::TimeZone(source)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schedule {
@@ -33,13 +85,13 @@ pub enum Schedule {
 }
 
 impl Schedule {
-    pub fn every(every: Duration) -> Result<Self, ScheduleSpecError> {
+    pub fn every(every: Duration) -> Result<Self, EveryDurationError> {
         Ok(Self::Every {
             every: EveryDuration::new(every)?,
         })
     }
 
-    pub fn cron(expr: impl Into<String>, timezone: Option<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn cron(expr: impl Into<String>, timezone: Option<String>) -> Result<Self, ScheduleError> {
         Ok(Self::Cron {
             expr: CronExpression::new(expr)?,
             timezone: timezone.map(ScheduleTimezone::new).transpose()?,
@@ -50,7 +102,7 @@ impl Schedule {
         dtstart: impl Into<String>,
         rrule: impl Into<String>,
         timezone: Option<String>,
-    ) -> Result<Self, ScheduleSpecError> {
+    ) -> Result<Self, ScheduleError> {
         Ok(Self::RRule {
             dtstart: RRuleDateTime::new("dtstart", dtstart)?,
             rrule: RRuleExpression::new(rrule)?,
@@ -64,13 +116,32 @@ impl Schedule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EveryDuration(Duration);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EveryDurationError {
+    MustBePositive,
+    TooLarge { max: Duration, actual: Duration },
+}
+
+impl std::fmt::Display for EveryDurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MustBePositive => formatter.write_str("every duration must be positive"),
+            Self::TooLarge { max, actual } => {
+                write!(formatter, "every duration must be at most {max:?}, got {actual:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EveryDurationError {}
+
 impl EveryDuration {
-    pub fn new(every: Duration) -> Result<Self, ScheduleSpecError> {
+    pub fn new(every: Duration) -> Result<Self, EveryDurationError> {
         if every.is_zero() {
-            return Err(ScheduleSpecError::EveryDurationMustBePositive);
+            return Err(EveryDurationError::MustBePositive);
         }
         if every > PROTOBUF_DURATION_MAX {
-            return Err(ScheduleSpecError::EveryDurationTooLarge {
+            return Err(EveryDurationError::TooLarge {
                 max: PROTOBUF_DURATION_MAX,
                 actual: every,
             });
@@ -79,7 +150,7 @@ impl EveryDuration {
         Ok(Self(every))
     }
 
-    pub fn from_secs(seconds: u64) -> Result<Self, ScheduleSpecError> {
+    pub fn from_secs(seconds: u64) -> Result<Self, EveryDurationError> {
         Self::new(Duration::from_secs(seconds))
     }
 
@@ -89,7 +160,7 @@ impl EveryDuration {
 }
 
 impl TryFrom<Duration> for EveryDuration {
-    type Error = ScheduleSpecError;
+    type Error = EveryDurationError;
 
     fn try_from(value: Duration) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -97,7 +168,7 @@ impl TryFrom<Duration> for EveryDuration {
 }
 
 impl TryFrom<u64> for EveryDuration {
-    type Error = ScheduleSpecError;
+    type Error = EveryDurationError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Self::from_secs(value)
@@ -107,10 +178,34 @@ impl TryFrom<u64> for EveryDuration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronExpression(String);
 
+#[derive(Debug)]
+pub enum CronExpressionError {
+    Invalid {
+        expr: String,
+        source: Box<dyn std::error::Error>,
+    },
+}
+
+impl std::fmt::Display for CronExpressionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { expr, source } => write!(formatter, "cron expression '{expr}' is invalid: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for CronExpressionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid { source, .. } => Some(source.as_ref()),
+        }
+    }
+}
+
 impl CronExpression {
-    pub fn new(expr: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(expr: impl Into<String>) -> Result<Self, CronExpressionError> {
         let expr = expr.into();
-        cron::Schedule::from_str(&expr).map_err(|source| ScheduleSpecError::InvalidCronExpression {
+        cron::Schedule::from_str(&expr).map_err(|source| CronExpressionError::Invalid {
             expr: expr.clone(),
             source: Box::new(source),
         })?;
@@ -127,7 +222,7 @@ impl CronExpression {
 }
 
 impl TryFrom<String> for CronExpression {
-    type Error = ScheduleSpecError;
+    type Error = CronExpressionError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -135,7 +230,7 @@ impl TryFrom<String> for CronExpression {
 }
 
 impl TryFrom<&str> for CronExpression {
-    type Error = ScheduleSpecError;
+    type Error = CronExpressionError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -145,8 +240,32 @@ impl TryFrom<&str> for CronExpression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleExpression(String);
 
+#[derive(Debug)]
+pub enum RRuleExpressionError {
+    Invalid {
+        rrule: String,
+        source: Box<dyn std::error::Error>,
+    },
+}
+
+impl std::fmt::Display for RRuleExpressionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { rrule, source } => write!(formatter, "rrule '{rrule}' is invalid: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for RRuleExpressionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid { source, .. } => Some(source.as_ref()),
+        }
+    }
+}
+
 impl RRuleExpression {
-    pub fn new(rrule: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(rrule: impl Into<String>) -> Result<Self, RRuleExpressionError> {
         let rrule = normalize_rrule_expression(rrule.into())?;
         validate_rrule_expression(&rrule)?;
         Ok(Self(rrule))
@@ -162,7 +281,7 @@ impl RRuleExpression {
 }
 
 impl TryFrom<String> for RRuleExpression {
-    type Error = ScheduleSpecError;
+    type Error = RRuleExpressionError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -170,7 +289,7 @@ impl TryFrom<String> for RRuleExpression {
 }
 
 impl TryFrom<&str> for RRuleExpression {
-    type Error = ScheduleSpecError;
+    type Error = RRuleExpressionError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -180,10 +299,37 @@ impl TryFrom<&str> for RRuleExpression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RRuleDateTime(String);
 
+#[derive(Debug)]
+pub enum RRuleDateTimeError {
+    Invalid {
+        field: &'static str,
+        value: String,
+        source: Box<dyn std::error::Error>,
+    },
+}
+
+impl std::fmt::Display for RRuleDateTimeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { field, value, source } => {
+                write!(formatter, "{field} datetime '{value}' is invalid: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RRuleDateTimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid { source, .. } => Some(source.as_ref()),
+        }
+    }
+}
+
 impl RRuleDateTime {
-    pub fn new(field: &'static str, value: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(field: &'static str, value: impl Into<String>) -> Result<Self, RRuleDateTimeError> {
         let value = value.into();
-        DateTime::parse_from_rfc3339(&value).map_err(|source| ScheduleSpecError::InvalidRRuleDateTime {
+        DateTime::parse_from_rfc3339(&value).map_err(|source| RRuleDateTimeError::Invalid {
             field,
             value: value.clone(),
             source: Box::new(source),
@@ -206,7 +352,7 @@ impl RRuleDateTime {
     }
 }
 
-fn normalize_rrule_expression(raw: String) -> Result<String, ScheduleSpecError> {
+fn normalize_rrule_expression(raw: String) -> Result<String, RRuleExpressionError> {
     let trimmed = raw.trim();
     let without_prefix = strip_rrule_prefix(trimmed);
 
@@ -215,7 +361,7 @@ fn normalize_rrule_expression(raw: String) -> Result<String, ScheduleSpecError> 
         || without_prefix.contains('\r')
         || without_prefix.chars().any(char::is_control)
     {
-        return Err(ScheduleSpecError::InvalidRRule {
+        return Err(RRuleExpressionError::Invalid {
             rrule: raw,
             source: Box::new(std::io::Error::other("empty or multi-line RRULE")),
         });
@@ -236,13 +382,13 @@ fn strip_rrule_prefix(trimmed: &str) -> &str {
     }
 }
 
-fn validate_rrule_expression(rrule: &str) -> Result<(), ScheduleSpecError> {
+fn validate_rrule_expression(rrule: &str) -> Result<(), RRuleExpressionError> {
     let mut has_count = false;
     let mut has_until = false;
 
     for part in rrule.split(';') {
         let Some((key, _)) = part.split_once('=') else {
-            return Err(ScheduleSpecError::InvalidRRule {
+            return Err(RRuleExpressionError::Invalid {
                 rrule: rrule.to_string(),
                 source: Box::new(std::io::Error::other("RRULE parts must use KEY=VALUE")),
             });
@@ -251,7 +397,7 @@ fn validate_rrule_expression(rrule: &str) -> Result<(), ScheduleSpecError> {
             "COUNT" => has_count = true,
             "UNTIL" => has_until = true,
             "EXRULE" | "RSCALE" | "SKIP" => {
-                return Err(ScheduleSpecError::InvalidRRule {
+                return Err(RRuleExpressionError::Invalid {
                     rrule: rrule.to_string(),
                     source: Box::new(std::io::Error::other(format!(
                         "{key} is not supported by cron RRULE schedules"
@@ -263,14 +409,14 @@ fn validate_rrule_expression(rrule: &str) -> Result<(), ScheduleSpecError> {
     }
 
     if has_count && has_until {
-        return Err(ScheduleSpecError::InvalidRRule {
+        return Err(RRuleExpressionError::Invalid {
             rrule: rrule.to_string(),
             source: Box::new(std::io::Error::other("COUNT and UNTIL cannot be used together")),
         });
     }
 
     let set = format!("DTSTART:19700101T000000Z\nRRULE:{rrule}");
-    rrule::RRuleSet::from_str(&set).map_err(|source| ScheduleSpecError::InvalidRRule {
+    rrule::RRuleSet::from_str(&set).map_err(|source| RRuleExpressionError::Invalid {
         rrule: rrule.to_string(),
         source: Box::new(source),
     })?;
@@ -285,22 +431,49 @@ pub struct TimeZone {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimeZoneError {
+    Invalid { timezone: String },
+}
+
+impl std::fmt::Display for TimeZoneError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { timezone } => write!(formatter, "timezone '{timezone}' is invalid"),
+        }
+    }
+}
+
+impl std::error::Error for TimeZoneError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TzdbVersion(String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TzdbVersionError {
+    Invalid { version: String },
+}
+
+impl std::fmt::Display for TzdbVersionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { version } => write!(formatter, "timezone database version '{version}' is invalid"),
+        }
+    }
+}
+
+impl std::error::Error for TzdbVersionError {}
 
 pub type ScheduleTimezone = TimeZone;
 pub type RRuleTimezone = TimeZone;
 
 impl TimeZone {
-    pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(timezone: impl Into<String>) -> Result<Self, TimeZoneError> {
         Self::with_tzdb_version(timezone, TzdbVersion::current())
     }
 
-    pub fn with_tzdb_version(
-        timezone: impl Into<String>,
-        tzdb_version: TzdbVersion,
-    ) -> Result<Self, ScheduleSpecError> {
+    pub fn with_tzdb_version(timezone: impl Into<String>, tzdb_version: TzdbVersion) -> Result<Self, TimeZoneError> {
         let id = validate_timezone_token(timezone.into())?;
-        chrono_tz::Tz::from_str(&id).map_err(|_| ScheduleSpecError::InvalidTimezone { timezone: id.clone() })?;
+        chrono_tz::Tz::from_str(&id).map_err(|_| TimeZoneError::Invalid { timezone: id.clone() })?;
 
         Ok(Self { id, tzdb_version })
     }
@@ -323,7 +496,7 @@ impl TimeZone {
 }
 
 impl TryFrom<String> for TimeZone {
-    type Error = ScheduleSpecError;
+    type Error = TimeZoneError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -331,7 +504,7 @@ impl TryFrom<String> for TimeZone {
 }
 
 impl TryFrom<&str> for TimeZone {
-    type Error = ScheduleSpecError;
+    type Error = TimeZoneError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -343,12 +516,12 @@ impl TzdbVersion {
         Self(chrono_tz::IANA_TZDB_VERSION.to_string())
     }
 
-    pub fn new(version: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(version: impl Into<String>) -> Result<Self, TzdbVersionError> {
         let version = version.into();
         if is_valid_tzdb_version(&version) {
             Ok(Self(version))
         } else {
-            Err(ScheduleSpecError::InvalidTimezoneDatabaseVersion { version })
+            Err(TzdbVersionError::Invalid { version })
         }
     }
 
@@ -361,10 +534,10 @@ impl TzdbVersion {
     }
 }
 
-fn validate_timezone_token(timezone: String) -> Result<String, ScheduleSpecError> {
+fn validate_timezone_token(timezone: String) -> Result<String, TimeZoneError> {
     let trimmed = timezone.trim();
     if trimmed.is_empty() || trimmed != timezone || timezone.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
-        return Err(ScheduleSpecError::InvalidTimezone { timezone });
+        return Err(TimeZoneError::Invalid { timezone });
     }
 
     Ok(timezone)
@@ -382,14 +555,38 @@ fn is_valid_tzdb_version(version: &str) -> bool {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScheduleHeaders(MessageHeaders);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleHeadersError {
+    MessageHeaders { source: MessageHeadersError },
+    ReservedName { name: String },
+}
+
+impl std::fmt::Display for ScheduleHeadersError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MessageHeaders { source } => source.fmt(formatter),
+            Self::ReservedName { name } => write!(formatter, "header name '{name}' is reserved"),
+        }
+    }
+}
+
+impl std::error::Error for ScheduleHeadersError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MessageHeaders { source } => Some(source),
+            Self::ReservedName { .. } => None,
+        }
+    }
+}
+
 impl ScheduleHeaders {
-    pub fn new<I, N, V>(headers: I) -> Result<Self, ScheduleSpecError>
+    pub fn new<I, N, V>(headers: I) -> Result<Self, ScheduleHeadersError>
     where
         I: IntoIterator<Item = (N, V)>,
         N: Into<String>,
         V: Into<String>,
     {
-        let headers = MessageHeaders::new(headers).map_err(message_headers_error)?;
+        let headers = MessageHeaders::new(headers).map_err(|source| ScheduleHeadersError::MessageHeaders { source })?;
         Self::try_from(headers)
     }
 
@@ -406,15 +603,8 @@ impl ScheduleHeaders {
     }
 }
 
-fn message_headers_error(source: MessageHeadersError) -> ScheduleSpecError {
-    match source {
-        MessageHeadersError::InvalidName { name } => ScheduleSpecError::InvalidHeaderName { name },
-        MessageHeadersError::InvalidValue { name } => ScheduleSpecError::InvalidHeaderValue { name },
-    }
-}
-
 impl TryFrom<MessageHeaders> for ScheduleHeaders {
-    type Error = ScheduleSpecError;
+    type Error = ScheduleHeadersError;
 
     fn try_from(value: MessageHeaders) -> Result<Self, Self::Error> {
         validate_reserved_scheduler_headers(value.as_slice())?;
@@ -437,12 +627,36 @@ pub struct ScheduleMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryRoute(DottedNatsToken);
 
+#[derive(Debug)]
+pub enum DeliveryRouteError {
+    Invalid {
+        route: String,
+        source: trogon_nats::SubjectTokenViolation,
+    },
+}
+
+impl std::fmt::Display for DeliveryRouteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { route, source } => write!(formatter, "delivery route '{route}' is invalid: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for DeliveryRouteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid { source, .. } => Some(source),
+        }
+    }
+}
+
 impl DeliveryRoute {
-    pub fn new(route: impl AsRef<str>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(route: impl AsRef<str>) -> Result<Self, DeliveryRouteError> {
         let route = route.as_ref();
         DottedNatsToken::new(route)
             .map(Self)
-            .map_err(|source| ScheduleSpecError::InvalidRoute {
+            .map_err(|source| DeliveryRouteError::Invalid {
                 route: route.to_string(),
                 source,
             })
@@ -458,7 +672,7 @@ impl DeliveryRoute {
 }
 
 impl TryFrom<String> for DeliveryRoute {
-    type Error = ScheduleSpecError;
+    type Error = DeliveryRouteError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -466,7 +680,7 @@ impl TryFrom<String> for DeliveryRoute {
 }
 
 impl TryFrom<&str> for DeliveryRoute {
-    type Error = ScheduleSpecError;
+    type Error = DeliveryRouteError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -476,12 +690,38 @@ impl TryFrom<&str> for DeliveryRoute {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SamplingSubject(DottedNatsToken);
 
+#[derive(Debug)]
+pub enum SamplingSubjectError {
+    Invalid {
+        subject: String,
+        source: trogon_nats::SubjectTokenViolation,
+    },
+}
+
+impl std::fmt::Display for SamplingSubjectError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid { subject, source } => {
+                write!(formatter, "sampling subject '{subject}' is invalid: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SamplingSubjectError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Invalid { source, .. } => Some(source),
+        }
+    }
+}
+
 impl SamplingSubject {
-    pub fn new(subject: impl AsRef<str>) -> Result<Self, ScheduleSpecError> {
+    pub fn new(subject: impl AsRef<str>) -> Result<Self, SamplingSubjectError> {
         let subject = subject.as_ref();
         DottedNatsToken::new(subject)
             .map(Self)
-            .map_err(|source| ScheduleSpecError::InvalidSamplingSource {
+            .map_err(|source| SamplingSubjectError::Invalid {
                 subject: subject.to_string(),
                 source,
             })
@@ -493,7 +733,7 @@ impl SamplingSubject {
 }
 
 impl TryFrom<String> for SamplingSubject {
-    type Error = ScheduleSpecError;
+    type Error = SamplingSubjectError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -501,7 +741,7 @@ impl TryFrom<String> for SamplingSubject {
 }
 
 impl TryFrom<&str> for SamplingSubject {
-    type Error = ScheduleSpecError;
+    type Error = SamplingSubjectError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -511,13 +751,32 @@ impl TryFrom<&str> for SamplingSubject {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TtlDuration(Duration);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TtlDurationError {
+    MustBePositive,
+    TooLarge { max: Duration, actual: Duration },
+}
+
+impl std::fmt::Display for TtlDurationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MustBePositive => formatter.write_str("ttl duration must be positive"),
+            Self::TooLarge { max, actual } => {
+                write!(formatter, "ttl duration must be at most {max:?}, got {actual:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TtlDurationError {}
+
 impl TtlDuration {
-    pub fn new(ttl: Duration) -> Result<Self, ScheduleSpecError> {
+    pub fn new(ttl: Duration) -> Result<Self, TtlDurationError> {
         if ttl.is_zero() {
-            return Err(ScheduleSpecError::TtlMustBePositive);
+            return Err(TtlDurationError::MustBePositive);
         }
         if ttl > PROTOBUF_DURATION_MAX {
-            return Err(ScheduleSpecError::TtlDurationTooLarge {
+            return Err(TtlDurationError::TooLarge {
                 max: PROTOBUF_DURATION_MAX,
                 actual: ttl,
             });
@@ -526,7 +785,7 @@ impl TtlDuration {
         Ok(Self(ttl))
     }
 
-    pub fn from_secs(seconds: u64) -> Result<Self, ScheduleSpecError> {
+    pub fn from_secs(seconds: u64) -> Result<Self, TtlDurationError> {
         Self::new(Duration::from_secs(seconds))
     }
 
@@ -536,7 +795,7 @@ impl TtlDuration {
 }
 
 impl TryFrom<Duration> for TtlDuration {
-    type Error = ScheduleSpecError;
+    type Error = TtlDurationError;
 
     fn try_from(value: Duration) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -544,7 +803,7 @@ impl TryFrom<Duration> for TtlDuration {
 }
 
 impl TryFrom<u64> for TtlDuration {
-    type Error = ScheduleSpecError;
+    type Error = TtlDurationError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Self::from_secs(value)
@@ -557,7 +816,7 @@ pub enum SamplingSource {
 }
 
 impl SamplingSource {
-    pub fn latest_from_subject(subject: impl AsRef<str>) -> Result<Self, ScheduleSpecError> {
+    pub fn latest_from_subject(subject: impl AsRef<str>) -> Result<Self, SamplingSubjectError> {
         Ok(Self::LatestFromSubject {
             subject: SamplingSubject::new(subject)?,
         })
@@ -580,7 +839,7 @@ pub enum Delivery {
 }
 
 impl Delivery {
-    pub fn nats_event(route: impl AsRef<str>) -> Result<Self, ScheduleSpecError> {
+    pub fn nats_event(route: impl AsRef<str>) -> Result<Self, DeliveryRouteError> {
         Ok(Self::NatsEvent {
             route: DeliveryRoute::new(route)?,
             ttl: None,
@@ -597,14 +856,14 @@ const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     "Nats-Schedule-TTL",
 ];
 
-fn validate_reserved_scheduler_headers(headers: &[MessageHeader]) -> Result<(), ScheduleSpecError> {
+fn validate_reserved_scheduler_headers(headers: &[MessageHeader]) -> Result<(), ScheduleHeadersError> {
     for header in headers {
         let name = header.name().as_str();
         if RESERVED_SCHEDULE_HEADERS
             .iter()
             .any(|reserved| reserved.eq_ignore_ascii_case(name))
         {
-            return Err(ScheduleSpecError::ReservedHeaderName { name: name.to_string() });
+            return Err(ScheduleHeadersError::ReservedName { name: name.to_string() });
         }
     }
 
@@ -697,6 +956,8 @@ impl From<&ScheduleMessage> for MessageEnvelope {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use trogonai_proto::convert::PROTOBUF_DURATION_MAX_SECONDS;
 
     use super::*;
@@ -724,6 +985,140 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn errors_are_scoped_to_the_value_that_failed_to_construct() {
+        let every_zero = EveryDuration::new(Duration::ZERO).unwrap_err();
+        assert_eq!(every_zero, EveryDurationError::MustBePositive);
+        assert_eq!(every_zero.to_string(), "every duration must be positive");
+        assert!(every_zero.source().is_none());
+
+        let every_too_large = EveryDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).unwrap_err();
+        assert_eq!(
+            every_too_large,
+            EveryDurationError::TooLarge {
+                max: PROTOBUF_DURATION_MAX,
+                actual: PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
+            }
+        );
+        assert!(
+            every_too_large
+                .to_string()
+                .starts_with("every duration must be at most")
+        );
+        assert!(every_too_large.source().is_none());
+
+        let cron = CronExpression::new("not a cron").unwrap_err();
+        assert!(cron.to_string().starts_with("cron expression 'not a cron' is invalid:"));
+        assert!(cron.source().is_some());
+
+        let rrule_date = RRuleDateTime::new("dtstart", "tomorrow").unwrap_err();
+        assert!(
+            rrule_date
+                .to_string()
+                .starts_with("dtstart datetime 'tomorrow' is invalid:")
+        );
+        assert!(rrule_date.source().is_some());
+
+        let rrule = RRuleExpression::new("FREQDAILY").unwrap_err();
+        assert_eq!(
+            rrule.to_string(),
+            "rrule 'FREQDAILY' is invalid: RRULE parts must use KEY=VALUE"
+        );
+        assert!(rrule.source().is_some());
+
+        let timezone = TimeZone::new("Nope/Zone").unwrap_err();
+        assert_eq!(
+            timezone,
+            TimeZoneError::Invalid {
+                timezone: "Nope/Zone".to_string()
+            }
+        );
+        assert_eq!(timezone.to_string(), "timezone 'Nope/Zone' is invalid");
+        assert!(timezone.source().is_none());
+
+        let tzdb_version = TzdbVersion::new("2025").unwrap_err();
+        assert_eq!(
+            tzdb_version,
+            TzdbVersionError::Invalid {
+                version: "2025".to_string()
+            }
+        );
+        assert_eq!(tzdb_version.to_string(), "timezone database version '2025' is invalid");
+        assert!(tzdb_version.source().is_none());
+
+        let header = ScheduleHeaders::new([("bad name", "value")]).unwrap_err();
+        assert_eq!(header.to_string(), "header name 'bad name' is invalid");
+        assert!(header.source().is_some());
+
+        let reserved_header = ScheduleHeaders::new([("Nats-Schedule", "value")]).unwrap_err();
+        assert_eq!(
+            reserved_header,
+            ScheduleHeadersError::ReservedName {
+                name: "Nats-Schedule".to_string()
+            }
+        );
+        assert_eq!(reserved_header.to_string(), "header name 'Nats-Schedule' is reserved");
+        assert!(reserved_header.source().is_none());
+
+        let route = DeliveryRoute::new("bad*route").unwrap_err();
+        assert!(route.to_string().starts_with("delivery route 'bad*route' is invalid:"));
+        assert!(route.source().is_some());
+
+        let subject = SamplingSubject::new("bad>subject").unwrap_err();
+        assert!(
+            subject
+                .to_string()
+                .starts_with("sampling subject 'bad>subject' is invalid:")
+        );
+        assert!(subject.source().is_some());
+
+        let ttl_zero = TtlDuration::new(Duration::ZERO).unwrap_err();
+        assert_eq!(ttl_zero, TtlDurationError::MustBePositive);
+        assert_eq!(ttl_zero.to_string(), "ttl duration must be positive");
+        assert!(ttl_zero.source().is_none());
+
+        let ttl_too_large = TtlDuration::new(PROTOBUF_DURATION_MAX + Duration::from_nanos(1)).unwrap_err();
+        assert_eq!(
+            ttl_too_large,
+            TtlDurationError::TooLarge {
+                max: PROTOBUF_DURATION_MAX,
+                actual: PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
+            }
+        );
+        assert!(ttl_too_large.to_string().starts_with("ttl duration must be at most"));
+        assert!(ttl_too_large.source().is_none());
+    }
+
+    #[test]
+    fn schedule_convenience_errors_only_wrap_schedule_value_failures() {
+        let cron = Schedule::cron("not a cron", None).unwrap_err();
+        assert!(matches!(cron, ScheduleError::CronExpression(_)));
+        assert!(cron.to_string().starts_with("cron expression 'not a cron' is invalid:"));
+        assert!(cron.source().is_some());
+
+        let cron_timezone = Schedule::cron("0 0 * * * *", Some("Nope/Zone".to_string())).unwrap_err();
+        assert!(matches!(cron_timezone, ScheduleError::TimeZone(_)));
+        assert_eq!(cron_timezone.to_string(), "timezone 'Nope/Zone' is invalid");
+        assert!(cron_timezone.source().is_some());
+
+        let rrule_dtstart = Schedule::rrule("tomorrow", "FREQ=DAILY;COUNT=2", None).unwrap_err();
+        assert!(matches!(rrule_dtstart, ScheduleError::RRuleDateTime(_)));
+        assert!(
+            rrule_dtstart
+                .to_string()
+                .starts_with("dtstart datetime 'tomorrow' is invalid:")
+        );
+        assert!(rrule_dtstart.source().is_some());
+
+        let rrule = Schedule::rrule("2026-01-01T00:00:00Z", "FREQDAILY", None).unwrap_err();
+        assert!(matches!(rrule, ScheduleError::RRuleExpression(_)));
+        assert_eq!(
+            rrule.to_string(),
+            "rrule 'FREQDAILY' is invalid: RRULE parts must use KEY=VALUE"
+        );
+        assert!(rrule.source().is_some());
     }
 
     #[test]
@@ -1024,7 +1419,7 @@ mod tests {
                     .collect();
 
                 let result = ScheduleHeaders::new([(name, value)]);
-                let is_reserved_error = matches!(result, Err(ScheduleSpecError::ReservedHeaderName { .. }));
+                let is_reserved_error = matches!(result, Err(ScheduleHeadersError::ReservedName { .. }));
                 prop_assert!(is_reserved_error);
             }
 
