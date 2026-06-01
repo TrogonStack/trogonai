@@ -97,6 +97,7 @@ impl Decider for CreateScheduleCommand {
 
 #[cfg(test)]
 mod tests {
+    use buffa::EnumValue;
     use trogon_decider::testing::TestCase;
 
     use super::*;
@@ -176,5 +177,56 @@ mod tests {
             .then_error(CreateScheduleDecideError::JobDeleted {
                 id: ScheduleId::parse("backup").unwrap(),
             });
+    }
+
+    #[test]
+    fn decide_errors_display_user_facing_messages() {
+        let id = ScheduleId::parse("backup").unwrap();
+
+        assert_eq!(
+            CreateScheduleDecideError::AlreadyExists { id: id.clone() }.to_string(),
+            "schedule 'backup' already exists"
+        );
+        assert_eq!(
+            CreateScheduleDecideError::JobDeleted { id }.to_string(),
+            "schedule 'backup' was deleted"
+        );
+        assert_eq!(
+            CreateScheduleDecideError::MissingStateValue.to_string(),
+            "state value is missing"
+        );
+        assert_eq!(
+            CreateScheduleDecideError::UnknownStateValue { value: 123 }.to_string(),
+            "unknown state value: 123"
+        );
+    }
+
+    #[test]
+    fn decide_rejects_invalid_state_values() {
+        assert_eq!(
+            CreateScheduleCommand::decide(&state_v1::State { state: None }, &create_schedule_command("backup"))
+                .unwrap_err(),
+            CreateScheduleDecideError::MissingStateValue
+        );
+        assert_eq!(
+            CreateScheduleCommand::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(123)),
+                },
+                &create_schedule_command("backup")
+            )
+            .unwrap_err(),
+            CreateScheduleDecideError::UnknownStateValue { value: 123 }
+        );
+        assert_eq!(
+            CreateScheduleCommand::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                },
+                &create_schedule_command("backup")
+            )
+            .unwrap_err(),
+            CreateScheduleDecideError::UnknownStateValue { value: 0 }
+        );
     }
 }
