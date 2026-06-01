@@ -720,6 +720,7 @@ async fn spawn_gateway(
         approval_gate: None,
         mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         context_throttle: None,
+        anomaly_emitter: None,
     };
 
     let gateway_client = Arc::new(connect(nats_conf, connect_timeout).await.map_err(|e| e.to_string())?);

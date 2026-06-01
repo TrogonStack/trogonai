@@ -137,6 +137,7 @@ async fn main() -> Result<(), BoxError> {
         approval_gate: None,
         mesh_config: trogon_mcp_gateway::policy::MeshGatewayConfig::default(),
         context_throttle: None,
+        anomaly_emitter: None,
     };
 
     info!(
