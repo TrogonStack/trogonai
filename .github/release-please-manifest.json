@@ -1,3 +1,16 @@
 {
-  "rsworkspace/crates/acp-nats-stdio": "0.0.1"
+  "rsworkspace/crates/acp-nats-stdio": "0.0.1",
+  "rsworkspace/crates/a2a-bridge": "0.1.0",
+  "rsworkspace/crates/a2a-gateway": "0.1.0",
+  "rsworkspace/crates/a2a-auth-callout": "0.1.0",
+  "rsworkspace/crates/mcp-nats-server": "0.0.1",
+  "rsworkspace/crates/mcp-pack": "0.1.0",
+  "rsworkspace/crates/trogon-agent-registry": "0.1.0",
+  "rsworkspace/crates/trogon-agent-registry-controller": "0.1.0",
+  "rsworkspace/crates/trogon-gateway-ctl": "0.0.1",
+  "rsworkspace/crates/trogon-gateway-k8s": "0.1.0",
+  "rsworkspace/crates/trogon-jwks-publisher": "0.1.0",
+  "rsworkspace/crates/trogon-mcp-gateway": "0.0.1",
+  "rsworkspace/crates/trogon-sts": "0.1.0",
+  "rsworkspace/crates/agctl": "0.1.0"
 }
