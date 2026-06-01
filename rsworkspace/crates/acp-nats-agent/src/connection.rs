@@ -383,6 +383,15 @@ where
     ReqT: serde::de::DeserializeOwned,
     F: std::future::Future<Output = agent_client_protocol::Result<()>>,
 {
+    // An empty payload carries no actionable fields, so there is nothing to
+    // deserialize or dispatch. The agent's own `cancel` handler re-publishes an
+    // empty body to the cancel subject as an in-process wake signal for the
+    // in-flight prompt; that signal is also delivered here. Treat it as a no-op
+    // rather than surfacing a spurious "deserialize notification: EOF" error.
+    if msg.payload.is_empty() {
+        return Ok(());
+    }
+
     let request: ReqT = serde_json::from_slice(&msg.payload).map_err(DispatchError::DeserializeNotification)?;
 
     handler(request).await.map_err(DispatchError::NotificationHandler)
@@ -785,6 +794,19 @@ mod tests {
         let (nats, agent) = dispatch("acp.session.s1.agent.cancel", &CancelNotification::new("s1"), None).await;
 
         assert_eq!(agent.cancelled.borrow().as_slice(), ["s1"]);
+        assert!(nats.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dispatch_cancel_with_empty_payload_is_silently_ignored() {
+        // The agent's own `cancel` handler re-publishes an empty body to the
+        // cancel subject as an in-process wake signal for the in-flight prompt.
+        // That signal is also delivered to this dispatcher; it must be treated as
+        // a no-op rather than producing a spurious "deserialize notification: EOF"
+        // error or invoking the cancel handler with a bogus session id.
+        let (nats, agent) = dispatch_raw("acp.session.s1.agent.cancel", b"", None).await;
+
+        assert!(agent.cancelled.borrow().is_empty());
         assert!(nats.published_messages().is_empty());
     }
 

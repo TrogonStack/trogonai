@@ -10,8 +10,14 @@ use trogon_mcp::McpCallTool;
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Implements `spawn_agent` by sending a NATS request-reply to
-/// `{prefix}.agent.spawn`. The registry resolves the correct agent type
-/// from the request payload and returns its output as the tool result.
+/// `{prefix}.spawn`. The dedicated spawn responder runs the sub-agent and
+/// returns its output as the tool result.
+///
+/// The subject is deliberately `{prefix}.spawn`, NOT `{prefix}.agent.spawn`:
+/// the claude runner's global dispatcher subscribes to `{prefix}.agent.>`, so a
+/// spawn subject under `agent.` would be delivered to BOTH this dedicated
+/// responder and the global ACP dispatcher (which mis-parses it and races back
+/// an error reply). Keeping spawn off the `agent.` namespace avoids that.
 pub struct SpawnAgentTool {
     nats: async_nats::Client,
     prefix: String,
@@ -89,15 +95,27 @@ impl McpCallTool for SpawnAgentTool {
             }))
             .map_err(|e| e.to_string())?;
 
-            let subject = format!("{prefix}.agent.spawn");
+            let subject = format!("{prefix}.spawn");
 
-            let msg = tokio::time::timeout(
-                SPAWN_TIMEOUT,
-                nats.request(subject, payload.into()),
-            )
-            .await
-            .map_err(|_| format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs()))?
-            .map_err(|e| e.to_string())?;
+            // Use an explicit per-request timeout. `Client::request` applies the
+            // client's default request timeout (10s), which would fire long before
+            // a sub-agent's full tool-use loop completes — a `tokio::time::timeout`
+            // wrapper around it is useless because the inner 10s wins. `send_request`
+            // with `Request::timeout(Some(..))` overrides that default.
+            let request = async_nats::Request::new()
+                .payload(payload.into())
+                .timeout(Some(SPAWN_TIMEOUT));
+
+            let msg = nats
+                .send_request(subject, request)
+                .await
+                .map_err(|e| {
+                    if e.kind() == async_nats::client::RequestErrorKind::TimedOut {
+                        format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs())
+                    } else {
+                        e.to_string()
+                    }
+                })?;
 
             String::from_utf8(msg.payload.to_vec()).map_err(|e| e.to_string())
         })

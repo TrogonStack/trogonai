@@ -57,7 +57,7 @@ async fn into_dispatch_handler_is_arc_mcp_call_tool() {
 
 // ── call_tool — happy path ────────────────────────────────────────────────────
 
-/// A subscriber on `{prefix}.agent.spawn` receives the payload and replies;
+/// A subscriber on `{prefix}.spawn` receives the payload and replies;
 /// `call_tool` returns the reply body as a String.
 #[tokio::test]
 async fn call_tool_delivers_request_and_returns_reply() {
@@ -67,7 +67,7 @@ async fn call_tool_delivers_request_and_returns_reply() {
 
     // Spawn a mock registry that echoes capability+prompt back.
     let mut sub = registry_client
-        .subscribe("trogon.agent.spawn")
+        .subscribe("trogon.spawn")
         .await
         .unwrap();
 
@@ -103,7 +103,7 @@ async fn call_tool_delivers_request_and_returns_reply() {
     assert!(body.contains("find all Rust files"), "body should contain prompt");
 }
 
-/// Prefix is forwarded correctly — subject is `{prefix}.agent.spawn`.
+/// Prefix is forwarded correctly — subject is `{prefix}.spawn`.
 #[tokio::test]
 async fn call_tool_uses_correct_subject_prefix() {
     let (_container, port) = start_nats().await;
@@ -111,7 +111,7 @@ async fn call_tool_uses_correct_subject_prefix() {
     let registry_client = nats_client(port).await;
 
     let mut sub = registry_client
-        .subscribe("myteam.agent.spawn")
+        .subscribe("myteam.spawn")
         .await
         .unwrap();
 
@@ -149,7 +149,7 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
     let registry_client = nats_client(port).await;
 
     let mut sub = registry_client
-        .subscribe("t.agent.spawn")
+        .subscribe("t.spawn")
         .await
         .unwrap();
 
@@ -290,7 +290,7 @@ async fn call_tool_returns_registry_reply_verbatim() {
 
     let expected = "Agent completed. Result: 42 files found.";
 
-    let mut sub = registry_client.subscribe("ns.agent.spawn").await.unwrap();
+    let mut sub = registry_client.subscribe("ns.spawn").await.unwrap();
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
@@ -322,7 +322,7 @@ async fn call_tool_handles_multiline_registry_reply() {
 
     let expected = "Line 1\nLine 2\nLine 3";
 
-    let mut sub = registry_client.subscribe("ns2.agent.spawn").await.unwrap();
+    let mut sub = registry_client.subscribe("ns2.spawn").await.unwrap();
     tokio::spawn(async move {
         if let Some(msg) = sub.next().await
             && let Some(reply) = msg.reply
@@ -354,7 +354,7 @@ async fn call_tool_handles_concurrent_requests() {
 
     // One registry subscriber that handles N messages.
     let registry_client = nats_client(port).await;
-    let mut sub = registry_client.subscribe("cc.agent.spawn").await.unwrap();
+    let mut sub = registry_client.subscribe("cc.spawn").await.unwrap();
 
     tokio::spawn(async move {
         while let Some(msg) = sub.next().await {

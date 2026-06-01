@@ -43,7 +43,6 @@ use trogon_nats::jetstream::NatsJetStreamClient;
 
 use trogon_acp_runner::elicitation::handle_elicitation_request_nats;
 use trogon_acp_runner::permission_bridge::handle_permission_request_nats;
-use trogon_runner_tools::session_store::SessionStore as _;
 use trogon_acp_runner::{ElicitationReq, PermissionReq};
 
 use trogon_agent_core::agent_loop::AgentLoop;
@@ -201,24 +200,20 @@ async fn main() -> anyhow::Result<()> {
     .with_compactor(nats.clone())
     .with_execution_backend(nats.clone(), registry_for_agent);
 
+    // Cheap shared handle for the spawn_agent responder. It runs sub-agents
+    // in-process (see TrogonAgent::spawn_subagent) rather than round-tripping a
+    // prompt back through NATS into this same runner, which deadlocks.
+    let agent_for_spawn = agent.clone();
+
     let prefix = AcpPrefix::new(&acp_prefix)?;
     let nats_for_perm = nats.clone();
     let nats_for_elic = nats.clone();
     let prefix_for_perm = prefix.clone();
     let prefix_for_elic = prefix.clone();
 
-    // Clones for the spawn_agent handler (created before `nats`/`js` are moved below).
+    // Clones for the spawn_agent handler (created before `nats` is moved below).
     let nats_for_spawn = nats.clone();
-    let js_for_spawn = js.clone();
-    let store_for_spawn = store.clone();
     let acp_prefix_for_spawn = acp_prefix.clone();
-    let spawn_config = acp_nats::Config::new(
-        prefix.clone(),
-        trogon_nats::NatsConfig {
-            servers: vec![nats_url.clone()],
-            auth: trogon_nats::NatsAuth::None,
-        },
-    );
 
     let js_client = NatsJetStreamClient::new(js);
     let (_conn, io_task) =
@@ -249,20 +244,24 @@ async fn main() -> anyhow::Result<()> {
                 }
             });
 
-            // Handle spawn_agent requests: create an isolated worktree, open a full
-            // ACP sub-session rooted there, run the prompt (full tool-use loop), relay
-            // the sub-agent's text back as the tool result, then clean up the worktree.
+            // Handle spawn_agent requests by running the sub-agent IN-PROCESS:
+            // TrogonAgent::spawn_subagent creates an isolated worktree, opens an
+            // ephemeral session inheriting the parent's context, drives the full
+            // tool-use loop directly (no NATS round-trip into this same runner —
+            // that deadlocks), and returns the sub-agent's text. Each request is
+            // handled on its own task so the responder keeps draining the queue.
             tokio::task::spawn_local({
                 let nats = nats_for_spawn;
-                let js = js_for_spawn;
-                let config = spawn_config;
-                let store = store_for_spawn;
                 let acp_prefix_str = acp_prefix_for_spawn;
+                let agent = agent_for_spawn;
                 async move {
-                    use agent_client_protocol::SessionUpdate;
                     use futures_util::StreamExt;
 
-                    let subject = format!("{acp_prefix_str}.agent.spawn");
+                    // `{prefix}.spawn`, NOT `{prefix}.agent.spawn`: the latter falls under
+                    // the global ACP wildcard `{prefix}.agent.>` and would be double-handled
+                    // (and raced with an error reply) by serve_global. Must match the subject
+                    // SpawnAgentTool sends to.
+                    let subject = format!("{acp_prefix_str}.spawn");
                     let mut sub = match nats.subscribe(subject).await {
                         Ok(s) => s,
                         Err(e) => {
@@ -286,134 +285,15 @@ async fn main() -> anyhow::Result<()> {
                             continue;
                         }
 
-                        let parent_state = match store.load(&session_id).await {
-                            Ok(s) => s,
-                            Err(_) => {
-                                nats.publish(reply, "spawn_agent: session not found".into()).await.ok();
-                                continue;
-                            }
-                        };
-
-                        const MAX_SPAWN_DEPTH: u32 = 3;
-                        if parent_state.spawn_depth >= MAX_SPAWN_DEPTH {
-                            nats.publish(reply, "spawn_agent: max nesting depth reached".into()).await.ok();
-                            continue;
-                        }
-
-                        let worktree = trogon_runner_tools::worktree::create_worktree(&parent_state.cwd).await;
-                        let sub_cwd = worktree
-                            .as_ref()
-                            .map(|w| w.path.clone())
-                            .unwrap_or_else(|| parent_state.cwd.clone());
-
-                        // Dummy channel: the Bridge's notification_sender silently fails
-                        // (warn and continue); we observe notifications via plain NATS below.
-                        let (notif_tx, _notif_rx_bridge_unused) = tokio::sync::mpsc::channel::<agent_client_protocol::SessionNotification>(1);
-                        drop(_notif_rx_bridge_unused);
-
-                        let nats_for_notif = nats.clone();
-                        let acp_prefix_for_notif = acp_prefix_str.clone();
-
-                        let bridge = acp_nats::Bridge::new(
-                            nats.clone(),
-                            NatsJetStreamClient::new(js.clone()),
-                            trogon_std::time::SystemClock,
-                            &opentelemetry::global::meter("trogon-acp-runner"),
-                            config.clone(),
-                            notif_tx,
-                        );
-
-                        let sub_sid = match trogon_runner_tools::spawn_session::create_sub_session(
-                            &bridge,
-                            &sub_cwd,
-                            &parent_state.mode,
-                            parent_state.permission_rules_text.as_deref(),
-                        ).await {
-                            Ok(sid) => sid,
-                            Err(e) => {
-                                drop(worktree);
-                                nats.publish(reply, format!("spawn_agent error: {e}").into()).await.ok();
-                                continue;
-                            }
-                        };
-
-                        // Propagate the recursion guard to the sub-session.
-                        if let Ok(mut sub_state) = store.load(&sub_sid).await {
-                            sub_state.spawn_depth = parent_state.spawn_depth + 1;
-                            let _ = store.save(&sub_sid, &sub_state).await;
-                        }
-
-                        let notif_subject = format!("{acp_prefix_for_notif}.session.{sub_sid}.client.session.update");
-                        let mut notif_sub = match nats_for_notif.subscribe(notif_subject).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                drop(worktree);
-                                nats.publish(reply, format!("spawn_agent error: subscribe failed: {e}").into()).await.ok();
-                                continue;
-                            }
-                        };
-
-                        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-                        let text_result = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-                        let text_clone = text_result.clone();
-
+                        let agent = agent.clone();
+                        let nats = nats.clone();
                         tokio::task::spawn_local(async move {
-                            loop {
-                                tokio::select! {
-                                    biased;
-                                    msg = notif_sub.next() => {
-                                        let Some(msg) = msg else { break; };
-                                        if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload)
-                                            && let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
-                                            && let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content
-                                        {
-                                            text_clone.lock().await.push_str(&t.text);
-                                        }
-                                    }
-                                    _ = &mut stop_rx => {
-                                        // Drain remaining buffered messages with a short timeout.
-                                        while let Ok(Some(msg)) = tokio::time::timeout(
-                                            std::time::Duration::from_millis(50),
-                                            notif_sub.next(),
-                                        ).await {
-                                            if let Ok(notif) = serde_json::from_slice::<agent_client_protocol::SessionNotification>(&msg.payload)
-                                                && let SessionUpdate::AgentMessageChunk(ref chunk) = notif.update
-                                                && let agent_client_protocol::ContentBlock::Text(ref t) = chunk.content
-                                            {
-                                                text_clone.lock().await.push_str(&t.text);
-                                            }
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
+                            let text = match agent.spawn_subagent(&session_id, &task).await {
+                                Ok(text) => text,
+                                Err(err) => err,
+                            };
+                            nats.publish(reply, text.into()).await.ok();
                         });
-
-                        let run_result = trogon_runner_tools::spawn_session::run_sub_session(
-                            &bridge,
-                            &sub_sid,
-                            &task,
-                            std::time::Duration::from_secs(3600),
-                        ).await;
-
-                        drop(worktree);
-
-                        let _ = stop_tx.send(());
-                        tokio::task::yield_now().await;
-
-                        let accumulated = text_result.lock().await.clone();
-                        let text = match run_result {
-                            Ok(()) => {
-                                if accumulated.is_empty() {
-                                    "Sub-agent completed.".to_string()
-                                } else {
-                                    accumulated
-                                }
-                            }
-                            Err(e) => format!("spawn_agent error: {e}"),
-                        };
-
-                        nats.publish(reply, text.into()).await.ok();
                     }
                 }
             });

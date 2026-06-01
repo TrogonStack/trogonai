@@ -30,7 +30,7 @@ use crate::elicitation::{ChannelElicitationProvider, ElicitationTx};
 use trogon_runner_tools::egress::EgressPolicy;
 use trogon_runner_tools::permission_rules::PermissionRules;
 use crate::prompt_converter::PromptEventConverter;
-use crate::session_notifier::{PromptEventClient, SessionNotifier};
+use crate::session_notifier::{AccumulatingPromptClient, PromptEventClient, SessionNotifier};
 use trogon_runner_tools::permission::{AuditBuf, PermissionTx};
 use trogon_runner_tools::build_mode_permission_checker;
 use trogon_runner_tools::session_store::{AuditEntry, NatsSessionStore, SessionStore, append_audit_entries, now_iso8601};
@@ -255,6 +255,31 @@ pub struct TrogonAgent<
     execution_nats: Option<async_nats::Client>,
 }
 
+// Manual `Clone` so the spawn handler can hold a cheap, shared handle to the
+// agent and run sub-agents in-process. Every field is `Arc`-backed or otherwise
+// cheap to clone; `A` lives behind `Arc`, so no `A: Clone` bound is required.
+// `session_locks` is shared, so sub-session prompt serialization stays coherent.
+impl<S: Clone, A, N: Clone, M: Clone> Clone for TrogonAgent<S, A, N, M> {
+    fn clone(&self) -> Self {
+        Self {
+            notifier: self.notifier.clone(),
+            store: self.store.clone(),
+            agent: self.agent.clone(),
+            md_loader: self.md_loader.clone(),
+            prefix: self.prefix.clone(),
+            default_model: self.default_model.clone(),
+            permission_tx: self.permission_tx.clone(),
+            elicitation_tx: self.elicitation_tx.clone(),
+            gateway_config: self.gateway_config.clone(),
+            session_locks: self.session_locks.clone(),
+            compactor_nats: self.compactor_nats.clone(),
+            http: self.http.clone(),
+            registry: self.registry.clone(),
+            execution_nats: self.execution_nats.clone(),
+        }
+    }
+}
+
 impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier>
     TrogonAgent<S, A, N, FsTrogonMdLoader>
 {
@@ -402,6 +427,106 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .clone()
     }
 
+    /// Run a sub-agent fully **in-process** and return its assistant text.
+    ///
+    /// This is the responder behind the `spawn_agent` tool. It must NOT route the
+    /// sub-agent's prompt back through NATS into this same runner: the parent
+    /// prompt is still in-flight here (blocked awaiting the `spawn_agent` tool
+    /// result), so a NATS round-trip into our own session loop deadlocks — the
+    /// sub-session is created but its prompt never gets driven to completion.
+    /// Instead we drive the full tool-use loop directly via [`Self::run_prompt`],
+    /// capturing the assistant text through an [`AccumulatingPromptClient`].
+    ///
+    /// The sub-agent runs in an isolated git worktree, in an ephemeral session
+    /// that inherits the parent's mode, permission rules, egress policy and model,
+    /// with the recursion guard (`spawn_depth`) incremented. The worktree and the
+    /// ephemeral session are cleaned up on every exit path, including the error /
+    /// timeout path.
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn spawn_subagent(
+        &self,
+        parent_session_id: &str,
+        prompt: &str,
+    ) -> Result<String, String> {
+        use trogon_runner_tools::session_store::SessionState;
+
+        let parent_state = self
+            .store
+            .load(parent_session_id)
+            .await
+            .map_err(|_| "spawn_agent: session not found".to_string())?;
+
+        const MAX_SPAWN_DEPTH: u32 = 3;
+        if parent_state.spawn_depth >= MAX_SPAWN_DEPTH {
+            return Err("spawn_agent: max nesting depth reached".to_string());
+        }
+
+        // Isolated worktree (best-effort: falls back to the parent cwd if the
+        // project is not a git repo). Cleaned up explicitly on every path below.
+        let worktree = trogon_runner_tools::worktree::create_worktree(&parent_state.cwd).await;
+        let sub_cwd = worktree
+            .as_ref()
+            .map(|w| w.path.clone())
+            .unwrap_or_else(|| parent_state.cwd.clone());
+
+        // Ephemeral sub-session inheriting the parent's execution context.
+        let sub_sid = uuid::Uuid::new_v4().to_string();
+        let now = now_iso8601();
+        let sub_state = SessionState {
+            cwd: sub_cwd,
+            mode: parent_state.mode.clone(),
+            model: parent_state.model.clone(),
+            permission_rules_text: parent_state.permission_rules_text.clone(),
+            egress_policy: parent_state.egress_policy.clone(),
+            parent_session_id: Some(parent_session_id.to_string()),
+            spawn_depth: parent_state.spawn_depth + 1,
+            created_at: now.clone(),
+            updated_at: now,
+            ..Default::default()
+        };
+        if let Err(e) = self.store.save(&sub_sid, &sub_state).await {
+            if let Some(w) = worktree {
+                w.cleanup().await;
+            }
+            return Err(format!("spawn_agent error: failed to create sub-session: {e}"));
+        }
+
+        // Drive the full tool-use loop in-process, accumulating assistant text.
+        let collected = Arc::new(std::sync::Mutex::new(String::new()));
+        let client = AccumulatingPromptClient::new(collected.clone());
+        let req = PromptRequest::new(
+            SessionId::new(sub_sid.clone()),
+            vec![ContentBlock::from(prompt)],
+        );
+
+        const SPAWN_SAFETY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+        let run = tokio::time::timeout(
+            SPAWN_SAFETY_TIMEOUT,
+            self.run_prompt(&req, &client, None, None),
+        )
+        .await;
+
+        // Cleanup on every path: drop the ephemeral session and the worktree.
+        let _ = self.store.delete(&sub_sid).await;
+        if let Some(w) = worktree {
+            w.cleanup().await;
+        }
+
+        let text = collected.lock().map(|g| g.clone()).unwrap_or_default();
+        match run {
+            Err(_elapsed) => Err(format!(
+                "spawn_agent error: safety-net timeout after {}s",
+                SPAWN_SAFETY_TIMEOUT.as_secs()
+            )),
+            Ok(Err(e)) => Err(format!("spawn_agent error: {e}")),
+            Ok(Ok(_)) => Ok(if text.is_empty() {
+                "Sub-agent completed.".to_string()
+            } else {
+                text
+            }),
+        }
+    }
+
     /// Core prompt execution. Streams events via `prompt_client` and returns the final response.
     #[cfg_attr(coverage, coverage(off))]
     async fn run_prompt(
@@ -519,7 +644,8 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                 }
                 // Offer the spawn_agent tool so the model can delegate subtasks to an
                 // isolated sub-agent (full tool-use loop in a temp worktree). The
-                // responder lives in main.rs; routed via {prefix}.agent.spawn.
+                // responder lives in main.rs; routed via {prefix}.spawn (off the
+                // `agent.` namespace to avoid the global-wildcard collision).
                 if let Some(ref nats) = self.execution_nats {
                     let spawn = trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::new(
                         nats.clone(),
