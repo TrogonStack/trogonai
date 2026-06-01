@@ -43,13 +43,21 @@ pub(crate) fn stream_event_json(event: &StreamEvent) -> Option<serde_json::Value
         StreamEvent::Text(t) => Some(json!({ "type": "text", "text": t })),
         StreamEvent::Thinking => Some(json!({ "type": "thinking" })),
         StreamEvent::ToolCall(name) => Some(json!({ "type": "tool_use", "name": name })),
-        StreamEvent::ToolFinished { name, output, exit_code, .. } => Some(json!({
+        StreamEvent::ToolFinished {
+            name,
+            output,
+            exit_code,
+            ..
+        } => Some(json!({
             "type": "tool_result",
             "name": name,
             "output": output,
             "exit_code": exit_code,
         })),
-        StreamEvent::Usage { used_tokens, context_size } => Some(json!({
+        StreamEvent::Usage {
+            used_tokens,
+            context_size,
+        } => Some(json!({
             "type": "usage",
             "used_tokens": used_tokens,
             "context_size": context_size,
@@ -59,12 +67,7 @@ pub(crate) fn stream_event_json(event: &StreamEvent) -> Option<serde_json::Value
 }
 
 /// Non-interactive mode: send one prompt, stream output to stdout, exit.
-pub async fn run<S: Session>(
-    session: S,
-    prompt: &str,
-    format: OutputFormat,
-    options: PrintOptions,
-) -> PrintExitCode {
+pub async fn run<S: Session>(session: S, prompt: &str, format: OutputFormat, options: PrintOptions) -> PrintExitCode {
     let mut rx = match session.prompt(prompt).await {
         Ok(rx) => rx,
         Err(e) => {
@@ -126,7 +129,12 @@ pub async fn run<S: Session>(
         while let Some(event) = rx.recv().await {
             match event {
                 StreamEvent::Text(t) => text.push_str(&t),
-                StreamEvent::ToolFinished { name, output, exit_code, .. } if options.print_tools => {
+                StreamEvent::ToolFinished {
+                    name,
+                    output,
+                    exit_code,
+                    ..
+                } if options.print_tools => {
                     let line = serde_json::json!({
                         "type": "tool",
                         "name": name,
@@ -160,7 +168,12 @@ pub async fn run<S: Session>(
     while let Some(event) = rx.recv().await {
         match event {
             StreamEvent::Text(t) => text.push_str(&t),
-            StreamEvent::ToolFinished { name, output, exit_code, .. } if options.print_tools => {
+            StreamEvent::ToolFinished {
+                name,
+                output,
+                exit_code,
+                ..
+            } if options.print_tools => {
                 let line = serde_json::json!({
                     "type": "tool",
                     "name": name,
@@ -285,7 +298,10 @@ mod tests {
             Some(json!({"type":"tool_result","name":"Bash","output":"ok","exit_code":0}))
         );
         assert_eq!(
-            stream_event_json(&StreamEvent::Usage { used_tokens: 5, context_size: 100 }),
+            stream_event_json(&StreamEvent::Usage {
+                used_tokens: 5,
+                context_size: 100
+            }),
             Some(json!({"type":"usage","used_tokens":5,"context_size":100}))
         );
         // Diff/Done/Error produce no standalone line.
@@ -326,7 +342,10 @@ mod tests {
                 StreamEvent::Thinking,
                 StreamEvent::ToolCall("Read".into()),
                 StreamEvent::Diff("--- a\n+++ b\n".into()),
-                StreamEvent::Usage { used_tokens: 100, context_size: 1000 },
+                StreamEvent::Usage {
+                    used_tokens: 100,
+                    context_size: 1000,
+                },
                 StreamEvent::Done("end_turn".into()),
             ]);
             assert_eq!(
@@ -351,7 +370,13 @@ mod tests {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("end_turn".into())]);
-        run(Arc::clone(&session), "test", OutputFormat::Text, PrintOptions::default()).await;
+        run(
+            Arc::clone(&session),
+            "test",
+            OutputFormat::Text,
+            PrintOptions::default(),
+        )
+        .await;
         assert_eq!(session.close_count(), 1);
     }
 
@@ -360,7 +385,13 @@ mod tests {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
         session.queue_turn(vec![StreamEvent::Done("error".into())]);
-        run(Arc::clone(&session), "test", OutputFormat::Text, PrintOptions::default()).await;
+        run(
+            Arc::clone(&session),
+            "test",
+            OutputFormat::Text,
+            PrintOptions::default(),
+        )
+        .await;
         assert_eq!(session.close_count(), 1);
     }
 
@@ -368,8 +399,17 @@ mod tests {
     async fn json_mode_closes_session_on_completion() {
         use std::sync::Arc;
         let session = Arc::new(MockSession::new("s"));
-        session.queue_turn(vec![StreamEvent::Text("hi".into()), StreamEvent::Done("end_turn".into())]);
-        run(Arc::clone(&session), "test", OutputFormat::Json, PrintOptions::default()).await;
+        session.queue_turn(vec![
+            StreamEvent::Text("hi".into()),
+            StreamEvent::Done("end_turn".into()),
+        ]);
+        run(
+            Arc::clone(&session),
+            "test",
+            OutputFormat::Json,
+            PrintOptions::default(),
+        )
+        .await;
         assert_eq!(session.close_count(), 1);
     }
 }

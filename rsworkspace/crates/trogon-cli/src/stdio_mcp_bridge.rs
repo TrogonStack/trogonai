@@ -71,11 +71,7 @@ pub struct StdioMcpBridge {
 impl StdioMcpBridge {
     /// Spawn `command` with `args` and `env`, and start the HTTP proxy on a
     /// random local port.
-    pub async fn spawn(
-        command: &str,
-        args: &[String],
-        env: &[(String, String)],
-    ) -> Result<Self, BridgeError> {
+    pub async fn spawn(command: &str, args: &[String], env: &[(String, String)]) -> Result<Self, BridgeError> {
         let mut child = Command::new(command)
             .args(args)
             .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
@@ -128,16 +124,19 @@ impl StdioMcpBridge {
         let port = listener.local_addr().unwrap().port();
         let url = format!("http://127.0.0.1:{port}");
 
-        let app = Router::new()
-            .fallback(proxy_handler)
-            .with_state(inner.clone());
+        let app = Router::new().fallback(proxy_handler).with_state(inner.clone());
 
         let handle = tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
         let server_abort = handle.abort_handle();
 
-        Ok(Self { url, inner, child, server_abort })
+        Ok(Self {
+            url,
+            inner,
+            child,
+            server_abort,
+        })
     }
 
     /// Shut down the HTTP server and kill the child process.
@@ -178,9 +177,7 @@ async fn proxy_handler(State(inner): State<Arc<Inner>>, body: Bytes) -> Response
     let line = serde_json::to_string(&req).unwrap_or_default() + "\n";
     {
         let mut stdin = inner.stdin.lock().await;
-        if stdin.write_all(line.as_bytes()).await.is_err()
-            || stdin.flush().await.is_err()
-        {
+        if stdin.write_all(line.as_bytes()).await.is_err() || stdin.flush().await.is_err() {
             inner.pending.lock().await.remove(&id);
             return (StatusCode::BAD_GATEWAY, "child stdin closed\n").into_response();
         }
@@ -274,12 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn bridge_spawn_fails_for_nonexistent_command() {
-        let result = StdioMcpBridge::spawn(
-            "/nonexistent/binary/that/does/not/exist",
-            &[],
-            &[],
-        )
-        .await;
+        let result = StdioMcpBridge::spawn("/nonexistent/binary/that/does/not/exist", &[], &[]).await;
         assert!(result.is_err(), "spawn must fail for a nonexistent command");
     }
 
@@ -510,9 +502,10 @@ mod tests {
     async fn bridge_fails_pending_when_child_exits() {
         // MED-42: when the child closes stdout (exit/crash), an in-flight request
         // must fail fast (502) instead of waiting out the 30-second timeout.
-        let path = std::env::temp_dir()
-            .join(format!("trogon_cli_dying_mcp_{}.sh", std::process::id()));
-        tokio::fs::write(&path, b"#!/bin/sh\nread line\nexit 0\n").await.unwrap();
+        let path = std::env::temp_dir().join(format!("trogon_cli_dying_mcp_{}.sh", std::process::id()));
+        tokio::fs::write(&path, b"#!/bin/sh\nread line\nexit 0\n")
+            .await
+            .unwrap();
         use std::os::unix::fs::PermissionsExt;
         let mut perms = tokio::fs::metadata(&path).await.unwrap().permissions();
         perms.set_mode(0o755);
@@ -523,13 +516,10 @@ mod tests {
             .expect("spawn must succeed");
         let client = reqwest::Client::new();
         let body = serde_json::json!({ "jsonrpc": "2.0", "id": 5, "method": "m" });
-        let resp = tokio::time::timeout(
-            Duration::from_secs(5),
-            client.post(&bridge.url).json(&body).send(),
-        )
-        .await
-        .expect("must not block for the full 30s timeout")
-        .expect("HTTP request must complete");
+        let resp = tokio::time::timeout(Duration::from_secs(5), client.post(&bridge.url).json(&body).send())
+            .await
+            .expect("must not block for the full 30s timeout")
+            .expect("HTTP request must complete");
         assert_eq!(
             resp.status().as_u16(),
             502,

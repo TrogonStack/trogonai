@@ -551,8 +551,15 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         session_id.clone(),
                     );
                     let (name, orig, client) = spawn.into_dispatch();
+                    // List available custom subagents (.claude/agents/) in the tool
+                    // description so the model knows which `agent` names it can use.
+                    let agent_names: Vec<String> =
+                        trogon_runner_tools::load_subagents(std::path::Path::new(&state.cwd))
+                            .into_iter()
+                            .map(|d| d.name)
+                            .collect();
                     a.add_mcp_tools(
-                        vec![trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def()],
+                        vec![trogon_runner_tools::spawn_agent_tool::SpawnAgentTool::tool_def_with_agents(&agent_names)],
                         vec![(name, orig, client)],
                     );
                 }

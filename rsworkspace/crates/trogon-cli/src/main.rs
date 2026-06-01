@@ -2,11 +2,11 @@ use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
-use trogon_cli::{
-    connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession, CrossRunnerSwitcher,
-    NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex, SessionInit,
-};
 use trogon_cli::Session as _;
+use trogon_cli::{
+    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
+    SessionInit, connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession,
+};
 
 #[derive(Subcommand)]
 enum Command {
@@ -116,17 +116,13 @@ fn trogon_dev_script() -> anyhow::Result<PathBuf> {
 /// `debug`, while an explicit `RUST_LOG` always wins so power users keep full
 /// control. Logs go to stderr so they never pollute `--print` stdout output.
 fn init_tracing(verbose: bool) {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     let default_level = if verbose { "debug" } else { "warn" };
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     // `try_init` so a double-init (e.g. in tests) is a no-op rather than a panic.
-    let _ = fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init();
+    let _ = fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
 }
 
 /// Build the per-session init metadata from the CLI flags.
@@ -145,7 +141,10 @@ fn build_session_init(
         match dir.canonicalize() {
             Ok(p) if p.is_dir() => additional_roots.push(p.to_string_lossy().into_owned()),
             Ok(p) => eprintln!("warning: --add-dir {} is not a directory — skipping", p.display()),
-            Err(e) => eprintln!("warning: --add-dir {} could not be resolved ({e}) — skipping", dir.display()),
+            Err(e) => eprintln!(
+                "warning: --add-dir {} could not be resolved ({e}) — skipping",
+                dir.display()
+            ),
         }
     }
     SessionInit {
@@ -241,7 +240,9 @@ async fn main() -> anyhow::Result<()> {
             "stream-json" => OutputFormat::StreamJson,
             _ => OutputFormat::Text,
         };
-        let options = PrintOptions { print_tools: args.print_tools };
+        let options = PrintOptions {
+            print_tools: args.print_tools,
+        };
 
         // Resolve the target runner prefix: if a model is requested, look it up in
         // the registry so cross-runner models (e.g. `--model haiku` while prefix is
@@ -249,22 +250,19 @@ async fn main() -> anyhow::Result<()> {
         let target_prefix = if let Some(model) = &args.model {
             let model_id = resolve_model_alias(model);
             let js = async_nats::jetstream::new(nats.clone());
-            let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+            let reg_store = trogon_registry::ReprovisioningStore::new(js)
+                .await
                 .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
             let registry = trogon_registry::Registry::new(reg_store);
             match registry.find_by_model(&model_id).await {
-                Ok(Some(cap)) => cap.metadata["acp_prefix"]
-                    .as_str()
-                    .unwrap_or(&args.prefix)
-                    .to_string(),
+                Ok(Some(cap)) => cap.metadata["acp_prefix"].as_str().unwrap_or(&args.prefix).to_string(),
                 _ => args.prefix.clone(),
             }
         } else {
             args.prefix.clone()
         };
 
-        let session =
-            TrogonSession::new_with_init(nats, &target_prefix, cwd, vec![], &session_init).await?;
+        let session = TrogonSession::new_with_init(nats, &target_prefix, cwd, vec![], &session_init).await?;
         if args.dangerously_skip_permissions
             && let Err(e) = session.set_mode("bypassPermissions").await
         {
@@ -285,15 +283,15 @@ async fn main() -> anyhow::Result<()> {
         drop(nats_server);
         std::process::exit(code as i32);
     } else {
-        let acp_prefix = AcpPrefix::new(&args.prefix)
-            .map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
+        let acp_prefix = AcpPrefix::new(&args.prefix).map_err(|e| anyhow::anyhow!("invalid ACP prefix: {e}"))?;
         let nats_config = NatsConfig::new(vec![args.nats_url.clone()], NatsAuth::None);
         let acp_config = Config::new(acp_prefix, nats_config);
         let js = async_nats::jetstream::new(nats.clone());
         // MED-36: use a store that re-provisions the (in-memory) AGENT_REGISTRY
         // bucket on failure, so /model and /status keep working after a NATS server
         // restart instead of erroring until the CLI is restarted.
-        let reg_store = trogon_registry::ReprovisioningStore::new(js).await
+        let reg_store = trogon_registry::ReprovisioningStore::new(js)
+            .await
             .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
         let registry = trogon_registry::Registry::new(reg_store);
         let registry_for_repl = registry.clone();
@@ -390,4 +388,3 @@ mod tests {
         assert!(init.permission_rules.unwrap().contains("allow_commands: cargo test"));
     }
 }
-

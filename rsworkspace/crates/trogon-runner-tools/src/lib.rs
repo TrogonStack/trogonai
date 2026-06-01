@@ -10,6 +10,7 @@ pub mod permission_bridge;
 pub mod permission_rules;
 pub mod portable_session;
 pub mod safety_classifier;
+pub mod subagents;
 pub mod trogon_md;
 pub mod session_store;
 pub mod spawn_agent_tool;
@@ -33,6 +34,7 @@ pub use permission::{
     RulesPermissionChecker, SafetyClassifier,
 };
 pub use safety_classifier::LlmSafetyClassifier;
+pub use subagents::{load_subagent, load_subagents, parse_subagent, SubagentDef};
 pub use permission_bridge::handle_permission_request_nats;
 pub use portable_session::{
     export_json_from_wire, message_to_v2, messages_need_v2, messages_to_export_v2,

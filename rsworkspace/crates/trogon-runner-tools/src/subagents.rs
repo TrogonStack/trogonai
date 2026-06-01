@@ -1,18 +1,11 @@
 //! Custom subagent definitions loaded from `.claude/agents/`.
 //!
-//! Each definition is a markdown file with optional YAML-ish frontmatter:
-//! ```text
-//! ---
-//! name: code-reviewer
-//! description: Reviews a diff for bugs
-//! tools: read_file, grep, git_diff
-//! model: claude-sonnet-4-6
-//! ---
-//! You are a meticulous code reviewer. ...
-//! ```
-//! Definitions are discovered from `<cwd>/.claude/agents/*.md` (project) and
-//! `~/.config/trogon/agents/*.md` (user); project definitions win on name clash.
-//! The `/agents` REPL command lists and inspects them.
+//! A definition is a markdown file with optional YAML-ish frontmatter
+//! (`name`, `description`, `tools`, `model`) followed by a body that becomes the
+//! subagent's system prompt. Lives in `trogon-runner-tools` so both the CLI
+//! (`/agents`) and the runner's `spawn_agent` handler can use it: the handler
+//! resolves a requested `agent` name to its system prompt + model for the
+//! sub-session.
 
 use std::path::{Path, PathBuf};
 
@@ -28,6 +21,15 @@ pub struct SubagentDef {
     pub system_prompt: String,
     /// File the definition was loaded from.
     pub source: PathBuf,
+}
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
 }
 
 /// Parse one definition file's contents. `name` falls back to the file stem when
@@ -74,11 +76,7 @@ pub fn parse_subagent(content: &str, source: PathBuf) -> Option<SubagentDef> {
         content.trim().to_string()
     };
 
-    let name = name.or_else(|| {
-        source
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-    })?;
+    let name = name.or_else(|| source.file_stem().map(|s| s.to_string_lossy().into_owned()))?;
 
     Some(SubagentDef {
         name,
@@ -90,15 +88,16 @@ pub fn parse_subagent(content: &str, source: PathBuf) -> Option<SubagentDef> {
     })
 }
 
-/// Load all subagent definitions for `cwd`: project (`<cwd>/.claude/agents`) then
-/// user (`~/.config/trogon/agents`). Project definitions override user ones on a
-/// name clash. Results are sorted by name.
+/// Load all subagent definitions for `cwd`: user (`~/.config/trogon/agents`) then
+/// project (`<cwd>/.claude/agents`); project overrides user on a name clash.
+/// Sorted by name.
 pub fn load_subagents(cwd: &Path) -> Vec<SubagentDef> {
-    let mut by_name: std::collections::HashMap<String, SubagentDef> = std::collections::HashMap::new();
-    // User first (lower precedence), then project overrides.
-    let user_dir = crate::session_store::expand_tilde("~/.config/trogon/agents");
-    let project_dir = cwd.join(".claude/agents");
-    for dir in [user_dir, project_dir] {
+    let mut by_name: std::collections::HashMap<String, SubagentDef> =
+        std::collections::HashMap::new();
+    for dir in [
+        expand_tilde("~/.config/trogon/agents"),
+        cwd.join(".claude/agents"),
+    ] {
         for def in read_dir_defs(&dir) {
             by_name.insert(def.name.clone(), def);
         }
@@ -108,7 +107,11 @@ pub fn load_subagents(cwd: &Path) -> Vec<SubagentDef> {
     defs
 }
 
-/// Read + parse every `*.md` file in `dir` (non-recursive). Missing dir → empty.
+/// Load a single subagent definition by `name` for `cwd`, if defined.
+pub fn load_subagent(cwd: &Path, name: &str) -> Option<SubagentDef> {
+    load_subagents(cwd).into_iter().find(|d| d.name == name)
+}
+
 fn read_dir_defs(dir: &Path) -> Vec<SubagentDef> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -145,9 +148,9 @@ mod tests {
 
     #[test]
     fn name_falls_back_to_file_stem() {
-        let def = parse_subagent("Just a body, no frontmatter.", PathBuf::from("/a/planner.md")).unwrap();
+        let def = parse_subagent("Just a body.", PathBuf::from("/a/planner.md")).unwrap();
         assert_eq!(def.name, "planner");
-        assert_eq!(def.system_prompt, "Just a body, no frontmatter.");
+        assert_eq!(def.system_prompt, "Just a body.");
         assert!(def.tools.is_empty());
         assert!(def.model.is_none());
     }
