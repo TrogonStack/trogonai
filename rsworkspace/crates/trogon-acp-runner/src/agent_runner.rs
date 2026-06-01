@@ -403,7 +403,20 @@ pub mod mock {
             }
 
             *self.captured_system_prompt.lock().unwrap() = system_prompt.map(str::to_string);
-            // Signal that the runner has started and the steer subscription is live.
+
+            // Emit scripted events first — a real runner streams text deltas as it
+            // generates, before it could block awaiting more input. Emitting here
+            // (rather than after the steer wait) lets cancel tests observe partial
+            // assistant text while the runner is still "running" on a steer wait.
+            let events = self.events.lock().unwrap().clone();
+            for event in events {
+                let _ = event_tx.send(event).await;
+            }
+
+            // Signal that the runner has started: scripted events are now buffered
+            // and the runner is about to block on the steer subscription. Tests wait
+            // on this before publishing a steer message or firing a cancel, so the
+            // event ordering they depend on is deterministic.
             self.started_notify.notify_one();
 
             // If configured, wait for the first steer message asynchronously.
@@ -423,10 +436,6 @@ pub mod mock {
                 }
             }
 
-            let events = self.events.lock().unwrap().clone();
-            for event in events {
-                let _ = event_tx.send(event).await;
-            }
             if let Some(error) = self.error.lock().unwrap().take() {
                 return Err(error);
             }
