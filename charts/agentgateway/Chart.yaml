@@ -1,0 +1,19 @@
+apiVersion: v2
+name: agentgateway
+description: Trogon MCP/A2A agentgateway — JWT-validating queue worker over NATS with SpiceDB authorization, audit, approval, step-up, anomaly, and context-throttle hooks.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/TrogonStack/trogonai
+sources:
+  - https://github.com/TrogonStack/trogonai
+maintainers:
+  - name: Trogon
+    url: https://github.com/TrogonStack
+keywords:
+  - mcp
+  - a2a
+  - nats
+  - gateway
+  - agent
+icon: https://avatars.githubusercontent.com/u/TrogonStack

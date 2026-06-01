@@ -1,0 +1,9 @@
+{
+  "bucket": "agent-registry",
+  "description": "Agent registry records keyed by <agent_id>@<version>.",
+  "history": 10,
+  "ttl": 0,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}

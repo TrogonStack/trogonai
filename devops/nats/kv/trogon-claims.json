@@ -1,0 +1,9 @@
+{
+  "bucket": "trogon-claims",
+  "description": "STS-minted claim cache (short-TTL agent/user JWTs and audience-shadow lookup).",
+  "history": 1,
+  "ttl": 600000000000,
+  "max_bytes": -1,
+  "replicas": 3,
+  "storage": "file"
+}

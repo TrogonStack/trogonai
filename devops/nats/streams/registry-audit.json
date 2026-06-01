@@ -1,0 +1,13 @@
+{
+  "name": "REGISTRY_AUDIT",
+  "description": "trogon-agent-registry audit envelopes (lookup_found, lookup_notfound, lookup_revoked, put, delete).",
+  "subjects": ["mcp.audit.registry.>"],
+  "retention": "limits",
+  "storage": "file",
+  "max_age": 2592000000000000,
+  "max_msgs": -1,
+  "max_bytes": -1,
+  "discard": "old",
+  "duplicate_window": 120000000000,
+  "num_replicas": 3
+}
