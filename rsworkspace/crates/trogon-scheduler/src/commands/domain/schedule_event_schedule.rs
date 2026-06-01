@@ -2,7 +2,7 @@ use buffa::MessageField;
 use trogonai_proto::convert::{duration_from_seconds, timestamp_from_datetime};
 use trogonai_proto::scheduler::schedules::v1;
 
-use super::{CronExpression, EverySeconds, RRuleExpression, RRuleTimezone, ScheduleTimezone};
+use super::{CronExpression, EverySeconds, RRuleExpression, RRuleTimezone, ScheduleTimezone, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScheduleEventSchedule {
@@ -38,10 +38,7 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
                 expr: expr.as_str().to_string(),
-                timezone: timezone
-                    .as_ref()
-                    .map(|timezone| timezone_from(timezone.as_str()))
-                    .unwrap_or_default(),
+                timezone: timezone.as_ref().map(timezone_from).unwrap_or_default(),
             }
             .into(),
             ScheduleEventSchedule::RRule {
@@ -53,10 +50,7 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
             } => v1::schedule::RRule {
                 dtstart: MessageField::some(timestamp_from_datetime(dtstart)),
                 rrule: rrule.as_str().to_string(),
-                timezone: timezone
-                    .as_ref()
-                    .map(|timezone| timezone_from(timezone.as_str()))
-                    .unwrap_or_default(),
+                timezone: timezone.as_ref().map(timezone_from).unwrap_or_default(),
                 rdate: rdate.iter().map(timestamp_from_datetime).collect(),
                 exdate: exdate.iter().map(timestamp_from_datetime).collect(),
             }
@@ -66,10 +60,10 @@ impl From<&ScheduleEventSchedule> for v1::Schedule {
     }
 }
 
-fn timezone_from(value: &str) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
+fn timezone_from(value: &TimeZone) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
     MessageField::some(trogonai_proto::google::r#type::TimeZone {
-        id: value.to_owned(),
-        version: String::new(),
+        id: value.id().to_string(),
+        version: value.tzdb_version().as_str().to_string(),
     })
 }
 
@@ -133,6 +127,10 @@ mod tests {
         );
         assert_eq!(inner.expr, "0 0 * * * *");
         assert_eq!(inner.timezone.as_option().unwrap().id, "UTC");
+        assert_eq!(
+            inner.timezone.as_option().unwrap().version,
+            chrono_tz::IANA_TZDB_VERSION
+        );
 
         let inner = expect_schedule_kind!(
             rrule_proto.kind.unwrap(),
@@ -141,6 +139,10 @@ mod tests {
         );
         assert_eq!(inner.rrule, "FREQ=DAILY;COUNT=2");
         assert_eq!(inner.timezone.as_option().unwrap().id, "UTC");
+        assert_eq!(
+            inner.timezone.as_option().unwrap().version,
+            chrono_tz::IANA_TZDB_VERSION
+        );
         assert_eq!(inner.rdate.len(), 1);
         assert_eq!(inner.exdate.len(), 1);
     }

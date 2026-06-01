@@ -285,51 +285,87 @@ fn validate_rrule_expression(rrule: &str) -> Result<(), ScheduleSpecError> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScheduleTimezone(String);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RRuleTimezone(String);
-
-macro_rules! impl_timezone_type {
-    ($type:ty) => {
-        impl $type {
-            pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
-                let timezone = validate_timezone_token(timezone.into())?;
-                chrono_tz::Tz::from_str(&timezone).map_err(|_| ScheduleSpecError::InvalidTimezone {
-                    timezone: timezone.clone(),
-                })?;
-                Ok(Self(timezone))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
-            pub fn into_string(self) -> String {
-                self.0
-            }
-        }
-
-        impl TryFrom<String> for $type {
-            type Error = ScheduleSpecError;
-
-            fn try_from(value: String) -> Result<Self, Self::Error> {
-                Self::new(value)
-            }
-        }
-
-        impl TryFrom<&str> for $type {
-            type Error = ScheduleSpecError;
-
-            fn try_from(value: &str) -> Result<Self, Self::Error> {
-                Self::new(value)
-            }
-        }
-    };
+pub struct TimeZone {
+    id: String,
+    tzdb_version: TzdbVersion,
 }
 
-impl_timezone_type!(ScheduleTimezone);
-impl_timezone_type!(RRuleTimezone);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TzdbVersion(String);
+
+pub type ScheduleTimezone = TimeZone;
+pub type RRuleTimezone = TimeZone;
+
+impl TimeZone {
+    pub fn new(timezone: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+        Self::with_tzdb_version(timezone, TzdbVersion::current())
+    }
+
+    pub fn with_tzdb_version(
+        timezone: impl Into<String>,
+        tzdb_version: TzdbVersion,
+    ) -> Result<Self, ScheduleSpecError> {
+        let id = validate_timezone_token(timezone.into())?;
+        chrono_tz::Tz::from_str(&id).map_err(|_| ScheduleSpecError::InvalidTimezone { timezone: id.clone() })?;
+
+        Ok(Self { id, tzdb_version })
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.id()
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn tzdb_version(&self) -> &TzdbVersion {
+        &self.tzdb_version
+    }
+
+    pub fn into_string(self) -> String {
+        self.id
+    }
+}
+
+impl TryFrom<String> for TimeZone {
+    type Error = ScheduleSpecError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for TimeZone {
+    type Error = ScheduleSpecError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TzdbVersion {
+    pub fn current() -> Self {
+        Self(chrono_tz::IANA_TZDB_VERSION.to_string())
+    }
+
+    pub fn new(version: impl Into<String>) -> Result<Self, ScheduleSpecError> {
+        let version = version.into();
+        if is_valid_tzdb_version(&version) {
+            Ok(Self(version))
+        } else {
+            Err(ScheduleSpecError::InvalidTimezoneDatabaseVersion { version })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
 
 fn validate_timezone_token(timezone: String) -> Result<String, ScheduleSpecError> {
     let trimmed = timezone.trim();
@@ -338,6 +374,15 @@ fn validate_timezone_token(timezone: String) -> Result<String, ScheduleSpecError
     }
 
     Ok(timezone)
+}
+
+fn is_valid_tzdb_version(version: &str) -> bool {
+    let Some(year) = version.get(..4) else {
+        return false;
+    };
+    let suffix = &version[4..];
+
+    year.chars().all(|ch| ch.is_ascii_digit()) && !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_lowercase())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -727,11 +772,28 @@ mod tests {
         );
         assert_eq!(dtstart.into_string(), "2026-01-01T00:00:00Z");
         assert_eq!(schedule_timezone.as_str(), "UTC");
+        assert_eq!(schedule_timezone.id(), "UTC");
+        assert_eq!(schedule_timezone.tzdb_version().as_str(), chrono_tz::IANA_TZDB_VERSION);
         assert_eq!(schedule_timezone.into_string(), "UTC");
         assert_eq!(rrule_timezone.as_str(), "UTC");
+        assert_eq!(rrule_timezone.tzdb_version().as_str(), chrono_tz::IANA_TZDB_VERSION);
         assert_eq!(rrule_timezone.into_string(), "UTC");
+        let version = TzdbVersion::new("2025b").unwrap();
+        assert_eq!(version.as_str(), "2025b");
+        assert_eq!(version.clone().into_string(), "2025b");
+        assert_eq!(
+            TimeZone::with_tzdb_version("America/New_York", version)
+                .unwrap()
+                .tzdb_version()
+                .as_str(),
+            "2025b"
+        );
         assert!(ScheduleTimezone::try_from("UTC\n").is_err());
         assert!(RRuleTimezone::try_from("Nope/Zone").is_err());
+        assert!(TzdbVersion::new("").is_err());
+        assert!(TzdbVersion::new("2025").is_err());
+        assert!(TzdbVersion::new("25b").is_err());
+        assert!(TzdbVersion::new("2025B").is_err());
     }
 
     #[test]
@@ -929,7 +991,7 @@ mod tests {
             }
 
             #[test]
-            fn schedule_timezone_accepts_any_non_whitespace_non_control_string(
+            fn schedule_timezone_accepts_known_iana_zones(
                 s in prop_oneof![Just("UTC".to_string()), Just("America/New_York".to_string()), Just("Europe/London".to_string())],
             ) {
                 let tz = ScheduleTimezone::new(&s).unwrap();

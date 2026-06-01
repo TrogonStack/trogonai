@@ -38,6 +38,9 @@ pub enum ScheduleSpecError {
     InvalidTimezone {
         timezone: String,
     },
+    InvalidTimezoneDatabaseVersion {
+        version: String,
+    },
     TtlMustBePositive,
     TtlSecondsTooLarge {
         max: u64,
@@ -67,6 +70,9 @@ impl std::fmt::Display for ScheduleSpecError {
                 write!(formatter, "sampling subject '{subject}' is invalid: {source}")
             }
             Self::InvalidTimezone { timezone } => write!(formatter, "timezone '{timezone}' is invalid"),
+            Self::InvalidTimezoneDatabaseVersion { version } => {
+                write!(formatter, "timezone database version '{version}' is invalid")
+            }
             Self::TtlMustBePositive => formatter.write_str("ttl seconds must be positive"),
             Self::TtlSecondsTooLarge { max, actual } => {
                 write!(formatter, "ttl seconds must be at most {max}, got {actual}")
@@ -88,6 +94,7 @@ impl std::error::Error for ScheduleSpecError {
             | Self::ReservedHeaderName { .. }
             | Self::InvalidHeaderValue { .. }
             | Self::InvalidTimezone { .. }
+            | Self::InvalidTimezoneDatabaseVersion { .. }
             | Self::TtlMustBePositive
             | Self::TtlSecondsTooLarge { .. } => None,
         }
@@ -187,6 +194,13 @@ mod tests {
                     timezone: "Nope/Zone".to_string(),
                 },
                 "timezone 'Nope/Zone' is invalid",
+                false,
+            ),
+            (
+                ScheduleSpecError::InvalidTimezoneDatabaseVersion {
+                    version: "2025".to_string(),
+                },
+                "timezone database version '2025' is invalid",
                 false,
             ),
             (

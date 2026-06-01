@@ -12,7 +12,8 @@ pub use message::{
 };
 pub use schedule::{
     CronExpression, Delivery, DeliveryRoute, EverySeconds, JobHeaders, JobMessage, JobStatus, RRuleDateTime,
-    RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TtlSeconds,
+    RRuleExpression, RRuleTimezone, SamplingSource, SamplingSubject, Schedule, ScheduleTimezone, TimeZone, TtlSeconds,
+    TzdbVersion,
 };
 pub use schedule_event_delivery::ScheduleEventDelivery;
 pub use schedule_event_sampling_source::ScheduleEventSamplingSource;
