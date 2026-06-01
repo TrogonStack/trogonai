@@ -49,6 +49,14 @@ struct Args {
     #[arg(long)]
     dangerously_skip_permissions: bool,
 
+    /// Start the interactive session in plan mode (writes are denied; plan first)
+    #[arg(long, conflicts_with = "dangerously_skip_permissions")]
+    plan: bool,
+
+    /// Enable verbose (debug-level) logging for the CLI. Respects an explicit RUST_LOG.
+    #[arg(short = 'v', long)]
+    verbose: bool,
+
     /// Model id for --print (resolved via aliases; uses --prefix runner)
     #[arg(long)]
     model: Option<String>,
@@ -84,6 +92,26 @@ fn trogon_dev_script() -> anyhow::Result<PathBuf> {
         .map_err(|_| anyhow::anyhow!("trogon dev script not found at {}", script.display()))
 }
 
+/// Initialize the CLI tracing subscriber.
+///
+/// Without `--verbose` the CLI stays quiet unless the user opts in via `RUST_LOG`
+/// (default filter: `warn`). With `--verbose` the default filter is raised to
+/// `debug`, while an explicit `RUST_LOG` always wins so power users keep full
+/// control. Logs go to stderr so they never pollute `--print` stdout output.
+fn init_tracing(verbose: bool) {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let default_level = if verbose { "debug" } else { "warn" };
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
+
+    // `try_init` so a double-init (e.g. in tests) is a no-op rather than a panic.
+    let _ = fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
+}
+
 fn run_dev_stack() -> anyhow::Result<()> {
     let script = trogon_dev_script()?;
     let status = std::process::Command::new("bash").arg(script).status()?;
@@ -97,6 +125,8 @@ fn run_dev_stack() -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     trogon_cli::env_local::load_env_local();
     let args = Args::parse();
+
+    init_tracing(args.verbose);
 
     if matches!(args.command, Some(Command::Dev)) {
         return run_dev_stack();
@@ -226,6 +256,7 @@ async fn main() -> anyhow::Result<()> {
             args.stream,
             resume,
             args.dangerously_skip_permissions,
+            args.plan,
         )
         .await?;
     }
