@@ -49,6 +49,7 @@ pub enum RateLimitScope {
     Server,
     Tenant,
     Caller,
+    Purpose,
 }
 
 impl RateLimitScope {
@@ -58,6 +59,7 @@ impl RateLimitScope {
             Self::Server => "server",
             Self::Tenant => "tenant",
             Self::Caller => "caller",
+            Self::Purpose => "purpose",
         }
     }
 }

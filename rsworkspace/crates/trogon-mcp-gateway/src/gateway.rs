@@ -9,7 +9,7 @@ use async_nats::jetstream;
 use bytes::Bytes;
 use futures::StreamExt;
 use mcp_nats::Config;
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_nats::inject_trace_context;
 
@@ -17,10 +17,7 @@ use crate::act_chain::{self, MCP_ACT_CHAIN_HEADER};
 use crate::agent_identity::AgentIdentityMode;
 use crate::audit::{self, AuditEnvelope, AUDIT_OUTCOME_REDACTED, AUDIT_OUTCOME_REDACTION_SKIPPED};
 use crate::authz::{AuthzContext, GatewayIdentity, IdentitySource, PermissionChecker, ToolsListFilterContext};
-use crate::approvals::{
-    ApprovalDecision, ApprovalError, ApprovalGate, ApprovalRequest, ApprovalSubject, RequestId,
-    build_approval_required_with_subject, jsonrpc_error_with_approval_data,
-};
+use crate::context_throttle::{ContextThrottle, ContextThrottleKey, ContextThrottleOutcome};
 use crate::egress::{
     EgressMinter, EgressTarget, apply_mesh_egress_headers, backend_target_aud, scope_for_tools_call,
     session_id_from_headers, strip_inbound_credentials,
@@ -40,7 +37,7 @@ use crate::schema_cache::{
     SchemaCacheRuntime, ServerId, ensure_tool_schema, lookup_tool_schema, sniff_tools_list_reply,
 };
 use crate::subject::gateway_to_server_subject;
-use crate::throttle::{RateLimitDeny, RateLimiter};
+use crate::throttle::{RateLimitDeny, RateLimitScope, RateLimiter};
 use crate::trace::{DecisionTrace, TraceStore};
 
 const TENANT_HEADER: &str = "trogon-mcp-tenant";
@@ -77,10 +74,8 @@ pub struct GatewaySettings {
     pub chain_resolver: Option<Arc<dyn IngressChainResolve>>,
     /// When `None`, Pin 9 defaults apply via in-process limiter (Tier 2 KV sync TODO per ADR 0012).
     pub rate_limit: Option<Arc<RateLimiter>>,
-    /// When `None`, HITL approval is not engaged on the ingress path.
-    pub approval_gate: Option<Arc<dyn ApprovalGate>>,
-    /// Risk thresholds and approval envelope defaults for adaptive-access evaluation.
-    pub mesh_config: MeshGatewayConfig,
+    /// Per `(tenant_id, agent_id, purpose)` token-bucket limiter; when `None`, context throttle is skipped.
+    pub context_throttle: Option<Arc<ContextThrottle>>,
 }
 
 fn rate_limiter(settings: &GatewaySettings) -> Arc<RateLimiter> {
@@ -381,87 +376,37 @@ async fn handle_ingress_inner(
         return Ok(());
     }
 
-    if let Some(gate) = settings.approval_gate.as_ref()
-        && let Some((reason, ttl_s)) = hitl_approval_requirement(
-            &settings.mesh_config,
-            &gateway_identity,
-            &jwt_claims,
-            tenant_for_rate,
-            server_id,
-            &jsonrpc_method,
-            tool_call.as_deref(),
-            msg.payload.as_ref(),
-            &request_id,
-        )
-    {
-        let correlation_id = approval_correlation_id(&request_id);
-        let Ok(approval_request_id) = RequestId::new(correlation_id) else {
-            finish_ingress_blocked(FinishIngressBlockedParams {
-                client,
-                jetstream,
-                mcp: &settings.mcp,
-                msg: &msg,
-                backend_subject: &backend_subject,
-                jsonrpc_method: &jsonrpc_method,
-                gateway_identity: gateway_identity.clone(),
-                request_id: request_id.clone(),
-                requires_spicedb,
-                spicedb_allowed: None,
-                traces,
-                audit_outcome: "error",
-                jsonrpc_code: rpc_codes::POLICY_DENY,
-                jsonrpc_message: "invalid_approval_request_id".to_string(),
-            })
-            .await;
-            return Ok(());
-        };
-        let approval_request = ApprovalRequest::new(
-            approval_request_id.clone(),
-            Duration::from_secs(ttl_s),
-            None,
-        );
-        match gate.request_approval(&approval_request).await {
-            Ok(ApprovalDecision::Granted { .. }) => {}
-            Ok(ApprovalDecision::Denied { reason, .. }) => {
-                finish_ingress_blocked(FinishIngressBlockedParams {
-                    client,
-                    jetstream,
-                    mcp: &settings.mcp,
-                    msg: &msg,
-                    backend_subject: &backend_subject,
-                    jsonrpc_method: &jsonrpc_method,
-                    gateway_identity: gateway_identity.clone(),
-                    request_id: request_id.clone(),
-                    requires_spicedb,
-                    spicedb_allowed: None,
-                    traces,
-                    audit_outcome: "deny",
-                    jsonrpc_code: rpc_codes::POLICY_DENY,
-                    jsonrpc_message: reason,
-                })
-                .await;
-                return Ok(());
-            }
-            Err(ApprovalError::Timeout) | Err(ApprovalError::ChannelClosed) | Err(ApprovalError::MalformedDecision) => {
-                finish_ingress_approval_required(FinishIngressApprovalRequiredParams {
-                    client,
-                    jetstream,
-                    mcp: &settings.mcp,
-                    msg: &msg,
-                    backend_subject: &backend_subject,
-                    jsonrpc_method: &jsonrpc_method,
-                    gateway_identity: gateway_identity.clone(),
-                    request_id: request_id.clone(),
-                    requires_spicedb,
-                    spicedb_allowed: None,
-                    traces,
-                    approval_request_id,
-                    reason,
-                    ttl_s,
-                    approval_base_url: settings.mesh_config.approval_base_url.clone(),
-                })
-                .await;
-                return Ok(());
+    if let Some(throttle) = settings.context_throttle.as_ref() {
+        match context_throttle_key(&gateway_identity, &jwt_claims, legacy_tenant_hdr.as_deref()) {
+            Some(key) => match throttle.acquire(&key, 1) {
+                Ok(ContextThrottleOutcome::Allowed) => {}
+                Ok(ContextThrottleOutcome::Throttled { retry_after_ms }) => {
+                    finish_ingress_rate_limited(FinishIngressRateLimitedParams {
+                        client,
+                        jetstream,
+                        mcp: &settings.mcp,
+                        msg: &msg,
+                        backend_subject: &backend_subject,
+                        jsonrpc_method: &jsonrpc_method,
+                        gateway_identity: gateway_identity.clone(),
+                        request_id: request_id.clone(),
+                        requires_spicedb,
+                        spicedb_allowed: None,
+                        traces,
+                        deny: RateLimitDeny {
+                            scope: RateLimitScope::Purpose,
+                            retry_after_ms,
+                        },
+                    })
+                    .await;
+                    return Ok(());
+                }
+                Err(err) => {
+                    debug!(error = %err, key = %key, "context throttle acquire failed; continuing");
+                }
+            },
+            None => {
+                debug!("context throttle skipped: incomplete tenant_id, agent_id, or purpose");
             }
         }
     }
@@ -950,84 +895,19 @@ fn evaluate_hierarchical_policy(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn hitl_approval_requirement(
-    mesh_config: &MeshGatewayConfig,
+fn context_throttle_key(
     gateway_identity: &GatewayIdentity,
     jwt_claims: &crate::jwt::VerifiedJwtClaims,
-    tenant: &str,
-    server_id: &str,
-    jsonrpc_method: &str,
-    tool_name: Option<&str>,
-    payload: &[u8],
-    request_id: &Option<serde_json::Value>,
-) -> Option<(String, u64)> {
-    let ctx = policy_call_context(
-        gateway_identity,
-        jwt_claims,
-        tenant,
-        server_id,
-        jsonrpc_method,
-        tool_name,
-        payload,
-        request_id,
-    );
-    match evaluate_risk(&ctx, mesh_config) {
-        RiskDecision::RequireApproval { reason, ttl_s } => Some((reason, ttl_s)),
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn policy_call_context(
-    gateway_identity: &GatewayIdentity,
-    jwt_claims: &crate::jwt::VerifiedJwtClaims,
-    tenant: &str,
-    server_id: &str,
-    jsonrpc_method: &str,
-    tool_name: Option<&str>,
-    payload: &[u8],
-    request_id: &Option<serde_json::Value>,
-) -> CallContext {
-    let caller_sub = gateway_identity.caller_sub.as_deref().unwrap_or("anonymous");
-    CallContext {
-        tenant: tenant.to_string(),
-        agent_id: jwt_claims
-            .agent_id
-            .clone()
-            .unwrap_or_else(|| caller_sub.to_string()),
-        purpose: jwt_claims.purpose.clone().unwrap_or_default(),
-        target_aud: backend_target_aud(tenant, server_id),
-        scope_fingerprint: scope_for_tools_call(server_id, tool_name).unwrap_or_default(),
-        jsonrpc_method: jsonrpc_method.to_string(),
-        tool_name: tool_name.map(str::to_string),
-        recent_denials_60s: 0,
-        args: jsonrpc_params(payload),
-        request_id: approval_correlation_id(request_id),
-    }
-}
-
-fn approval_correlation_id(request_id: &Option<serde_json::Value>) -> String {
-    match request_id {
-        Some(value) if !value.is_null() => value
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| value.to_string()),
-        _ => format!(
-            "{:032x}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ),
-    }
-}
-
-fn jsonrpc_params(payload: &[u8]) -> serde_json::Value {
-    serde_json::from_slice::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| value.get("params").cloned())
-        .unwrap_or_else(|| serde_json::json!({}))
+    legacy_tenant: Option<&str>,
+) -> Option<ContextThrottleKey> {
+    let tenant_id = gateway_identity
+        .tenant
+        .as_deref()
+        .or(legacy_tenant)
+        .filter(|value| !value.is_empty())?;
+    let agent_id = jwt_claims.agent_id.as_deref().filter(|value| !value.is_empty())?;
+    let purpose = jwt_claims.purpose.as_deref().filter(|value| !value.is_empty())?;
+    ContextThrottleKey::new(tenant_id, agent_id, purpose).ok()
 }
 
 fn merged_requires_spicedb(
