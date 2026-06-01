@@ -13,6 +13,7 @@ pub mod context_throttle;
 pub mod chain_resolver;
 pub mod egress;
 pub mod gateway;
+pub mod health;
 pub mod ingress;
 pub mod observability;
 pub mod jwt;
