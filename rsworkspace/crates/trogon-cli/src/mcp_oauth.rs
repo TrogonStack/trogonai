@@ -436,6 +436,22 @@ pub fn open_browser(url: &str) {
 /// Run the full interactive OAuth flow for `mcp_url` and return the resulting
 /// token. Opens the browser and blocks until the user authorizes (or times out).
 pub async fn login(http: &reqwest::Client, mcp_url: &str) -> Result<StoredToken, String> {
+    login_with(http, mcp_url, |authorize_url| {
+        eprintln!("Opening your browser to authorize MCP access. If it doesn't open, visit:");
+        eprintln!("  {authorize_url}");
+        open_browser(authorize_url);
+    })
+    .await
+}
+
+/// Like [`login`] but with an injectable `open` step (given the authorization
+/// URL). Production passes the browser opener; tests pass a driver that follows
+/// the redirect, so the whole flow can run end-to-end headlessly.
+pub async fn login_with<O: FnOnce(&str)>(
+    http: &reqwest::Client,
+    mcp_url: &str,
+    open: O,
+) -> Result<StoredToken, String> {
     let meta = discover(http, mcp_url).await?;
     let callback = CallbackServer::bind().await?;
     // `wait()` consumes `callback`; keep the redirect URI for the token exchange.
@@ -452,9 +468,7 @@ pub async fn login(http: &reqwest::Client, mcp_url: &str) -> Result<StoredToken,
         mcp_url,
     )?;
 
-    eprintln!("Opening your browser to authorize MCP access. If it doesn't open, visit:");
-    eprintln!("  {authorize_url}");
-    open_browser(&authorize_url);
+    open(&authorize_url);
 
     let code = callback.wait(&state).await?;
     let tok = exchange_code(
