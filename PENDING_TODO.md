@@ -49,13 +49,18 @@ Every audit / metrics subject must honor the operator-configured prefix
 - [x] `docs/runbook/agentgateway.md` — operator runbook (startup,
       env vars, audit subjects, approval workflow, rollback).
       _Done in this branch._
-- [x] CI workflow — `.github/workflows/ci-rust.yml` already exists with
-      fmt + clippy + check + test. _Verified._
+- [x] CI workflow — `.github/workflows/ci-rust.yml` extended with a
+      `cargo deny check` job. _Done: 54c0c5e39._
 - [x] release-please configuration — `.github/release-please-config.json`
-      and `.github/release-please-manifest.json` already exist with
-      `cargo-workspace` plugin. _Verified._
-- [ ] Expand `release-please-config.json` `packages` to include every
-      shipping binary crate (currently only `acp-nats-stdio`).
+      and manifest now cover the 14 shipping binary crates
+      (acp-nats-stdio, a2a-bridge, a2a-gateway, a2a-auth-callout,
+      mcp-nats-server, mcp-pack, trogon-agent-registry,
+      trogon-agent-registry-controller, trogon-gateway-ctl,
+      trogon-gateway-k8s, trogon-jwks-publisher, trogon-mcp-gateway,
+      trogon-sts, agctl). _Done: 54c0c5e39._
+- [x] Base Dockerfile — `devops/docker/Dockerfile` with `BIN` build-arg
+      covers every shipping binary; image pipeline (build/push/sign) is
+      v0.2. _Done: 54c0c5e39._
 - [ ] Decide branch strategy for the 604-commit `yordis/agentgateway` →
       `main` merge (single PR vs. stacked).
 
@@ -127,9 +132,9 @@ The repository ships binaries via `release-artifacts.yml` (Linux + macOS
 targets) but has no container or k8s artifacts yet. v0.1 supports the
 binary-only deployment path; v0.2 adds containerized + k8s.
 
-- [ ] **Dockerfiles** for `trogon-mcp-gateway`, `a2a-gateway`, `a2a-bridge`,
-      `trogon-sts`, `trogon-jwks-publisher`, `trogon-gateway-k8s`,
-      `mcp-nats-server`, `mcp-pack`.
+- [x] **Dockerfile** — `devops/docker/Dockerfile` covers every shipping
+      binary via `BIN` build-arg (distroless `cc-debian12:nonroot`).
+      _Done: 54c0c5e39._
 - [ ] **Container image build + publish pipeline** (registry, tagging,
       cosign signing).
 - [ ] **Helm chart** (`charts/agentgateway/`). Blocked by health probes
@@ -153,11 +158,10 @@ binary-only deployment path; v0.2 adds containerized + k8s.
 
 ### v0.2 — Release sign-off
 
-- [ ] Run `cargo deny check` (now that `rsworkspace/deny.toml` exists).
-      Fold into `ci-rust.yml`.
+- [x] Wire `cargo deny check` into `ci-rust.yml`. _Done: 54c0c5e39._
 - [ ] Tag a release candidate, smoke-test against staging NATS, run the
       integration test suite (`e2e_nats_forward.rs` plus v0.2-promoted
-      scaffolds).
+      scaffolds). _External: requires staging NATS cluster._
 
 ---
 
