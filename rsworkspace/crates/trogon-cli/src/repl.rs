@@ -177,6 +177,21 @@ fn join_continuation(s: &str) -> String {
     s.replace("\\\n", " ")
 }
 
+// ── `!` shell escape ────────────────────────────────────────────────────────────
+
+/// Run a `!`-prefixed line as a local shell command in the REPL's working
+/// directory. Stdout/stderr are inherited so output streams live to the terminal.
+/// This is a local shell escape — neither the command nor its output is sent to
+/// the model.
+fn run_shell_command(cmd: &str, cwd: &Path) -> std::io::Result<std::process::ExitStatus> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    std::process::Command::new(shell)
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .status()
+}
+
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -321,6 +336,26 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         && let Some(helper) = rl.helper_mut()
                     {
                         helper.cwd = cwd.clone();
+                    }
+                    continue;
+                }
+
+                // `! <command>` — local shell escape. Runs in the REPL's working
+                // directory and streams output to the terminal; not sent to the model.
+                if let Some(shell_cmd) = line.strip_prefix('!') {
+                    let shell_cmd = shell_cmd.trim();
+                    if shell_cmd.is_empty() {
+                        eprintln!("usage: !<shell command>  (runs in {})", cwd.display());
+                    } else {
+                        let _ = rl.add_history_entry(&raw_line);
+                        match run_shell_command(shell_cmd, &cwd) {
+                            Ok(status) if status.success() => {}
+                            Ok(status) => match status.code() {
+                                Some(code) => eprintln!("\x1b[2m[exit {code}]\x1b[0m"),
+                                None => eprintln!("\x1b[2m[terminated by signal]\x1b[0m"),
+                            },
+                            Err(e) => eprintln!("\x1b[31m!: {e}\x1b[0m"),
+                        }
                     }
                     continue;
                 }
@@ -2003,6 +2038,33 @@ mod tests {
     #[test]
     fn join_continuation_no_backslash_newlines_unchanged() {
         assert_eq!(join_continuation("line one\nline two"), "line one\nline two");
+    }
+
+    // ── run_shell_command (`!` shell escape) ──────────────────────────────────
+
+    #[test]
+    fn run_shell_command_reports_success_and_exit_code() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            run_shell_command("exit 0", &cwd).unwrap().success(),
+            "a zero exit must report success"
+        );
+        assert_eq!(
+            run_shell_command("exit 3", &cwd).unwrap().code(),
+            Some(3),
+            "a non-zero exit code must be surfaced"
+        );
+    }
+
+    #[test]
+    fn run_shell_command_runs_in_given_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = run_shell_command("touch marker.txt", dir.path()).unwrap();
+        assert!(status.success());
+        assert!(
+            dir.path().join("marker.txt").exists(),
+            "command must execute in the provided working directory"
+        );
     }
 
     // ── input_needs_continuation ──────────────────────────────────────────────
