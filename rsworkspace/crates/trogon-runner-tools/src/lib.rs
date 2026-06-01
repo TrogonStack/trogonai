@@ -48,3 +48,11 @@ pub use trogon_md::{FsTrogonMdLoader, TrogonMdLayer, TrogonMdLoading, list_trogo
 /// file path. Without it, a model asked to "see <url>" or "check example.com"
 /// reaches for file/search tools and comes back empty.
 pub const URL_FETCH_GUIDANCE: &str = "When the user gives or refers to a URL or web link (for example \"see https://example.com\", \"check example.com\", or \"open this page\"), call the fetch_url tool to retrieve its contents. Never treat a URL as a local file path or search the filesystem for it.";
+
+/// Guidance appended to the system prompt while the session is in `plan` mode.
+/// The permission layer already denies write tools and write-bash in plan mode,
+/// but denial alone makes the model flail (it attempts an edit, gets rejected,
+/// and reacts). This steers the model to behave like a planner: research
+/// read-only, then present a plan and stop until the user approves leaving plan
+/// mode. Mirrors Claude Code's plan mode behaviour.
+pub const PLAN_MODE_GUIDANCE: &str = "You are currently in PLAN MODE. Do NOT make any changes yet: do not edit, create, or delete files, and do not run commands that modify state (these are blocked and will be rejected). First investigate the codebase using read-only tools (read_file, list_dir, glob, search_files, read-only git/bash) until you fully understand the task. Then present a clear, step-by-step plan of what you intend to do. After presenting the plan, STOP and wait for the user to approve and switch out of plan mode — do not begin implementing until they do.";
