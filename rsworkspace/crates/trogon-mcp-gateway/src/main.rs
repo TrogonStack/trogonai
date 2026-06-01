@@ -106,7 +106,8 @@ async fn main() -> Result<(), BoxError> {
         None
     } else {
         let egress_cfg =
-            trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv).map_err(config_err_box)?;
+            trogon_mcp_gateway::egress::EgressMintConfig::from_env(&SystemEnv, mcp.prefix_str())
+                .map_err(config_err_box)?;
         let sts_cfg = trogon_sts_client::StsClientConfig::from_env(&SystemEnv);
         let sts = trogon_sts_client::StsClient::from_arc(nats_client.clone(), sts_cfg);
         Some(trogon_mcp_gateway::egress::EgressMinter::from_parts(

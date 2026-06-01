@@ -113,6 +113,7 @@ impl EgressMinter {
         {
             publish_shadow_aud_mismatch_metric(
                 client.as_ref(),
+                self.config.prefix.as_str(),
                 target_aud.as_str(),
                 presented_aud.as_str(),
                 tenant,
