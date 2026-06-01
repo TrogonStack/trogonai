@@ -742,6 +742,15 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         .await;
                     } else if cmd == "/memory" {
                         handle_memory_command(arg, &cwd, &fs).await;
+                    } else if cmd == "/agents" {
+                        handle_agents_command(arg, &cwd);
+                    } else if cmd == "/tasks" {
+                        // Subagents spawned via the spawn_agent tool run synchronously
+                        // (inline, in an isolated worktree) and return their result as
+                        // the tool output — there is no background task queue to list.
+                        println!(
+                            "no background tasks — spawned subagents run inline and return immediately"
+                        );
                     } else if cmd == "/init" {
                         let force = arg == "--force";
                         let root = find_git_root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -1419,6 +1428,8 @@ Commands:
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
   {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
+  {m}/agents{r}             list subagent definitions (.claude/agents/)  |  {m}/agents{r} <name> details
+  {m}/tasks{r}              list background tasks
   {m}/init{r}               analyze project with AI and generate TROGON.md
   {m}/init --force{r}       overwrite existing TROGON.md
   {m}cd{r} [path]           change working directory (same as {m}/cd{r})
@@ -1471,6 +1482,43 @@ Ctrl+D    quit")
         }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
+    }
+}
+
+/// `/agents` — list custom subagent definitions; `/agents <name>` shows one.
+fn handle_agents_command(arg: &str, cwd: &Path) {
+    let defs = crate::subagents::load_subagents(cwd);
+    let arg = arg.trim();
+    if defs.is_empty() {
+        println!("no subagents defined — add markdown files to .claude/agents/");
+        return;
+    }
+    if arg.is_empty() {
+        println!("subagents (.claude/agents/ + ~/.config/trogon/agents/):");
+        for d in &defs {
+            let desc = if d.description.is_empty() { "" } else { &d.description };
+            println!("  {:<20} {desc}", d.name);
+        }
+        println!("\nuse /agents <name> to see details");
+        return;
+    }
+    match defs.iter().find(|d| d.name == arg) {
+        Some(d) => {
+            println!("name:        {}", d.name);
+            if !d.description.is_empty() {
+                println!("description: {}", d.description);
+            }
+            println!("model:       {}", d.model.as_deref().unwrap_or("(default)"));
+            println!(
+                "tools:       {}",
+                if d.tools.is_empty() { "(all)".to_string() } else { d.tools.join(", ") }
+            );
+            println!("source:      {}", d.source.display());
+            if !d.system_prompt.is_empty() {
+                println!("\nsystem prompt:\n{}", d.system_prompt);
+            }
+        }
+        None => eprintln!("no subagent named `{arg}` — run /agents to list"),
     }
 }
 
