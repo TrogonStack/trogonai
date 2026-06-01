@@ -192,6 +192,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
+    plan: bool,
 ) -> anyhow::Result<()> {
     let mut prefix = prefix.to_string();
     let init_prefix = prefix.clone(); // always use the startup runner for /init
@@ -220,10 +221,14 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     } else {
         start_session(&factory, &mut mcp_manager, &prefix, cwd.clone()).await?
     };
-    if skip_permissions
-        && let Err(e) = session.set_mode("bypassPermissions").await
+    // `--dangerously-skip-permissions` / `--plan` select a startup mode up front
+    // (clap enforces they are mutually exclusive). `TROGON_MODE` is applied by the
+    // runner itself, so only the flag-driven overrides need an explicit set_mode.
+    let startup_mode = crate::runtime::startup_mode(skip_permissions, plan);
+    if (skip_permissions || plan)
+        && let Err(e) = session.set_mode(&startup_mode).await
     {
-        eprintln!("warning: could not set bypassPermissions: {e}");
+        eprintln!("warning: could not set startup mode {startup_mode}: {e}");
     }
     if let Some(ref sup) = client_supervisor {
         sup.set_session(session.session_id());
@@ -249,11 +254,7 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // None means "default" (compaction uses the session model). Reset on /clear and
     // cross-runner /model switches, which start a fresh session.
     let mut compactor_model_sel: Option<String> = None;
-    let mut session_mode = if skip_permissions {
-        "bypassPermissions".to_string()
-    } else {
-        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
-    };
+    let mut session_mode = startup_mode.clone();
     print_startup_banner(session.session_id(), &prefix, &session_mode);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;

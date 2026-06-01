@@ -19,6 +19,22 @@ pub use crate::tui_client::PermissionCoordinator;
 use crate::RunnerSwitcher;
 use trogon_nats::jetstream::NatsJetStreamClient;
 
+/// Resolve the startup session mode from the CLI flags.
+///
+/// `--dangerously-skip-permissions` and `--plan` select fixed modes (and are
+/// mutually exclusive at the clap layer). Otherwise the mode is taken from
+/// `TROGON_MODE`, falling back to `"default"`. This mirrors how the REPL keeps
+/// its tracked `session_mode` in sync after `/clear` and `/model` switches.
+pub fn startup_mode(skip_permissions: bool, plan: bool) -> String {
+    if skip_permissions {
+        "bypassPermissions".to_string()
+    } else if plan {
+        "plan".to_string()
+    } else {
+        std::env::var("TROGON_MODE").unwrap_or_else(|_| "default".into())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_interactive<SF, F, SW, RS>(
     factory: SF,
@@ -33,6 +49,7 @@ pub async fn run_interactive<SF, F, SW, RS>(
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
+    plan: bool,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -44,7 +61,7 @@ where
     local
         .run_until(run_interactive_inner(
             factory, prefix, cwd, fs, switcher, registry, nats, nats_url, stream, resume,
-            skip_permissions,
+            skip_permissions, plan,
         ))
         .await
 }
@@ -62,6 +79,7 @@ async fn run_interactive_inner<SF, F, SW, RS>(
     stream: bool,
     resume: Option<crate::session_store::SessionEntry>,
     skip_permissions: bool,
+    plan: bool,
 ) -> anyhow::Result<()>
 where
     SF: SessionFactory,
@@ -110,6 +128,24 @@ where
         stream,
         resume,
         skip_permissions,
+        plan,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::startup_mode;
+
+    #[test]
+    fn skip_permissions_selects_bypass() {
+        // `--dangerously-skip-permissions` always wins and does not read TROGON_MODE.
+        assert_eq!(startup_mode(true, false), "bypassPermissions");
+    }
+
+    #[test]
+    fn plan_selects_plan_mode() {
+        // `--plan` selects plan mode regardless of TROGON_MODE.
+        assert_eq!(startup_mode(false, true), "plan");
+    }
 }
