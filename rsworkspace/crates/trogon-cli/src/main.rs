@@ -138,6 +138,7 @@ fn build_session_init(
     system_prompt: Option<String>,
     append_system_prompt: Option<String>,
     add_dir: &[PathBuf],
+    settings: &trogon_cli::Settings,
 ) -> SessionInit {
     let mut additional_roots = Vec::new();
     for dir in add_dir {
@@ -151,6 +152,10 @@ fn build_session_init(
         system_prompt_override: system_prompt,
         append_system_prompt,
         additional_roots,
+        // permissions.additionalDirectories from settings.json.
+        additional_read_dirs: settings.permissions.additional_directories.clone(),
+        // permissions.allow/deny translated to trogon rule-text.
+        permission_rules: settings.permission_rules_text(),
     }
 }
 
@@ -180,10 +185,36 @@ async fn main() -> anyhow::Result<()> {
 
     let cwd = std::env::current_dir()?;
 
+    // Layered settings.json (user → project → project-local).
+    let settings = trogon_cli::Settings::load(&RealFs, &cwd);
+
+    // permissions.defaultMode seeds the startup mode when not overridden by an
+    // explicit flag or TROGON_MODE. (Startup-only; set before any threads spawn.)
+    if std::env::var_os("TROGON_MODE").is_none()
+        && let Some(mode) = settings.permissions.default_mode.as_deref()
+    {
+        // SAFETY: called once at startup before any worker threads are spawned.
+        unsafe { std::env::set_var("TROGON_MODE", mode) };
+    }
+
+    // cleanupPeriodDays: prune stale sessions from the index on startup.
+    if let Some(days) = settings.cleanup_period_days {
+        let mut index = SessionIndex::load(&RealFs);
+        let removed = index.prune_older_than(days);
+        if removed > 0 {
+            if let Err(e) = index.save(&RealFs) {
+                eprintln!("warning: could not save pruned session index: {e}");
+            } else {
+                eprintln!("cleaned up {removed} session(s) older than {days} days");
+            }
+        }
+    }
+
     let session_init = build_session_init(
         args.system_prompt.clone(),
         args.append_system_prompt.clone(),
         &args.add_dir,
+        &settings,
     );
 
     // MED-40: keep `nats_server` in a named binding (not `_child`) so Drop is
@@ -324,10 +355,11 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::build_session_init;
     use std::path::PathBuf;
+    use trogon_cli::Settings;
 
     #[test]
     fn prompts_flow_into_init_without_add_dir() {
-        let init = build_session_init(Some("over".into()), Some("app".into()), &[]);
+        let init = build_session_init(Some("over".into()), Some("app".into()), &[], &Settings::default());
         assert_eq!(init.system_prompt_override.as_deref(), Some("over"));
         assert_eq!(init.append_system_prompt.as_deref(), Some("app"));
         assert!(init.additional_roots.is_empty());
@@ -337,15 +369,25 @@ mod tests {
     fn existing_dir_is_canonicalised_into_roots() {
         // The current directory always exists and is a directory.
         let cwd = std::env::current_dir().unwrap();
-        let init = build_session_init(None, None, &[cwd.clone()]);
+        let init = build_session_init(None, None, &[cwd.clone()], &Settings::default());
         let expected = cwd.canonicalize().unwrap().to_string_lossy().into_owned();
         assert_eq!(init.additional_roots, vec![expected]);
     }
 
     #[test]
     fn missing_dir_is_skipped_not_fatal() {
-        let init = build_session_init(None, None, &[PathBuf::from("/no/such/dir/xyzzy")]);
+        let init = build_session_init(None, None, &[PathBuf::from("/no/such/dir/xyzzy")], &Settings::default());
         assert!(init.additional_roots.is_empty());
+    }
+
+    #[test]
+    fn settings_permissions_flow_into_init() {
+        let mut settings = Settings::default();
+        settings.permissions.additional_directories = vec!["/shared".into()];
+        settings.permissions.allow = vec!["Bash(cargo test:*)".into()];
+        let init = build_session_init(None, None, &[], &settings);
+        assert_eq!(init.additional_read_dirs, vec!["/shared".to_string()]);
+        assert!(init.permission_rules.unwrap().contains("allow_commands: cargo test"));
     }
 }
 

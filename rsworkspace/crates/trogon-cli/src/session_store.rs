@@ -88,6 +88,27 @@ impl SessionIndex {
         slot.by_prefix.insert(entry.prefix.clone(), entry.clone());
         slot.last = Some(entry);
     }
+
+    /// Remove session entries whose `updated_at` is older than `days` days
+    /// (`cleanupPeriodDays`). Entries with an empty/unknown timestamp are kept
+    /// (age can't be determined). Returns the number of entries removed.
+    pub fn prune_older_than(&mut self, days: u64) -> usize {
+        let cutoff = iso8601_from_secs(now_secs().saturating_sub(days.saturating_mul(86_400)));
+        let is_old = |e: &SessionEntry| !e.updated_at.is_empty() && e.updated_at < cutoff;
+        let mut removed = 0;
+        for slot in self.projects.values_mut() {
+            let before = slot.by_prefix.len();
+            slot.by_prefix.retain(|_, e| !is_old(e));
+            removed += before - slot.by_prefix.len();
+            if slot.last.as_ref().is_some_and(is_old) {
+                slot.last = None;
+            }
+        }
+        // Drop projects that no longer have any sessions.
+        self.projects
+            .retain(|_, s| s.last.is_some() || !s.by_prefix.is_empty());
+        removed
+    }
 }
 
 pub fn project_key(cwd: &Path) -> String {
@@ -110,17 +131,28 @@ fn now_iso8601() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| {
-            let secs = d.as_secs();
-            let days = secs / 86_400;
-            let time = secs % 86_400;
-            let (y, mo, day) = civil_from_days(days as i64);
-            let h = time / 3600;
-            let min = (time % 3600) / 60;
-            let s = time % 60;
-            format!("{y:04}-{mo:02}-{day:02}T{h:02}:{min:02}:{s:02}Z")
-        })
+        .map(|d| iso8601_from_secs(d.as_secs()))
         .unwrap_or_default()
+}
+
+/// Format a unix timestamp (seconds) as `YYYY-MM-DDTHH:MM:SSZ`.
+fn iso8601_from_secs(secs: u64) -> String {
+    let days = secs / 86_400;
+    let time = secs % 86_400;
+    let (y, mo, day) = civil_from_days(days as i64);
+    let h = time / 3600;
+    let min = (time % 3600) / 60;
+    let s = time % 60;
+    format!("{y:04}-{mo:02}-{day:02}T{h:02}:{min:02}:{s:02}Z")
+}
+
+/// Current unix time in seconds (0 on clock error).
+fn now_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Civil date from days since Unix epoch (1970-01-01).
@@ -215,5 +247,37 @@ mod tests {
         index.record(&project, grok.clone());
         assert_eq!(index.get_last(&project), Some(&grok));
         assert_eq!(index.get_for_prefix(&project, "acp.claude"), Some(&claude));
+    }
+
+    #[test]
+    fn prune_removes_old_entries_keeps_recent_and_unknown() {
+        let mut index = SessionIndex::default();
+        let project = PathBuf::from("/repo");
+        // Recent (now) — kept.
+        index.record(&project, new_session_entry("acp.claude", "recent", "m"));
+        // Old timestamp — pruned.
+        let old = SessionEntry {
+            prefix: "acp.grok".into(),
+            session_id: "old".into(),
+            model: "m".into(),
+            updated_at: "2000-01-01T00:00:00Z".into(),
+            name: None,
+        };
+        index.record(&project, old);
+        // Empty timestamp — kept (age unknown).
+        let unknown = SessionEntry {
+            prefix: "acp.codex".into(),
+            session_id: "unknown".into(),
+            model: "m".into(),
+            updated_at: String::new(),
+            name: None,
+        };
+        index.record(&project, unknown);
+
+        let removed = index.prune_older_than(30);
+        assert_eq!(removed, 1, "only the year-2000 entry should be pruned");
+        assert!(index.get_for_prefix(&project, "acp.claude").is_some());
+        assert!(index.get_for_prefix(&project, "acp.codex").is_some());
+        assert!(index.get_for_prefix(&project, "acp.grok").is_none());
     }
 }

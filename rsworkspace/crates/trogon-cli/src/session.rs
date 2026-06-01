@@ -279,6 +279,12 @@ pub struct SessionInit {
     pub append_system_prompt: Option<String>,
     /// Extra working directories granted to the agent. (`--add-dir`)
     pub additional_roots: Vec<String>,
+    /// Read-only allow-listed directories outside cwd.
+    /// (`permissions.additionalDirectories`)
+    pub additional_read_dirs: Vec<String>,
+    /// Permission rule-text translated from `permissions.allow/deny`, applied as
+    /// the session's permission rules on the runner.
+    pub permission_rules: Option<String>,
 }
 
 impl SessionInit {
@@ -300,6 +306,21 @@ impl SessionInit {
                 .map(Value::String)
                 .collect();
             meta.insert("additionalRoots".into(), Value::Array(roots));
+        }
+        if !self.additional_read_dirs.is_empty() {
+            let dirs: Vec<Value> = self
+                .additional_read_dirs
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect();
+            meta.insert(
+                "permissions".into(),
+                serde_json::json!({ "additionalDirectories": dirs }),
+            );
+        }
+        if let Some(ref rules) = self.permission_rules {
+            meta.insert("permissionRules".into(), Value::String(rules.clone()));
         }
         if meta.is_empty() {
             None
