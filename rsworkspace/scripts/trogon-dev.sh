@@ -17,7 +17,11 @@ LOG_DIR="${TROGON_LOG_DIR:-/tmp}"
 
 # Returns 0 (true) if a process with the given binary name is already running.
 # pgrep -x truncates comm to 15 chars so it misses long names; match full path instead.
-running() { pgrep -f "release/$1" > /dev/null 2>&1; }
+# Anchor to argv[0]: a real runner is launched as "$BIN/<name>", so its command line BEGINS
+# with a space-free path ending in /release/<name>. Anchoring with ^[^ ]* avoids false-matching
+# unrelated processes that merely mention the path mid-command-line (e.g. a wrapper/agent
+# invoked with this script's contents, or this script itself, as a prompt argument).
+running() { pgrep -f "^[^ ]*/release/$1( |$)" > /dev/null 2>&1; }
 
 # 1. NATS + JetStream (skip if port already open)
 if ! nc -z localhost 4222 2>/dev/null; then
