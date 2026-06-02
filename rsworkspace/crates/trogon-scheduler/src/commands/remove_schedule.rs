@@ -1,4 +1,4 @@
-use trogon_decider_runtime::{Decider, Decision};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
 use super::domain::ScheduleId;
@@ -29,19 +29,6 @@ impl std::fmt::Display for RemoveScheduleError {
 
 impl std::error::Error for RemoveScheduleError {}
 
-fn current_state(state: &state_v1::State) -> Result<state_v1::StateValue, RemoveScheduleError> {
-    let Some(value) = state.state.as_ref() else {
-        return Err(RemoveScheduleError::MissingStateValue);
-    };
-    let Some(current_state) = value.as_known() else {
-        return Err(RemoveScheduleError::UnknownStateValue { value: value.to_i32() });
-    };
-    if current_state == state_v1::StateValue::STATE_VALUE_UNSPECIFIED {
-        return Err(RemoveScheduleError::UnknownStateValue { value: 0 });
-    }
-    Ok(current_state)
-}
-
 impl RemoveSchedule {
     pub fn new(id: ScheduleId) -> Self {
         Self { id }
@@ -68,30 +55,44 @@ impl Decider for RemoveSchedule {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let current_state = current_state(state)?;
-        if current_state == state_v1::StateValue::STATE_VALUE_MISSING {
-            return Err(RemoveScheduleError::ScheduleNotFound { id: command.id.clone() });
+        let Some(value) = state.state.as_ref() else {
+            return Err(RemoveScheduleError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(RemoveScheduleError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
+            state_v1::StateValue::STATE_VALUE_MISSING => {
+                Err(RemoveScheduleError::ScheduleNotFound { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED | state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => {
+                Ok(Decision::event(v1::ScheduleEvent {
+                    event: Some(
+                        v1::ScheduleRemoved {
+                            schedule_id: command.id.as_str().to_string(),
+                        }
+                        .into(),
+                    ),
+                }))
+            }
+            state_v1::StateValue::STATE_VALUE_DELETED => {
+                Err(RemoveScheduleError::ScheduleDeleted { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(RemoveScheduleError::UnknownStateValue { value: 0 }),
         }
-        if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
-            return Err(RemoveScheduleError::ScheduleDeleted { id: command.id.clone() });
-        }
-        Ok(Decision::event(v1::ScheduleEvent {
-            event: Some(
-                v1::ScheduleRemoved {
-                    schedule_id: command.id.as_str().to_string(),
-                }
-                .into(),
-            ),
-        }))
     }
+}
+
+impl CommandSnapshotPolicy for RemoveSchedule {
+    type SnapshotPolicy = FrequencySnapshot;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
 #[cfg(test)]
 mod tests {
-    use trogon_decider::testing::TestCase;
-    use trogon_decider_runtime::Decider;
-
     use buffa::{EnumValue, MessageField};
+    use trogon_decider::testing::TestCase;
+    use trogon_decider_runtime::{CommandSnapshotPolicy, Decider};
 
     use super::*;
     use crate::CreateSchedule;
@@ -227,22 +228,30 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_state_values() {
+    fn decide_rejects_invalid_state_values() {
+        let command = remove_job_command("backup");
+
         assert_eq!(
-            current_state(&state_v1::State { state: None }).unwrap_err(),
+            RemoveSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
             RemoveScheduleError::MissingStateValue
         );
         assert_eq!(
-            current_state(&state_v1::State {
-                state: Some(EnumValue::from(123)),
-            })
+            RemoveSchedule::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(123)),
+                },
+                &command,
+            )
             .unwrap_err(),
             RemoveScheduleError::UnknownStateValue { value: 123 }
         );
         assert_eq!(
-            current_state(&state_v1::State {
-                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-            })
+            RemoveSchedule::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                },
+                &command,
+            )
             .unwrap_err(),
             RemoveScheduleError::UnknownStateValue { value: 0 }
         );
@@ -267,6 +276,16 @@ mod tests {
             .unwrap()
             .as_known(),
             Some(state_v1::StateValue::STATE_VALUE_DELETED)
+        );
+    }
+
+    #[test]
+    fn command_snapshot_policy_uses_shared_frequency() {
+        assert_eq!(
+            <RemoveSchedule as CommandSnapshotPolicy>::SNAPSHOT_POLICY
+                .frequency()
+                .get(),
+            32
         );
     }
 }

@@ -3,6 +3,7 @@ pub mod domain;
 mod pause_schedule;
 mod remove_schedule;
 mod resume_schedule;
+mod snapshot;
 mod state;
 
 pub use create_schedule::{CreateSchedule, CreateScheduleDecideError};

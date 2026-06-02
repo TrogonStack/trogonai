@@ -1,4 +1,4 @@
-use trogon_decider_runtime::{Decider, Decision};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 use trogonai_proto::scheduler::schedules::{state_v1, v1};
 
 use super::domain::ScheduleId;
@@ -31,19 +31,6 @@ impl std::fmt::Display for ResumeScheduleError {
 
 impl std::error::Error for ResumeScheduleError {}
 
-fn current_state(state: &state_v1::State) -> Result<state_v1::StateValue, ResumeScheduleError> {
-    let Some(value) = state.state.as_ref() else {
-        return Err(ResumeScheduleError::MissingStateValue);
-    };
-    let Some(current_state) = value.as_known() else {
-        return Err(ResumeScheduleError::UnknownStateValue { value: value.to_i32() });
-    };
-    if current_state == state_v1::StateValue::STATE_VALUE_UNSPECIFIED {
-        return Err(ResumeScheduleError::UnknownStateValue { value: 0 });
-    }
-    Ok(current_state)
-}
-
 impl ResumeSchedule {
     pub fn new(id: ScheduleId) -> Self {
         Self { id }
@@ -70,50 +57,57 @@ impl Decider for ResumeSchedule {
     }
 
     fn decide(state: &state_v1::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let current_state = current_state(state)?;
-        if current_state == state_v1::StateValue::STATE_VALUE_MISSING {
-            return Err(ResumeScheduleError::ScheduleNotFound { id: command.id.clone() });
+        let Some(value) = state.state.as_ref() else {
+            return Err(ResumeScheduleError::MissingStateValue);
+        };
+        let Some(current_state) = value.as_known() else {
+            return Err(ResumeScheduleError::UnknownStateValue { value: value.to_i32() });
+        };
+        match current_state {
+            state_v1::StateValue::STATE_VALUE_MISSING => {
+                Err(ResumeScheduleError::ScheduleNotFound { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_DELETED => {
+                Err(ResumeScheduleError::ScheduleDeleted { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => {
+                Err(ResumeScheduleError::AlreadyActive { id: command.id.clone() })
+            }
+            state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED => Ok(Decision::event(v1::ScheduleEvent {
+                event: Some(
+                    v1::ScheduleResumed {
+                        schedule_id: command.id.as_str().to_string(),
+                    }
+                    .into(),
+                ),
+            })),
+            state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeScheduleError::UnknownStateValue { value: 0 }),
         }
-        if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
-            return Err(ResumeScheduleError::ScheduleDeleted { id: command.id.clone() });
-        }
-        if current_state == state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED {
-            return Err(ResumeScheduleError::AlreadyActive { id: command.id.clone() });
-        }
-        Ok(Decision::event(v1::ScheduleEvent {
-            event: Some(
-                v1::ScheduleResumed {
-                    schedule_id: command.id.as_str().to_string(),
-                }
-                .into(),
-            ),
-        }))
     }
+}
+
+impl CommandSnapshotPolicy for ResumeSchedule {
+    type SnapshotPolicy = FrequencySnapshot;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::COMMAND_SNAPSHOT_POLICY;
 }
 
 #[cfg(test)]
 mod tests {
-    use buffa::EnumValue;
+    use buffa::{EnumValue, MessageField};
+    use trogon_decider::testing::TestCase;
+    use trogon_decider_runtime::CommandSnapshotPolicy;
 
     use super::*;
+    use crate::CreateSchedule;
     use crate::commands::domain::{
         Delivery, MessageContent, MessageEnvelope, Schedule as DomainSchedule, ScheduleEventDelivery,
         ScheduleEventSchedule, ScheduleEventStatus, ScheduleHeaders, ScheduleId, ScheduleMessage,
     };
-    use trogon_decider::testing::TestCase;
 
-    fn schedule_id(id: &str) -> ScheduleId {
-        ScheduleId::parse(id).unwrap()
-    }
-
-    fn resume_job_command(id: &str) -> ResumeSchedule {
-        ResumeSchedule::new(ScheduleId::parse(id).unwrap())
-    }
-
-    fn create_schedule(id: &str, status: ScheduleEventStatus) -> crate::CreateSchedule {
-        crate::CreateSchedule {
-            id: schedule_id(id),
-            status,
+    fn create_schedule(id: &str) -> CreateSchedule {
+        CreateSchedule {
+            id: ScheduleId::parse(id).unwrap(),
+            status: ScheduleEventStatus::Scheduled,
             schedule: DomainSchedule::every(std::time::Duration::from_secs(30)).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
             message: ScheduleMessage {
@@ -123,21 +117,36 @@ mod tests {
         }
     }
 
+    fn resume_job_command(id: &str) -> ResumeSchedule {
+        ResumeSchedule::new(ScheduleId::parse(id).unwrap())
+    }
+
     fn added(id: &str) -> v1::ScheduleEvent {
-        let command = create_schedule(id, ScheduleEventStatus::Paused);
+        let command = create_schedule(id);
 
         v1::ScheduleEvent {
             event: Some(
                 v1::ScheduleCreated {
                     schedule_id: command.id.as_str().to_string(),
-                    status: buffa::MessageField::some(v1::ScheduleStatus::from(command.status)),
-                    schedule: buffa::MessageField::some(
+                    status: MessageField::some(v1::ScheduleStatus::from(command.status)),
+                    schedule: MessageField::some(
                         v1::Schedule::try_from(&ScheduleEventSchedule::from(&command.schedule)).unwrap(),
                     ),
-                    delivery: buffa::MessageField::some(
+                    delivery: MessageField::some(
                         v1::Delivery::try_from(&ScheduleEventDelivery::from(&command.delivery)).unwrap(),
                     ),
-                    message: buffa::MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                    message: MessageField::some(v1::Message::from(&MessageEnvelope::from(&command.message))),
+                }
+                .into(),
+            ),
+        }
+    }
+
+    fn paused(id: &str) -> v1::ScheduleEvent {
+        v1::ScheduleEvent {
+            event: Some(
+                v1::SchedulePaused {
+                    schedule_id: id.to_string(),
                 }
                 .into(),
             ),
@@ -170,6 +179,7 @@ mod tests {
     fn given_when_then_supports_resume_job_decider() {
         TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
+            .given([paused("backup")])
             .when(resume_job_command("backup"))
             .then([resumed("backup")]);
     }
@@ -178,7 +188,6 @@ mod tests {
     fn given_when_then_supports_resume_job_failures() {
         TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
-            .given([resumed("backup")])
             .when(resume_job_command("backup"))
             .then_error(ResumeScheduleError::AlreadyActive {
                 id: ScheduleId::parse("backup").unwrap(),
@@ -199,6 +208,7 @@ mod tests {
     fn given_when_then_rejects_resuming_deleted_jobs() {
         TestCase::<ResumeSchedule>::new()
             .given([added("backup")])
+            .given([paused("backup")])
             .given([removed("backup")])
             .when(resume_job_command("backup"))
             .then_error(ResumeScheduleError::ScheduleDeleted {
@@ -233,24 +243,42 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_state_values() {
+    fn decide_rejects_invalid_state_values() {
+        let command = resume_job_command("backup");
+
         assert_eq!(
-            current_state(&state_v1::State { state: None }).unwrap_err(),
+            ResumeSchedule::decide(&state_v1::State { state: None }, &command).unwrap_err(),
             ResumeScheduleError::MissingStateValue
         );
         assert_eq!(
-            current_state(&state_v1::State {
-                state: Some(EnumValue::from(123)),
-            })
+            ResumeSchedule::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(123)),
+                },
+                &command,
+            )
             .unwrap_err(),
             ResumeScheduleError::UnknownStateValue { value: 123 }
         );
         assert_eq!(
-            current_state(&state_v1::State {
-                state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
-            })
+            ResumeSchedule::decide(
+                &state_v1::State {
+                    state: Some(EnumValue::from(state_v1::StateValue::STATE_VALUE_UNSPECIFIED)),
+                },
+                &command,
+            )
             .unwrap_err(),
             ResumeScheduleError::UnknownStateValue { value: 0 }
+        );
+    }
+
+    #[test]
+    fn command_snapshot_policy_uses_shared_frequency() {
+        assert_eq!(
+            <ResumeSchedule as CommandSnapshotPolicy>::SNAPSHOT_POLICY
+                .frequency()
+                .get(),
+            32
         );
     }
 }
