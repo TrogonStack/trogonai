@@ -20,19 +20,28 @@ impl TrogonMdLoading for FsTrogonMdLoader {
     }
 }
 
-/// Loads and concatenates all `TROGON.md` files relevant to `cwd`.
+/// Maximum nesting depth for `@path` imports (cycle/blow-up guard).
+const MAX_IMPORT_DEPTH: usize = 5;
+
+/// Loads and concatenates all `TROGON.md` content relevant to `cwd`.
 ///
 /// Concatenation order (most general → most specific):
 /// 1. `~/.config/trogon/TROGON.md` — global user configuration
 /// 2. All `TROGON.md` files found walking up from `cwd` to `/`,
 ///    ordered root-first so child directories can extend or override parents.
+/// 3. Path-scoped rules from `.trogon/rules/*.md` (with optional `globs:`
+///    frontmatter), appended as a labelled section.
 ///
-/// Returns `None` when no files are found.
+/// Inside any `TROGON.md`, an `@path` token is replaced by the referenced file's
+/// content (resolved relative to that file's directory; `@~/…` for home), expanded
+/// recursively. Tokens that don't resolve to a readable file are left as-is.
+///
+/// Returns `None` when nothing is found.
 pub async fn load_trogon_md(cwd: &str) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
 
-    if let Some(content) = load_global().await {
-        parts.push(content);
+    if let Some((content, base)) = load_global().await {
+        parts.push(expand_imports(&content, &base, 0, &mut Vec::new()));
     }
 
     // Collect all candidates walking up from cwd, then reverse to get root-first order.
@@ -47,8 +56,15 @@ pub async fn load_trogon_md(cwd: &str) -> Option<String> {
     candidates.reverse();
     for path in candidates {
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            parts.push(content);
+            let base = path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+            let mut visited = vec![path.clone()];
+            parts.push(expand_imports(&content, &base, 0, &mut visited));
         }
+    }
+
+    let rules = load_path_scoped_rules(cwd).await;
+    if !rules.is_empty() {
+        parts.push(format!("# Path-scoped rules\n\n{}", rules.join("\n\n")));
     }
 
     if parts.is_empty() {
@@ -58,10 +74,157 @@ pub async fn load_trogon_md(cwd: &str) -> Option<String> {
     }
 }
 
-async fn load_global() -> Option<String> {
+/// Returns the global TROGON.md content and its directory (for import resolution).
+async fn load_global() -> Option<(String, PathBuf)> {
     let home = std::env::var("HOME").ok()?;
-    let path = PathBuf::from(home).join(".config/trogon/TROGON.md");
-    tokio::fs::read_to_string(&path).await.ok()
+    let dir = PathBuf::from(home).join(".config/trogon");
+    let content = tokio::fs::read_to_string(dir.join("TROGON.md")).await.ok()?;
+    Some((content, dir))
+}
+
+/// Resolve an `@path` import token relative to `base_dir` (`@~/…` → `$HOME/…`).
+fn resolve_import(token: &str, base_dir: &Path) -> Option<PathBuf> {
+    if token.is_empty() {
+        return None;
+    }
+    if let Some(rest) = token.strip_prefix("~/") {
+        let home = std::env::var("HOME").ok()?;
+        Some(PathBuf::from(home).join(rest))
+    } else {
+        Some(base_dir.join(token))
+    }
+}
+
+/// Replace `@path` tokens with the referenced file's (recursively expanded)
+/// content. Uses synchronous reads — import files are small config files read at
+/// prompt-build time. Cycles (via `visited`) and depth (`MAX_IMPORT_DEPTH`) leave
+/// the token unexpanded, as do tokens that don't resolve to a readable file
+/// (so `@mention`-style text is preserved).
+fn expand_imports(content: &str, base_dir: &Path, depth: usize, visited: &mut Vec<PathBuf>) -> String {
+    if depth >= MAX_IMPORT_DEPTH {
+        return content.to_string();
+    }
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        if ch != '@' {
+            result.push(ch);
+            continue;
+        }
+        // Capture the following non-whitespace run as the import path.
+        let start = i + ch.len_utf8();
+        let mut end = start;
+        while let Some(&(j, c)) = chars.peek() {
+            if c.is_whitespace() {
+                break;
+            }
+            end = j + c.len_utf8();
+            chars.next();
+        }
+        let token = &content[start..end];
+        let resolved = resolve_import(token, base_dir)
+            .map(|p| p.canonicalize().unwrap_or(p));
+        match resolved {
+            Some(path) if !visited.contains(&path) => {
+                match std::fs::read_to_string(&path) {
+                    Ok(imported) => {
+                        let import_base =
+                            path.parent().map(Path::to_path_buf).unwrap_or_else(|| base_dir.to_path_buf());
+                        visited.push(path);
+                        result.push_str(&expand_imports(&imported, &import_base, depth + 1, visited));
+                        visited.pop();
+                    }
+                    // Not a readable file → leave the token literal.
+                    Err(_) => {
+                        result.push('@');
+                        result.push_str(token);
+                    }
+                }
+            }
+            // Cycle, or unresolvable → literal.
+            _ => {
+                result.push('@');
+                result.push_str(token);
+            }
+        }
+    }
+    result
+}
+
+/// Load `.trogon/rules/*.md` walking up from `cwd` (root-first), returning each
+/// rule's body annotated with its `globs:` scope. Parsing the glob frontmatter is
+/// the contract; the scope is surfaced to the model rather than used to filter
+/// (active-file filtering is delivered by on-demand subdirectory loading).
+async fn load_path_scoped_rules(cwd: &str) -> Vec<String> {
+    let mut rule_dirs: Vec<PathBuf> = Vec::new();
+    let mut dir = PathBuf::from(cwd);
+    loop {
+        rule_dirs.push(dir.join(".trogon").join("rules"));
+        if !dir.pop() {
+            break;
+        }
+    }
+    rule_dirs.reverse();
+
+    let mut out = Vec::new();
+    for rules_dir in rule_dirs {
+        let Ok(mut entries) = tokio::fs::read_dir(&rules_dir).await else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = Vec::new();
+        while let Ok(Some(e)) = entries.next_entry().await {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) == Some("md") {
+                files.push(p);
+            }
+        }
+        files.sort();
+        for f in files {
+            if let Ok(content) = tokio::fs::read_to_string(&f).await {
+                let (globs, body) = parse_rule_frontmatter(&content);
+                let body = body.trim();
+                if body.is_empty() {
+                    continue;
+                }
+                let scope = if globs.is_empty() { "all files".to_string() } else { globs.join(", ") };
+                out.push(format!("## Rule (applies to: {scope})\n\n{body}"));
+            }
+        }
+    }
+    out
+}
+
+/// Parse optional `---`-delimited frontmatter, extracting `globs:` (accepts a bare
+/// value, a comma list, or a `[...]` array). Returns the globs and the body after
+/// the frontmatter (or empty globs + the whole content when no frontmatter).
+fn parse_rule_frontmatter(content: &str) -> (Vec<String>, &str) {
+    let Some(rest) = content.strip_prefix("---\n") else {
+        return (Vec::new(), content);
+    };
+    let Some(end) = rest.find("\n---") else {
+        return (Vec::new(), content);
+    };
+    let front = &rest[..end];
+    // Skip past the closing "\n---" and an optional trailing newline.
+    let body = rest[end + 4..].strip_prefix('\n').unwrap_or(&rest[end + 4..]);
+
+    let mut globs = Vec::new();
+    for line in front.lines() {
+        let line = line.trim();
+        let value = line
+            .strip_prefix("globs:")
+            .or_else(|| line.strip_prefix("glob:"));
+        if let Some(v) = value {
+            let v = v.trim().trim_start_matches('[').trim_end_matches(']');
+            for g in v.split(',') {
+                let g = g.trim().trim_matches('"').trim_matches('\'');
+                if !g.is_empty() {
+                    globs.push(g.to_string());
+                }
+            }
+        }
+    }
+    (globs, body)
 }
 
 /// One layer in the TROGON.md hierarchy (global → repo root → cwd).
@@ -164,11 +327,24 @@ mod tests {
         dir
     }
 
+    // Holds the HOME mutex and points HOME at a dir with no global TROGON.md, so a
+    // concurrent HOME-mutating test can't make load_global read a fake global file.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn returns_none_when_no_file_exists() {
+        let _guard = home_test_mutex().lock().unwrap();
+        let empty_home = tmp_dir("none_empty_home").await; // no .config/trogon/TROGON.md
+        let orig = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", &empty_home) };
+
         let dir = tmp_dir("none").await;
         let result = load_trogon_md(dir.to_str().unwrap()).await;
-        assert!(result.is_none());
+
+        match &orig {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        assert!(result.is_none(), "got: {result:?}");
     }
 
     #[tokio::test]
@@ -351,5 +527,70 @@ mod tests {
 
         let content = result.expect("must return Some when global file exists and no local file");
         assert!(content.contains("only global content"), "got: {content}");
+    }
+
+    // ── @path imports ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn at_import_inlines_referenced_file() {
+        let dir = tmp_dir("import_inline").await;
+        write(&dir.join("snippet.md"), "imported snippet body").await;
+        write(&dir.join("TROGON.md"), "before\n@./snippet.md\nafter").await;
+        let out = load_trogon_md(dir.to_str().unwrap()).await.unwrap();
+        assert!(out.contains("imported snippet body"), "import not inlined: {out}");
+        assert!(!out.contains("@./snippet.md"), "literal token should be gone: {out}");
+        assert!(out.contains("before") && out.contains("after"));
+    }
+
+    #[tokio::test]
+    async fn at_import_unresolved_token_stays_literal() {
+        let dir = tmp_dir("import_literal").await;
+        // `@someone` is not a readable file — must survive verbatim.
+        write(&dir.join("TROGON.md"), "ping @someone for reviews").await;
+        let out = load_trogon_md(dir.to_str().unwrap()).await.unwrap();
+        assert!(out.contains("@someone"), "non-file @token must stay literal: {out}");
+    }
+
+    #[tokio::test]
+    async fn at_import_cycle_terminates() {
+        let dir = tmp_dir("import_cycle").await;
+        // Imports are whitespace-delimited; keep the token on its own line.
+        write(&dir.join("a.md"), "A_BODY\n@./b.md\n").await;
+        write(&dir.join("b.md"), "B_BODY\n@./a.md\n").await; // cycles back to a
+        write(&dir.join("TROGON.md"), "@./a.md\n").await;
+        // Must terminate (cycle guard) and include both bodies; the back-edge stays literal.
+        let out = load_trogon_md(dir.to_str().unwrap()).await.unwrap();
+        assert!(out.contains("A_BODY") && out.contains("B_BODY"), "got: {out}");
+    }
+
+    // ── path-scoped rules (.trogon/rules/*.md) ────────────────────────────────
+
+    #[tokio::test]
+    async fn path_scoped_rules_loaded_with_glob_scope() {
+        let dir = tmp_dir("rules_scope").await;
+        write(
+            &dir.join(".trogon/rules/style.md"),
+            "---\nglobs: src/**/*.rs\n---\nUse 4-space indentation.",
+        )
+        .await;
+        let out = load_trogon_md(dir.to_str().unwrap()).await.unwrap();
+        assert!(out.contains("Path-scoped rules"), "section missing: {out}");
+        assert!(out.contains("src/**/*.rs"), "glob scope missing: {out}");
+        assert!(out.contains("Use 4-space indentation."), "rule body missing: {out}");
+    }
+
+    #[test]
+    fn parse_rule_frontmatter_handles_variants() {
+        // array form
+        let (g, body) = parse_rule_frontmatter("---\nglobs: [\"a/**\", 'b.rs']\n---\nbody1");
+        assert_eq!(g, vec!["a/**", "b.rs"]);
+        assert_eq!(body.trim(), "body1");
+        // comma list
+        let (g, _) = parse_rule_frontmatter("---\nglobs: x, y\n---\nb");
+        assert_eq!(g, vec!["x", "y"]);
+        // no frontmatter → whole content is body, no globs
+        let (g, body) = parse_rule_frontmatter("just a rule");
+        assert!(g.is_empty());
+        assert_eq!(body, "just a rule");
     }
 }
