@@ -37,7 +37,7 @@ use crate::session_notifier::{NatsSessionNotifier, SessionNotifier};
 use crate::session_store::{MessageUsage, SessionSnapshot, SessionStoring, SnapshotMessage, TextBlock, now_iso};
 use crate::skill_loader::SkillLoading;
 use trogon_runner_tools::check_tool_permission;
-use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
+use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
 use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{
     AllowedToolsSessionStore, FsTrogonMdLoader, PermissionTx, TrogonMdLoading,
@@ -313,6 +313,8 @@ pub struct OpenRouterAgent<H = OpenRouterClient, N = NatsSessionNotifier, M = Fs
     /// NATS/ACP config used to create a `Bridge` for sub-sessions when `spawn_agent` is invoked.
     /// Set via [`OpenRouterAgent::with_runner_config`]. `None` disables spawn_agent.
     runner_config: Option<acp_nats::Config>,
+    /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
+    session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
 
 impl OpenRouterAgent<OpenRouterClient, NatsSessionNotifier, FsTrogonMdLoader> {
@@ -438,6 +440,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier> OpenRouterAgent<H, N, FsTrogon
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 }
@@ -476,6 +479,7 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            session_locks: self.session_locks,
         }
     }
 
@@ -732,7 +736,19 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
         SessionModelState::new(current, self.available_models.clone())
     }
 
-    fn maybe_evict_oldest(sessions: &mut HashMap<String, OpenRouterSession>) -> Option<String> {
+    /// Acquire (or create) the per-session semaphore permit, serializing concurrent state mutations.
+    fn acquire_session_lock(&self, session_id: &str) -> Arc<tokio::sync::Semaphore> {
+        let mut locks = self.session_locks.lock().unwrap();
+        locks
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+
+    fn maybe_evict_oldest(
+        sessions: &mut HashMap<String, OpenRouterSession>,
+        session_locks: &std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>,
+    ) -> Option<String> {
         if sessions.len() < MAX_SESSIONS {
             return None;
         }
@@ -746,6 +762,9 @@ impl<H: OpenRouterHttpClient, N: SessionNotifier, M: TrogonMdLoading> OpenRouter
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
                   "openrouter: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
+            if let Ok(mut locks) = session_locks.lock() {
+                locks.remove(&oldest_id);
+            }
             return Some(oldest_id);
         }
         None
@@ -883,11 +902,13 @@ async fn compact_or_trim_openrouter_history(
     nats: &Option<async_nats::Client>,
     history: &mut Vec<Message>,
     max: usize,
+    model: &str,
+    compactor_model: Option<&str>,
 ) {
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = openrouter_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter").await {
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", model, compactor_model).await {
             *history = openrouter_history_from_wire(compacted);
             return;
         }
@@ -1045,7 +1066,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let mcp_servers = trogon_runner_tools::convert_mcp_servers(&req.mcp_servers);
         let evicted_id = {
             let mut sessions = self.sessions.lock().await;
-            Self::maybe_evict_oldest(&mut sessions)
+            Self::maybe_evict_oldest(&mut sessions, &self.session_locks)
         };
         if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
             store.remove(&self.tenant_id, &evicted).await;
@@ -1164,7 +1185,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
                 let evicted_id = {
                     let mut sessions = self.sessions.lock().await;
-                    Self::maybe_evict_oldest(&mut sessions)
+                    Self::maybe_evict_oldest(&mut sessions, &self.session_locks)
                 };
                 if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
                     store.remove(&self.tenant_id, &evicted).await;
@@ -1281,7 +1302,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         let new_session_id = Uuid::new_v4().to_string();
         let evicted_id = {
             let mut sessions = self.sessions.lock().await;
-            Self::maybe_evict_oldest(&mut sessions)
+            Self::maybe_evict_oldest(&mut sessions, &self.session_locks)
         };
         if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
             store.remove(&self.tenant_id, &evicted).await;
@@ -1373,6 +1394,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         }
         sessions.remove(&session_id);
         drop(sessions);
+        // Remove the per-session semaphore now that the session is gone. Any
+        // in-flight prompt holds its own Arc clone, so the live semaphore stays
+        // valid until that prompt finishes.
+        self.session_locks.lock().unwrap().remove(&session_id);
         info!(session_id, "openrouter: session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -1422,6 +1447,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if !is_valid_mode(&mode_id) {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -1449,6 +1477,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -1466,6 +1497,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
     ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
         let session_id = req.session_id.to_string();
         let config_id = req.config_id.to_string();
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut sessions = self.sessions.lock().await;
         let s = sessions
             .get_mut(&session_id)
@@ -1509,6 +1543,10 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
     async fn prompt(&self, req: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
         let session_id = req.session_id.to_string();
+
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
 
         let user_input: String = req
             .prompt
@@ -1575,6 +1613,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
 
         let (
             model,
+            compactor_model,
             api_key,
             mut messages,
             session_system_prompt,
@@ -1596,6 +1635,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             s.last_used_at = Instant::now();
             (
                 s.model.clone(),
+                s.compactor_model.clone(),
                 s.api_key.clone(),
                 s.history.clone(),
                 s.system_prompt.clone(),
@@ -1627,6 +1667,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             }
         };
 
+        let resolved_model = model.clone().unwrap_or_else(|| self.default_model.clone());
         let model = model.as_deref().unwrap_or(&self.default_model).to_string();
         let api_key = api_key
             .or_else(|| self.global_api_key.clone())
@@ -1727,7 +1768,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
         if let Some(nats) = &self.execution_nats {
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = openrouter_history_to_wire(&messages);
-            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter").await {
+            if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "openrouter", &resolved_model, compactor_model.as_deref()).await {
                 messages = openrouter_history_from_wire(compacted);
                 // Intentionally not writing back to s.history here: the post-turn path
                 // assigns the full messages (including new response) to s.history and
@@ -2228,7 +2269,7 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
             messages.push(msg);
         }
         let mut history = messages;
-        compact_or_trim_openrouter_history(&self.execution_nats, &mut history, self.max_history).await;
+        compact_or_trim_openrouter_history(&self.execution_nats, &mut history, self.max_history, &resolved_model, compactor_model.as_deref()).await;
 
         let snapshot = {
             let mut sessions = self.sessions.lock().await;
@@ -2313,6 +2354,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     serde_json::from_str(args.params.get()).unwrap_or_default();
                 let session_id = params["sessionId"].as_str()
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let semaphore = self.acquire_session_lock(session_id);
+                let _permit = semaphore.acquire_owned().await
+                    .map_err(|_| internal_error("session lock closed"))?;
                 let sessions = self.sessions.lock().await;
                 let s = sessions.get(session_id)
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
@@ -2327,6 +2371,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     serde_json::from_str(args.params.get()).unwrap_or_default();
                 let session_id = params["sessionId"].as_str()
                     .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+                let semaphore = self.acquire_session_lock(session_id);
+                let _permit = semaphore.acquire_owned().await
+                    .map_err(|_| internal_error("session lock closed"))?;
                 let messages_json = params["messages"].to_string();
                 let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
                     .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
@@ -2351,7 +2398,9 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                         )
                     }
                 };
-                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history)
+                let import_model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
+                let import_compactor_model = s.compactor_model.clone();
+                compact_or_trim_openrouter_history(&self.execution_nats, &mut s.history, self.max_history, &import_model, import_compactor_model.as_deref())
                     .await;
                 // MED-20: persist the imported (and compacted) history to KV so a
                 // runner restart before the next prompt doesn't revert /compact.
@@ -2360,6 +2409,67 @@ impl<H: OpenRouterHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonM
                     store.save(&snapshot).await;
                 }
                 let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+                Ok(ExtResponse::new(raw.into()))
+            }
+            "session/compact" => {
+                let params: serde_json::Value =
+                    serde_json::from_str(args.params.get()).unwrap_or_default();
+                let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "missing sessionId")
+                })?;
+                let semaphore = self.acquire_session_lock(session_id);
+                let _permit = semaphore.acquire_owned().await
+                    .map_err(|_| internal_error("session lock closed"))?;
+                let (history, resolved_model, compactor_model) = {
+                    let sessions = self.sessions.lock().await;
+                    let s = sessions.get(session_id).ok_or_else(|| {
+                        Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                    })?;
+                    let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
+                    (s.history.clone(), model, s.compactor_model.clone())
+                };
+                let wire = openrouter_history_to_wire(&history);
+                let tokens_before = estimate_tokens(&wire);
+                let nats = self.execution_nats.as_ref().ok_or_else(|| {
+                    Error::new(
+                        ErrorCode::InternalError.into(),
+                        "no compactor backend for compaction",
+                    )
+                })?;
+                let (token_budget, threshold_pct) = compaction_settings_from_env();
+                let compacted_wire = maybe_compact(
+                    nats,
+                    &wire,
+                    token_budget,
+                    threshold_pct,
+                    "openrouter",
+                    &resolved_model,
+                    compactor_model.as_deref(),
+                )
+                .await
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+                let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
+                    let tokens_after = estimate_tokens(&cw);
+                    let new_history = openrouter_history_from_wire(cw);
+                    let mut sessions = self.sessions.lock().await;
+                    if let Some(s) = sessions.get_mut(session_id) {
+                        s.history = new_history;
+                        if let Some(store) = &self.session_store {
+                            let snapshot = self.build_snapshot(session_id, s);
+                            store.save(&snapshot).await;
+                        }
+                    }
+                    (true, tokens_after)
+                } else {
+                    (false, tokens_before)
+                };
+                let result = serde_json::json!({
+                    "compacted": compacted,
+                    "tokens_before": tokens_before,
+                    "tokens_after": tokens_after,
+                });
+                let raw = serde_json::value::RawValue::from_string(result.to_string())
+                    .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
                 Ok(ExtResponse::new(raw.into()))
             }
             _ => Err(Error::new(ErrorCode::MethodNotFound.into(), args.method.to_string())),
@@ -2751,7 +2861,8 @@ mod tests {
         for i in 0..MAX_SESSIONS - 1 {
             sessions.insert(format!("s{i}"), make_session());
         }
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        let dummy_locks = std::sync::Mutex::new(HashMap::new());
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions, &dummy_locks);
         assert_eq!(sessions.len(), MAX_SESSIONS - 1);
     }
 
@@ -2762,7 +2873,8 @@ mod tests {
             sessions.insert(format!("s{i}"), make_session());
         }
         // At exactly MAX_SESSIONS, eviction fires (guard is `< MAX_SESSIONS`).
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        let dummy_locks = std::sync::Mutex::new(HashMap::new());
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions, &dummy_locks);
         assert_eq!(sessions.len(), MAX_SESSIONS - 1);
     }
 
@@ -2772,14 +2884,16 @@ mod tests {
         for i in 0..=MAX_SESSIONS {
             sessions.insert(format!("s{i}"), make_session());
         }
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        let dummy_locks = std::sync::Mutex::new(HashMap::new());
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions, &dummy_locks);
         assert_eq!(sessions.len(), MAX_SESSIONS);
     }
 
     #[test]
     fn maybe_evict_oldest_empty_map_does_not_panic() {
         let mut sessions: HashMap<String, OpenRouterSession> = HashMap::new();
-        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions);
+        let dummy_locks = std::sync::Mutex::new(HashMap::new());
+        OpenRouterAgent::<MockOpenRouterHttpClient, MockSessionNotifier>::maybe_evict_oldest(&mut sessions, &dummy_locks);
         assert!(sessions.is_empty());
     }
 

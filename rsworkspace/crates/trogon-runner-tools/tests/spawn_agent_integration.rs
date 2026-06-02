@@ -161,9 +161,12 @@ async fn call_tool_sends_capability_and_prompt_in_payload() {
             assert_eq!(v["capability"].as_str().unwrap(), "explore");
             assert_eq!(v["prompt"].as_str().unwrap(), "list files");
 
-            // payload has capability, prompt, session_id
+            // session_id is forwarded so the spawned agent knows its parent
+            // session (added in feat(spawn-agent): isolated worktree sub-agents).
+            assert_eq!(v["session_id"].as_str().unwrap(), "");
+
+            // no unexpected fields beyond capability, prompt, session_id
             assert!(v.as_object().map(|o| o.len() == 3).unwrap_or(false));
-            assert!(v["session_id"].is_string(), "session_id must be a string field");
 
             if let Some(reply) = msg.reply {
                 registry_client.publish(reply, "ok".into()).await.unwrap();

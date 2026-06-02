@@ -5,7 +5,6 @@ use agent_client_protocol::{
     LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest, SessionNotification,
     SessionUpdate, TextContent, ToolCallStatus,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -16,158 +15,12 @@ const SESSION_NEW_TIMEOUT: Duration = Duration::from_secs(15);
 const LOAD_SESSION_TIMEOUT: Duration = Duration::from_secs(15);
 const LIST_SESSIONS_TIMEOUT: Duration = Duration::from_secs(15);
 const EXT_METHOD_TIMEOUT: Duration = Duration::from_secs(30);
-const COMPACT_TIMEOUT: Duration = Duration::from_secs(120);
-const COMPACT_SUBJECT: &str = "trogon.compactor.compact";
-
 /// Result of a manual `/compact` request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct CompactResult {
     pub compacted: bool,
     pub tokens_before: usize,
     pub tokens_after: usize,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PortableMessage {
-    role: String,
-    text: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct CompactorMessage {
-    role: String,
-    content: Vec<Value>,
-}
-
-/// A response from the compactor service.
-///
-/// Unifies the success and error shapes into one struct so that a response that
-/// happens to contain an `error` field (e.g. a partial-success diagnostic) is
-/// never misinterpreted as a failure. The rule is:
-///   - `compacted == true`  → success; use `messages`, `tokens_before`, `tokens_after`
-///   - `compacted == false` AND `error.is_some()` → failure; surface the error message
-///   - `compacted == false` AND `error.is_none()` → compaction was skipped (short history)
-#[derive(Deserialize)]
-struct CompactResponse {
-    /// `#[serde(default)]` so a failure response (which omits `messages` and
-    /// carries only `error`) still parses — otherwise the real error is masked
-    /// by a "missing field `messages`" deserialization error.
-    #[serde(default)]
-    messages: Vec<CompactorMessage>,
-    #[serde(default)]
-    compacted: bool,
-    #[serde(default)]
-    tokens_before: usize,
-    #[serde(default)]
-    tokens_after: usize,
-    /// Present only on failure responses; ignored when `compacted` is `true`.
-    #[serde(default)]
-    error: Option<String>,
-}
-
-fn compactor_content_to_text(content: &[Value]) -> String {
-    content
-        .iter()
-        .filter_map(|block| {
-            (block.get("type")?.as_str() == Some("text"))
-                .then(|| block.get("text")?.as_str())
-                .flatten()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn compactor_to_portable(messages: &[CompactorMessage]) -> Vec<PortableMessage> {
-    messages
-        .iter()
-        .map(|m| PortableMessage {
-            role: m.role.clone(),
-            text: compactor_content_to_text(&m.content),
-        })
-        .collect()
-}
-
-// ── MED-27: structure-preserving compaction (V2) ───────────────────────────────
-//
-// The compactor keeps a recent tail of messages verbatim, so if we send the
-// structured V2 blocks (instead of flattening to text) it returns the recent
-// tool_use/tool_result blocks with their pairing intact. We map between the V2
-// `PortableBlock` shape and the compactor's `ContentBlock` JSON shape (which use
-// different field names) on the way out and back.
-
-/// Map a V2 export block to the compactor's `ContentBlock` JSON shape.
-fn v2_block_to_compactor_json(block: &trogon_runner_tools::PortableBlock) -> Value {
-    use trogon_runner_tools::PortableBlock as B;
-    match block {
-        B::Text { text } => json!({ "type": "text", "text": text }),
-        B::ToolUse { id, name, input_summary } => json!({
-            "type": "tool_use",
-            "id": id,
-            "name": name,
-            // The compactor's `input` is an arbitrary JSON value; the V2 export
-            // already carries a summarized string, so pass it as a string value.
-            "input": input_summary,
-        }),
-        B::ToolResult { id, output_summary } => json!({
-            "type": "tool_result",
-            "tool_use_id": id,
-            "content": output_summary,
-        }),
-        B::Thinking { text } => json!({ "type": "thinking", "thinking": text }),
-    }
-}
-
-/// Map a compactor `ContentBlock` JSON value back to a V2 export block.
-fn compactor_json_to_v2_block(v: &Value) -> Option<trogon_runner_tools::PortableBlock> {
-    use trogon_runner_tools::PortableBlock as B;
-    let value_to_summary = |val: Option<&Value>| -> String {
-        match val {
-            Some(Value::String(s)) => s.clone(),
-            Some(other) => other.to_string(),
-            None => String::new(),
-        }
-    };
-    match v.get("type").and_then(|t| t.as_str())? {
-        "text" => Some(B::Text {
-            text: v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-        }),
-        "tool_use" => Some(B::ToolUse {
-            id: v.get("id").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-            name: v.get("name").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-            input_summary: value_to_summary(v.get("input")),
-        }),
-        "tool_result" => Some(B::ToolResult {
-            id: v.get("tool_use_id").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-            output_summary: v.get("content").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-        }),
-        "thinking" => Some(B::Thinking {
-            text: v.get("thinking").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-        }),
-        // The text-only V2 block type carries images as a placeholder.
-        "image" => Some(B::Text { text: "[image]".to_string() }),
-        _ => None,
-    }
-}
-
-/// Build the structured compactor request messages from a parsed export.
-fn export_to_compactor(parsed: &trogon_runner_tools::ParsedExport) -> Vec<CompactorMessage> {
-    match parsed {
-        trogon_runner_tools::ParsedExport::V1(v1) => v1
-            .iter()
-            .map(|m| CompactorMessage {
-                role: m.role.clone(),
-                content: vec![json!({ "type": "text", "text": m.text })],
-            })
-            .collect(),
-        trogon_runner_tools::ParsedExport::V2(v2) => v2
-            .messages
-            .iter()
-            .map(|m| CompactorMessage {
-                role: m.role.clone(),
-                content: m.blocks.iter().map(v2_block_to_compactor_json).collect(),
-            })
-            .collect(),
-    }
 }
 
 async fn ext_method<N: NatsClient>(
@@ -730,95 +583,15 @@ impl<N: NatsClient> Session for TrogonSession<N> {
         let session_id = self.session_id.clone();
         let nats = &self.nats;
         async move {
-            let export_params = json!({ "sessionId": session_id });
-            let export_val =
-                ext_method(nats, &prefix, "session/export", export_params).await?;
-            let export_str = serde_json::to_string(&export_val)
-                .map_err(|e| anyhow::anyhow!("session/export encode error: {e}"))?;
-            let parsed = trogon_runner_tools::parse_export_json(&export_str)
-                .map_err(|e| anyhow::anyhow!("session/export returned invalid messages: {e}"))?;
-            // MED-27: send STRUCTURED messages so the compactor preserves the recent
-            // tail's tool_use/tool_result pairing instead of flattening to text.
-            let is_v2 = matches!(parsed, trogon_runner_tools::ParsedExport::V2(_));
-            let compactor_msgs = export_to_compactor(&parsed);
-
-            if compactor_msgs.is_empty() {
-                return Ok(CompactResult {
-                    compacted: false,
-                    tokens_before: 0,
-                    tokens_after: 0,
-                });
-            }
-
-            let compact_payload =
-                serde_json::to_vec(&json!({ "messages": compactor_msgs }))?;
-            let bytes = tokio::time::timeout(
-                COMPACT_TIMEOUT,
-                nats.request_bytes(COMPACT_SUBJECT.to_string(), compact_payload.into()),
-            )
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "timed out waiting for compactor ({}s)",
-                    COMPACT_TIMEOUT.as_secs()
-                )
-            })?
-            .map_err(|e| anyhow::anyhow!("NATS error calling compactor: {e}"))?;
-
-            // A single parse into `CompactResponse` handles both success and error shapes.
-            // `error` is only surfaced when `compacted == false`; a successful response that
-            // happens to include an `error` diagnostic field is never misread as a failure.
-            let resp: CompactResponse = serde_json::from_slice(&bytes)
-                .map_err(|e| anyhow::anyhow!("invalid compactor response: {e}"))?;
-
-            if !resp.compacted
-                && let Some(err_msg) = &resp.error
-            {
-                return Err(anyhow::anyhow!("compactor error: {}", err_msg));
-            }
-
-            let result = CompactResult {
-                compacted: resp.compacted,
-                tokens_before: resp.tokens_before,
-                tokens_after: resp.tokens_after,
-            };
-
-            if resp.compacted {
-                // MED-27: re-import preserving structure. For a V2 session rebuild a
-                // V2 export (so tool_use/tool_result blocks survive); for a V1 session
-                // keep the text-only array shape.
-                let messages_val = if is_v2 {
-                    let v2_msgs: Vec<Value> = resp
-                        .messages
-                        .iter()
-                        .map(|m| {
-                            let blocks: Vec<trogon_runner_tools::PortableBlock> = m
-                                .content
-                                .iter()
-                                .filter_map(compactor_json_to_v2_block)
-                                .collect();
-                            json!({
-                                "version": trogon_runner_tools::EXPORT_VERSION_V2,
-                                "role": m.role,
-                                "blocks": blocks,
-                            })
-                        })
-                        .collect();
-                    json!({
-                        "version": trogon_runner_tools::EXPORT_VERSION_V2,
-                        "messages": v2_msgs,
-                    })
-                } else {
-                    json!(compactor_to_portable(&resp.messages))
-                };
-                let import_params = json!({
-                    "sessionId": session_id,
-                    "messages": messages_val,
-                });
-                ext_method(nats, &prefix, "session/import", import_params).await?;
-            }
-
-            Ok(result)
+            // Delegate compaction to the runner via the `session/compact` ext method.
+            // The runner owns the session and supplies the correct provider + session model
+            // + compactor_model. Reimplementing compaction here (export → compactor → import)
+            // is what caused the provider/compactor_model bug, so the CLI now just asks the
+            // runner to compact its own session.
+            let params = json!({ "sessionId": session_id });
+            let val = ext_method(nats, &prefix, "session/compact", params).await?;
+            serde_json::from_value::<CompactResult>(val)
+                .map_err(|e| anyhow::anyhow!("invalid session/compact response: {e}"))
         }
     }
 
@@ -1798,25 +1571,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_export_compactor_import_round_trip() {
+    async fn compact_delegates_to_runner_session_compact() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
+        // `compact()` now makes a single `session/compact` ext call; the runner owns the
+        // compaction (provider + session model + compactor_model) and returns the result.
         nats.queue_request_ok(ext_response(
-            r#"[{"role":"user","text":"hello"},{"role":"assistant","text":"world"}]"#,
+            r#"{"compacted":true,"tokens_before":1000,"tokens_after":200}"#,
         ));
-        nats.queue_request_ok(Bytes::from(
-            serde_json::to_vec(&json!({
-                "messages": [{"role": "user", "content": [{"type": "text", "text": "summary"}]}],
-                "compacted": true,
-                "tokens_before": 1000,
-                "tokens_after": 200,
-            }))
-            .unwrap(),
-        ));
-        nats.queue_request_ok(ext_response("{}"));
 
         let result = session.compact().await.unwrap();
         assert_eq!(
@@ -1830,13 +1595,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_returns_noop_when_export_empty() {
+    async fn compact_returns_runner_noop_result() {
         let nats = MockNatsClient::new();
         queue_new_session_setup(&nats, "s1").await;
         let session =
             TrogonSession::new(nats.clone(), "acp", std::path::PathBuf::from("/tmp"), vec![]).await.unwrap();
 
-        nats.queue_request_ok(ext_response("[]"));
+        nats.queue_request_ok(ext_response(
+            r#"{"compacted":false,"tokens_before":0,"tokens_after":0}"#,
+        ));
 
         let result = session.compact().await.unwrap();
         assert_eq!(
