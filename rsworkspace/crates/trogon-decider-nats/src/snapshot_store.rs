@@ -1,9 +1,9 @@
 //! Snapshot storage helpers backed by JetStream Key/Value.
 //!
-//! Snapshots are stored under the [`SnapshotType::SNAPSHOT_STREAM_PREFIX`]
-//! namespace for each payload type. Checkpoints are optional and use a reserved
-//! `_snapshot.*` key so snapshot listings can separate stream snapshots from
-//! adapter metadata.
+//! Snapshots are stored under NATS-specific keys derived from the
+//! [`SnapshotType::snapshot_type`] identity and the caller's snapshot id.
+//! Checkpoints are optional and use a `snapshots.checkpoint.*` key so snapshot
+//! listings can separate stream snapshots from adapter metadata.
 
 use async_nats::jetstream::kv;
 use bytes::Bytes;
@@ -11,8 +11,8 @@ use futures::StreamExt;
 use std::{borrow::Cow, collections::BTreeMap, convert::Infallible};
 use trogon_decider_runtime::StreamPosition;
 use trogon_decider_runtime::snapshot::{
-    EncodedSnapshot, Snapshot, SnapshotEnvelopeDecodeError, SnapshotEnvelopeEncodeError, SnapshotPayloadData,
-    SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    EncodedSnapshot, Snapshot, SnapshotEnvelopeDecodeError, SnapshotEnvelopeEncodeError, SnapshotPayloadDecode,
+    SnapshotPayloadEncode, SnapshotType, SnapshotTypeName, decode_snapshot, encode_snapshot,
 };
 use trogon_nats::jetstream::{
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
@@ -182,36 +182,46 @@ impl std::error::Error for SnapshotKvError {
 #[derive(Debug)]
 /// Snapshot envelope or payload codec error.
 #[allow(missing_docs)]
-pub enum SnapshotCodecError<PayloadError> {
+pub enum SnapshotCodecError<PayloadError, SnapshotTypeError = Infallible> {
+    SnapshotType { source: SnapshotTypeError },
     EncodePayload { source: PayloadError },
     EncodeEnvelope { source: SnapshotEnvelopeEncodeError },
     DecodeEnvelope { source: SnapshotEnvelopeDecodeError },
+    UnexpectedSnapshotType { expected: SnapshotTypeName, actual: String },
     DecodePayload { source: PayloadError },
 }
 
-impl<PayloadError> std::fmt::Display for SnapshotCodecError<PayloadError>
+impl<PayloadError, SnapshotTypeError> std::fmt::Display for SnapshotCodecError<PayloadError, SnapshotTypeError>
 where
     PayloadError: std::fmt::Display,
+    SnapshotTypeError: std::fmt::Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SnapshotType { source } => write!(f, "failed to resolve stream snapshot type: {source}"),
             Self::EncodePayload { source } => write!(f, "failed to encode stream snapshot payload: {source}"),
             Self::EncodeEnvelope { source } => write!(f, "failed to encode stream snapshot envelope: {source}"),
             Self::DecodeEnvelope { source } => write!(f, "failed to decode stream snapshot envelope: {source}"),
+            Self::UnexpectedSnapshotType { expected, actual } => {
+                write!(f, "unexpected stream snapshot type: expected {expected}, got {actual}")
+            }
             Self::DecodePayload { source } => write!(f, "failed to decode stream snapshot payload: {source}"),
         }
     }
 }
 
-impl<PayloadError> std::error::Error for SnapshotCodecError<PayloadError>
+impl<PayloadError, SnapshotTypeError> std::error::Error for SnapshotCodecError<PayloadError, SnapshotTypeError>
 where
     PayloadError: std::error::Error + 'static,
+    SnapshotTypeError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::SnapshotType { source } => Some(source),
             Self::EncodePayload { source } => Some(source),
             Self::EncodeEnvelope { source } => Some(source),
             Self::DecodeEnvelope { source } => Some(source),
+            Self::UnexpectedSnapshotType { .. } => None,
             Self::DecodePayload { source } => Some(source),
         }
     }
@@ -219,20 +229,20 @@ where
 
 #[derive(Debug)]
 /// Error raised while reading, writing, or decoding snapshot state.
-pub enum SnapshotStoreError<PayloadError = Infallible> {
+pub enum SnapshotStoreError<PayloadError = Infallible, SnapshotTypeError = Infallible> {
     /// JetStream Key/Value operation failed.
     Kv(SnapshotKvError),
     /// Snapshot envelope or payload encoding failed.
-    Codec(SnapshotCodecError<PayloadError>),
-    /// A key used the snapshot namespace prefix but did not include a stream id.
+    Codec(SnapshotCodecError<PayloadError, SnapshotTypeError>),
+    /// A key used the snapshot namespace prefix but did not include a snapshot id.
     InvalidSnapshotKey {
         /// Invalid key observed in the Key/Value bucket.
         key: String,
     },
     /// Checkpoint operations were requested without a checkpoint name.
     MissingCheckpointName {
-        /// Snapshot namespace prefix that requires a checkpoint name.
-        key_prefix: String,
+        /// Snapshot type that requires a checkpoint name.
+        snapshot_type: SnapshotTypeName,
     },
 }
 
@@ -270,52 +280,55 @@ impl Default for NatsSnapshotConfig {
 #[derive(Debug, Clone, PartialEq)]
 /// Persisted snapshot mutation.
 pub enum SnapshotChange<T> {
-    /// Writes a snapshot for the stream id.
+    /// Writes a snapshot for the snapshot id.
     Upsert {
-        /// Domain stream id associated with the snapshot.
-        stream_id: String,
+        /// Domain snapshot id associated with the snapshot.
+        snapshot_id: String,
         /// Snapshot payload and stream position to store.
         snapshot: Box<Snapshot<T>>,
     },
-    /// Deletes a snapshot for the stream id.
+    /// Deletes a snapshot for the snapshot id.
     Delete {
-        /// Domain stream id whose snapshot should be removed.
-        stream_id: String,
+        /// Domain snapshot id whose snapshot should be removed.
+        snapshot_id: String,
     },
 }
 
 impl<T> SnapshotChange<T> {
     /// Builds an upsert change for a stream snapshot.
-    pub fn upsert(stream_id: impl Into<String>, snapshot: Snapshot<T>) -> Self {
+    pub fn upsert(snapshot_id: impl Into<String>, snapshot: Snapshot<T>) -> Self {
         Self::Upsert {
-            stream_id: stream_id.into(),
+            snapshot_id: snapshot_id.into(),
             snapshot: Box::new(snapshot),
         }
     }
 
     /// Builds a delete change for a stream snapshot.
-    pub fn delete(stream_id: impl Into<String>) -> Self {
+    pub fn delete(snapshot_id: impl Into<String>) -> Self {
         Self::Delete {
-            stream_id: stream_id.into(),
+            snapshot_id: snapshot_id.into(),
         }
     }
 }
 
-impl<PayloadError> From<SnapshotKvError> for SnapshotStoreError<PayloadError> {
+impl<PayloadError, SnapshotTypeError> From<SnapshotKvError> for SnapshotStoreError<PayloadError, SnapshotTypeError> {
     fn from(source: SnapshotKvError) -> Self {
         Self::Kv(source)
     }
 }
 
-impl<PayloadError> From<SnapshotCodecError<PayloadError>> for SnapshotStoreError<PayloadError> {
-    fn from(source: SnapshotCodecError<PayloadError>) -> Self {
+impl<PayloadError, SnapshotTypeError> From<SnapshotCodecError<PayloadError, SnapshotTypeError>>
+    for SnapshotStoreError<PayloadError, SnapshotTypeError>
+{
+    fn from(source: SnapshotCodecError<PayloadError, SnapshotTypeError>) -> Self {
         Self::Codec(source)
     }
 }
 
-impl<PayloadError> std::fmt::Display for SnapshotStoreError<PayloadError>
+impl<PayloadError, SnapshotTypeError> std::fmt::Display for SnapshotStoreError<PayloadError, SnapshotTypeError>
 where
     PayloadError: std::fmt::Display,
+    SnapshotTypeError: std::fmt::Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -324,16 +337,17 @@ where
             Self::InvalidSnapshotKey { key } => {
                 write!(f, "Invalid stream snapshot key: {key}")
             }
-            Self::MissingCheckpointName { key_prefix } => {
-                write!(f, "Missing checkpoint name for snapshot namespace: {key_prefix}")
+            Self::MissingCheckpointName { snapshot_type } => {
+                write!(f, "Missing checkpoint name for snapshot type: {snapshot_type}")
             }
         }
     }
 }
 
-impl<PayloadError> std::error::Error for SnapshotStoreError<PayloadError>
+impl<PayloadError, SnapshotTypeError> std::error::Error for SnapshotStoreError<PayloadError, SnapshotTypeError>
 where
     PayloadError: std::error::Error + 'static,
+    SnapshotTypeError: std::error::Error + 'static,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -344,89 +358,171 @@ where
     }
 }
 
-/// Builds the Key/Value key used to store a stream snapshot.
-pub fn snapshot_key<T>(id: &str) -> String
+const SNAPSHOT_DATA_KEY_NAMESPACE: &str = "snapshots.data";
+const SNAPSHOT_CHECKPOINT_KEY_NAMESPACE: &str = "snapshots.checkpoint";
+
+type SnapshotTypeError<T> = <T as SnapshotType>::Error;
+type SnapshotEncodePayloadError<T> = <T as SnapshotPayloadEncode>::Error;
+type SnapshotDecodePayloadError<T> = <T as SnapshotPayloadDecode>::Error;
+
+fn resolve_snapshot_type<T, PayloadError>()
+-> Result<SnapshotTypeName, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
 {
-    format!("{}{}", T::SNAPSHOT_STREAM_PREFIX, id)
+    T::snapshot_type()
+        .map_err(|source| SnapshotCodecError::SnapshotType { source })
+        .map_err(Into::into)
+}
+
+fn snapshot_key_prefix<T, PayloadError>() -> Result<String, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
+where
+    T: SnapshotType,
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
+{
+    let snapshot_type = resolve_snapshot_type::<T, PayloadError>()?;
+    Ok(format!("{}.{}.", SNAPSHOT_DATA_KEY_NAMESPACE, snapshot_type))
+}
+
+/// Builds the Key/Value key used to store a stream snapshot.
+pub fn snapshot_key<T>(snapshot_id: &str) -> Result<String, SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
+where
+    T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
+{
+    snapshot_key_for::<T, Infallible>(snapshot_id)
+}
+
+fn snapshot_key_for<T, PayloadError>(
+    snapshot_id: &str,
+) -> Result<String, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
+where
+    T: SnapshotType,
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
+{
+    Ok(format!("{}{}", snapshot_key_prefix::<T, PayloadError>()?, snapshot_id))
 }
 
 /// Builds the Key/Value key used to store a snapshot checkpoint.
-pub fn checkpoint_key<T>(config: &NatsSnapshotConfig) -> Result<String, SnapshotStoreError>
+pub fn checkpoint_key<T>(
+    config: &NatsSnapshotConfig,
+) -> Result<String, SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
 {
-    config
+    let snapshot_type = resolve_snapshot_type::<T, Infallible>()?;
+
+    let checkpoint_name = config
         .checkpoint_name()
-        .map(|checkpoint_name| {
-            format!(
-                "_snapshot.{}.{}",
-                T::SNAPSHOT_STREAM_PREFIX.trim_end_matches('.'),
-                checkpoint_name
-            )
-        })
         .ok_or_else(|| SnapshotStoreError::MissingCheckpointName {
-            key_prefix: T::SNAPSHOT_STREAM_PREFIX.to_string(),
-        })
+            snapshot_type: snapshot_type.clone(),
+        })?;
+
+    Ok(format!(
+        "{}.{}.{}",
+        SNAPSHOT_CHECKPOINT_KEY_NAMESPACE, snapshot_type, checkpoint_name,
+    ))
 }
 
-fn stream_id_from_snapshot_key<T, PayloadError>(key: &str) -> Result<Option<String>, SnapshotStoreError<PayloadError>>
+fn snapshot_id_from_snapshot_key<T, PayloadError>(
+    key: &str,
+) -> Result<Option<String>, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
 {
-    let Some(stream_id) = key.strip_prefix(T::SNAPSHOT_STREAM_PREFIX) else {
+    let key_prefix = snapshot_key_prefix::<T, PayloadError>()?;
+    let Some(snapshot_id) = key.strip_prefix(&key_prefix) else {
         return Ok(None);
     };
 
-    if stream_id.is_empty() {
+    if snapshot_id.is_empty() {
         return Err(SnapshotStoreError::InvalidSnapshotKey { key: key.to_string() });
     }
 
-    Ok(Some(stream_id.to_string()))
+    Ok(Some(snapshot_id.to_string()))
 }
 
-fn snapshot_value<T>(snapshot: &Snapshot<T>) -> Result<Vec<u8>, SnapshotStoreError<T::Error>>
+fn snapshot_value<T>(
+    snapshot: &Snapshot<T>,
+) -> Result<Vec<u8>, SnapshotStoreError<SnapshotEncodePayloadError<T>, SnapshotTypeError<T>>>
 where
-    T: SnapshotPayloadEncode,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    T: SnapshotPayloadEncode + SnapshotType,
+    SnapshotEncodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
 {
-    let payload = snapshot
-        .payload
-        .encode()
-        .map_err(|source| SnapshotCodecError::EncodePayload { source })?;
-    let encoded = EncodedSnapshot::new(snapshot.position, payload);
+    let encoded = encode_snapshot(snapshot).map_err(|source| match source {
+        trogon_decider_runtime::snapshot::SnapshotEncodeError::SnapshotType { source } => {
+            SnapshotCodecError::SnapshotType { source }
+        }
+        trogon_decider_runtime::snapshot::SnapshotEncodeError::Payload { source } => {
+            SnapshotCodecError::EncodePayload { source }
+        }
+    })?;
 
     encoded
         .into_bytes()
         .map_err(|source| SnapshotCodecError::EncodeEnvelope { source }.into())
 }
 
-fn snapshot_from_value<T>(value: &[u8]) -> Result<Snapshot<T>, SnapshotStoreError<T::Error>>
-where
-    T: SnapshotPayloadDecode,
-    T::Error: std::error::Error + Send + Sync + 'static,
-{
-    let encoded = EncodedSnapshot::from_bytes(value).map_err(|source| SnapshotCodecError::DecodeEnvelope { source })?;
-    let payload = T::decode(SnapshotPayloadData::new(encoded.payload.as_slice()))
-        .map_err(|source| SnapshotCodecError::DecodePayload { source })?;
-
-    Ok(Snapshot::new(encoded.position, payload))
-}
-
-fn snapshot_position_from_value<PayloadError>(value: &[u8]) -> Result<StreamPosition, SnapshotStoreError<PayloadError>>
-where
-    PayloadError: std::error::Error + Send + Sync + 'static,
-{
-    EncodedSnapshot::from_bytes(value)
-        .map(|snapshot| snapshot.position)
-        .map_err(|source| SnapshotCodecError::DecodeEnvelope { source }.into())
-}
-
-async fn read_snapshot_entries<T, K>(bucket: &K) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError<T::Error>>
+fn snapshot_from_value<T>(
+    value: &[u8],
+) -> Result<Snapshot<T>, SnapshotStoreError<SnapshotDecodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotDecodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
+{
+    let encoded = EncodedSnapshot::from_bytes(value).map_err(|source| SnapshotCodecError::DecodeEnvelope { source })?;
+    decode_snapshot::<T>(encoded)
+        .map_err(|source| match source {
+            trogon_decider_runtime::snapshot::SnapshotDecodeError::SnapshotType { source } => {
+                SnapshotCodecError::SnapshotType { source }
+            }
+            trogon_decider_runtime::snapshot::SnapshotDecodeError::Payload { source } => {
+                SnapshotCodecError::DecodePayload { source }
+            }
+            trogon_decider_runtime::snapshot::SnapshotDecodeError::UnexpectedType { expected, actual } => {
+                SnapshotCodecError::UnexpectedSnapshotType { expected, actual }
+            }
+        })
+        .map_err(Into::into)
+}
+
+fn snapshot_position_from_value<T, PayloadError>(
+    value: &[u8],
+) -> Result<StreamPosition, SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
+where
+    T: SnapshotType,
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
+{
+    let encoded = EncodedSnapshot::from_bytes(value).map_err(|source| SnapshotCodecError::DecodeEnvelope { source })?;
+    let snapshot_type = resolve_snapshot_type::<T, PayloadError>()?;
+    if encoded.r#type != snapshot_type.as_str() {
+        return Err(SnapshotCodecError::UnexpectedSnapshotType {
+            expected: snapshot_type,
+            actual: encoded.r#type,
+        }
+        .into());
+    }
+
+    Ok(encoded.position)
+}
+
+async fn read_snapshot_entries<T, K>(
+    bucket: &K,
+) -> Result<Vec<(String, Snapshot<T>)>, SnapshotStoreError<SnapshotDecodePayloadError<T>, SnapshotTypeError<T>>>
+where
+    T: SnapshotPayloadDecode + SnapshotType,
+    SnapshotDecodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvGet + JetStreamKvKeys,
 {
     let mut keys = bucket
@@ -437,7 +533,7 @@ where
 
     while let Some(result) = keys.next().await {
         let key = result.map_err(|source| SnapshotKvError::ReadSnapshotKey { source })?;
-        let Some(stream_id) = stream_id_from_snapshot_key::<T, T::Error>(&key)? else {
+        let Some(snapshot_id) = snapshot_id_from_snapshot_key::<T, SnapshotDecodePayloadError<T>>(&key)? else {
             continue;
         };
         let Some(value) = bucket
@@ -447,22 +543,30 @@ where
         else {
             continue;
         };
-        let snapshot = snapshot_from_value::<T>(&value)?;
-        snapshots.push((stream_id, snapshot));
+        let snapshot = match snapshot_from_value::<T>(&value) {
+            Ok(snapshot) => snapshot,
+            Err(SnapshotStoreError::Codec(SnapshotCodecError::UnexpectedSnapshotType { .. })) => continue,
+            Err(error) => return Err(error),
+        };
+        snapshots.push((snapshot_id, snapshot));
     }
 
     Ok(snapshots)
 }
 
-/// Reads the snapshot currently stored for the stream id.
-pub async fn read_snapshot<T, K>(bucket: &K, id: &str) -> Result<Option<Snapshot<T>>, SnapshotStoreError<T::Error>>
+/// Reads the snapshot currently stored for the snapshot id.
+pub async fn read_snapshot<T, K>(
+    bucket: &K,
+    snapshot_id: &str,
+) -> Result<Option<Snapshot<T>>, SnapshotStoreError<SnapshotDecodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotDecodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvGet,
 {
     let Some(value) = bucket
-        .get(snapshot_key::<T>(id))
+        .get(snapshot_key_for::<T, SnapshotDecodePayloadError<T>>(snapshot_id)?)
         .await
         .map_err(|source| SnapshotKvError::ReadSnapshotEntry { source })?
     else {
@@ -472,25 +576,29 @@ where
     snapshot_from_value::<T>(&value).map(Some)
 }
 
-/// Writes a snapshot for the stream id.
+/// Writes a snapshot for the snapshot id.
 pub async fn write_snapshot<T, K>(
     bucket: &K,
-    id: &str,
+    snapshot_id: &str,
     snapshot: Snapshot<T>,
-) -> Result<(), SnapshotStoreError<T::Error>>
+) -> Result<(), SnapshotStoreError<SnapshotEncodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadEncode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotEncodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: SnapshotKvBucket,
 {
-    persist_snapshot_change(bucket, SnapshotChange::upsert(id, snapshot)).await
+    persist_snapshot_change(bucket, SnapshotChange::upsert(snapshot_id, snapshot)).await
 }
 
 /// Lists snapshots in the payload type namespace.
-pub async fn list_snapshots<T, K>(bucket: &K) -> Result<Vec<Snapshot<T>>, SnapshotStoreError<T::Error>>
+pub async fn list_snapshots<T, K>(
+    bucket: &K,
+) -> Result<Vec<Snapshot<T>>, SnapshotStoreError<SnapshotDecodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotDecodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvGet + JetStreamKvKeys,
 {
     read_snapshot_entries(bucket)
@@ -498,11 +606,14 @@ where
         .map(|entries| entries.into_iter().map(|(_, snapshot)| snapshot).collect())
 }
 
-/// Reads snapshots in the payload type namespace keyed by stream id.
-pub async fn read_snapshot_map<T, K>(bucket: &K) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError<T::Error>>
+/// Reads snapshots in the payload type namespace keyed by snapshot id.
+pub async fn read_snapshot_map<T, K>(
+    bucket: &K,
+) -> Result<BTreeMap<String, Snapshot<T>>, SnapshotStoreError<SnapshotDecodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadDecode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotDecodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvGet + JetStreamKvKeys,
 {
     read_snapshot_entries(bucket)
@@ -513,9 +624,13 @@ where
 /// Reads the configured checkpoint sequence.
 ///
 /// Missing or deleted checkpoint entries are treated as sequence `0`.
-pub async fn read_checkpoint<T, K>(bucket: &K, config: &NatsSnapshotConfig) -> Result<u64, SnapshotStoreError>
+pub async fn read_checkpoint<T, K>(
+    bucket: &K,
+    config: &NatsSnapshotConfig,
+) -> Result<u64, SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry,
 {
     let (_revision, sequence) = read_checkpoint_entry::<T, K>(bucket, config).await?;
@@ -527,12 +642,18 @@ pub async fn write_checkpoint<T, K>(
     bucket: &K,
     config: &NatsSnapshotConfig,
     sequence: u64,
-) -> Result<(), SnapshotStoreError>
+) -> Result<(), SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
-    write_kv_value(bucket, &checkpoint_key::<T>(config)?, checkpoint_value(sequence)).await
+    write_kv_value::<Infallible, SnapshotTypeError<T>, K>(
+        bucket,
+        &checkpoint_key::<T>(config)?,
+        checkpoint_value(sequence),
+    )
+    .await
 }
 
 /// Advances the checkpoint only when the current value is exactly one behind.
@@ -543,9 +664,10 @@ pub async fn maybe_advance_checkpoint<T, K>(
     bucket: &K,
     config: &NatsSnapshotConfig,
     sequence: u64,
-) -> Result<(), SnapshotStoreError>
+) -> Result<(), SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     let expected_previous = sequence.saturating_sub(1);
@@ -577,21 +699,32 @@ where
 pub async fn persist_snapshot_change<T, K>(
     bucket: &K,
     change: SnapshotChange<T>,
-) -> Result<(), SnapshotStoreError<T::Error>>
+) -> Result<(), SnapshotStoreError<SnapshotEncodePayloadError<T>, SnapshotTypeError<T>>>
 where
     T: SnapshotPayloadEncode + SnapshotType,
-    T::Error: std::error::Error + Send + Sync + 'static,
+    SnapshotEncodePayloadError<T>: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: SnapshotKvBucket,
 {
     match change {
-        SnapshotChange::Upsert { stream_id, snapshot } => {
+        SnapshotChange::Upsert { snapshot_id, snapshot } => {
             let snapshot_position = snapshot.position;
             let value = snapshot_value(snapshot.as_ref())?;
-            write_snapshot_value::<T::Error, K>(bucket, &snapshot_key::<T>(&stream_id), snapshot_position, value)
-                .await?;
+            let snapshot_key = snapshot_key_for::<T, SnapshotEncodePayloadError<T>>(&snapshot_id)?;
+            write_snapshot_value::<T, SnapshotEncodePayloadError<T>, K>(
+                bucket,
+                &snapshot_key,
+                snapshot_position,
+                value,
+            )
+            .await?;
         }
-        SnapshotChange::Delete { stream_id } => {
-            delete_kv_value::<T::Error, K>(bucket, &snapshot_key::<T>(&stream_id)).await?;
+        SnapshotChange::Delete { snapshot_id } => {
+            delete_kv_value::<SnapshotEncodePayloadError<T>, SnapshotTypeError<T>, K>(
+                bucket,
+                &snapshot_key_for::<T, SnapshotEncodePayloadError<T>>(&snapshot_id)?,
+            )
+            .await?;
         }
     }
 
@@ -605,9 +738,10 @@ fn checkpoint_value(sequence: u64) -> Vec<u8> {
 async fn read_checkpoint_entry<T, K>(
     bucket: &K,
     config: &NatsSnapshotConfig,
-) -> Result<(Option<u64>, u64), SnapshotStoreError>
+) -> Result<(Option<u64>, u64), SnapshotStoreError<Infallible, SnapshotTypeError<T>>>
 where
     T: SnapshotType,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry,
 {
     let checkpoint_key = checkpoint_key::<T>(config)?;
@@ -630,8 +764,14 @@ where
     Ok((Some(entry.revision), sequence))
 }
 
-async fn write_kv_value<K>(bucket: &K, key: &str, value: Vec<u8>) -> Result<(), SnapshotStoreError>
+async fn write_kv_value<PayloadError, SnapshotTypeError, K>(
+    bucket: &K,
+    key: &str,
+    value: Vec<u8>,
+) -> Result<(), SnapshotStoreError<PayloadError, SnapshotTypeError>>
 where
+    PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     let value = Bytes::from(value);
@@ -660,14 +800,16 @@ where
     }
 }
 
-async fn write_snapshot_value<PayloadError, K>(
+async fn write_snapshot_value<T, PayloadError, K>(
     bucket: &K,
     key: &str,
     snapshot_position: StreamPosition,
     value: Vec<u8>,
-) -> Result<(), SnapshotStoreError<PayloadError>>
+) -> Result<(), SnapshotStoreError<PayloadError, SnapshotTypeError<T>>>
 where
+    T: SnapshotType,
     PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError<T>: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
     loop {
@@ -676,20 +818,20 @@ where
             .await
             .map_err(|source| SnapshotKvError::ReadEntryForSnapshotUpdate { source })?
         else {
-            if create_snapshot_value::<PayloadError, K>(bucket, key, value.clone()).await? {
+            if create_snapshot_value::<PayloadError, SnapshotTypeError<T>, K>(bucket, key, value.clone()).await? {
                 return Ok(());
             }
             continue;
         };
 
         if entry.operation != kv::Operation::Put {
-            if create_snapshot_value::<PayloadError, K>(bucket, key, value.clone()).await? {
+            if create_snapshot_value::<PayloadError, SnapshotTypeError<T>, K>(bucket, key, value.clone()).await? {
                 return Ok(());
             }
             continue;
         }
 
-        if snapshot_position_from_value::<PayloadError>(&entry.value)? >= snapshot_position {
+        if snapshot_position_from_value::<T, PayloadError>(&entry.value)? >= snapshot_position {
             return Ok(());
         }
 
@@ -703,13 +845,14 @@ where
     }
 }
 
-async fn create_snapshot_value<PayloadError, K>(
+async fn create_snapshot_value<PayloadError, SnapshotTypeError, K>(
     bucket: &K,
     key: &str,
     value: Vec<u8>,
-) -> Result<bool, SnapshotStoreError<PayloadError>>
+) -> Result<bool, SnapshotStoreError<PayloadError, SnapshotTypeError>>
 where
     PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvCreate,
 {
     match bucket.create(key, value.into()).await {
@@ -719,9 +862,13 @@ where
     }
 }
 
-async fn delete_kv_value<PayloadError, K>(bucket: &K, key: &str) -> Result<(), SnapshotStoreError<PayloadError>>
+async fn delete_kv_value<PayloadError, SnapshotTypeError, K>(
+    bucket: &K,
+    key: &str,
+) -> Result<(), SnapshotStoreError<PayloadError, SnapshotTypeError>>
 where
     PayloadError: std::error::Error + Send + Sync + 'static,
+    SnapshotTypeError: std::error::Error + Send + Sync + 'static,
     K: JetStreamKvEntry + JetStreamKeyValueDeleteExpectRevision,
 {
     loop {
@@ -752,7 +899,8 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use trogon_decider_runtime::StreamPosition;
     use trogon_decider_runtime::snapshot::{
-        SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+        InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+        SnapshotTypeName,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -764,8 +912,34 @@ mod tests {
         id: String,
     }
 
+    #[derive(Debug)]
+    struct TestSnapshotTypeError;
+
+    impl std::fmt::Display for TestSnapshotTypeError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("missing snapshot type")
+        }
+    }
+
+    impl std::error::Error for TestSnapshotTypeError {}
+
+    #[derive(Debug)]
+    struct UnavailableSnapshotTypePayload;
+
     impl SnapshotType for TestPayload {
-        const SNAPSHOT_STREAM_PREFIX: &'static str = "snapshots.v2.";
+        type Error = InvalidSnapshotTypeName;
+
+        fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+            SnapshotTypeName::new("test.snapshot.v2")
+        }
+    }
+
+    impl SnapshotType for UnavailableSnapshotTypePayload {
+        type Error = TestSnapshotTypeError;
+
+        fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+            Err(TestSnapshotTypeError)
+        }
     }
 
     impl SnapshotPayloadEncode for TestPayload {
@@ -784,6 +958,14 @@ mod tests {
         }
     }
 
+    impl SnapshotPayloadDecode for UnavailableSnapshotTypePayload {
+        type Error = serde_json::Error;
+
+        fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
+            serde_json::from_slice::<serde_json::Value>(payload.payload).map(|_| Self)
+        }
+    }
+
     #[test]
     fn nats_snapshot_config_exposes_checkpoint_name() {
         let config = NatsSnapshotConfig::with_checkpoint_name("last_event_sequence");
@@ -792,8 +974,26 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_key_uses_snapshot_type_prefix() {
-        assert_eq!(snapshot_key::<TestPayload>("backup"), "snapshots.v2.backup");
+    fn snapshot_key_uses_nats_snapshot_namespace() {
+        assert_eq!(
+            snapshot_key::<TestPayload>("backup").unwrap(),
+            "snapshots.data.test.snapshot.v2.backup"
+        );
+    }
+
+    #[test]
+    fn snapshot_key_preserves_snapshot_type_error() {
+        assert_eq!(
+            snapshot_key::<UnavailableSnapshotTypePayload>("backup")
+                .unwrap_err()
+                .to_string(),
+            "Snapshot codec error: failed to resolve stream snapshot type: missing snapshot type"
+        );
+    }
+
+    #[test]
+    fn unavailable_snapshot_type_payload_decode_accepts_json() {
+        assert!(UnavailableSnapshotTypePayload::decode(SnapshotPayloadData::new(br#"{"id":"backup"}"#)).is_ok());
     }
 
     #[test]
@@ -802,7 +1002,7 @@ mod tests {
 
         assert_eq!(
             checkpoint_key::<TestPayload>(&config).unwrap(),
-            "_snapshot.snapshots.v2.last_event_sequence"
+            "snapshots.checkpoint.test.snapshot.v2.last_event_sequence"
         );
     }
 
@@ -812,7 +1012,7 @@ mod tests {
 
         assert_eq!(
             checkpoint_key::<TestPayload>(&config).unwrap_err().to_string(),
-            "Missing checkpoint name for snapshot namespace: snapshots.v2."
+            "Missing checkpoint name for snapshot type: test.snapshot.v2"
         );
     }
 
@@ -830,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_change_builders_keep_stream_identity() {
+    fn snapshot_change_builders_keep_snapshot_identity() {
         let upsert = SnapshotChange::upsert(
             "backup",
             Snapshot::new(
@@ -845,7 +1045,7 @@ mod tests {
         assert_eq!(
             upsert,
             SnapshotChange::Upsert {
-                stream_id: "backup".to_string(),
+                snapshot_id: "backup".to_string(),
                 snapshot: Box::new(Snapshot::new(
                     position(3),
                     TestPayload {
@@ -857,7 +1057,7 @@ mod tests {
         assert_eq!(
             delete,
             SnapshotChange::Delete {
-                stream_id: "backup".to_string(),
+                snapshot_id: "backup".to_string(),
             }
         );
     }
@@ -874,30 +1074,85 @@ mod tests {
         let json = String::from_utf8(snapshot_value(&snapshot).unwrap()).unwrap();
         let decoded = snapshot_from_value::<TestPayload>(json.as_bytes()).unwrap();
 
+        assert!(json.contains("\"type\":\"test.snapshot.v2\""));
         assert!(json.contains("\"position\":7"));
         assert!(json.contains("\"payload\""));
         assert_eq!(decoded, snapshot);
     }
 
     #[test]
-    fn stream_id_from_snapshot_key_uses_configured_prefix() {
+    fn stored_snapshot_rejects_unexpected_snapshot_type() {
+        let encoded = EncodedSnapshot::new("other.snapshot.v2", position(7), br#"{"id":"backup"}"#.to_vec())
+            .into_bytes()
+            .unwrap();
+
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v2.backup").unwrap(),
+            snapshot_from_value::<TestPayload>(&encoded).unwrap_err().to_string(),
+            "Snapshot codec error: unexpected stream snapshot type: expected test.snapshot.v2, got other.snapshot.v2"
+        );
+    }
+
+    #[test]
+    fn stored_snapshot_preserves_payload_decode_error() {
+        let encoded = EncodedSnapshot::new("test.snapshot.v2", position(7), b"not-json".to_vec())
+            .into_bytes()
+            .unwrap();
+
+        assert_eq!(
+            snapshot_from_value::<TestPayload>(&encoded).unwrap_err().to_string(),
+            "Snapshot codec error: failed to decode stream snapshot payload: expected ident at line 1 column 2"
+        );
+    }
+
+    #[test]
+    fn stored_snapshot_preserves_snapshot_type_error() {
+        let encoded = EncodedSnapshot::new("test.snapshot.v2", position(7), br#"{"id":"backup"}"#.to_vec())
+            .into_bytes()
+            .unwrap();
+
+        assert_eq!(
+            snapshot_from_value::<UnavailableSnapshotTypePayload>(&encoded)
+                .unwrap_err()
+                .to_string(),
+            "Snapshot codec error: failed to resolve stream snapshot type: missing snapshot type"
+        );
+    }
+
+    #[test]
+    fn stored_snapshot_position_rejects_unexpected_snapshot_type() {
+        let encoded = EncodedSnapshot::new("other.snapshot.v2", position(7), br#"{"id":"backup"}"#.to_vec())
+            .into_bytes()
+            .unwrap();
+
+        assert_eq!(
+            snapshot_position_from_value::<TestPayload, serde_json::Error>(&encoded)
+                .unwrap_err()
+                .to_string(),
+            "Snapshot codec error: unexpected stream snapshot type: expected test.snapshot.v2, got other.snapshot.v2"
+        );
+    }
+
+    #[test]
+    fn snapshot_id_from_snapshot_key_uses_configured_prefix() {
+        assert_eq!(
+            snapshot_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.data.test.snapshot.v2.backup")
+                .unwrap(),
             Some("backup".to_string())
         );
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v1.backup").unwrap(),
+            snapshot_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.data.test.snapshot.v1.backup")
+                .unwrap(),
             None
         );
     }
 
     #[test]
-    fn stream_id_from_snapshot_key_rejects_empty_suffix() {
+    fn snapshot_id_from_snapshot_key_rejects_empty_suffix() {
         assert_eq!(
-            stream_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.v2.")
+            snapshot_id_from_snapshot_key::<TestPayload, serde_json::Error>("snapshots.data.test.snapshot.v2.")
                 .unwrap_err()
                 .to_string(),
-            "Invalid stream snapshot key: snapshots.v2."
+            "Invalid stream snapshot key: snapshots.data.test.snapshot.v2."
         );
     }
 
@@ -914,6 +1169,13 @@ mod tests {
             snapshot_value(&Snapshot::new(position(position_value), snapshot_payload(id))).unwrap()
         }
 
+        fn encoded_snapshot_with_type(snapshot_type: &str, position_value: u64, id: &str) -> Vec<u8> {
+            let payload = snapshot_payload(id).encode().unwrap();
+            EncodedSnapshot::new(snapshot_type, position(position_value), payload)
+                .into_bytes()
+                .unwrap()
+        }
+
         #[tokio::test]
         async fn write_snapshot_creates_entry_when_missing() {
             let bucket = MockJetStreamKvStore::new();
@@ -925,7 +1187,7 @@ mod tests {
 
             let calls = bucket.create_calls();
             assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].0, "snapshots.v2.alpha");
+            assert_eq!(calls[0].0, "snapshots.data.test.snapshot.v2.alpha");
         }
 
         #[tokio::test]
@@ -952,7 +1214,7 @@ mod tests {
 
             let updates = bucket.update_calls();
             assert_eq!(updates.len(), 1);
-            assert_eq!(updates[0].0, "snapshots.v2.alpha");
+            assert_eq!(updates[0].0, "snapshots.data.test.snapshot.v2.alpha");
             assert_eq!(updates[0].2, 7);
         }
 
@@ -1053,7 +1315,7 @@ mod tests {
 
             let calls = bucket.create_calls();
             assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].0, "_snapshot.snapshots.v2.checkpoint");
+            assert_eq!(calls[0].0, "snapshots.checkpoint.test.snapshot.v2.checkpoint");
             assert_eq!(calls[0].1, Bytes::from_static(b"1"));
         }
 
@@ -1185,9 +1447,9 @@ mod tests {
         async fn read_snapshot_entries_lists_keys_and_decodes_values() {
             let bucket = MockJetStreamKvStore::new();
             bucket.set_keys_result(Ok(vec![
-                "snapshots.v2.alpha".to_string(),
-                "snapshots.v1.legacy".to_string(),
-                "snapshots.v2.beta".to_string(),
+                "snapshots.data.test.snapshot.v2.alpha".to_string(),
+                "snapshots.data.test.snapshot.v1.legacy".to_string(),
+                "snapshots.data.test.snapshot.v2.beta".to_string(),
             ]));
             bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(3, "alpha")));
             bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(7, "beta")));
@@ -1204,8 +1466,8 @@ mod tests {
         async fn read_snapshot_entries_skips_missing_values() {
             let bucket = MockJetStreamKvStore::new();
             bucket.set_keys_result(Ok(vec![
-                "snapshots.v2.alpha".to_string(),
-                "snapshots.v2.beta".to_string(),
+                "snapshots.data.test.snapshot.v2.alpha".to_string(),
+                "snapshots.data.test.snapshot.v2.beta".to_string(),
             ]));
             bucket.enqueue_get_none();
             bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(2, "beta")));
@@ -1214,6 +1476,72 @@ mod tests {
 
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].position, position(2));
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_entries_skips_colliding_snapshot_type_keys() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.set_keys_result(Ok(vec![
+                "snapshots.data.test.snapshot.v2.alpha".to_string(),
+                "snapshots.data.test.snapshot.v2.extra.beta".to_string(),
+            ]));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(3, "alpha")));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_with_type(
+                "test.snapshot.v2.extra",
+                7,
+                "beta",
+            )));
+
+            let entries = read_snapshot_entries::<TestPayload, _>(&bucket).await.unwrap();
+
+            assert_eq!(
+                entries,
+                vec![(
+                    "alpha".to_string(),
+                    Snapshot::new(position(3), snapshot_payload("alpha"))
+                )]
+            );
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_returns_none_when_missing() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_get_none();
+
+            let snapshot = read_snapshot::<TestPayload, _>(&bucket, "alpha").await.unwrap();
+
+            assert_eq!(snapshot, None);
+            assert_eq!(bucket.get_calls(), vec!["snapshots.data.test.snapshot.v2.alpha"]);
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_decodes_stored_value() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(9, "alpha")));
+
+            let snapshot = read_snapshot::<TestPayload, _>(&bucket, "alpha")
+                .await
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(snapshot.position, position(9));
+            assert_eq!(snapshot.payload, snapshot_payload("alpha"));
+        }
+
+        #[tokio::test]
+        async fn read_snapshot_map_preserves_snapshot_ids() {
+            let bucket = MockJetStreamKvStore::new();
+            bucket.set_keys_result(Ok(vec![
+                "snapshots.data.test.snapshot.v2.alpha".to_string(),
+                "snapshots.data.test.snapshot.v2.beta".to_string(),
+            ]));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(3, "alpha")));
+            bucket.enqueue_get_some(Bytes::from(encoded_snapshot_at(7, "beta")));
+
+            let snapshots = read_snapshot_map::<TestPayload, _>(&bucket).await.unwrap();
+
+            assert_eq!(snapshots["alpha"].position, position(3));
+            assert_eq!(snapshots["beta"].position, position(7));
         }
     }
 }

@@ -88,8 +88,9 @@ pub use execution::{
 };
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 pub use snapshot::{
-    ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData, SnapshotPayloadDecode,
-    SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest, WriteSnapshotResponse,
+    InvalidSnapshotTypeName, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
+    SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotTypeName, SnapshotWrite,
+    WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
     AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadAfterOverflow, ReadFrom, ReadStreamRequest,

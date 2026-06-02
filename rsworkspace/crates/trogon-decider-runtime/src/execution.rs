@@ -713,7 +713,7 @@ where
         let snapshot = self
             .snapshots
             .snapshot_store
-            .read_snapshot(ReadSnapshotRequest { stream_id })
+            .read_snapshot(ReadSnapshotRequest { snapshot_id: stream_id })
             .await
             .map_err(CommandError::ReadSnapshot)?;
         let snapshot = snapshot.snapshot;
@@ -806,7 +806,7 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     schedule_snapshot_task.schedule(async move {
         if let Err(source) = snapshot_store
             .write_snapshot(WriteSnapshotRequest {
-                stream_id: stream_id.borrow(),
+                snapshot_id: stream_id.borrow(),
                 snapshot,
             })
             .await
@@ -858,7 +858,8 @@ mod tests {
     use super::*;
     use crate::{
         Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventType,
-        ReadSnapshotResponse, ReadStreamResponse, SnapshotType, StreamEvent, WriteSnapshotResponse,
+        InvalidSnapshotTypeName, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName, StreamEvent,
+        WriteSnapshotResponse,
     };
 
     fn position(value: u64) -> StreamPosition {
@@ -925,7 +926,16 @@ mod tests {
     }
 
     impl SnapshotType for TestState {
-        const SNAPSHOT_STREAM_PREFIX: &'static str = "test.command.v1.";
+        type Error = InvalidSnapshotTypeName;
+
+        fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
+            SnapshotTypeName::new("test.command.v1.State")
+        }
+    }
+
+    #[test]
+    fn test_state_snapshot_type_is_stable() {
+        assert_eq!(TestState::snapshot_type().unwrap().as_str(), "test.command.v1.State");
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1312,7 +1322,7 @@ mod tests {
             self.loaded_stream_ids
                 .lock()
                 .unwrap()
-                .push(request.stream_id.to_string());
+                .push(request.snapshot_id.to_string());
             Ok(ReadSnapshotResponse {
                 snapshot: self.snapshot.clone(),
             })
