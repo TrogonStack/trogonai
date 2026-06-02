@@ -26,7 +26,7 @@ pub struct Settings {
     /// Extra environment variables (loaded for completeness; not auto-applied).
     pub env: HashMap<String, String>,
     /// Lifecycle hooks (PreToolUse/PostToolUse/Stop/Notification/UserPromptSubmit).
-    pub hooks: crate::hooks::HooksConfig,
+    pub hooks: trogon_runner_tools::HooksConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

@@ -587,6 +587,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                         cwd: Some(state.cwd.clone()),
                         additional_read_dirs: read_dirs,
                         classifier: self.classifier.clone(),
+                        pre_tool_use: state.tool_hooks.pre_tool_use.clone(),
                     };
                     if let Some(checker) = build_mode_permission_checker(
                         &state.mode,
@@ -755,6 +756,12 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                         state.terminal_cwd = None;
                                     }
 
+                                    // Keep the output for the PostToolUse hook before it moves into the event.
+                                    let post_output = if state.tool_hooks.post_tool_use.is_empty() {
+                                        None
+                                    } else {
+                                        Some(output.clone())
+                                    };
                                     let finished = PromptEvent::ToolCallFinished { id, output, exit_code, signal };
                                     publish_via_converter(prompt_client, &mut converter, finished).await;
                                     if is_enter_plan {
@@ -792,6 +799,22 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
                                                 mode: new_mode,
                                                 model: current_model.clone(),
                                             },
+                                        )
+                                        .await;
+                                    }
+                                    // PostToolUse hooks: react to the tool result (fire-and-forget).
+                                    if let Some(out) = post_output
+                                        && let Some(ref tn) = tool_name
+                                    {
+                                        let payload = serde_json::json!({
+                                            "hook_event_name": "PostToolUse",
+                                            "tool_name": tn,
+                                            "tool_response": out,
+                                        });
+                                        let _ = trogon_runner_tools::run_event_hooks(
+                                            &state.tool_hooks.post_tool_use,
+                                            Some(tn),
+                                            &payload,
                                         )
                                         .await;
                                     }
@@ -1090,6 +1113,11 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             .and_then(|m| m.get("permissionRules"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        // PreToolUse/PostToolUse hooks (from settings.json `hooks`).
+        let tool_hooks = meta
+            .and_then(|m| m.get("toolHooks"))
+            .and_then(|v| serde_json::from_value::<trogon_runner_tools::HooksConfig>(v.clone()).ok())
+            .unwrap_or_default();
         let mode = meta
             .and_then(|m| m.get("mode"))
             .and_then(|v| v.as_str())
@@ -1106,6 +1134,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             additional_roots,
             additional_read_dirs,
             permission_rules_text,
+            tool_hooks,
             mcp_servers,
             created_at: now.clone(),
             updated_at: now,

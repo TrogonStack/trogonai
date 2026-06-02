@@ -268,6 +268,9 @@ pub struct SessionInit {
     /// Permission rule-text translated from `permissions.allow/deny`, applied as
     /// the session's permission rules on the runner.
     pub permission_rules: Option<String>,
+    /// Tool-event hooks (PreToolUse/PostToolUse) for the runner to run around tool
+    /// dispatch. Sent as `_meta.toolHooks`.
+    pub tool_hooks: Option<trogon_runner_tools::HooksConfig>,
 }
 
 impl SessionInit {
@@ -294,6 +297,12 @@ impl SessionInit {
         }
         if let Some(ref rules) = self.permission_rules {
             meta.insert("permissionRules".into(), Value::String(rules.clone()));
+        }
+        if let Some(ref hooks) = self.tool_hooks
+            && !hooks.is_empty()
+            && let Ok(v) = serde_json::to_value(hooks)
+        {
+            meta.insert("toolHooks".into(), v);
         }
         if meta.is_empty() { None } else { Some(meta) }
     }

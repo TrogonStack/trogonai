@@ -1,21 +1,16 @@
-//! Lifecycle hooks (Claude Code-style) configured under `settings.json` `hooks`.
+//! Lifecycle hooks (Claude Code-style), configured under `settings.json` `hooks`.
 //!
-//! ```json
-//! "hooks": {
-//!   "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "./check.sh" } ] } ],
-//!   "PreToolUse":  [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "..." } ] } ]
-//! }
-//! ```
 //! Each command runs via `sh -c`, receives the event payload as JSON on stdin,
 //! and signals its decision by exit code (2 = block) or a JSON stdout
 //! `{"decision":"block","reason":"…"}`. For `UserPromptSubmit`, a hook's stdout
-//! (when it doesn't block) is added to the prompt as extra context.
+//! (when it doesn't block) is added as extra context.
 //!
-//! This module is the execution engine + config schema. CLI-side events
-//! (`UserPromptSubmit`, `Stop`, `Notification`) are wired in the REPL. The
-//! runner-side tool events (`PreToolUse`, `PostToolUse`) reuse this engine.
+//! Lives in `trogon-runner-tools` so both the CLI (UserPromptSubmit/Stop/
+//! Notification) and the runner (PreToolUse/PostToolUse) share one engine. The
+//! config structs derive `Serialize` so the runner can persist the tool-event
+//! matchers in `SessionState` (sent from the CLI via session meta).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -26,17 +21,17 @@ fn default_hook_type() -> String {
 }
 
 /// All configured hooks, keyed by event (Claude Code event names).
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HooksConfig {
-    #[serde(default, rename = "PreToolUse")]
+    #[serde(default, rename = "PreToolUse", skip_serializing_if = "Vec::is_empty")]
     pub pre_tool_use: Vec<HookMatcher>,
-    #[serde(default, rename = "PostToolUse")]
+    #[serde(default, rename = "PostToolUse", skip_serializing_if = "Vec::is_empty")]
     pub post_tool_use: Vec<HookMatcher>,
-    #[serde(default, rename = "Stop")]
+    #[serde(default, rename = "Stop", skip_serializing_if = "Vec::is_empty")]
     pub stop: Vec<HookMatcher>,
-    #[serde(default, rename = "Notification")]
+    #[serde(default, rename = "Notification", skip_serializing_if = "Vec::is_empty")]
     pub notification: Vec<HookMatcher>,
-    #[serde(default, rename = "UserPromptSubmit")]
+    #[serde(default, rename = "UserPromptSubmit", skip_serializing_if = "Vec::is_empty")]
     pub user_prompt_submit: Vec<HookMatcher>,
 }
 
@@ -49,9 +44,18 @@ impl HooksConfig {
         self.notification.extend(other.notification);
         self.user_prompt_submit.extend(other.user_prompt_submit);
     }
+
+    /// True when no hooks are configured for any event.
+    pub fn is_empty(&self) -> bool {
+        self.pre_tool_use.is_empty()
+            && self.post_tool_use.is_empty()
+            && self.stop.is_empty()
+            && self.notification.is_empty()
+            && self.user_prompt_submit.is_empty()
+    }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HookMatcher {
     /// Tool-name pattern (tool events only). Empty or `*` = match all. Supports
     /// `A|B` alternatives. Ignored for non-tool events.
@@ -61,13 +65,13 @@ pub struct HookMatcher {
     pub hooks: Vec<HookCommand>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HookCommand {
     #[serde(rename = "type", default = "default_hook_type")]
     pub r#type: String,
     #[serde(default)]
     pub command: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
 }
 
@@ -84,7 +88,7 @@ pub enum HookOutcome {
 /// always match. `""`/`"*"` match all; `A|B` matches any listed tool.
 pub fn matcher_matches(matcher: &str, tool_name: Option<&str>) -> bool {
     let Some(tool) = tool_name else {
-        return true; // non-tool event: matcher ignored
+        return true;
     };
     let m = matcher.trim();
     if m.is_empty() || m == "*" {
@@ -93,11 +97,7 @@ pub fn matcher_matches(matcher: &str, tool_name: Option<&str>) -> bool {
     m.split('|').any(|alt| alt.trim() == tool)
 }
 
-/// Decide a single command's effect from its exit code + output. Exit 2, or a
-/// JSON stdout `{"decision":"block"}`, blocks; exit 0 continues (stdout = context);
-/// other non-zero is a non-blocking error.
 fn decide(exit_code: Option<i32>, stdout: &str, stderr: &str) -> HookCmdResult {
-    // JSON control object on stdout takes precedence.
     if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(stdout.trim()) {
         let blocked = obj.get("decision").and_then(|v| v.as_str()) == Some("block")
             || obj.get("continue").and_then(|v| v.as_bool()) == Some(false);
@@ -149,7 +149,6 @@ async fn run_one(cmd: &HookCommand, stdin_json: &str) -> HookCmdResult {
     };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(stdin_json.as_bytes()).await;
-        // Drop closes stdin so the hook's read terminates.
     }
     let timeout = Duration::from_secs(cmd.timeout.unwrap_or(DEFAULT_HOOK_TIMEOUT_SECS));
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
@@ -165,8 +164,8 @@ async fn run_one(cmd: &HookCommand, stdin_json: &str) -> HookCmdResult {
 }
 
 /// Run all matching hooks for an event. `tool_name` is `Some` for tool events.
-/// Returns the first `Block` encountered, else `Continue` with concatenated
-/// non-blocking stdout as context.
+/// Returns the first `Block`, else `Continue` with concatenated non-blocking
+/// stdout as context.
 pub async fn run_event_hooks(
     matchers: &[HookMatcher],
     tool_name: Option<&str>,
@@ -216,7 +215,6 @@ mod tests {
         assert!(matcher_matches("Bash", Some("Bash")));
         assert!(!matcher_matches("Bash", Some("Read")));
         assert!(matcher_matches("Bash|Read", Some("Read")));
-        // Non-tool events ignore the matcher.
         assert!(matcher_matches("Bash", None));
     }
 
@@ -225,35 +223,43 @@ mod tests {
         assert!(matches!(decide(Some(0), "", ""), HookCmdResult::Continue(_)));
         assert!(matches!(decide(Some(2), "", "nope"), HookCmdResult::Block(r) if r == "nope"));
         assert!(matches!(decide(Some(1), "", "boom"), HookCmdResult::Error(_)));
-        // JSON block decision wins regardless of exit 0.
         match decide(Some(0), r#"{"decision":"block","reason":"policy"}"#, "") {
             HookCmdResult::Block(r) => assert_eq!(r, "policy"),
             _ => panic!("expected block"),
         }
-        // stdout on exit 0 becomes context.
         match decide(Some(0), "extra context", "") {
             HookCmdResult::Continue(c) => assert_eq!(c, "extra context"),
             _ => panic!("expected continue"),
         }
     }
 
+    #[test]
+    fn config_serde_round_trips_claude_format() {
+        let raw = r#"{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"./guard.sh"}]}]}"#;
+        let cfg: HooksConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.pre_tool_use.len(), 1);
+        assert_eq!(cfg.pre_tool_use[0].matcher, "Bash");
+        // Round-trips (Serialize) for persistence in SessionState.
+        let back: HooksConfig = serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back, cfg);
+    }
+
     #[tokio::test]
     async fn run_event_hooks_blocks_on_exit_2() {
         let matchers = vec![HookMatcher {
-            matcher: String::new(),
+            matcher: "Bash".into(),
             hooks: vec![HookCommand {
                 r#type: "command".into(),
                 command: "echo denied >&2; exit 2".into(),
                 timeout: None,
             }],
         }];
-        let out = run_event_hooks(&matchers, None, &json!({"hook_event_name": "Stop"})).await;
+        let out = run_event_hooks(&matchers, Some("Bash"), &json!({"tool_name": "Bash"})).await;
         assert_eq!(out, HookOutcome::Block { reason: "denied".into() });
     }
 
     #[tokio::test]
     async fn run_event_hooks_collects_context_and_passes_stdin() {
-        // The hook echoes back a field from the JSON payload on stdin.
         let matchers = vec![HookMatcher {
             matcher: String::new(),
             hooks: vec![HookCommand {
@@ -279,7 +285,6 @@ mod tests {
                 timeout: None,
             }],
         }];
-        // Tool event for Read → Bash matcher doesn't apply → not blocked.
         let out = run_event_hooks(&matchers, Some("Read"), &json!({})).await;
         assert_eq!(out, HookOutcome::Continue { context: None });
     }

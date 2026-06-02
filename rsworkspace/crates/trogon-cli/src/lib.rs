@@ -3,7 +3,6 @@ pub mod client_supervisor;
 pub mod doctor;
 pub mod env_local;
 pub mod fs;
-pub mod hooks;
 pub mod markdown;
 pub mod mcp;
 pub mod mcp_oauth;
@@ -27,8 +26,8 @@ pub use nats::NatsClient;
 pub use print::{OutputFormat, PrintExitCode, PrintOptions};
 pub use session::{NatsSessionFactory, Session, SessionFactory, SessionInit, SessionSummary};
 pub use session_store::{SessionEntry, SessionIndex, new_session_entry, project_key};
-pub use hooks::{HookOutcome, HooksConfig};
 pub use settings::{PermissionsSettings, Settings};
+pub use trogon_runner_tools::{HookOutcome, HooksConfig};
 pub use stdio_mcp_bridge::StdioMcpBridge;
 
 pub mod cross_runner;

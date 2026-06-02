@@ -790,22 +790,22 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         "prompt": line,
                         "cwd": cwd.to_string_lossy(),
                     });
-                    match crate::hooks::run_event_hooks(
+                    match trogon_runner_tools::run_event_hooks(
                         &hooks_config.user_prompt_submit,
                         None,
                         &payload,
                     )
                     .await
                     {
-                        crate::hooks::HookOutcome::Block { reason } => {
+                        trogon_runner_tools::HookOutcome::Block { reason } => {
                             eprintln!("\x1b[33mprompt blocked by hook: {reason}\x1b[0m");
                             continue;
                         }
-                        crate::hooks::HookOutcome::Continue { context: Some(ctx) } => {
+                        trogon_runner_tools::HookOutcome::Continue { context: Some(ctx) } => {
                             expanded.push_str("\n\n");
                             expanded.push_str(&ctx);
                         }
-                        crate::hooks::HookOutcome::Continue { context: None } => {}
+                        trogon_runner_tools::HookOutcome::Continue { context: None } => {}
                     }
                 }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
@@ -942,12 +942,12 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 // when the agent finishes; Notification when it's idle awaiting input.
                 if !hooks_config.stop.is_empty() {
                     let payload = serde_json::json!({"hook_event_name": "Stop", "cwd": cwd.to_string_lossy()});
-                    let _ = crate::hooks::run_event_hooks(&hooks_config.stop, None, &payload).await;
+                    let _ = trogon_runner_tools::run_event_hooks(&hooks_config.stop, None, &payload).await;
                 }
                 if !hooks_config.notification.is_empty() {
                     let payload = serde_json::json!({"hook_event_name": "Notification", "cwd": cwd.to_string_lossy()});
                     let _ =
-                        crate::hooks::run_event_hooks(&hooks_config.notification, None, &payload).await;
+                        trogon_runner_tools::run_event_hooks(&hooks_config.notification, None, &payload).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {
