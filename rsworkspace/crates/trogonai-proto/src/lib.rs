@@ -6,6 +6,9 @@ mod r#gen;
 #[cfg(feature = "schedules")]
 mod codec;
 
+#[cfg(feature = "chrono")]
+pub mod convert;
+
 #[cfg(feature = "schedules")]
 pub mod scheduler;
 

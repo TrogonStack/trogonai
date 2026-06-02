@@ -1,0 +1,22 @@
+[package]
+name = "trogon-scheduler"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+chrono = { version = "0.4" }
+chrono-tz = "0.10"
+cron = "0.15"
+rrule = "0.14"
+trogon-decider-runtime = { workspace = true }
+trogon-nats = { workspace = true }
+trogonai-proto = { path = "../trogonai-proto", features = ["schedules"] }
+
+[dev-dependencies]
+proptest = "1"
+trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
