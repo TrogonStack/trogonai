@@ -1,5 +1,7 @@
 use crate::RunnerSwitcher;
-use crate::app::{TurnMetrics, TurnRenderer, TurnStop, print_startup_banner, print_user_line};
+use crate::app::{
+    TurnMetrics, TurnRenderer, TurnStop, print_command_echo, print_startup_banner, print_user_line,
+};
 use crate::fs::Fs;
 use crate::mcp::McpManager;
 use crate::session::{CompactResult, Session, SessionFactory, StreamEvent};
@@ -7,9 +9,14 @@ use crate::session_store::{SessionIndex, new_session_entry};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
+use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::{Context, Editor, Helper};
+use rustyline::config::Configurer;
+use rustyline::{
+    Cmd, ConditionalEventHandler, Context, Editor, EditMode, EventContext, EventHandler, Helper,
+    KeyCode, KeyEvent, Modifiers,
+};
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -28,13 +35,28 @@ const HISTORY_PATH: &str = "~/.local/share/trogon/history";
 
 struct FileAtHelper {
     cwd: PathBuf,
+    /// Fish-style autosuggestion from history: dims the most recent matching
+    /// entry after the cursor; accepted with Tab (see [`TabHandler`]) or →.
+    history_hinter: HistoryHinter,
+    /// Shared permission-mode cell, rendered into the prompt by `highlight_prompt`
+    /// and cycled by Shift+Tab ([`TabModeHandler`]). `Arc<Mutex>` so the handler
+    /// (which must be `Send + Sync`) can share it; no real contention.
+    mode: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl Default for FileAtHelper {
     fn default() -> Self {
-        Self {
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        }
+        Self::new(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+}
+
+impl FileAtHelper {
+    fn new(cwd: PathBuf) -> Self {
+        Self::with_mode(cwd, std::sync::Arc::new(std::sync::Mutex::new(String::from("default"))))
+    }
+
+    fn with_mode(cwd: PathBuf, mode: std::sync::Arc<std::sync::Mutex<String>>) -> Self {
+        Self { cwd, history_hinter: HistoryHinter::new(), mode }
     }
 }
 
@@ -79,12 +101,202 @@ impl Completer for FileAtHelper {
 
 impl Hinter for FileAtHelper {
     type Hint = String;
-    fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-        None
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        // Delegate to the history hinter (only fires at end-of-line on a
+        // prefix match), so a dimmed completion of a prior command appears.
+        self.history_hinter.hint(line, pos, ctx)
     }
 }
 
-impl Highlighter for FileAtHelper {}
+impl Highlighter for FileAtHelper {
+    /// Render the autosuggestion dimmed so it's visibly distinct from typed text.
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Owned(format!("\x1b[90m{hint}\x1b[0m"))
+    }
+
+    /// Render the prompt from the shared mode cell, coloured. The *visible* width
+    /// matches `format_mode_prompt` (which is what rustyline measures for cursor
+    /// math), so Shift+Tab can repaint a different-length mode name safely.
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        _prompt: &'p str,
+        _default: bool,
+    ) -> Cow<'b, str> {
+        let mode = self
+            .mode
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| String::from("default"));
+        let bracketed = format!("[{}]", mode_label(&mode));
+        Cow::Owned(format!("\x1b[35m{:<width$}\x1b[0m › ", bracketed, width = MODE_FIELD))
+    }
+    // No highlight_char override: Shift+Tab's Cmd::Repaint forces a full
+    // refresh_line (which always re-renders the prompt via highlight_prompt), so
+    // we don't need per-keystroke re-highlighting — keeping the default (false)
+    // avoids redrawing the whole line on every character.
+}
+
+/// What Tab should do given the current input state.
+#[derive(Debug, PartialEq, Eq)]
+enum TabChoice {
+    /// Accept the showing history autosuggestion.
+    CompleteHint,
+    /// Run `@`-file completion.
+    Complete,
+    /// Fall through to rustyline's default Tab handling.
+    Default,
+}
+
+/// Decide Tab's action. An active `@`-mention token always takes precedence so
+/// Tab keeps completing file paths even when a history hint exists; otherwise a
+/// showing hint at end-of-line is accepted; otherwise default.
+fn tab_choice(line: &str, pos: usize, has_hint: bool) -> TabChoice {
+    let in_at_mention = line[..pos]
+        .rsplit(char::is_whitespace)
+        .next()
+        .is_some_and(|word| word.starts_with('@'));
+    if in_at_mention {
+        TabChoice::Complete
+    } else if has_hint && pos == line.len() {
+        TabChoice::CompleteHint
+    } else {
+        TabChoice::Default
+    }
+}
+
+/// Tab handler: accept the autosuggestion when one is showing, otherwise fall
+/// back to `@`-file completion (see [`tab_choice`]).
+struct TabHandler;
+
+impl ConditionalEventHandler for TabHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        match tab_choice(ctx.line(), ctx.pos(), ctx.has_hint()) {
+            TabChoice::Complete => Some(Cmd::Complete),
+            TabChoice::CompleteHint => Some(Cmd::CompleteHint),
+            TabChoice::Default => None,
+        }
+    }
+}
+
+// ── Shift+Tab permission-mode cycling ───────────────────────────────────────────
+
+/// Width of the `[label]` field in the prompt. Sized to the widest label
+/// (`[acceptEdits]` = 13) so the prompt's visible width is constant across modes —
+/// required for correct cursor math when Shift+Tab repaints a new mode.
+const MODE_FIELD: usize = 13;
+
+/// Next mode in the Shift+Tab cycle. Any mode outside the cycle (e.g. dontAsk,
+/// bypassPermissions) enters it at `default`.
+fn next_cycle_mode(current: &str) -> &'static str {
+    match current {
+        "default" => "acceptEdits",
+        "acceptEdits" => "plan",
+        "plan" => "default",
+        _ => "default",
+    }
+}
+
+/// Short display label for a mode (keeps every label ≤ 11 chars so `[label]`
+/// fits `MODE_FIELD`).
+fn mode_label(mode: &str) -> &str {
+    match mode {
+        "bypassPermissions" => "bypass",
+        other => other,
+    }
+}
+
+/// Plain (un-coloured), fixed-width prompt for `mode`. Passed to rustyline as the
+/// raw prompt so its measured width matches the coloured `highlight_prompt`.
+fn format_mode_prompt(mode: &str) -> String {
+    let bracketed = format!("[{}]", mode_label(mode));
+    format!("{:<width$} › ", bracketed, width = MODE_FIELD)
+}
+
+/// Shift+Tab handler: cycle the shared mode cell and repaint so the prompt's mode
+/// indicator updates instantly. The async `set_mode` is applied by the REPL loop
+/// once `readline` returns (a handler cannot await).
+struct TabModeHandler {
+    mode: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl ConditionalEventHandler for TabModeHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        _ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        if let Ok(mut m) = self.mode.lock() {
+            let next = next_cycle_mode(m.as_str()).to_string();
+            *m = next;
+        }
+        Some(Cmd::Repaint)
+    }
+}
+
+// ── Ctrl+X Ctrl+E: edit the prompt in $EDITOR ───────────────────────────────────
+
+/// Open `$VISUAL`/`$EDITOR` (fallback `vi`) on a temp file seeded with `initial`,
+/// returning the edited text (trailing newlines trimmed). The editor inherits the
+/// terminal, so this must run with the terminal in normal mode — i.e. *after*
+/// `readline` returns, never inside a rustyline handler.
+fn edit_in_editor(initial: &str) -> std::io::Result<String> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_string());
+    edit_with(&editor, initial)
+}
+
+/// Editor round-trip with an explicit editor command (injected for testability).
+/// `editor` may include args (e.g. `"code --wait"`); the temp file path is
+/// appended as the final argument.
+fn edit_with(editor: &str, initial: &str) -> std::io::Result<String> {
+    // Unique per call (pid + monotonic counter) so concurrent edits/tests don't
+    // share a temp file.
+    static EDIT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = EDIT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut path = std::env::temp_dir();
+    path.push(format!("trogon-prompt-{}-{seq}.md", std::process::id()));
+    std::fs::write(&path, initial)?;
+    let mut parts = editor.split_whitespace();
+    let bin = parts.next().unwrap_or("vi");
+    let args: Vec<&str> = parts.collect();
+    let status = std::process::Command::new(bin).args(&args).arg(&path).status();
+    let content = std::fs::read_to_string(&path);
+    let _ = std::fs::remove_file(&path);
+    status?;
+    Ok(content?.trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// Ctrl+X Ctrl+E handler: capture the current buffer and force `readline` to
+/// return (via `Cmd::Interrupt`) so the REPL loop — where the terminal is back in
+/// normal mode — can launch the editor. The captured buffer distinguishes this
+/// from a real Ctrl+C in the loop's interrupt arm.
+struct EditorHandler {
+    request: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl ConditionalEventHandler for EditorHandler {
+    fn handle(
+        &self,
+        _evt: &rustyline::Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &EventContext<'_>,
+    ) -> Option<Cmd> {
+        if let Ok(mut r) = self.request.lock() {
+            *r = Some(ctx.line().to_string());
+        }
+        Some(Cmd::Interrupt)
+    }
+}
 
 impl Validator for FileAtHelper {
     fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
@@ -175,6 +387,21 @@ fn join_continuation(s: &str) -> String {
     s.replace("\\\n", " ")
 }
 
+// ── `!` shell escape ────────────────────────────────────────────────────────────
+
+/// Run a `!`-prefixed line as a local shell command in the REPL's working
+/// directory. Stdout/stderr are inherited so output streams live to the terminal.
+/// This is a local shell escape — neither the command nor its output is sent to
+/// the model.
+fn run_shell_command(cmd: &str, cwd: &Path) -> std::io::Result<std::process::ExitStatus> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    std::process::Command::new(shell)
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .status()
+}
+
 // ── REPL entry point ──────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -244,7 +471,28 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     }
 
     let mut rl: Editor<FileAtHelper, _> = Editor::new()?;
-    rl.set_helper(Some(FileAtHelper { cwd: cwd.clone() }));
+    // Shared permission-mode cell: rendered into the prompt and cycled by Shift+Tab.
+    let mode_cell = std::sync::Arc::new(std::sync::Mutex::new(startup_mode.clone()));
+    rl.set_helper(Some(FileAtHelper::with_mode(cwd.clone(), mode_cell.clone())));
+    // Tab accepts the dimmed history autosuggestion when one is showing; falls
+    // back to `@`-file completion otherwise (see TabHandler).
+    rl.bind_sequence(
+        KeyEvent(KeyCode::Tab, Modifiers::NONE),
+        EventHandler::Conditional(Box::new(TabHandler)),
+    );
+    // Shift+Tab (BackTab) cycles permission modes: default → acceptEdits → plan → …
+    rl.bind_sequence(
+        KeyEvent(KeyCode::BackTab, Modifiers::NONE),
+        EventHandler::Conditional(Box::new(TabModeHandler { mode: mode_cell.clone() })),
+    );
+    // Ctrl+X Ctrl+E opens the current prompt in $EDITOR (see EditorHandler). The
+    // handler stashes the buffer here and returns Interrupt; the loop's interrupt
+    // arm reads this to tell an editor request apart from a real Ctrl+C.
+    let editor_request = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    rl.bind_sequence(
+        rustyline::Event::KeySeq(vec![KeyEvent::ctrl('X'), KeyEvent::ctrl('E')]),
+        EventHandler::Conditional(Box::new(EditorHandler { request: editor_request.clone() })),
+    );
     let _ = rl.load_history(&history_path);
 
     let mut session_used_tokens: u64 = 0;
@@ -254,12 +502,27 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     // cross-runner /model switches, which start a fresh session.
     let mut compactor_model_sel: Option<String> = None;
     let mut session_mode = startup_mode.clone();
+    // Tracks rustyline edit mode toggled by /vim (false = emacs, true = vi).
+    let mut vim_mode = false;
     print_startup_banner(session.session_id(), &prefix, &session_mode);
 
     sync_repl_cwd_from_session(&session, &mut cwd).await;
     if let Some(helper) = rl.helper_mut() {
         helper.cwd = cwd.clone();
     }
+
+    // Record the session (and any --name) in the local index at creation, so
+    // `trogon sessions list` and /sessions show it — and its name — immediately,
+    // rather than only after the first turn or a /rename. On resume this refreshes
+    // the existing entry.
+    persist_session_index(
+        &fs,
+        &project_dir,
+        &prefix,
+        session.session_id(),
+        &session.current_model(),
+        session_name.as_deref(),
+    );
 
     // Claude-style interrupt UX: when Ctrl+C cancels an in-flight response, the
     // prompt the user submitted is stashed here and pre-filled into the next
@@ -271,21 +534,47 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
     loop {
         permission_coordinator.cancel_pending();
+        // Mirror the live mode into the shared cell so the prompt shows it. During
+        // readline, Shift+Tab may diverge the cell; that's reconciled once readline
+        // returns (below). This single sync point covers every session_mode change
+        // (/mode, /clear, /model) without touching each assignment site.
+        if let Ok(mut m) = mode_cell.lock() {
+            *m = session_mode.clone();
+        }
         // A queued message (typed during the previous turn) is submitted before
         // reading new input. `from_queue` skips the readline-echo erase below,
         // since there's no readline echo line to overwrite.
-        let (read, from_queue): (rustyline::Result<String>, bool) = match queued_prompts.pop_front() {
-            Some(q) => (Ok(q), true),
-            None => {
-                let r = match pending_input.take() {
-                    Some(text) => rl.readline_with_initial("> ", (&text, "")),
-                    None => rl.readline("> "),
-                };
-                (r, false)
-            }
-        };
+        let (read, from_queue): (rustyline::Result<String>, bool) =
+            match queued_prompts.pop_front() {
+                Some(q) => (Ok(q), true),
+                None => {
+                    let prompt = format_mode_prompt(&session_mode);
+                    let r = match pending_input.take() {
+                        Some(text) => rl.readline_with_initial(&prompt, (&text, "")),
+                        None => rl.readline(&prompt),
+                    };
+                    (r, false)
+                }
+            };
         match read {
             Ok(raw_line) => {
+                // Apply a Shift+Tab mode change made during readline. The cell was
+                // synced to session_mode at loop top, so any divergence is a cycle.
+                // (A handler can't await, so set_mode happens here.)
+                let desired_mode = mode_cell.lock().ok().map(|m| m.clone());
+                if let Some(desired) = desired_mode
+                    && desired != session_mode
+                {
+                    match session.set_mode(&desired).await {
+                        Ok(()) => session_mode = desired,
+                        Err(e) => {
+                            eprintln!("warning: could not set mode {desired}: {e}");
+                            if let Ok(mut m) = mode_cell.lock() {
+                                *m = session_mode.clone();
+                            }
+                        }
+                    }
+                }
                 let line = join_continuation(&raw_line).trim().to_string();
                 if line.is_empty() {
                     continue;
@@ -295,8 +584,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                     // Erase the readline echo line before printing the styled block.
                     eprint!("\x1b[1A\r\x1b[2K");
                 }
-                // No readline echo to erase for queued lines — just print the block.
-                print_user_line(&line);
+                // Commands (cd, !…, /…) get a dim echo — they aren't messages to the
+                // model; real prompts get the "You" block. Queued lines are always
+                // prompts (no readline echo to erase).
+                let is_command = line == "cd"
+                    || line.starts_with("cd ")
+                    || line.starts_with('!')
+                    || line.starts_with('/');
+                if is_command {
+                    print_command_echo(&line);
+                } else {
+                    print_user_line(&line);
+                }
 
                 if line == "cd" || line.starts_with("cd ") {
                     let arg = line.strip_prefix("cd").unwrap_or("").trim();
@@ -314,6 +613,26 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                         && let Some(helper) = rl.helper_mut()
                     {
                         helper.cwd = cwd.clone();
+                    }
+                    continue;
+                }
+
+                // `! <command>` — local shell escape. Runs in the REPL's working
+                // directory and streams output to the terminal; not sent to the model.
+                if let Some(shell_cmd) = line.strip_prefix('!') {
+                    let shell_cmd = shell_cmd.trim();
+                    if shell_cmd.is_empty() {
+                        eprintln!("usage: !<shell command>  (runs in {})", cwd.display());
+                    } else {
+                        let _ = rl.add_history_entry(&raw_line);
+                        match run_shell_command(shell_cmd, &cwd) {
+                            Ok(status) if status.success() => {}
+                            Ok(status) => match status.code() {
+                                Some(code) => eprintln!("\x1b[2m[exit {code}]\x1b[0m"),
+                                None => eprintln!("\x1b[2m[terminated by signal]\x1b[0m"),
+                            },
+                            Err(e) => eprintln!("\x1b[31m!: {e}\x1b[0m"),
+                        }
                     }
                     continue;
                 }
@@ -626,6 +945,31 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                                 Err(e) => eprintln!("error setting mode: {e}"),
                             }
                         }
+                    } else if cmd == "/plan" {
+                        match session.set_mode("plan").await {
+                            Ok(()) => {
+                                session_mode = "plan".to_string();
+                                println!(
+                                    "plan mode on — read-only exploration; writes & bash are denied"
+                                );
+                            }
+                            Err(e) => eprintln!("error entering plan mode: {e}"),
+                        }
+                    } else if cmd == "/vim" {
+                        vim_mode = !vim_mode;
+                        rl.set_edit_mode(if vim_mode { EditMode::Vi } else { EditMode::Emacs });
+                        println!(
+                            "{} input mode",
+                            if vim_mode { "vim" } else { "emacs" }
+                        );
+                    } else if cmd == "/allowed-tools" {
+                        println!("{}", allowed_tools_for_mode(&session_mode));
+                    } else if cmd == "/review" {
+                        // Drive the model to review via its shell tools; runs like a
+                        // normal prompt on the next loop turn.
+                        queued_prompts.push_back(review_prompt(arg));
+                    } else if cmd == "/pr-comments" {
+                        queued_prompts.push_back(pr_comments_prompt(arg));
                     } else if cmd == "/compact" {
                         match session.compact().await {
                             Ok(CompactResult {
@@ -951,8 +1295,25 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                session.cancel().await;
-                eprintln!("(Ctrl+C)");
+                // Ctrl+X Ctrl+E stashes the buffer here and interrupts; if present,
+                // this is an editor request, not a cancel. The terminal is back in
+                // normal mode now, so it's safe to launch the editor.
+                let edit_seed = editor_request.lock().ok().and_then(|mut r| r.take());
+                if let Some(seed) = edit_seed {
+                    match edit_in_editor(&seed) {
+                        Ok(edited) if !edited.trim().is_empty() => {
+                            reset_display();
+                            // Re-prefill the prompt with the edited text for review
+                            // before sending (Enter submits).
+                            pending_input = Some(edited);
+                        }
+                        Ok(_) => {} // empty result — discard, fresh prompt
+                        Err(e) => eprintln!("editor error: {e}"),
+                    }
+                } else {
+                    session.cancel().await;
+                    eprintln!("(Ctrl+C)");
+                }
             }
             Err(ReadlineError::Eof) => {
                 eprint!("\r\x1b[K");
@@ -1412,6 +1773,76 @@ pub(crate) async fn do_compact_model<S: Session>(session: &S, arg: &str) -> Resu
     }
 }
 
+// ── new slash-command helpers ───────────────────────────────────────────────────
+
+/// Describe how the current permission mode gates each tool category — i.e. which
+/// tools are usable in this mode. The runner owns the actual tool registry; this
+/// reflects the permission model the runner enforces.
+fn allowed_tools_for_mode(mode: &str) -> String {
+    let (edits, bash, mcp) = match mode {
+        "acceptEdits" => ("auto-allow", "prompt", "prompt"),
+        "plan" => ("denied", "denied", "prompt"),
+        "dontAsk" => ("auto-allow", "auto-allow", "auto-allow"),
+        "bypassPermissions" => ("no checks", "no checks", "no checks"),
+        // "default" and anything else
+        _ => ("prompt", "prompt", "prompt"),
+    };
+    format!(
+        "Tool permissions in mode `{mode}`:\n\
+         \u{20}\u{20}reads  (read_file, list_dir, glob, search, fetch_url) : always allowed\n\
+         \u{20}\u{20}edits  (write_file, str_replace)                      : {edits}\n\
+         \u{20}\u{20}bash / shell                                          : {bash}\n\
+         \u{20}\u{20}MCP tools                                             : {mcp}\n\
+         \u{20}\u{20}todo / plan tools                                     : always allowed\n\
+         \nChange with /mode <name>, or cycle default → acceptEdits → plan with Shift+Tab."
+    )
+}
+
+/// Prompt that drives the model to review the current branch / a PR via its shell
+/// tools (git, gh). Sent as a normal prompt.
+fn review_prompt(arg: &str) -> String {
+    let target = arg.trim();
+    let scope = if target.is_empty() {
+        "the changes on the current branch — compare against the base branch (e.g. `git diff main...HEAD`, or `gh pr diff` if a PR exists)".to_string()
+    } else {
+        format!("pull request {target} (use `gh pr diff {target}` and `gh pr view {target}`)")
+    };
+    format!(
+        "Review {scope} as a thorough code reviewer. Use your shell tools to gather the diff and \
+         surrounding context. Report, with file:line references: (1) a short summary of the change, \
+         (2) correctness bugs, (3) security concerns, (4) style/maintainability issues. Prioritise \
+         high-confidence, actionable findings. Do not modify any files."
+    )
+}
+
+/// Prompt that drives the model to fetch and triage PR review comments via `gh`.
+fn pr_comments_prompt(arg: &str) -> String {
+    let target = arg.trim();
+    let (pr, cmd) = if target.is_empty() {
+        ("the current pull request".to_string(), "gh pr view --comments".to_string())
+    } else {
+        (format!("pull request {target}"), format!("gh pr view {target} --comments"))
+    };
+    format!(
+        "Fetch the review comments on {pr} (e.g. `{cmd}`, or the GitHub API via `gh api`). \
+         Summarise them grouped by file and thread, and for each draft a suggested reply or code \
+         change. Do not post replies or push changes unless I explicitly confirm."
+    )
+}
+
+/// Bug-report template with build/environment details for the user to paste.
+fn bug_report_text() -> String {
+    format!(
+        "Report a bug — include the details below when filing an issue:\n\n\
+         \u{20}\u{20}trogon version : {}\n\
+         \u{20}\u{20}os / arch      : {} / {}\n\n\
+         Then describe: what you did, what you expected, what actually happened, and any error output.",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
 fn handle_slash_command<F: Fs>(
     cmd: &str,
     arg: &str,
@@ -1443,6 +1874,13 @@ Commands:
   {m}/config{r}             show config  |  {m}/config{r} set <key> <value>
   {m}/model{r}              show current model  |  {m}/model{r} <id> change model
   {m}/mode{r}               show permission mode |  {m}/mode{r} <name> change mode
+  {m}/plan{r}               enter plan mode (read-only exploration)
+  {m}/allowed-tools{r}      show which tools the current mode permits
+  {m}/vim{r}                toggle vim / emacs input editing
+  {m}/review{r} [pr]        review the current branch or a PR
+  {m}/pr-comments{r} [pr]   fetch & triage PR review comments
+  {m}/bug{r}                print a bug-report template with build info
+  {m}/release-notes{r}      show version / release info
   {m}/rename{r} <name>      name the current session (shown in /status)
   {m}/memory{r} list|show|edit  TROGON.md hierarchy (project memory)
   {m}/agents{r}             list subagent definitions (.claude/agents/)  |  {m}/agents{r} <name> details
@@ -1495,6 +1933,48 @@ Ctrl+D    quit")
         "/status" => "use /status in the REPL for live session status".to_string(),
 
         "/memory" => "use /memory in the REPL to list or show TROGON.md hierarchy".to_string(),
+
+        "/bug" => bug_report_text(),
+
+        "/release-notes" => format!(
+            "trogon {}\n\nNo release notes are bundled with this build — see your project's \
+             releases / CHANGELOG for version history.",
+            env!("CARGO_PKG_VERSION")
+        ),
+
+        "/login" | "/logout" => {
+            "trogon has no interactive login. Authentication uses provider tokens from the \
+             environment (ANTHROPIC_TOKEN, XAI_API_KEY, OPENROUTER_API_KEY, …) or the \
+             secret-proxy / vault. Set or rotate those to change credentials."
+                .to_string()
+        }
+
+        "/ide" => {
+            "trogon integrates with IDEs over the Agent Client Protocol (ACP): JetBrains and Zed \
+             connect natively — there is no trogon plugin to manage here. Run the ACP server \
+             (acp-nats-server) and point your editor's ACP client at it."
+                .to_string()
+        }
+
+        "/tasks" => {
+            "The CLI does not track background tasks — prompts run inline (Ctrl+C to interrupt). \
+             Sub-agents the model spawns run on the runner in isolated worktrees; see /agents."
+                .to_string()
+        }
+
+        "/agents" => {
+            "Sub-agents are spawned by the model via its spawn_agent tool (each gets an isolated \
+             git worktree); the CLI doesn't manage them directly — ask the model to \"spawn a \
+             sub-agent to …\". Use /sessions to list sessions on the current runner."
+                .to_string()
+        }
+
+        "/rewind" | "/checkpoint" => {
+            "Message-level rewind/checkpointing isn't supported yet. To revert state today: \
+             /clear starts a fresh session, /resume <id> reattaches a prior one, and switching \
+             models with /model opens a new session. (Code changes are reverted with git.)"
+                .to_string()
+        }
 
         other => format!("unknown command: {other}  (type \x1b[35m/help\x1b[0m for a list)"),
     }
@@ -2137,9 +2617,7 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_no_at_returns_empty() {
-        let helper = FileAtHelper {
-            cwd: std::env::temp_dir(),
-        };
+        let helper = FileAtHelper::new(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("hello world", 5, &ctx).unwrap();
@@ -2148,9 +2626,7 @@ mod tests {
 
     #[test]
     fn file_at_helper_complete_at_with_space_returns_empty() {
-        let helper = FileAtHelper {
-            cwd: std::env::temp_dir(),
-        };
+        let helper = FileAtHelper::new(std::env::temp_dir());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@ hello", 7, &ctx).unwrap();
@@ -2166,7 +2642,7 @@ mod tests {
         std::fs::write(dir.join("alpha2.txt"), "").unwrap();
         std::fs::write(dir.join("beta.txt"), "").unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (start, pairs) = helper.complete("@alpha", 6, &ctx).unwrap();
@@ -2186,7 +2662,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&sub).unwrap();
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@my", 3, &ctx).unwrap();
@@ -2205,7 +2681,7 @@ mod tests {
             std::fs::write(dir.join(name), "").unwrap();
         }
 
-        let helper = FileAtHelper { cwd: dir.clone() };
+        let helper = FileAtHelper::new(dir.clone());
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         let (_, pairs) = helper.complete("@", 1, &ctx).unwrap();
@@ -2235,6 +2711,126 @@ mod tests {
     #[test]
     fn join_continuation_no_backslash_newlines_unchanged() {
         assert_eq!(join_continuation("line one\nline two"), "line one\nline two");
+    }
+
+    // ── run_shell_command (`!` shell escape) ──────────────────────────────────
+
+    #[test]
+    fn run_shell_command_reports_success_and_exit_code() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(
+            run_shell_command("exit 0", &cwd).unwrap().success(),
+            "a zero exit must report success"
+        );
+        assert_eq!(
+            run_shell_command("exit 3", &cwd).unwrap().code(),
+            Some(3),
+            "a non-zero exit code must be surfaced"
+        );
+    }
+
+    #[test]
+    fn run_shell_command_runs_in_given_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = run_shell_command("touch marker.txt", dir.path()).unwrap();
+        assert!(status.success());
+        assert!(
+            dir.path().join("marker.txt").exists(),
+            "command must execute in the provided working directory"
+        );
+    }
+
+    // ── tab_choice (Tab autosuggestion vs @-completion) ───────────────────────
+
+    #[test]
+    fn tab_accepts_hint_at_end_of_line() {
+        assert_eq!(tab_choice("git st", 6, true), TabChoice::CompleteHint);
+    }
+
+    #[test]
+    fn tab_at_mention_completes_files_even_with_hint() {
+        // Cursor inside an @-mention → file completion wins over any history hint.
+        assert_eq!(tab_choice("read @src/ma", 12, true), TabChoice::Complete);
+        assert_eq!(tab_choice("@", 1, true), TabChoice::Complete);
+    }
+
+    #[test]
+    fn tab_without_hint_is_default() {
+        assert_eq!(tab_choice("plain text", 10, false), TabChoice::Default);
+    }
+
+    #[test]
+    fn tab_does_not_accept_hint_when_cursor_not_at_end() {
+        // Hint only applies at end-of-line; mid-line Tab falls through.
+        assert_eq!(tab_choice("git status", 3, true), TabChoice::Default);
+    }
+
+    #[test]
+    fn tab_after_completed_mention_can_accept_hint() {
+        // Trailing space ends the @-token, so a hint may be accepted again.
+        assert_eq!(tab_choice("@src/main.rs ", 13, true), TabChoice::CompleteHint);
+    }
+
+    // ── Shift+Tab mode cycling ────────────────────────────────────────────────
+
+    #[test]
+    fn next_cycle_mode_cycles_the_three_core_modes() {
+        assert_eq!(next_cycle_mode("default"), "acceptEdits");
+        assert_eq!(next_cycle_mode("acceptEdits"), "plan");
+        assert_eq!(next_cycle_mode("plan"), "default");
+    }
+
+    #[test]
+    fn next_cycle_mode_enters_cycle_from_other_modes() {
+        assert_eq!(next_cycle_mode("bypassPermissions"), "default");
+        assert_eq!(next_cycle_mode("dontAsk"), "default");
+        assert_eq!(next_cycle_mode(""), "default");
+    }
+
+    // ── edit_with ($EDITOR round-trip) ────────────────────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_with_round_trips_through_fake_editor() {
+        use std::os::unix::fs::PermissionsExt;
+        // Fake editor: overwrites the file it's given with fixed content.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake-editor.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'rewritten\\n\\n' > \"$1\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let edited = edit_with(script.to_str().unwrap(), "seed text").unwrap();
+        // The editor's content replaces the seed; trailing newlines are trimmed.
+        assert_eq!(edited, "rewritten");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_with_preserves_seed_when_editor_is_noop() {
+        // `true` ignores its argument and exits 0, leaving the seed file intact.
+        let edited = edit_with("true", "keep me\n").unwrap();
+        assert_eq!(edited, "keep me");
+    }
+
+    #[test]
+    fn mode_prompt_has_constant_visible_width() {
+        // The prompt width must not vary with the mode name, or Shift+Tab repaint
+        // would misalign the cursor (rustyline measures the raw prompt).
+        let widths: Vec<usize> = ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]
+            .iter()
+            .map(|m| format_mode_prompt(m).chars().count())
+            .collect();
+        assert!(
+            widths.iter().all(|&w| w == widths[0]),
+            "prompt widths must all match, got {widths:?}"
+        );
+        // Every label must fit the fixed field (so it's never truncated/overflowed).
+        for m in ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"] {
+            assert!(
+                format!("[{}]", mode_label(m)).chars().count() <= MODE_FIELD,
+                "label for {m} overflows MODE_FIELD"
+            );
+        }
     }
 
     // ── input_needs_continuation ──────────────────────────────────────────────
@@ -2401,6 +2997,59 @@ mod tests {
     fn config_unknown_subcommand_returns_error() {
         let fs = MockFs::new();
         assert!(handle_config_cmd("delete mykey", &fs).contains("unknown config subcommand"));
+    }
+
+    // ── new slash commands ────────────────────────────────────────────────────
+
+    #[test]
+    fn allowed_tools_reflects_mode_gating() {
+        assert!(allowed_tools_for_mode("plan").contains("edits"));
+        assert!(allowed_tools_for_mode("plan").contains("denied"));
+        assert!(allowed_tools_for_mode("acceptEdits").contains("auto-allow"));
+        assert!(allowed_tools_for_mode("bypassPermissions").contains("no checks"));
+        // reads are always allowed regardless of mode
+        assert!(allowed_tools_for_mode("default").contains("always allowed"));
+    }
+
+    #[test]
+    fn review_prompt_targets_branch_or_pr() {
+        assert!(review_prompt("").contains("current branch"));
+        let pr = review_prompt("123");
+        assert!(pr.contains("123") && pr.contains("gh pr diff 123"));
+        assert!(review_prompt("").to_lowercase().contains("do not modify"));
+    }
+
+    #[test]
+    fn pr_comments_prompt_targets_pr_and_is_read_only() {
+        assert!(pr_comments_prompt("").contains("gh pr view --comments"));
+        assert!(pr_comments_prompt("42").contains("gh pr view 42 --comments"));
+        assert!(pr_comments_prompt("").to_lowercase().contains("do not post"));
+    }
+
+    #[test]
+    fn bug_report_includes_version_and_platform() {
+        let out = bug_report_text();
+        assert!(out.contains(env!("CARGO_PKG_VERSION")));
+        assert!(out.contains(std::env::consts::OS));
+    }
+
+    #[test]
+    fn informational_commands_are_recognised_not_unknown() {
+        let fs = MockFs::new();
+        for cmd in ["/login", "/logout", "/ide", "/tasks", "/agents", "/rewind", "/checkpoint", "/release-notes", "/bug"] {
+            let out = handle_slash_command(cmd, "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+            assert!(!out.contains("unknown command"), "{cmd} should be recognised, got: {out}");
+            assert!(!out.is_empty());
+        }
+    }
+
+    #[test]
+    fn help_lists_new_commands() {
+        let fs = MockFs::new();
+        let out = handle_slash_command("/help", "", 0, 0, "claude-sonnet-4-6", Path::new("/tmp"), &fs);
+        for c in ["/plan", "/allowed-tools", "/vim", "/review", "/pr-comments", "/bug"] {
+            assert!(out.contains(c), "/help must mention {c}");
+        }
     }
 
     #[test]

@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 use trogon_cli::Session as _;
 use trogon_cli::{
-    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry, SessionIndex,
-    SessionInit, connect_or_start_nats, repl::resolve_model_alias, session::TrogonSession,
+    CrossRunnerSwitcher, NatsSessionFactory, OutputFormat, PrintOptions, RealFs, SessionEntry,
+    SessionFactory, SessionIndex, SessionInit, connect_or_start_nats, repl::resolve_model_alias,
+    session::TrogonSession,
 };
 
 #[derive(Subcommand)]
@@ -14,6 +15,17 @@ enum Command {
     Dev,
     /// Run health checks on the Trogon stack
     Doctor,
+    /// Manage sessions on the current runner
+    Sessions {
+        #[command(subcommand)]
+        action: Option<SessionsAction>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionsAction {
+    /// List sessions on the current runner (the non-interactive form of /sessions)
+    List,
 }
 
 #[derive(Parser)]
@@ -22,11 +34,11 @@ struct Args {
     #[command(subcommand)]
     command: Option<Command>,
     /// NATS server URL (overrides TROGON_NATS_URL)
-    #[arg(long, env = "TROGON_NATS_URL", default_value = "nats://localhost:4222")]
+    #[arg(long, env = "TROGON_NATS_URL", default_value = "nats://localhost:4222", global = true)]
     nats_url: String,
 
     /// ACP prefix (overrides ACP_PREFIX)
-    #[arg(long, env = "ACP_PREFIX", default_value = "acp.claude")]
+    #[arg(long, env = "ACP_PREFIX", default_value = "acp.claude", global = true)]
     prefix: String,
 
     /// Non-interactive mode: send PROMPT and print result to stdout.
@@ -93,6 +105,41 @@ struct Args {
     /// Attach to a specific session id (uses --prefix runner)
     #[arg(long, conflicts_with = "continue_session")]
     session_id: Option<String>,
+}
+
+/// `trogon sessions list`: query the runner for its sessions and print a table,
+/// merging the local session index for model + name (mirrors the REPL's
+/// /sessions). Uses an attach-only handle — no new session is created.
+async fn run_sessions_list(nats_url: &str, prefix: &str) -> anyhow::Result<()> {
+    let (nats, _nats_server) = connect_or_start_nats(nats_url, Duration::from_secs(3)).await?;
+    let factory = NatsSessionFactory::new(nats);
+    // list_sessions targets a runner-global subject and ignores the session id.
+    let session = factory.attach_session(prefix, "sessions-list".to_string());
+    let list = session.list_sessions().await?;
+
+    if list.is_empty() {
+        println!("no sessions on runner {prefix}");
+        return Ok(());
+    }
+
+    let index = SessionIndex::load(&RealFs);
+    let project = std::env::current_dir()?;
+    let project = project.canonicalize().unwrap_or(project);
+
+    println!("{:<36}  {:<20}  name / cwd", "session_id", "updated");
+    for s in list {
+        let updated = s.updated_at.as_deref().unwrap_or("-");
+        let entry = index
+            .get_for_prefix(&project, prefix)
+            .filter(|e| e.session_id == s.session_id);
+        let model = entry.map(|e| e.model.as_str()).unwrap_or("-");
+        let label = entry
+            .and_then(|e| e.name.as_deref())
+            .or_else(|| s.title.as_deref().filter(|t| !t.is_empty()))
+            .unwrap_or(&s.cwd);
+        println!("{:<36}  {:<20}  {label}  [model: {model}]", s.session_id, updated);
+    }
+    Ok(())
 }
 
 fn trogon_dev_script() -> anyhow::Result<PathBuf> {
@@ -194,6 +241,15 @@ async fn main() -> anyhow::Result<()> {
 
     if args.doctor || matches!(args.command, Some(Command::Doctor)) {
         return trogon_cli::doctor::run(&args.nats_url).await;
+    }
+
+    // `trogon sessions [list]` — non-interactive equivalent of the REPL's /sessions.
+    if let Some(Command::Sessions { action }) = &args.command {
+        match action {
+            None | Some(SessionsAction::List) => {
+                return run_sessions_list(&args.nats_url, &args.prefix).await;
+            }
+        }
     }
 
     let cwd = std::env::current_dir()?;
@@ -385,9 +441,26 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_session_init;
+    use super::{Args, Command, SessionsAction, build_session_init};
+    use clap::Parser;
     use std::path::PathBuf;
     use trogon_cli::Settings;
+
+    #[test]
+    fn sessions_list_subcommand_parses() {
+        let args = Args::try_parse_from(["trogon", "sessions", "list"]).unwrap();
+        assert!(matches!(
+            args.command,
+            Some(Command::Sessions { action: Some(SessionsAction::List) })
+        ));
+    }
+
+    #[test]
+    fn bare_sessions_subcommand_defaults_to_no_action() {
+        // `trogon sessions` (no action) is accepted and treated as list.
+        let args = Args::try_parse_from(["trogon", "sessions"]).unwrap();
+        assert!(matches!(args.command, Some(Command::Sessions { action: None })));
+    }
 
     #[test]
     fn prompts_flow_into_init_without_add_dir() {
