@@ -201,6 +201,8 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
     let mut mcp_manager = McpManager::load(&fs);
     // HTTP client used to fetch MCP prompts on demand for `/mcp__server__prompt`.
     let mcp_http = reqwest::Client::new();
+    // Lifecycle hooks from settings.json (CLI-side events wired below).
+    let hooks_config = crate::settings::Settings::load(&fs, &project_dir).hooks;
     // Session name: prefer the `--name` flag; otherwise inherit a name from the
     // resumed session entry. Updatable at runtime via `/rename`.
     let mut session_name = name.or_else(|| resume.as_ref().and_then(|e| e.name.clone()));
@@ -779,7 +781,33 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
 
                 let _ = rl.add_history_entry(&raw_line);
 
-                let expanded = expand_mentions(&line, &cwd, &fs);
+                let mut expanded = expand_mentions(&line, &cwd, &fs);
+
+                // UserPromptSubmit hooks: may block the prompt or inject context.
+                if !hooks_config.user_prompt_submit.is_empty() {
+                    let payload = serde_json::json!({
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": line,
+                        "cwd": cwd.to_string_lossy(),
+                    });
+                    match crate::hooks::run_event_hooks(
+                        &hooks_config.user_prompt_submit,
+                        None,
+                        &payload,
+                    )
+                    .await
+                    {
+                        crate::hooks::HookOutcome::Block { reason } => {
+                            eprintln!("\x1b[33mprompt blocked by hook: {reason}\x1b[0m");
+                            continue;
+                        }
+                        crate::hooks::HookOutcome::Continue { context: Some(ctx) } => {
+                            expanded.push_str("\n\n");
+                            expanded.push_str(&ctx);
+                        }
+                        crate::hooks::HookOutcome::Continue { context: None } => {}
+                    }
+                }
                 // Auto-recover if the runner restarted and lost the session, then retry once.
                 let prompt_result = match session.prompt(&expanded).await {
                     Err(e) if e.to_string().contains("not found") => {
@@ -908,6 +936,18 @@ pub async fn run<SF: SessionFactory, F: Fs, SW: RunnerSwitcher, RS: RegistryStor
                             queued_prompts.extend(queued);
                         }
                     }
+                }
+
+                // Post-turn lifecycle hooks (CLI-side, fire-and-forget). Stop fires
+                // when the agent finishes; Notification when it's idle awaiting input.
+                if !hooks_config.stop.is_empty() {
+                    let payload = serde_json::json!({"hook_event_name": "Stop", "cwd": cwd.to_string_lossy()});
+                    let _ = crate::hooks::run_event_hooks(&hooks_config.stop, None, &payload).await;
+                }
+                if !hooks_config.notification.is_empty() {
+                    let payload = serde_json::json!({"hook_event_name": "Notification", "cwd": cwd.to_string_lossy()});
+                    let _ =
+                        crate::hooks::run_event_hooks(&hooks_config.notification, None, &payload).await;
                 }
             }
             Err(ReadlineError::Interrupted) => {
