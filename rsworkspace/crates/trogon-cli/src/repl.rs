@@ -1061,11 +1061,13 @@ async fn handle_mcp_command<F: Fs, S: Session>(
                         }
                         crate::mcp::McpTransport::Http => {
                             let auth = if s.oauth { " (oauth)" } else { "" };
-                            println!("  {} — http: {}{}", s.name, s.url, auth)
+                            let t = s.timeout_secs.map(|n| format!(" (timeout {n}s)")).unwrap_or_default();
+                            println!("  {} — http: {}{}{}", s.name, s.url, auth, t)
                         }
                         crate::mcp::McpTransport::Sse => {
                             let auth = if s.oauth { " (oauth)" } else { "" };
-                            println!("  {} — sse: {}{}", s.name, s.url, auth)
+                            let t = s.timeout_secs.map(|n| format!(" (timeout {n}s)")).unwrap_or_default();
+                            println!("  {} — sse: {}{}{}", s.name, s.url, auth, t)
                         }
                     }
                 }
@@ -1432,7 +1434,7 @@ Commands:
   {m}/clear{r}              start a new session (clears conversation history)
   {m}/sessions{r}           list sessions on the current runner
   {m}/resume{r} <id>        resume a session by id on the current runner
-  {m}/mcp{r} list|add|remove|login|import|prompts  manage MCP servers (add: {m}--transport http|sse <name> <url> [--header \"K: V\"] [--oauth]{r})
+  {m}/mcp{r} list|add|remove|login|import|prompts  manage MCP servers (add: {m}--transport http|sse <name> <url> [--header \"K: V\"] [--oauth] [--timeout <secs>]{r})
   {m}/mcp import{r} [path]  import servers from a Claude Desktop config (default path if omitted)
   {m}/mcp login{r} <name>   authorize an HTTP MCP server via OAuth (browser)
   {m}/mcp__<server>__<prompt>{r}  run an MCP prompt as a command (see {m}/mcp prompts{r})

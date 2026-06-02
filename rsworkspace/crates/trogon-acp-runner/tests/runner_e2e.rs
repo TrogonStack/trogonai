@@ -1283,6 +1283,7 @@ async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
             name: "my_srv".to_string(),
             url: mcp_server.base_url(),
             headers: vec![],
+            timeout_secs: None,
         }],
         ..Default::default()
     };
@@ -2418,6 +2419,7 @@ async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
             name: "blocked_srv".to_string(),
             url: mcp_server.base_url(),
             headers: vec![],
+            timeout_secs: None,
         }],
         egress_policy: Some(EgressPolicy {
             default_action: EgressAction::Deny,

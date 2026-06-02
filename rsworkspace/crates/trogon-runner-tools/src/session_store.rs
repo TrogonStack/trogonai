@@ -18,6 +18,10 @@ pub struct StoredMcpServer {
     /// Optional HTTP headers (name, value pairs).
     #[serde(default)]
     pub headers: Vec<(String, String)>,
+    /// Optional per-request timeout in seconds. `None` uses the runner's default
+    /// HTTP client timeout. Carried from the client via the ACP `_meta` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }
 
 // ── Feature 1: Path-scoped RBAC ───────────────────────────────────────────────
@@ -622,6 +626,7 @@ mod tests {
                 ("Authorization".to_string(), "Bearer tok".to_string()),
                 ("X-Tenant".to_string(), "acme".to_string()),
             ],
+            timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
         let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
@@ -637,6 +642,7 @@ mod tests {
             name: "bare".to_string(),
             url: "http://localhost:8080".to_string(),
             headers: vec![],
+            timeout_secs: None,
         };
         let json = serde_json::to_string(&server).unwrap();
         let back: StoredMcpServer = serde_json::from_str(&json).unwrap();
@@ -728,10 +734,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(
-            !json.contains("\"model\""),
-            "None model must be omitted: {json}"
-        );
+        assert!(!json.contains("\"model\""), "None model must be omitted: {json}");
     }
 
     #[test]
@@ -741,10 +744,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&state).unwrap();
-        assert!(
-            json.contains("claude-opus-4-6"),
-            "model must be serialized: {json}"
-        );
+        assert!(json.contains("claude-opus-4-6"), "model must be serialized: {json}");
     }
 
     // ── branching fields ──────────────────────────────────────────────────────
