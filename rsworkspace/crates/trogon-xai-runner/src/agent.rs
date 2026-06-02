@@ -40,7 +40,7 @@ use trogon_runner_tools::{
     build_session_mcp, convert_mcp_servers, elicit_via_channel, ElicitationTx, StoredMcpServer,
 };
 use trogon_runner_tools::check_tool_permission;
-use trogon_runner_tools::compaction::{compaction_settings_from_env, maybe_compact};
+use trogon_runner_tools::compaction::{compaction_settings_from_env, estimate_tokens, maybe_compact};
 use trogon_runner_tools::permission_rules::{PermissionRules, RuleDecision};
 use trogon_runner_tools::{AllowedToolsSessionStore, PermissionTx};
 use trogon_runner_tools::session_store::{AuditEntry, AuditOutcome, ToolPolicy, append_audit_entries};
@@ -295,6 +295,8 @@ pub struct XaiAgent<H = XaiClient, N = NatsSessionNotifier, M = FsTrogonMdLoader
     /// NATS/ACP config for this runner (prefix + NATS URL). Used by the
     /// spawn_agent interceptor to build a Bridge for sub-agent sessions.
     runner_config: Option<acp_nats::Config>,
+    /// Per-session semaphore (1 permit) to serialize concurrent state mutations.
+    session_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>>,
 }
 
 /// Permission decision after applying bypass + the rule engine, before any interactive gate.
@@ -487,6 +489,7 @@ impl<H: XaiHttpClient, N: SessionNotifier> XaiAgent<H, N, FsTrogonMdLoader> {
             permission_nats: None,
             permission_prefix: None,
             runner_config: None,
+            session_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -535,6 +538,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             permission_nats: self.permission_nats,
             permission_prefix: self.permission_prefix,
             runner_config: self.runner_config,
+            session_locks: self.session_locks,
         }
     }
 
@@ -695,7 +699,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             .collect();
         let evicted_id = {
             let mut sessions = self.sessions.lock().await;
-            Self::maybe_evict_oldest(&mut sessions)
+            Self::maybe_evict_oldest(&mut sessions, &self.session_locks)
         };
         if let Some(evicted) = evicted_id {
             store.remove(&self.tenant_id, &evicted).await;
@@ -835,11 +839,24 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
         )
     }
 
+    /// Acquire (or create) the per-session semaphore permit, serializing concurrent mutations.
+    fn acquire_session_lock(&self, session_id: &str) -> Arc<tokio::sync::Semaphore> {
+        let mut locks = self.session_locks.lock().unwrap();
+        locks
+            .entry(session_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+    }
+
     /// Evict the oldest session if the map is at capacity.
     ///
     /// Called before inserting a new session so the map never exceeds
     /// `MAX_SESSIONS`. The evicted session is logged as a warning.
-    fn maybe_evict_oldest(sessions: &mut HashMap<String, XaiSession>) -> Option<String> {
+    /// Also removes the evicted session's lock from `session_locks` to prevent leaks.
+    fn maybe_evict_oldest(
+        sessions: &mut HashMap<String, XaiSession>,
+        session_locks: &std::sync::Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>,
+    ) -> Option<String> {
         if sessions.len() < MAX_SESSIONS {
             return None;
         }
@@ -854,6 +871,7 @@ impl<H: XaiHttpClient, N: SessionNotifier, M: TrogonMdLoading> XaiAgent<H, N, M>
             warn!(session_id = %oldest_id, max = MAX_SESSIONS,
                   "xai: session limit reached — evicting least-recently-used session");
             sessions.remove(&oldest_id);
+            session_locks.lock().unwrap().remove(&oldest_id);
             return Some(oldest_id);
         }
         None
@@ -1044,7 +1062,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
 
         let created_at_iso = now_iso();
         let mut sessions = self.sessions.lock().await;
-        let evicted_id = Self::maybe_evict_oldest(&mut sessions);
+        let evicted_id = Self::maybe_evict_oldest(&mut sessions, &self.session_locks);
         drop(sessions);
         if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
             store.remove(&self.tenant_id, &evicted).await;
@@ -1202,7 +1220,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         let new_session_id = Uuid::new_v4().to_string();
         let evicted_id = {
             let mut sessions = self.sessions.lock().await;
-            Self::maybe_evict_oldest(&mut sessions)
+            Self::maybe_evict_oldest(&mut sessions, &self.session_locks)
         };
         if let (Some(store), Some(evicted)) = (&self.session_store, evicted_id) {
             store.remove(&self.tenant_id, &evicted).await;
@@ -1295,6 +1313,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
         sessions.remove(&session_id);
         drop(sessions);
+        // Drop the per-session semaphore now that the session is gone. Any
+        // in-flight handler holds its own `Arc` clone, so the live semaphore
+        // stays valid until that handler finishes.
+        self.session_locks.lock().unwrap().remove(&session_id);
         info!(session_id, "xai: session closed");
         Ok(CloseSessionResponse::new())
     }
@@ -1341,6 +1363,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         if !is_valid_mode(&mode_id) {
             return Err(invalid_params(format!("unknown mode: {mode_id}")));
         }
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -1368,6 +1393,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             return Err(invalid_params(format!("unknown model: {model_id}")));
         }
 
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
         let mut sessions = self.sessions.lock().await;
         match sessions.get_mut(&session_id) {
             Some(s) => {
@@ -1388,6 +1416,10 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
     ) -> agent_client_protocol::Result<SetSessionConfigOptionResponse> {
         let config_id = req.config_id.to_string();
         let session_id = req.session_id.to_string();
+
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
 
         let is_known_tool = AVAILABLE_TOOLS
             .iter()
@@ -1480,6 +1512,11 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             );
         }
 
+        // Serialize concurrent prompts for the same session.
+        let semaphore = self.acquire_session_lock(&session_id);
+        let _permit = semaphore.acquire_owned().await
+            .map_err(|_| internal_error("session lock closed"))?;
+
         // Snapshot session state — release lock before streaming.
         // If the session was evicted from memory (e.g. runner restart), restore
         // from the KV snapshot so the conversation can continue seamlessly.
@@ -1488,6 +1525,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         }
         let (
             model,
+            compactor_model,
             api_key,
             mut history,
             last_response_id,
@@ -1508,6 +1546,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             s.last_used_at = Instant::now();
             (
                 s.model.clone(),
+                s.compactor_model.clone(),
                 s.api_key.clone(),
                 s.history.clone(),
                 s.last_response_id.clone(),
@@ -1525,6 +1564,13 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
         // checks; drained into session_audit once the turn finishes.
         let audit_buf: AuditBuf = Arc::new(std::sync::Mutex::new(Vec::new()));
 
+        // Resolve the session model once so both the pre-turn compaction and the
+        // actual API call use the same concrete model id.
+        let resolved_model = model
+            .as_deref()
+            .unwrap_or(&self.default_model)
+            .to_string();
+
         // Context compaction (theirs): summarize the oldest portion via the
         // trogon-compactor service. Falls back to history trimming when the
         // compactor is unavailable or did not reduce the history below threshold.
@@ -1533,7 +1579,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             let (token_budget, threshold_pct) = compaction_settings_from_env();
             let wire = xai_history_to_wire(&history);
             if let Ok(Some(compacted)) =
-                maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await
+                maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", &resolved_model, compactor_model.as_deref()).await
             {
                 history = xai_history_from_wire(compacted);
                 pre_turn_compacted = true;
@@ -1559,7 +1605,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             }
         };
 
-        let model = model.as_deref().unwrap_or(&self.default_model).to_string();
+        let model = resolved_model;
         let api_key = api_key
             .or_else(|| self.global_api_key.clone())
             .ok_or_else(|| {
@@ -2407,7 +2453,7 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
             };
 
             if let Some(mut compacted) = history_for_compaction {
-                compact_or_trim_xai_history(&self.compactor_nats, &mut compacted, self.max_history)
+                compact_or_trim_xai_history(&self.compactor_nats, &mut compacted, self.max_history, &model, compactor_model.as_deref())
                     .await;
                 let snapshot = {
                     let mut sessions = self.sessions.lock().await;
@@ -2552,6 +2598,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore.acquire_owned().await
+                .map_err(|_| internal_error("session lock closed"))?;
             let sessions = self.sessions.lock().await;
             let s = sessions.get(session_id)
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "session not found"))?;
@@ -2566,6 +2615,9 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 serde_json::from_str(args.params.get()).unwrap_or_default();
             let session_id = params["sessionId"].as_str()
                 .ok_or_else(|| Error::new(ErrorCode::InvalidParams.into(), "missing sessionId"))?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore.acquire_owned().await
+                .map_err(|_| internal_error("session lock closed"))?;
             let messages_json = params["messages"].to_string();
             let parsed = trogon_runner_tools::portable_session::parse_export_json(&messages_json)
                 .map_err(|e| Error::new(ErrorCode::InvalidParams.into(), e.to_string()))?;
@@ -2589,6 +2641,72 @@ impl<H: XaiHttpClient + 'static, N: SessionNotifier + 'static, M: TrogonMdLoadin
                 store.save(&snapshot).await;
             }
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
+            return Ok(ExtResponse::new(raw.into()));
+        }
+        if args.method.as_ref() == "session/compact" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId")
+            })?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore.acquire_owned().await
+                .map_err(|_| internal_error("session lock closed"))?;
+            // Read history + resolved model + compactor_model so compaction uses the SAME
+            // contract as the auto path: provider "xai", default = session model, optional
+            // same-provider override. Fixes the CLI's manual /compact, which sent only
+            // {messages} to the compactor (defaulting provider to "anthropic").
+            let (history, resolved_model, compactor_model) = {
+                let sessions = self.sessions.lock().await;
+                let s = sessions.get(session_id).ok_or_else(|| {
+                    Error::new(ErrorCode::InvalidParams.into(), "session not found")
+                })?;
+                let model = s.model.clone().unwrap_or_else(|| self.default_model.clone());
+                (s.history.clone(), model, s.compactor_model.clone())
+            };
+            let wire = xai_history_to_wire(&history);
+            let tokens_before = estimate_tokens(&wire);
+            let nats = self.compactor_nats.as_ref().ok_or_else(|| {
+                Error::new(
+                    ErrorCode::InternalError.into(),
+                    "no compactor backend for compaction",
+                )
+            })?;
+            let (token_budget, threshold_pct) = compaction_settings_from_env();
+            let compacted_wire = maybe_compact(
+                nats,
+                &wire,
+                token_budget,
+                threshold_pct,
+                "xai",
+                &resolved_model,
+                compactor_model.as_deref(),
+            )
+            .await
+            .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
+            let (compacted, tokens_after) = if let Some(cw) = compacted_wire {
+                let tokens_after = estimate_tokens(&cw);
+                let new_history = xai_history_from_wire(cw);
+                let mut sessions = self.sessions.lock().await;
+                if let Some(s) = sessions.get_mut(session_id) {
+                    s.history = new_history;
+                    s.last_response_id = None;
+                    if let Some(store) = &self.session_store {
+                        let snapshot = self.build_snapshot(session_id, s);
+                        store.save(&snapshot).await;
+                    }
+                }
+                (true, tokens_after)
+            } else {
+                (false, tokens_before)
+            };
+            let result = serde_json::json!({
+                "compacted": compacted,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| Error::new(ErrorCode::InternalError.into(), e.to_string()))?;
             return Ok(ExtResponse::new(raw.into()));
         }
         Err(Error::new(
@@ -2667,11 +2785,13 @@ async fn compact_or_trim_xai_history(
     nats: &Option<async_nats::Client>,
     history: &mut Vec<Message>,
     max: usize,
+    model: &str,
+    compactor_model: Option<&str>,
 ) {
     if let Some(nats) = nats {
         let (token_budget, threshold_pct) = compaction_settings_from_env();
         let wire = xai_history_to_wire(history);
-        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai").await {
+        if let Ok(Some(compacted)) = maybe_compact(nats, &wire, token_budget, threshold_pct, "xai", model, compactor_model).await {
             *history = xai_history_from_wire(compacted);
             return;
         }

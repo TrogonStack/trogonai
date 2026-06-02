@@ -41,6 +41,13 @@ struct CompactReq<'a> {
     /// Which provider the compactor should summarize with (e.g. "xai",
     /// "openrouter", "anthropic") so each runner compacts via its own provider.
     provider: &'a str,
+    /// Session model. The compactor summarizes with this unless `compactor_model`
+    /// is set. Empty string is omitted so the service falls back to its default.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    model: &'a str,
+    /// Same-provider model override. Takes precedence over `model` when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compactor_model: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -96,13 +103,20 @@ pub async fn maybe_compact(
     token_budget: usize,
     threshold_pct: u8,
     provider: &str,
+    model: &str,
+    compactor_model: Option<&str>,
 ) -> Result<Option<Vec<Message>>, CompactError> {
     if !over_threshold(messages, token_budget, threshold_pct) {
         return Ok(None);
     }
 
-    let payload = serde_json::to_vec(&CompactReq { messages, provider })
-        .map_err(|e| CompactError::Serialize(e.to_string()))?;
+    let payload = serde_json::to_vec(&CompactReq {
+        messages,
+        provider,
+        model,
+        compactor_model,
+    })
+    .map_err(|e| CompactError::Serialize(e.to_string()))?;
 
     let reply = tokio::time::timeout(COMPACT_TIMEOUT, nats.request(COMPACT_SUBJECT, payload.into()))
         .await

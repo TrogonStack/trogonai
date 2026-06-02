@@ -451,6 +451,180 @@ async fn switch_model_migrates_history_from_xai_to_openrouter() {
         .await;
 }
 
+/// Characterization test: documents what the cross-runner `switch_model` path
+/// PRESERVES and what it LOSES for a history containing `ToolUse` / `ToolResult`
+/// blocks. The migration serializes through the `PortableMessageV2` format
+/// (trogon-runner-tools::portable_session), which is intentionally LOSSY for
+/// tool blocks:
+///   * tool_use.input  → `value.to_string()` truncated to 240 chars, and on
+///                        import re-wrapped as `Value::String` (never reparsed
+///                        back to a JSON object).
+///   * tool_result.content → truncated to 500 chars.
+///   * parent_tool_use_id  → dropped (forced to None on import).
+///   * Image blocks        → replaced by the literal text "[image]".
+///
+/// This test LOCKS IN that behavior. If the format is ever made lossless, this
+/// test should be updated to assert exact preservation instead.
+#[tokio::test]
+async fn switch_model_tool_blocks_are_summarized_lossy() {
+    let (_c, port) = start_nats_js().await;
+    let (nats, js) = make_nats(port).await;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async move {
+            // ── 1. Seed source session with a tool-call round-trip ────────────
+            let store = NatsSessionStore::open(&js).await.unwrap();
+
+            // Small input (< 240 chars: stringified but NOT truncated).
+            let small_input = serde_json::json!({ "command": "ls -la", "timeout_ms": 5000 });
+            // Large input (> 240 chars: stringified AND truncated → data loss).
+            let big_value = "x".repeat(400);
+            let large_input = serde_json::json!({ "path": "/etc/config", "blob": big_value });
+
+            let src_state = SessionState {
+                messages: vec![
+                    AgentMessage::user_text("list the files in this repo"),
+                    AgentMessage::assistant(vec![
+                        AgentContentBlock::Text {
+                            text: "Let me list them.".into(),
+                        },
+                        AgentContentBlock::ToolUse {
+                            id: "toolu_abc123".into(),
+                            name: "bash".into(),
+                            input: small_input.clone(),
+                            parent_tool_use_id: Some("toolu_parent".into()),
+                        },
+                        AgentContentBlock::ToolUse {
+                            id: "toolu_big".into(),
+                            name: "write".into(),
+                            input: large_input.clone(),
+                            parent_tool_use_id: None,
+                        },
+                    ]),
+                    AgentMessage {
+                        role: "user".into(),
+                        content: vec![AgentContentBlock::ToolResult {
+                            tool_use_id: "toolu_abc123".into(),
+                            content: "total 8\n-rw-r--r-- 1 user user 0 main.rs".into(),
+                        }],
+                    },
+                    AgentMessage::assistant(vec![AgentContentBlock::Text {
+                        text: "There is one file: main.rs".into(),
+                    }]),
+                ],
+                ..Default::default()
+            };
+            store.save("switcher-tool-1", &src_state).await.unwrap();
+
+            // ── 2. Start two TrogonAgent instances on different prefixes ───────
+            attach_agent(make_agent(store.clone(), "acp.src"), nats.clone(), "acp.src");
+            attach_agent(make_agent(store.clone(), "acp.dst"), nats.clone(), "acp.dst");
+            tokio::time::sleep(Duration::from_millis(60)).await;
+
+            // ── 3. Registry: "dst-model" → "acp.dst" ──────────────────────────
+            let registry = Registry::new(MockRegistryStore::new());
+            let mut dst_cap = AgentCapability::new("dst-runner", ["chat"], "agents.dst.>");
+            dst_cap.metadata = serde_json::json!({ "models": ["dst-model"], "acp_prefix": "acp.dst" });
+            registry.register(&dst_cap).await.unwrap();
+
+            let mut switcher = CrossRunnerSwitcher::new(nats.clone(), make_config(port), registry);
+
+            // ── 4. Migrate the session ────────────────────────────────────────
+            let (new_prefix, new_session_id) = switcher
+                .switch_model("acp.src", "switcher-tool-1", "dst-model", "/tmp")
+                .await
+                .expect("switch_model should succeed");
+            assert_eq!(new_prefix, "acp.dst");
+
+            // ── 5. Characterize what survived vs what was lost ────────────────
+            let dst = store.load(&new_session_id).await.unwrap();
+
+            assert_eq!(dst.messages.len(), 4, "message count is preserved");
+
+            // msg[0]: plain user text — fully preserved.
+            assert!(matches!(
+                &dst.messages[0].content[0],
+                AgentContentBlock::Text { text } if text == "list the files in this repo"
+            ));
+
+            // msg[1]: assistant text preserved; tool_use id/name preserved.
+            assert!(matches!(
+                &dst.messages[1].content[0],
+                AgentContentBlock::Text { text } if text == "Let me list them."
+            ));
+
+            // First tool_use: id + name kept, but input is STRINGIFIED (object
+            // → JSON string) and parent_tool_use_id is DROPPED.
+            match &dst.messages[1].content[1] {
+                AgentContentBlock::ToolUse {
+                    id,
+                    name,
+                    input,
+                    parent_tool_use_id,
+                } => {
+                    assert_eq!(id, "toolu_abc123", "tool_use id is preserved");
+                    assert_eq!(name, "bash", "tool_use name is preserved");
+                    // LOSS #1: structured object collapsed into a JSON *string*.
+                    assert_eq!(
+                        input,
+                        &serde_json::Value::String(small_input.to_string()),
+                        "tool_use input is stringified, not kept as an object"
+                    );
+                    assert!(
+                        input.is_string() && !input.is_object(),
+                        "input must no longer be a JSON object"
+                    );
+                    // LOSS #2: parent linkage dropped.
+                    assert!(
+                        parent_tool_use_id.is_none(),
+                        "parent_tool_use_id is dropped on migration (was Some)"
+                    );
+                }
+                other => panic!("expected ToolUse, got {other:?}"),
+            }
+
+            // Second tool_use: large input is stringified AND TRUNCATED to 240
+            // chars with a trailing ellipsis — concrete data loss.
+            match &dst.messages[1].content[2] {
+                AgentContentBlock::ToolUse { id, input, .. } => {
+                    assert_eq!(id, "toolu_big");
+                    let s = input.as_str().expect("large input is a string");
+                    assert!(s.ends_with('…'), "LOSS #3: long input is truncated with ellipsis");
+                    assert!(
+                        s.chars().count() <= 240,
+                        "truncated to <=240 chars (was {} in original)",
+                        large_input.to_string().len()
+                    );
+                    assert!(
+                        s.len() < large_input.to_string().len(),
+                        "destination input is strictly shorter than the original"
+                    );
+                }
+                other => panic!("expected ToolUse, got {other:?}"),
+            }
+
+            // msg[2]: ToolResult — id and (short) content preserved.
+            match &dst.messages[2].content[0] {
+                AgentContentBlock::ToolResult { tool_use_id, content } => {
+                    assert_eq!(tool_use_id, "toolu_abc123", "tool_result id is preserved");
+                    assert_eq!(
+                        content, "total 8\n-rw-r--r-- 1 user user 0 main.rs",
+                        "short tool_result content is preserved (would truncate at 500)"
+                    );
+                }
+                other => panic!("expected ToolResult, got {other:?}"),
+            }
+
+            // msg[3]: final assistant text — fully preserved.
+            assert!(matches!(
+                &dst.messages[3].content[0],
+                AgentContentBlock::Text { text } if text == "There is one file: main.rs"
+            ));
+        })
+        .await;
+}
+
 /// After `switch_model` migrates a session, the new runner can immediately
 /// accept and process a prompt on the new prefix+session_id.
 ///

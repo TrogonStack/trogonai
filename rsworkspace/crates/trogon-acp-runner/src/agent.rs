@@ -1384,6 +1384,54 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
             let raw = serde_json::value::RawValue::from_string("{}".to_string()).unwrap();
             return Ok(ExtResponse::new(raw.into()));
         }
+        if args.method.as_ref() == "session/compact" {
+            let params: serde_json::Value =
+                serde_json::from_str(args.params.get()).unwrap_or_default();
+            let session_id = params["sessionId"].as_str().ok_or_else(|| {
+                Error::new(ErrorCode::InvalidParams.into(), "missing sessionId".to_string())
+            })?;
+            let semaphore = self.acquire_session_lock(session_id);
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|_| internal_error("session lock closed"))?;
+            let mut state = self
+                .store
+                .load(session_id)
+                .await
+                .map_err(|e| internal_error(e.to_string()))?;
+            let tokens_before = estimate_token_count(&state.messages);
+            let (compacted, tokens_after) = if let Some(ref nats) = self.compactor_nats {
+                let model = state.model.clone().unwrap_or_else(|| self.default_model.clone());
+                let compactor_model = state.compactor_model.clone();
+                let msgs = std::mem::take(&mut state.messages);
+                let new_msgs =
+                    compact_messages(nats, msgs, session_id, &model, compactor_model.as_deref())
+                        .await;
+                let after = estimate_token_count(&new_msgs);
+                state.messages = new_msgs;
+                if after < tokens_before {
+                    state.updated_at = now_iso8601();
+                    self.store
+                        .save(session_id, &state)
+                        .await
+                        .map_err(|e| internal_error(e.to_string()))?;
+                    (true, after)
+                } else {
+                    (false, tokens_before)
+                }
+            } else {
+                (false, tokens_before)
+            };
+            let result = serde_json::json!({
+                "compacted": compacted,
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            });
+            let raw = serde_json::value::RawValue::from_string(result.to_string())
+                .map_err(|e| internal_error(e.to_string()))?;
+            return Ok(ExtResponse::new(raw.into()));
+        }
         Err(Error::new(
             ErrorCode::MethodNotFound.into(),
             format!("unknown ext method: {}", args.method),
