@@ -123,6 +123,67 @@ pub async fn run<S: Session>(
     PrintExitCode::from_stop_reason(&stop_reason)
 }
 
+/// Auto-deny responder for non-interactive `--print` mode.
+///
+/// In `--print` there is no human to answer permission prompts, so an
+/// approval-gated tool (bash, or an MCP tool such as `spawn_agent`) would block
+/// the turn forever waiting for an approval that never comes. This subscribes to
+/// the session's permission-request subject and replies `Cancelled` to every
+/// request — which the runner maps to "denied" — so the model is told the tool
+/// was denied and the turn completes instead of hanging.
+///
+/// This is the safe default for non-interactive runs. `--dangerously-skip-permissions`
+/// (which sets `bypassPermissions`) opts into auto-*allow* instead, in which case
+/// the runner never sends a permission request and this responder is not started.
+///
+/// Uses the concrete `async_nats::Client` rather than the `NatsClient` trait
+/// because answering a request-reply needs each message's reply subject, which
+/// `NatsClient::subscribe_bytes` does not expose. The subscription is established
+/// before this returns, so it is active before the prompt is sent. Returns the
+/// responder task handle; abort it once the run completes.
+pub async fn spawn_auto_deny_permissions(
+    nats: async_nats::Client,
+    prefix: &str,
+    session_id: &str,
+) -> tokio::task::JoinHandle<()> {
+    use agent_client_protocol::{RequestPermissionOutcome, RequestPermissionResponse};
+    use futures::StreamExt as _;
+
+    let subject = format!("{prefix}.session.{session_id}.client.session.request_permission");
+    let sub = nats.subscribe(subject).await;
+    tokio::spawn(async move {
+        let mut sub = match sub {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            // Best-effort: name the tool being denied so `--print` output explains
+            // itself. ACP serializes JSON in camelCase (`toolCall.title`).
+            let tool = serde_json::from_slice::<serde_json::Value>(&msg.payload)
+                .ok()
+                .and_then(|v| {
+                    v.get("toolCall")
+                        .and_then(|t| t.get("title"))
+                        .and_then(|t| t.as_str())
+                        .map(str::to_string)
+                });
+            match tool {
+                Some(t) => eprintln!(
+                    "note: auto-denied permission for `{t}` (non-interactive --print; pass --dangerously-skip-permissions to allow)"
+                ),
+                None => eprintln!(
+                    "note: auto-denied a permission request (non-interactive --print; pass --dangerously-skip-permissions to allow)"
+                ),
+            }
+            let resp = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
+            if let Ok(payload) = serde_json::to_vec(&resp) {
+                let _ = nats.publish(reply, payload.into()).await;
+            }
+        }
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
