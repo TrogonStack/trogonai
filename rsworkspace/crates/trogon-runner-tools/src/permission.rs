@@ -1770,4 +1770,66 @@ mod tests {
             );
         }
     }
+
+    fn pre_hook(matcher: &str, command: &str) -> Vec<crate::hooks::HookMatcher> {
+        vec![crate::hooks::HookMatcher {
+            matcher: matcher.to_string(),
+            hooks: vec![crate::hooks::HookCommand {
+                r#type: "command".into(),
+                command: command.to_string(),
+                timeout: None,
+            }],
+        }]
+    }
+
+    #[tokio::test]
+    async fn pretooluse_hook_actually_runs_and_blocks() {
+        // A real PreToolUse hook that (a) creates a marker file proving it ran, and
+        // (b) exits 2 to block — even in dontAsk mode which normally auto-allows.
+        let marker = std::env::temp_dir().join(format!("trogon_pretooluse_{}.marker", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let command = format!("touch '{}'; echo blocked-by-policy >&2; exit 2", marker.display());
+
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let mut checker = full_checker("dontAsk", tx, None, vec![], None);
+        checker.pre_tool_use = pre_hook("", &command);
+
+        let allowed = checker
+            .check("tc", "Bash", &serde_json::json!({"command": "ls"}))
+            .await;
+        assert!(!allowed, "blocking PreToolUse hook must deny even in dontAsk");
+        assert!(marker.exists(), "the PreToolUse hook actually executed (marker file created)");
+        let _ = std::fs::remove_file(&marker);
+    }
+
+    #[tokio::test]
+    async fn pretooluse_non_blocking_hook_falls_through() {
+        // A passing PreToolUse hook (exit 0) doesn't block → dontAsk auto-allows.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let mut checker = full_checker("dontAsk", tx, None, vec![], None);
+        checker.pre_tool_use = pre_hook("Bash", "exit 0");
+        assert!(
+            checker
+                .check("tc", "Bash", &serde_json::json!({"command": "ls"}))
+                .await,
+            "non-blocking PreToolUse hook must not deny"
+        );
+    }
+
+    #[tokio::test]
+    async fn pretooluse_hook_only_runs_for_matching_tool() {
+        // Matcher is "Bash" but the tool is Read → hook skipped → not blocked.
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let mut checker = full_checker("dontAsk", tx, None, vec![], None);
+        checker.pre_tool_use = pre_hook("Bash", "exit 2");
+        assert!(
+            checker
+                .check("tc", "read_file", &serde_json::json!({"path": "a.rs"}))
+                .await,
+            "PreToolUse matcher must not fire for a non-matching tool"
+        );
+    }
 }
