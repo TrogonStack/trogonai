@@ -150,11 +150,27 @@ async fn main() -> anyhow::Result<()> {
             args.prefix.clone()
         };
 
+        let nats_for_perm = nats.clone();
         let session = TrogonSession::new(nats, &target_prefix, cwd, vec![]).await?;
-        if args.dangerously_skip_permissions
-            && let Err(e) = session.set_mode("bypassPermissions").await
-        {
-            eprintln!("warning: could not set bypassPermissions: {e}");
+        // Permission handling in non-interactive mode: `--dangerously-skip-permissions`
+        // sets `bypassPermissions` (auto-allow, no prompts). Otherwise — since there is
+        // no human to answer a prompt — start an auto-DENY responder so approval-gated
+        // tools (bash, MCP tools like `spawn_agent`) are denied and the turn completes
+        // instead of hanging forever waiting for input.
+        let mut deny_task = None;
+        if args.dangerously_skip_permissions {
+            if let Err(e) = session.set_mode("bypassPermissions").await {
+                eprintln!("warning: could not set bypassPermissions: {e}");
+            }
+        } else {
+            deny_task = Some(
+                trogon_cli::print::spawn_auto_deny_permissions(
+                    nats_for_perm,
+                    &target_prefix,
+                    session.session_id(),
+                )
+                .await,
+            );
         }
         if let Some(model) = &args.model {
             let model_id = resolve_model_alias(model);
@@ -166,6 +182,9 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         let code = trogon_cli::print::run(session, &prompt, format, options).await;
+        if let Some(task) = deny_task {
+            task.abort();
+        }
         // MED-40: explicitly drop the KillOnDrop guard so the auto-started NATS
         // server process is killed before process::exit bypasses normal Drop.
         drop(nats_server);
