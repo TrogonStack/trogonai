@@ -139,6 +139,11 @@ pub struct McpClient {
     url: String,
     /// Extra HTTP headers sent on every request (e.g. `Authorization: Bearer …`).
     headers: Vec<(String, String)>,
+    /// Optional per-request timeout. When set, every JSON-RPC call (initialize,
+    /// tools/list, tools/call, …) is bounded by this duration so a hung server
+    /// can never stall the agent loop. `None` falls back to the `reqwest::Client`
+    /// default (no timeout).
+    timeout: Option<std::time::Duration>,
 }
 
 impl McpClient {
@@ -149,22 +154,29 @@ impl McpClient {
             http,
             url: url.into(),
             headers: Vec::new(),
+            timeout: None,
         }
     }
 
     /// Create a client that sends `headers` (name, value) on every request —
     /// used to carry MCP auth (e.g. a bearer token) to the server.
     #[cfg_attr(coverage, coverage(off))]
-    pub fn with_headers(
-        http: Client,
-        url: impl Into<String>,
-        headers: Vec<(String, String)>,
-    ) -> Self {
+    pub fn with_headers(http: Client, url: impl Into<String>, headers: Vec<(String, String)>) -> Self {
         Self {
             http,
             url: url.into(),
             headers,
+            timeout: None,
         }
+    }
+
+    /// Set a per-request timeout (builder style). `None` leaves the client at the
+    /// `reqwest::Client` default.
+    #[cfg_attr(coverage, coverage(off))]
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Option<std::time::Duration>) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Perform the MCP `initialize` handshake.
@@ -282,6 +294,9 @@ impl McpClient {
         let mut req = self.http.post(&self.url).json(&body);
         for (name, value) in &self.headers {
             req = req.header(name, value);
+        }
+        if let Some(timeout) = self.timeout {
+            req = req.timeout(timeout);
         }
         req.send()
             .await

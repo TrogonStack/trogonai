@@ -29,24 +29,26 @@ pub fn convert_mcp_servers(servers: &[McpServer]) -> Vec<StoredMcpServer> {
             McpServer::Http(h) => Some(StoredMcpServer {
                 name: h.name.clone(),
                 url: h.url.clone(),
-                headers: h
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
+                headers: h.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                timeout_secs: timeout_from_meta(h.meta.as_ref()),
             }),
             McpServer::Sse(s) => Some(StoredMcpServer {
                 name: s.name.clone(),
                 url: s.url.clone(),
-                headers: s
-                    .headers
-                    .iter()
-                    .map(|hv| (hv.name.clone(), hv.value.clone()))
-                    .collect(),
+                headers: s.headers.iter().map(|hv| (hv.name.clone(), hv.value.clone())).collect(),
+                timeout_secs: timeout_from_meta(s.meta.as_ref()),
             }),
             _ => None,
         })
         .collect()
+}
+
+/// The `_meta` key under which the client stashes a per-server request timeout.
+pub const TIMEOUT_META_KEY: &str = "trogon_timeout_secs";
+
+/// Extract the per-server timeout (seconds) from an ACP `_meta` map, if present.
+pub fn timeout_from_meta(meta: Option<&agent_client_protocol::Meta>) -> Option<u64> {
+    meta?.get(TIMEOUT_META_KEY)?.as_u64()
 }
 
 /// Connect to each session MCP server, initialize it, and return tool defs +
@@ -58,10 +60,7 @@ pub async fn build_session_mcp(
     http: &reqwest::Client,
     servers: &[StoredMcpServer],
     policy: &EgressPolicy,
-) -> (
-    Vec<ToolDef>,
-    Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>,
-) {
+) -> (Vec<ToolDef>, Vec<(String, String, Arc<dyn trogon_mcp::McpCallTool>)>) {
     let mut tool_defs = Vec::new();
     let mut dispatch = Vec::new();
 
@@ -71,11 +70,10 @@ pub async fn build_session_mcp(
             continue;
         }
 
-        let client = Arc::new(trogon_mcp::McpClient::with_headers(
-            http.clone(),
-            &server.url,
-            server.headers.clone(),
-        ));
+        let client = Arc::new(
+            trogon_mcp::McpClient::with_headers(http.clone(), &server.url, server.headers.clone())
+                .with_timeout(server.timeout_secs.map(std::time::Duration::from_secs)),
+        );
 
         if let Err(e) = client.initialize().await {
             warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
@@ -96,11 +94,7 @@ pub async fn build_session_mcp(
                         input_schema: tool.input_schema,
                         cache_control: None,
                     });
-                    dispatch.push((
-                        prefixed,
-                        tool.name,
-                        client.clone() as Arc<dyn trogon_mcp::McpCallTool>,
-                    ));
+                    dispatch.push((prefixed, tool.name, client.clone() as Arc<dyn trogon_mcp::McpCallTool>));
                 }
                 info!(name = %server.name, tools = tool_defs.len() - before, "MCP server connected");
             }
@@ -124,6 +118,7 @@ mod tests {
             name: name.to_string(),
             url: url.to_string(),
             headers: vec![],
+            timeout_secs: None,
         }
     }
 
@@ -147,12 +142,8 @@ mod tests {
         });
 
         let http = reqwest::Client::new();
-        let (defs, dispatch) = build_session_mcp(
-            &http,
-            &[server("web", &mcp.url("/mcp"))],
-            &EgressPolicy::default_safe(),
-        )
-        .await;
+        let (defs, dispatch) =
+            build_session_mcp(&http, &[server("web", &mcp.url("/mcp"))], &EgressPolicy::default_safe()).await;
 
         // AskUserQuestion is filtered out; "search" is prefixed.
         assert_eq!(defs.len(), 1);
@@ -176,6 +167,23 @@ mod tests {
         assert!(dispatch.is_empty());
     }
 
+    /// `convert_mcp_servers` reads a per-server timeout from the ACP `_meta`.
+    #[test]
+    fn convert_reads_timeout_from_meta() {
+        use agent_client_protocol::{McpServerHttp, McpServerSse};
+        let mut meta = serde_json::Map::new();
+        meta.insert(TIMEOUT_META_KEY.to_string(), serde_json::json!(45));
+
+        let http = McpServer::Http(McpServerHttp::new("h", "https://h.example/mcp").meta(meta.clone()));
+        let sse = McpServer::Sse(McpServerSse::new("s", "https://s.example/sse").meta(meta));
+        let plain = McpServer::Http(McpServerHttp::new("p", "https://p.example/mcp"));
+
+        let stored = convert_mcp_servers(&[http, sse, plain]);
+        assert_eq!(stored[0].timeout_secs, Some(45));
+        assert_eq!(stored[1].timeout_secs, Some(45));
+        assert_eq!(stored[2].timeout_secs, None);
+    }
+
     /// A server that fails the initialize handshake is skipped, not fatal.
     #[tokio::test]
     async fn init_failure_skipped() {
@@ -185,12 +193,8 @@ mod tests {
             then.status(500);
         });
         let http = reqwest::Client::new();
-        let (defs, dispatch) = build_session_mcp(
-            &http,
-            &[server("bad", &mcp.url("/mcp"))],
-            &EgressPolicy::default_safe(),
-        )
-        .await;
+        let (defs, dispatch) =
+            build_session_mcp(&http, &[server("bad", &mcp.url("/mcp"))], &EgressPolicy::default_safe()).await;
         assert!(defs.is_empty());
         assert!(dispatch.is_empty());
     }
