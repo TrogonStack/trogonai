@@ -2,11 +2,33 @@ use std::collections::HashMap;
 
 use acp_nats::{AcpPrefix, Bridge, Config, NatsJetStreamClient};
 use agent_client_protocol::{Agent as _, CloseSessionRequest, ExtRequest, NewSessionRequest, SessionNotification};
+use tokio::sync::mpsc;
 use trogon_registry::{Registry, RegistryStore};
 use trogon_std::time::SystemClock;
-use tokio::sync::mpsc;
 
 type ConcreteBridge = Bridge<async_nats::Client, SystemClock, NatsJetStreamClient>;
+
+/// Neutral system prompt injected when importing history into the target runner
+/// on a cross-runner switch. The exported history can contain identity statements
+/// from the source model (e.g. "I'm Claude"); without this, the target model
+/// (e.g. grok) continues that persona. This instructs it to ignore prior
+/// identity claims and respond as itself.
+const IDENTITY_RESET_SYSTEM_PROMPT: &str = "You are the AI assistant for this session. \
+The conversation history may have been produced by a different AI model. Ignore any \
+statements in the history about being a specific named model or assistant (for example \
+\"I'm Claude\"); do not adopt or continue that persona. Simply continue helping the user as yourself.";
+
+/// Build the `_meta` for the target runner's `new_session` so the imported
+/// history doesn't make it impersonate the source model. Both the Claude runner
+/// and the xAI/OpenRouter runners honor `_meta.systemPrompt`.
+fn import_session_meta() -> serde_json::Map<String, serde_json::Value> {
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "systemPrompt".to_string(),
+        serde_json::Value::String(IDENTITY_RESET_SYSTEM_PROMPT.to_string()),
+    );
+    meta
+}
 
 // LOW-7: Bundle each bridge with its notification receiver in a single tuple.
 // The receiver is never polled here — CrossRunnerSwitcher only calls new_session
@@ -41,7 +63,12 @@ pub struct CrossRunnerSwitcher<S: RegistryStore> {
 
 impl<S: RegistryStore> CrossRunnerSwitcher<S> {
     pub fn new(nats: async_nats::Client, base_config: Config, registry: Registry<S>) -> Self {
-        Self { nats, base_config, registry, bridges: HashMap::new() }
+        Self {
+            nats,
+            base_config,
+            registry,
+            bridges: HashMap::new(),
+        }
     }
 
     /// Switch the active session to whichever runner owns `model_id`.
@@ -57,8 +84,10 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
         cwd: &str,
     ) -> Result<(String, String), String> {
         // 1. Resolve target runner from registry
-        let cap = self.registry
-            .find_by_model(model_id).await
+        let cap = self
+            .registry
+            .find_by_model(model_id)
+            .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("no runner found for model: {model_id}"))?;
         let target_prefix = cap.metadata["acp_prefix"]
@@ -87,11 +116,13 @@ impl<S: RegistryStore> CrossRunnerSwitcher<S> {
                 .0
         };
 
-        // 4. Open new session on target runner (same workspace path)
+        // 4. Open new session on target runner (same workspace path). Inject a
+        // neutral system prompt so imported history from the source model doesn't
+        // make the target model impersonate it (e.g. grok continuing as "Claude").
         let new_session_id = {
             let (bridge, _) = self.bridges.get(&target_prefix).unwrap();
             bridge
-                .new_session(NewSessionRequest::new(cwd))
+                .new_session(NewSessionRequest::new(cwd).meta(import_session_meta()))
                 .await
                 .map_err(|e| e.to_string())?
                 .session_id
@@ -175,13 +206,19 @@ pub mod mock {
 
     impl MockRunnerSwitcher {
         pub fn same_runner(prefix: &str, session_id: &str) -> Self {
-            Self { result: Ok((prefix.to_string(), session_id.to_string())) }
+            Self {
+                result: Ok((prefix.to_string(), session_id.to_string())),
+            }
         }
         pub fn cross_runner(new_prefix: &str, new_session_id: &str) -> Self {
-            Self { result: Ok((new_prefix.to_string(), new_session_id.to_string())) }
+            Self {
+                result: Ok((new_prefix.to_string(), new_session_id.to_string())),
+            }
         }
         pub fn error(msg: &str) -> Self {
-            Self { result: Err(msg.to_string()) }
+            Self {
+                result: Err(msg.to_string()),
+            }
         }
     }
 
@@ -203,6 +240,18 @@ pub mod mock {
 mod tests {
     use super::*;
     use acp_nats::AcpPrefix;
+
+    #[test]
+    fn import_session_meta_carries_identity_reset_prompt() {
+        let meta = import_session_meta();
+        let sp = meta
+            .get("systemPrompt")
+            .and_then(|v| v.as_str())
+            .expect("systemPrompt present");
+        assert!(sp.contains("Ignore any"));
+        assert!(sp.to_lowercase().contains("claude")); // names the persona to drop
+    }
+
     use testcontainers_modules::nats::Nats;
     use testcontainers_modules::testcontainers::runners::AsyncRunner;
     use trogon_nats::{NatsAuth, NatsConfig};
@@ -244,7 +293,9 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.test")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.test", "session-abc", "gpt-4", "/workspace").await;
+        let result = switcher
+            .switch_model("acp.test", "session-abc", "gpt-4", "/workspace")
+            .await;
         assert_eq!(result, Ok(("acp.test".to_string(), "session-abc".to_string())));
     }
 
@@ -254,7 +305,9 @@ mod tests {
         let registry = Registry::new(MockRegistryStore::new());
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        let result = switcher.switch_model("acp.current", "session-1", "unknown-model", "/ws").await;
+        let result = switcher
+            .switch_model("acp.current", "session-1", "unknown-model", "/ws")
+            .await;
         assert_eq!(result, Err("no runner found for model: unknown-model".to_string()));
     }
 
@@ -361,7 +414,9 @@ mod tests {
             if let Some(msg) = sub.next().await {
                 let payload = msg.payload.to_vec();
                 if let Some(reply) = msg.reply {
-                    nats.publish(reply, axum::body::Bytes::from_static(response_bytes)).await.ok();
+                    nats.publish(reply, axum::body::Bytes::from_static(response_bytes))
+                        .await
+                        .ok();
                 }
                 tx.send(payload).ok();
             }
@@ -395,7 +450,10 @@ mod tests {
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
         let result = switcher.switch_model("acp.src", "session-1", "gpt-4", "/ws").await;
-        assert!(result.is_err(), "expected new_session failure to propagate; got: {result:?}");
+        assert!(
+            result.is_err(),
+            "expected new_session failure to propagate; got: {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -463,10 +521,14 @@ mod tests {
             br#"[{"role":"user","content":"hello"}]"#,
         )
         .await;
-        mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"new-sess"}"#).await;
+        mock_responder(
+            nats_bg.clone(),
+            "acp.tgt.agent.session.new",
+            br#"{"sessionId":"new-sess"}"#,
+        )
+        .await;
         // Capture the import request so we can inspect its body
-        let import_rx =
-            capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+        let import_rx = capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -474,12 +536,18 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        switcher.switch_model("acp.src", "src-session", "gpt-4", "/ws").await.unwrap();
+        switcher
+            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .await
+            .unwrap();
 
         let import_body = import_rx.await.expect("import responder captured payload");
         let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();
         assert_eq!(json["sessionId"], "new-sess");
-        assert_eq!(json["messages"], serde_json::json!([{"role": "user", "content": "hello"}]));
+        assert_eq!(
+            json["messages"],
+            serde_json::json!([{"role": "user", "content": "hello"}])
+        );
     }
 
     #[tokio::test]
@@ -487,11 +555,16 @@ mod tests {
         let (_container, port) = start_nats().await;
         let nats_bg = async_nats::connect(format!("127.0.0.1:{port}")).await.unwrap();
 
-        let v2_export = br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","text":"hi"}]}]}"#;
+        let v2_export =
+            br#"{"version":2,"messages":[{"version":2,"role":"user","blocks":[{"type":"text","text":"hi"}]}]}"#;
         mock_responder(nats_bg.clone(), "acp.src.agent.ext.session/export", v2_export).await;
-        mock_responder(nats_bg.clone(), "acp.tgt.agent.session.new", br#"{"sessionId":"v2-sess"}"#).await;
-        let import_rx =
-            capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
+        mock_responder(
+            nats_bg.clone(),
+            "acp.tgt.agent.session.new",
+            br#"{"sessionId":"v2-sess"}"#,
+        )
+        .await;
+        let import_rx = capturing_responder(nats_bg.clone(), "acp.tgt.agent.ext.session/import", b"{}").await;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -499,7 +572,10 @@ mod tests {
         registry.register(&cap_with_prefix("gpt-4", "acp.tgt")).await.unwrap();
 
         let mut switcher = CrossRunnerSwitcher::new(connect(port).await, make_config(port), registry);
-        switcher.switch_model("acp.src", "src-session", "gpt-4", "/ws").await.unwrap();
+        switcher
+            .switch_model("acp.src", "src-session", "gpt-4", "/ws")
+            .await
+            .unwrap();
 
         let import_body = import_rx.await.expect("import responder captured payload");
         let json: serde_json::Value = serde_json::from_slice(&import_body).unwrap();

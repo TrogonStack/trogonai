@@ -46,7 +46,9 @@ impl ToggleProxy {
         let (cut2, relays2) = (cut.clone(), relays.clone());
         tokio::spawn(async move {
             loop {
-                let Ok((mut client, _)) = listener.accept().await else { break };
+                let Ok((mut client, _)) = listener.accept().await else {
+                    break;
+                };
                 if cut2.load(Ordering::SeqCst) {
                     let _ = client.shutdown().await;
                     continue;
@@ -60,7 +62,11 @@ impl ToggleProxy {
                 relays2.lock().unwrap().push(handle.abort_handle());
             }
         });
-        Self { cut, relays, local_addr }
+        Self {
+            cut,
+            relays,
+            local_addr,
+        }
     }
 
     /// Drop all active relays and reject new connections.
@@ -129,7 +135,10 @@ async fn med35_ordered_consumer_replays_after_reconnect() {
     tokio::time::sleep(Duration::from_millis(750)).await;
 
     // msg1 — delivered while connected.
-    publisher.publish(subject.clone(), Bytes::from_static(b"msg1")).await.unwrap();
+    publisher
+        .publish(subject.clone(), Bytes::from_static(b"msg1"))
+        .await
+        .unwrap();
     publisher.flush().await.unwrap();
     assert_eq!(
         recv(&mut rx, Duration::from_secs(5)).await.as_deref(),
@@ -142,8 +151,14 @@ async fn med35_ordered_consumer_replays_after_reconnect() {
     tokio::time::sleep(Duration::from_millis(750)).await;
 
     // msg2 + msg3 published DURING the outage — core pub-sub would lose these.
-    publisher.publish(subject.clone(), Bytes::from_static(b"msg2")).await.unwrap();
-    publisher.publish(subject.clone(), Bytes::from_static(b"msg3")).await.unwrap();
+    publisher
+        .publish(subject.clone(), Bytes::from_static(b"msg2"))
+        .await
+        .unwrap();
+    publisher
+        .publish(subject.clone(), Bytes::from_static(b"msg3"))
+        .await
+        .unwrap();
     publisher.flush().await.unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -153,8 +168,16 @@ async fn med35_ordered_consumer_replays_after_reconnect() {
 
     let m2 = recv(&mut rx, Duration::from_secs(20)).await;
     let m3 = recv(&mut rx, Duration::from_secs(20)).await;
-    assert_eq!(m2.as_deref(), Some(&b"msg2"[..]), "msg2 must be replayed after reconnect");
-    assert_eq!(m3.as_deref(), Some(&b"msg3"[..]), "msg3 must be replayed after reconnect");
+    assert_eq!(
+        m2.as_deref(),
+        Some(&b"msg2"[..]),
+        "msg2 must be replayed after reconnect"
+    );
+    assert_eq!(
+        m3.as_deref(),
+        Some(&b"msg3"[..]),
+        "msg3 must be replayed after reconnect"
+    );
 
     let _ = js.delete_stream(&stream_name).await;
 }

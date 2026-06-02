@@ -71,7 +71,11 @@ pub async fn build_session_mcp(
             continue;
         }
 
-        let client = Arc::new(trogon_mcp::McpClient::new(http.clone(), &server.url));
+        let client = Arc::new(trogon_mcp::McpClient::with_headers(
+            http.clone(),
+            &server.url,
+            server.headers.clone(),
+        ));
 
         if let Err(e) = client.initialize().await {
             warn!(name = %server.name, url = %server.url, error = %e, "MCP server init failed — skipping");
