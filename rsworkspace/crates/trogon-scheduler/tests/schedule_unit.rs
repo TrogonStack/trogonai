@@ -3,9 +3,9 @@
 use buffa::MessageField;
 use trogon_decider_runtime::{CommandExecution, ImmediateSnapshotTaskScheduler, StreamPosition};
 use trogon_scheduler::{
-    CreateScheduleCommand, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
-    PauseScheduleCommand, RemoveScheduleCommand, Schedule, ScheduleEventDelivery, ScheduleEventSchedule,
-    ScheduleEventStatus, ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
+    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, MessageContent, MessageEnvelope, MessageHeaders,
+    PauseSchedule, RemoveSchedule, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
+    ScheduleId, SchedulePublisher, ScheduleWriteCondition, SchedulerController,
     commands::domain as command_domain,
     mocks::{MockLeaderLock, MockSchedulePublisher, MockSchedulerStore},
 };
@@ -53,7 +53,7 @@ async fn client_register_then_get() {
     let store = MockSchedulerStore::new();
 
     let job = command_base_schedule("backup");
-    CommandExecution::new(&store, &CreateScheduleCommand::new(job))
+    CommandExecution::new(&store, &CreateSchedule::new(job))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -71,13 +71,13 @@ async fn client_register_then_get() {
 async fn client_pause_job_toggles_job() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("toggle")))
+    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("toggle")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &PauseScheduleCommand::new(command_schedule_id("toggle")))
+    CommandExecution::new(&store, &PauseSchedule::new(command_schedule_id("toggle")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -96,13 +96,13 @@ async fn client_pause_job_toggles_job() {
 async fn client_remove_and_list_schedules_use_store_paths() {
     let store = MockSchedulerStore::new();
 
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("alpha")))
+    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("alpha")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
         .await
         .unwrap();
-    CommandExecution::new(&store, &CreateScheduleCommand::new(command_base_schedule("beta")))
+    CommandExecution::new(&store, &CreateSchedule::new(command_base_schedule("beta")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
@@ -112,7 +112,7 @@ async fn client_remove_and_list_schedules_use_store_paths() {
     let listed = store.list_schedules(ListSchedulesCommand).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    CommandExecution::new(&store, &RemoveScheduleCommand::new(command_schedule_id("beta")))
+    CommandExecution::new(&store, &RemoveSchedule::new(command_schedule_id("beta")))
         .with_snapshot(&store)
         .with_task_runtime(ImmediateSnapshotTaskScheduler)
         .execute()
